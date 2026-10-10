@@ -30,8 +30,14 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
-import { auditEvents, integrationConnections, integrationPins } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnectionShares,
+  integrationConnections,
+  integrationPins,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
 const app = getTestApp();
@@ -70,10 +76,10 @@ async function seedConnectionFor(opts: {
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
       label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
-      sharedSpaceIds: opts.sharedWithSpace && home ? [home] : [],
       ...(opts.identityClaims ? { identityClaims: opts.identityClaims } : {}),
     })
     .returning({ id: integrationConnections.id });
+  await seedShares(row!.id, opts.sharedWithSpace && home ? [home] : []);
   return row!.id;
 }
 
@@ -564,10 +570,7 @@ describe("Me API (/api/me)", () => {
         integrationId: "@conn/org-row",
         userId: ctx.user.id,
       });
-      await db
-        .update(integrationConnections)
-        .set({ sharedSpaceIds: [spaceB.id] })
-        .where(eq(integrationConnections.id, id));
+      await seedShares(id, [spaceB.id]);
 
       const res = await app.request("/api/me/connections", { headers: { Cookie: ctx.cookie } });
       expect(res.status).toBe(200);
@@ -596,10 +599,7 @@ describe("Me API (/api/me)", () => {
         integrationId: "@conn/bound-reach",
         userId: ctx.user.id,
       });
-      await db
-        .update(integrationConnections)
-        .set({ sharedSpaceIds: [spaceB.id, ctx.defaultSpaceId] })
-        .where(eq(integrationConnections.id, id));
+      await seedShares(id, [spaceB.id, ctx.defaultSpaceId]);
       const key = await seedApiKey({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
@@ -623,6 +623,52 @@ describe("Me API (/api/me)", () => {
       ]);
     });
 
+    it("gives a key bound to a space the same shares on the space's connection list", async () => {
+      const ctx = await createTestContext({ orgSlug: "orgrow-bound-list" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const integrationId = "@conn/bound-list";
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: spaceB.id,
+        integrationId,
+        userId: ctx.user.id,
+      });
+      await seedShares(id, [spaceB.id, ctx.defaultSpaceId]);
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+      const list = async (headers: Record<string, string>) => {
+        const res = await app.request(`/api/integrations/${integrationId}/connections`, {
+          headers,
+        });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+      };
+
+      const asKey = await list({ Authorization: `Bearer ${key.rawKey}` });
+      // Its origin lies outside the key's space: projected away like the shares there.
+      expect(asKey).toEqual([
+        expect.objectContaining({
+          id,
+          shared_here: true,
+          shared_space_ids: [ctx.defaultSpaceId],
+          origin_space_id: null,
+        }),
+      ]);
+      const asOwner = await list(authHeaders(ctx));
+      expect(asOwner).toEqual([
+        expect.objectContaining({
+          id,
+          shared_space_ids: [spaceB.id, ctx.defaultSpaceId].toSorted(),
+          origin_space_id: spaceB.id,
+        }),
+      ]);
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/me/connections");
       expect(res.status).toBe(401);
@@ -638,6 +684,26 @@ describe("Me API (/api/me)", () => {
       });
     }
 
+    function share(
+      method: "PUT" | "DELETE",
+      connectionId: string,
+      headers: Record<string, string>,
+      spaceId: string,
+    ) {
+      return app.request(`/api/me/connections/${connectionId}/shares/${spaceId}`, {
+        method,
+        headers,
+      });
+    }
+
+    async function sharesOf(connectionId: string): Promise<string[]> {
+      const rows = await db
+        .select({ spaceId: integrationConnectionShares.spaceId })
+        .from(integrationConnectionShares)
+        .where(eq(integrationConnectionShares.connectionId, connectionId));
+      return rows.map((row) => row.spaceId).toSorted();
+    }
+
     it("lets the owner rename an org-scoped connection and share it, without a space header", async () => {
       const ctx = await createTestContext({ orgSlug: "mepatch-org" });
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
@@ -649,18 +715,14 @@ describe("Me API (/api/me)", () => {
         userId: ctx.user.id,
       });
 
-      const res = await patch(
-        id,
-        { Cookie: ctx.cookie },
-        {
-          label: "Work",
-          shared_space_ids: [ctx.defaultSpaceId, spaceB.id],
-        },
-      );
+      const res = await patch(id, { Cookie: ctx.cookie }, { label: "Work" });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { label: string; shared_space_ids: string[] };
-      expect(body.label).toBe("Work");
-      expect(body.shared_space_ids.toSorted()).toEqual([ctx.defaultSpaceId, spaceB.id].toSorted());
+      expect(((await res.json()) as { label: string }).label).toBe("Work");
+
+      for (const spaceId of [ctx.defaultSpaceId, spaceB.id]) {
+        expect((await share("PUT", id, { Cookie: ctx.cookie }, spaceId)).status).toBe(204);
+      }
+      expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId, spaceB.id].toSorted());
 
       // One audit row per target, in the connection's org (a cookie session has no org context).
       const audits = await db
@@ -699,6 +761,22 @@ describe("Me API (/api/me)", () => {
         .from(integrationConnections)
         .where(eq(integrationConnections.id, id));
       expect(row?.label).toBe("Mine");
+    });
+
+    it("refuses shared_space_ids on the PATCH: shares are a sub-resource (400)", async () => {
+      const ctx = await createTestContext({ orgSlug: "mepatch-field" });
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const id = await seedConnectionFor({
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        integrationId: "@mepatch/field",
+        userId: ctx.user.id,
+      });
+
+      const res = await patch(id, { Cookie: ctx.cookie }, { shared_space_ids: [spaceB.id] });
+      expect(res.status).toBe(400);
+      expect(await sharesOf(id)).toEqual([]);
     });
 
     it("holds an API key to its binding and to its integrations:connect ceiling", async () => {
@@ -741,13 +819,8 @@ describe("Me API (/api/me)", () => {
       // An org-scoped row reaches the key's space, wherever it was connected from, but serves
       // other spaces too: the key shares it into its own space, and renames none but its own.
       expect((await patch(inside, connectKey, { label: "y" })).status).toBe(403);
-      const shared = await patch(inside, connectKey, { shared_space_ids: [ctx.defaultSpaceId] });
-      expect(shared.status).toBe(200);
-      // The key reads its own space only: not the space the connection was connected from.
-      expect(await shared.json()).toMatchObject({
-        shared_space_ids: [ctx.defaultSpaceId],
-        origin_space_id: null,
-      });
+      expect((await share("PUT", inside, connectKey, ctx.defaultSpaceId)).status).toBe(204);
+      expect(await sharesOf(inside)).toEqual([ctx.defaultSpaceId]);
       expect((await patch(ofKeySpace, connectKey, { label: "y" })).status).toBe(200);
       expect((await patch(ofKeySpace, readKey, { label: "z" })).status).toBe(403);
     });
@@ -771,21 +844,14 @@ describe("Me API (/api/me)", () => {
       });
       const bearer = { Authorization: `Bearer ${key.rawKey}` };
 
-      const sharesNow = async () =>
-        (
-          await db
-            .select({ sharedSpaceIds: integrationConnections.sharedSpaceIds })
-            .from(integrationConnections)
-            .where(eq(integrationConnections.id, id))
-        )[0]?.sharedSpaceIds;
-      // The key's set edits its own space only: B's share is neither read nor touched.
-      expect((await patch(id, bearer, { shared_space_ids: [spaceB.id] })).status).toBe(403);
-      expect((await patch(id, bearer, { shared_space_ids: [ctx.defaultSpaceId] })).status).toBe(
-        200,
-      );
-      expect(await sharesNow()).toEqual([spaceB.id, ctx.defaultSpaceId]);
-      expect((await patch(id, bearer, { shared_space_ids: [] })).status).toBe(200);
-      expect(await sharesNow()).toEqual([spaceB.id]);
+      // The key shares into its own space only: B's share is neither read nor touched.
+      expect((await share("PUT", id, bearer, spaceB.id)).status).toBe(403);
+      expect((await share("DELETE", id, bearer, spaceB.id)).status).toBe(403);
+      expect(await sharesOf(id)).toEqual([spaceB.id]);
+      expect((await share("PUT", id, bearer, ctx.defaultSpaceId)).status).toBe(204);
+      expect(await sharesOf(id)).toEqual([spaceB.id, ctx.defaultSpaceId].toSorted());
+      expect((await share("DELETE", id, bearer, ctx.defaultSpaceId)).status).toBe(204);
+      expect(await sharesOf(id)).toEqual([spaceB.id]);
     });
 
     it("refuses a member sharing into a space that blocks user connections, not its governor", async () => {
@@ -817,21 +883,12 @@ describe("Me API (/api/me)", () => {
           label: "Shared",
         })
         .returning({ id: integrationConnections.id });
-
-      const refused = await patch(
-        memberRow,
-        { Cookie: member.cookie },
-        { shared_space_ids: [blocked.id] },
-      );
+      const refused = await share("PUT", memberRow, { Cookie: member.cookie }, blocked.id);
       expect(refused.status).toBe(403);
       expect(((await refused.json()) as { code: string }).code).toBe("connection_blocked_by_admin");
       // The org owner holds `admin` — and `integrations:configure` — in every team space.
-      const allowed = await patch(
-        governorRow!.id,
-        { Cookie: ctx.cookie },
-        { shared_space_ids: [blocked.id] },
-      );
-      expect(allowed.status).toBe(200);
+      const allowed = await share("PUT", governorRow!.id, { Cookie: ctx.cookie }, blocked.id);
+      expect(allowed.status).toBe(204);
     });
 
     it("refuses an owner sharing into a space where they cannot connect, on both doors", async () => {
@@ -849,33 +906,19 @@ describe("Me API (/api/me)", () => {
         integrationId,
         userId: member.id,
       });
-      const spaceDoor = (sharedSpaceIds: string[]) =>
-        app.request(`/api/integrations/${integrationId}/connections/${id}`, {
-          method: "PATCH",
-          headers: {
-            ...authHeaders({ ...ctx, cookie: member.cookie }),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ shared_space_ids: sharedSpaceIds }),
+      const spaceDoor = (method: "PUT" | "DELETE", spaceId: string) =>
+        app.request(`/api/integrations/${integrationId}/connections/${id}/shares/${spaceId}`, {
+          method,
+          headers: authHeaders({ ...ctx, cookie: member.cookie }),
         });
 
-      const refused = await patch(
-        id,
-        { Cookie: member.cookie },
-        { shared_space_ids: [viewing.id] },
-      );
+      const refused = await share("PUT", id, { Cookie: member.cookie }, viewing.id);
       expect(refused.status).toBe(403);
       expect(((await refused.json()) as { detail: string }).detail).toContain(viewing.id);
-      expect((await spaceDoor([viewing.id])).status).toBe(403);
-      expect(
-        (await patch(id, { Cookie: member.cookie }, { shared_space_ids: [operating.id] })).status,
-      ).toBe(200);
-      expect((await spaceDoor([operating.id, ctx.defaultSpaceId])).status).toBe(200);
-      const [row] = await db
-        .select({ shares: integrationConnections.sharedSpaceIds })
-        .from(integrationConnections)
-        .where(eq(integrationConnections.id, id));
-      expect(row!.shares.toSorted()).toEqual([operating.id, ctx.defaultSpaceId].toSorted());
+      expect((await spaceDoor("PUT", viewing.id)).status).toBe(403);
+      expect((await share("PUT", id, { Cookie: member.cookie }, operating.id)).status).toBe(204);
+      expect((await spaceDoor("PUT", ctx.defaultSpaceId)).status).toBe(204);
+      expect(await sharesOf(id)).toEqual([operating.id, ctx.defaultSpaceId].toSorted());
     });
   });
 

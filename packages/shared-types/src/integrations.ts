@@ -42,9 +42,27 @@ export interface IntegrationSummary {
 }
 
 /** Where a connection is usable: its whole org, or the one space whose OAuth client minted it. */
-export type ConnectionScope = "org" | "space";
+export const CONNECTION_SCOPES = ["org", "space"] as const;
+export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
 
-export interface IntegrationConnection {
+/** Actions a caller may take on a connection, listed per row on the list surfaces. */
+export const CONNECTION_ACTIONS = ["rename", "share", "unshare_here"] as const;
+export type ConnectionAction = (typeof CONNECTION_ACTIONS)[number];
+
+/** Where a connection reaches, as one reader sees it. */
+export interface ConnectionReach {
+  scope: ConnectionScope;
+  /** The one space a space-scoped connection lives in; null for an org-scoped one. */
+  spaceId: string | null;
+  /** Shared into the space the request is made from; false where none is (account surface, connect responses). */
+  shared_here: boolean;
+  /** The owner only (absent otherwise): every space it is shared into, within its credential's binding. */
+  shared_space_ids?: string[];
+  /** The owner only (absent otherwise): where an org-scoped row was connected from, within that binding. */
+  origin_space_id?: string | null;
+}
+
+export interface IntegrationConnection extends ConnectionReach {
   id: string;
   integration_package_id: string;
   auth_key: string;
@@ -78,11 +96,6 @@ export interface IntegrationConnection {
    * user-editable. The UI renders it verbatim.
    */
   label: string;
-  scope: ConnectionScope;
-  /** Spaces whose members may use it: all for the owner's own session, else the current one only. */
-  shared_space_ids: string[];
-  /** The space an org-scoped row was connected from, projected as `shared_space_ids` is. */
-  origin_space_id: string | null;
   /**
    * The registered OAuth client that minted this connection — a flat client id
    * (system env id or `integration_oauth_clients.id`). `null` for non-oauth2
@@ -93,6 +106,10 @@ export interface IntegrationConnection {
   client_ref: string | null;
   /** Connection variables (AFPS §7.12); `null` when the integration declares none. */
   variables: Record<string, string> | null;
+  /** Actions the caller may take on this row. Present on the list surfaces only, like `owner_name`. */
+  allowed_actions?: ConnectionAction[];
+  /** Spaces the caller may share this row into. The owner's, on the list surfaces only. */
+  shareable_spaces?: { id: string; name: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -187,7 +204,7 @@ export interface IntegrationOAuthClient {
  * `GET /api/agents/:scope/:name/connection-readiness`
  * (extended by `IntegrationCandidate`).
  */
-export interface AccessibleIntegrationConnection {
+export interface AccessibleIntegrationConnection extends ConnectionReach {
   id: string;
   auth_key: string;
   account_id: string;
@@ -198,10 +215,6 @@ export interface AccessibleIntegrationConnection {
   owner_name: string | null;
   /** OAuth scopes granted to this connection (empty for api_key/basic). */
   scopes_granted: string[];
-  scope: ConnectionScope;
-  /** Same projection as {@link IntegrationConnection.shared_space_ids}. */
-  shared_space_ids: string[];
-  origin_space_id: string | null;
   needs_reconnection: boolean;
 }
 

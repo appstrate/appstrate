@@ -8,12 +8,17 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  createTestUser,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import { listMeConnections } from "../../../src/services/me-connections.ts";
-import type { MeConnectionAuthority } from "../../../src/services/connection-reach.ts";
-import type { Actor } from "../../../src/lib/actor.ts";
+import type { ConnectionPrincipal } from "../../../src/lib/connection-principal.ts";
 
 const INTEGRATION = "@reuse/svc";
 const AUTH = "google";
@@ -22,7 +27,7 @@ describe("listMeConnections — reused_by_agents", () => {
   let ctx: TestContext;
   let a: string;
   let b: string;
-  let me: Actor;
+  let principal: ConnectionPrincipal;
 
   const declaring = (id: string): Record<string, unknown> => ({
     name: id,
@@ -48,6 +53,7 @@ describe("listMeConnections — reused_by_agents", () => {
     from?: string;
     scopedTo?: string;
     sharedSpaceIds?: string[];
+    userId?: string;
   }): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
@@ -58,21 +64,18 @@ describe("listMeConnections — reused_by_agents", () => {
         orgId: ctx.orgId,
         spaceId: opts.scopedTo ?? null,
         originSpaceId: opts.scopedTo ? null : (opts.from ?? null),
-        userId: ctx.user.id,
+        userId: opts.userId ?? ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: [],
-        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
     return row!.id;
   }
 
-  async function reuseOf(
-    connectionId: string,
-    authority: MeConnectionAuthority = { kind: "user_global" },
-  ): Promise<number | undefined> {
-    const groups = await listMeConnections(me, authority);
+  async function reuseOf(connectionId: string): Promise<number | undefined> {
+    const groups = await listMeConnections(testCaller(principal));
     return groups
       .flatMap((g) => g.connections)
       .find((entry) => entry.connection_id === connectionId)?.reused_by_agents;
@@ -81,7 +84,7 @@ describe("listMeConnections — reused_by_agents", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "reuseorg" });
-    me = { type: "user", id: ctx.user.id };
+    principal = { kind: "person", actor: { type: "user", id: ctx.user.id } };
     a = ctx.defaultSpaceId;
     b = (await seedSpace({ orgId: ctx.orgId, name: "B" })).id;
     await seedPackage({
@@ -113,6 +116,16 @@ describe("listMeConnections — reused_by_agents", () => {
     expect(await reuseOf(await seedConnection({ from: a, sharedSpaceIds: [b] }))).toBe(2);
   });
 
+  it("does not count a colleague's row shared into the owner's space toward the owner's row", async () => {
+    const colleague = await createTestUser({ email: "reuse-colleague@reuseorg.test" });
+    await addOrgMember(ctx.orgId, colleague.id, "member");
+    const own = await seedConnection({ from: a });
+    expect(await reuseOf(own)).toBe(2);
+
+    await seedConnection({ from: b, sharedSpaceIds: [a, b], userId: colleague.id });
+    expect(await reuseOf(own)).toBe(2);
+  });
+
   it("counts an org row made in A whose only agent runs in B", async () => {
     await seedSpacePackage(a, "@reuse/in-a", { enabled: false });
     expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
@@ -142,6 +155,16 @@ describe("listMeConnections — reused_by_agents", () => {
   it("counts the bound space only for a credential bound to one", async () => {
     const id = await seedConnection({ from: b, sharedSpaceIds: [a] });
     expect(await reuseOf(id)).toBe(2);
-    expect(await reuseOf(id, { kind: "bound", orgId: ctx.orgId, spaceId: a })).toBe(1);
+    const bound: ConnectionPrincipal = {
+      kind: "delegated",
+      actor: { type: "user", id: ctx.user.id },
+      orgId: ctx.orgId,
+      spaceId: a,
+    };
+    const groups = await listMeConnections(testCaller(bound));
+    const boundCount = groups
+      .flatMap((g) => g.connections)
+      .find((entry) => entry.connection_id === id)?.reused_by_agents;
+    expect(boundCount).toBe(1);
   });
 });

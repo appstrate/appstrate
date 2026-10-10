@@ -33,7 +33,6 @@ export interface OrgDefaultPick {
 interface UpsertOrgDefaultInput {
   connectionIds: string[];
   enforce: boolean;
-  createdBy: string | null;
 }
 
 function toSummary(row: typeof integrationOrgDefaults.$inferSelect): OrgDefaultSummary {
@@ -108,7 +107,6 @@ export async function upsertOrgDefault(
       integrationId,
       connectionIds: input.connectionIds,
       enforce: input.enforce,
-      createdBy: input.createdBy,
       createdAt: now,
       updatedAt: now,
     })
@@ -117,7 +115,6 @@ export async function upsertOrgDefault(
       set: {
         connectionIds: input.connectionIds,
         enforce: input.enforce,
-        createdBy: input.createdBy,
         updatedAt: now,
       },
     })

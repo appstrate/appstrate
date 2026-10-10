@@ -64,6 +64,10 @@ describe("persona-sensitive call sites", () => {
           "two membership-existence gates; the who-manages-whom policy reads `callerOrgRole`",
         ],
         [
+          "apps/api/src/routes/integrations.ts",
+          "the real role a connection list's share targets are judged under; `orgHalfFor` applies the persona",
+        ],
+        [
           "packages/module-chat/src/chat-stream.ts",
           "the fallback under the persona's role, which is what the turn is answered as",
         ],

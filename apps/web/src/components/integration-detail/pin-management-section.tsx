@@ -21,8 +21,6 @@ import {
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
 import { connectionOptionLabel, type ConnectionSet } from "../../lib/connection-set";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { isSharedInSpace } from "../integration-connect/connection-ownership";
 import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
@@ -34,7 +32,6 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: pins } = useIntegrationPins(packageId);
   const { data: connections } = useIntegrationConnections(packageId);
-  const spaceId = useCurrentSpaceId();
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
   const upsertPin = useUpsertIntegrationPin();
   const deletePin = useDeleteIntegrationPin();
@@ -42,7 +39,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const [newAgent, setNewAgent] = useState("");
   const [newConnectionIds, setNewConnectionIds] = useState<ConnectionSet>(null);
 
-  const pinnableConnections = (connections ?? []).filter((c) => isSharedInSpace(c, spaceId));
+  const pinnableConnections = (connections ?? []).filter((c) => c.shared_here);
 
   // Lookup helpers for the table
   const agentDisplayName = (id: string): string =>

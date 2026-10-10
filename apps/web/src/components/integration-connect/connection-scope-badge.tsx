@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import type { ConnectionScope } from "@appstrate/shared-types";
 import {
   Tooltip,
   TooltipContent,
@@ -13,7 +14,7 @@ export function ConnectionScopeBadge({
   scope,
   testId,
 }: {
-  scope: "org" | "space";
+  scope: ConnectionScope;
   testId?: string;
 }) {
   const { t } = useTranslation("settings");

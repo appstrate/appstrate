@@ -64,6 +64,7 @@ import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { countByKid, type KidCount } from "@appstrate/db/encrypted-columns";
 import { keyringKids, opensWithKeyring } from "@appstrate/connect";
+import { warnOnUnreadEnvKeys } from "./unread-env-keys.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -87,6 +88,10 @@ const ORPHAN_CLEANUP_CONCURRENCY = 6;
  * {@link bootBackground}, behind the readiness gate in `index.ts`.
  */
 export async function bootCritical(): Promise<void> {
+  // First, so the unread-key line is logged even if a later boot step fails.
+  // Namespace rule and limits: docs/ENV.md § Unread keys (docs/NO_TRANSITIONAL_CODE.md §4).
+  warnOnUnreadEnvKeys();
+
   // Register RBAC denial audit handler BEFORE modules load. Every guard
   // created from this point on — core routes via `requirePermission`,
   // module routes via `requireModulePermission`/`requireCorePermission` —

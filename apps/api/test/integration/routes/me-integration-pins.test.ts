@@ -54,6 +54,7 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -113,12 +114,12 @@ describe("/api/me/integration-pins", () => {
         spaceId,
         userId,
         endUserId: opts.endUserId ?? null,
-        sharedSpaceIds: opts.shared ? [spaceId] : [],
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.shared ? [spaceId] : []);
     return row!.id;
   }
 
@@ -976,7 +977,6 @@ describe("/api/me/integration-pins", () => {
         packageId: AGENT,
         integrationId: INTEGRATION,
         userId: null,
-        createdBy: ctx.user.id,
         connectionIds: [connectionId],
       });
       const schedule = await scheduleFor([connectionId], { userId: ctx.user.id });

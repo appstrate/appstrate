@@ -17,7 +17,15 @@ import {
 } from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { assertDbHas, assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
-import { spaces, spacePackages, auditEvents, packages, runs } from "@appstrate/db/schema";
+import {
+  spaces,
+  spacePackages,
+  auditEvents,
+  packages,
+  runs,
+  integrationConnections,
+} from "@appstrate/db/schema";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
@@ -191,7 +199,6 @@ describe("Spaces API", () => {
         name: "Audited Renamed",
         defaultRole: "viewer",
         settings: { allowedRedirectDomains: ["example.com"] },
-        unsharedConnectionIds: [],
       });
     });
   });
@@ -220,6 +227,47 @@ describe("Spaces API", () => {
       const listBody = (await listRes.json()) as any;
       const found = listBody.data.find((a: { id: string }) => a.id === created.id);
       expect(found).toBeUndefined();
+    });
+
+    it("withdraws the shares into the space, each recorded as share_removed with reason space_deleted", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Shared into" });
+      const integrationId = "@spacedel/svc";
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+      });
+      const [conn] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "primary",
+          accountId: "acct-shared",
+          label: "Partagée",
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+        })
+        .returning({ id: integrationConnections.id });
+      await seedShares(conn!.id, [space.id]);
+
+      const res = await app.request(`/api/spaces/${space.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(204);
+
+      const event = await getDbRow(
+        auditEvents,
+        and(
+          eq(auditEvents.action, "integration.connection.share_removed"),
+          eq(auditEvents.resourceId, conn!.id),
+        )!,
+      );
+      expect(event.after).toEqual({ spaceId: space.id, reason: "space_deleted" });
     });
 
     it("refuses the default space with a named 409, like every other undeletable space", async () => {

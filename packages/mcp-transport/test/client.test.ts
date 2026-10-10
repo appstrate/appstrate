@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -377,6 +378,66 @@ describe("wrapClient — progress", () => {
     try {
       await expect(wrapped.callTool({ name: "reporting" })).rejects.toThrow();
       expect(seen.token).toBeUndefined();
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("with onProgress: the total is capped by maxTotalMs and the server is told it was cancelled", async () => {
+    let aborted = false;
+    const pair = await createInProcessPair([
+      {
+        descriptor: { name: "reporting", inputSchema: { type: "object" } },
+        handler: async (_args, extra) => {
+          const progressToken = extra._meta?.progressToken;
+          if (progressToken === undefined) throw new Error("the call carries no progressToken");
+          extra.signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          while (!aborted) {
+            await new Promise((r) => setTimeout(r, STEP_MS));
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: { progressToken, progress: 1 },
+            });
+          }
+          return { content: [{ type: "text", text: "cancelled" }] };
+        },
+      },
+    ]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, TIMEOUT_MS, 150);
+    try {
+      const error = await wrapped.callTool({ name: "reporting" }, { onProgress: () => {} }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(McpError);
+      expect((error as McpError).code).toBe(ErrorCode.RequestTimeout);
+      expect((error as McpError).message).toContain("Maximum total timeout exceeded");
+      const deadline = Date.now() + 200;
+      while (!aborted && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(aborted).toBe(true);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("without onProgress: no total cap applies, even when maxTotalMs is shorter than the call", async () => {
+    const pair = await createInProcessPair([
+      {
+        descriptor: { name: "quick", inputSchema: { type: "object" } },
+        handler: async () => {
+          await new Promise((r) => setTimeout(r, 50));
+          return { content: [{ type: "text", text: "done" }] };
+        },
+      },
+    ]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, undefined, 10);
+    try {
+      const res = await wrapped.callTool({ name: "quick" });
+      expect(res.content).toEqual([{ type: "text", text: "done" }]);
     } finally {
       await pair.close();
     }
