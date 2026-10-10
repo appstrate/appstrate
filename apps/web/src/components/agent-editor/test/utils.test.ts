@@ -21,6 +21,7 @@ import {
   setKeyword,
   textToList,
   textToValue,
+  toKeywordNumber,
   toNumber,
   valueToText,
   manifestToSchemaFields,
@@ -608,6 +609,38 @@ describe("changeType", () => {
     expect(changeType(prop, "string")).toEqual({ type: "string", description: "d" });
   });
 
+  it("keeps annotations and x-* keys but not type-specific values", () => {
+    const prop: JSONSchema7 & Record<string, unknown> = {
+      type: "string",
+      title: "T",
+      $comment: "c",
+      deprecated: true,
+      readOnly: true,
+      "x-ui": 1,
+      default: "a",
+      enum: ["a"],
+      examples: ["a"],
+      const: "a",
+    };
+    const expected: Record<string, unknown> = {
+      type: "number",
+      title: "T",
+      $comment: "c",
+      deprecated: true,
+      readOnly: true,
+      "x-ui": 1,
+    };
+    expect(changeType(prop, "number")).toEqual(expected);
+    const file: Record<string, unknown> = { ...FILE_ITEM, title: "T", "x-a": 1 };
+    const src: JSONSchema7 & Record<string, unknown> = {
+      type: "string",
+      title: "T",
+      "x-a": 1,
+      minLength: 1,
+    };
+    expect(setFileKind(src, "single")).toEqual(file);
+  });
+
   it("does not add an undefined description", () => {
     expect(changeType({ type: "array", items: {} }, "number")).toEqual({ type: "number" });
   });
@@ -655,6 +688,14 @@ describe("setItemsEnum", () => {
     });
   });
 
+  it("does not narrow existing items that have no type", () => {
+    expect(setItemsEnum({ type: "array", items: { $ref: "#/x" } }, ["a"]).items).toEqual({
+      $ref: "#/x",
+      enum: ["a"],
+    });
+    expect(setItemsEnum({ type: "array", items: {} }, ["a"]).items).toEqual({ enum: ["a"] });
+  });
+
   it("adds a string items type when there is none", () => {
     expect(setItemsEnum({ type: "array" }, ["a"]).items).toEqual({ type: "string", enum: ["a"] });
   });
@@ -689,6 +730,20 @@ describe("text adapters", () => {
     expect(textToList("1, 2 ,3,", "integer")).toEqual([1, 2, 3]);
     expect(textToList("true, false", "boolean")).toEqual([true, false]);
     expect(textToList("a, , b", "string")).toEqual(["a", "b"]);
+  });
+
+  it("toKeywordNumber validates per keyword", () => {
+    for (const k of ["minLength", "maxLength", "maxItems"]) {
+      expect(toKeywordNumber(k, "3")).toBe(3);
+      expect(toKeywordNumber(k, "0")).toBe(0);
+      expect(toKeywordNumber(k, "-1")).toBeUndefined();
+      expect(toKeywordNumber(k, "1.5")).toBeUndefined();
+    }
+    expect(toKeywordNumber("multipleOf", "0.5")).toBe(0.5);
+    expect(toKeywordNumber("multipleOf", "0")).toBeUndefined();
+    expect(toKeywordNumber("multipleOf", "-2")).toBeUndefined();
+    expect(toKeywordNumber("minimum", "-2.5")).toBe(-2.5);
+    expect(toKeywordNumber("maximum", "abc")).toBeUndefined();
   });
 
   it("toNumber is undefined for empty or non-numeric text", () => {

@@ -45,6 +45,7 @@ import {
   setKeyword,
   textToList,
   textToValue,
+  toKeywordNumber,
   toNumber,
   valueToText,
   type TextValue,
@@ -188,7 +189,7 @@ function NumberKeywordInput({
   return (
     <DraftInput
       text={typeof current === "number" ? String(current) : ""}
-      onCommit={(text) => onChange(setKeyword(prop, keyword, toNumber(text)))}
+      onCommit={(text) => onChange(setKeyword(prop, keyword, toKeywordNumber(keyword, text)))}
       placeholder={placeholder}
       className={className}
     />

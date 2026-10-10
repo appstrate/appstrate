@@ -410,12 +410,20 @@ export function setKeyword<K extends keyof JSONSchema7>(
   return next;
 }
 
-/** A fresh property of another type: keywords of the old type would be invalid, only `description` survives. */
-export function changeType(prop: JSONSchema7, type: JSONSchema7TypeName): JSONSchema7 {
-  return prop.description === undefined ? { type } : { type, description: prop.description };
+const ANNOTATIONS = ["description", "title", "$comment", "deprecated", "readOnly", "writeOnly"];
+
+/** A fresh shape keeping only the type-agnostic annotations (not default/enum/examples/const). */
+function freshShape(prop: JSONSchema7, shape: JSONSchema7): JSONSchema7 {
+  const kept = Object.entries(prop).filter(([k]) => ANNOTATIONS.includes(k) || k.startsWith("x-"));
+  return { ...shape, ...Object.fromEntries(kept) };
 }
 
-/** Turn the file shape on/off. Always a fresh property (keeping only `description`). */
+/** A fresh property of another type: keywords of the old type would be invalid. */
+export function changeType(prop: JSONSchema7, type: JSONSchema7TypeName): JSONSchema7 {
+  return freshShape(prop, { type });
+}
+
+/** Turn the file shape on/off. Always a fresh property. */
 export function setFileKind(prop: JSONSchema7, kind: FileKind): JSONSchema7 {
   const shape: JSONSchema7 =
     kind === "none"
@@ -423,7 +431,7 @@ export function setFileKind(prop: JSONSchema7, kind: FileKind): JSONSchema7 {
       : kind === "single"
         ? fileItem()
         : { type: "array", items: fileItem() };
-  return prop.description === undefined ? shape : { ...shape, description: prop.description };
+  return freshShape(prop, shape);
 }
 
 /** Set (or clear, when empty) `items.enum`, keeping the other `items` keywords and its type. */
@@ -431,7 +439,7 @@ export function setItemsEnum(prop: JSONSchema7, values: Scalar[]): JSONSchema7 {
   if (prop.items !== undefined && !itemsOf(prop)) return prop; // tuple/boolean items: not ours to rewrite
   const items = itemsOf(prop);
   if (values.length > 0) {
-    return setKeyword(prop, "items", { type: "string", ...items, enum: values });
+    return setKeyword(prop, "items", { ...(items ? items : { type: "string" }), enum: values });
   }
   if (!items) return prop;
   const { enum: _removed, ...rest } = items;
@@ -446,6 +454,17 @@ export function toNumber(text: string): number | undefined {
 }
 
 // ─── Text adapters (default, enum, items.enum) ──────────────
+
+const NON_NEGATIVE_INTEGER = ["minLength", "maxLength", "maxItems"];
+
+/** Numeric keyword input → number; undefined (keyword removed) when empty or invalid for that keyword. */
+export function toKeywordNumber(keyword: string, text: string): number | undefined {
+  const n = toNumber(text);
+  if (n === undefined) return undefined;
+  if (NON_NEGATIVE_INTEGER.includes(keyword)) return Number.isInteger(n) && n >= 0 ? n : undefined;
+  if (keyword === "multipleOf") return n > 0 ? n : undefined;
+  return n;
+}
 
 /** Text → typed value for `type`; undefined when empty or not a valid number. */
 export function textToValue(text: string, type: string): Scalar | undefined {
