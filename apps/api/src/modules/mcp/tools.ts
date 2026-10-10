@@ -1275,9 +1275,9 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     // Success or failure, the result names the space it was launched in.
     const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
     if (!launched.ok) {
-      // A launch HTTP failure (payload carries a numeric `status`) reached the
-      // route and it rejected the request (bad input, unconnected integration,
-      // no published version, …) — reported as an `invoked` POST. A pre-dispatch
+      // A payload carrying a numeric `status` reached the route: it rejected the
+      // request (bad input, unconnected integration, no published version, …) or
+      // answered without a run id — reported as an `invoked` POST. A pre-dispatch
       // validation failure (payload carries its `code`, `error` and `arguments`)
       // never touched the route.
       const launchStatus = launched.step.payload.status;

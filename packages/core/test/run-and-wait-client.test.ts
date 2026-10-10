@@ -201,6 +201,16 @@ describe("run_and_wait client", () => {
     expect(steps.map((step) => step.warnings)).toEqual([[], []]);
   });
 
+  it("reports a 2xx launch without a run id as a dispatched failure", async () => {
+    const fetchImpl = fakeFetch(async () => jsonResponse({ status: "pending" }, 201));
+
+    await expect(
+      collectSteps(fetchImpl, { kind: "agent", scope: "@acme", name: "writer" }),
+    ).resolves.toEqual([
+      { status: 201, error: "Run launch returned no run id.", launch: { status: "pending" } },
+    ]);
+  });
+
   it("validates before dispatching", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");

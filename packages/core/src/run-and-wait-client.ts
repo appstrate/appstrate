@@ -719,7 +719,11 @@ export async function launchRunAndWait(
     return {
       ok: false,
       step: {
-        payload: { error: "Run launch returned no run id.", launch: launched },
+        payload: {
+          status: launchRes.status,
+          error: "Run launch returned no run id.",
+          launch: launched,
+        },
         isError: true,
       },
     };
