@@ -254,7 +254,8 @@ A `Select` never holds hundreds of entries.
   names the act (« Supprimer la planification ? »), its body says what changes,
   its button repeats the verb through `confirmLabel` (« Supprimer »), never
   « Confirmer ». It closes itself on a refusal; `keepOpenOnRefusal` when it shows
-  the refusal inline.
+  the refusal inline. A delete hook never refetches the page being left (a 404
+  GET): it invalidates the list, and the item's detail with `refetchType: "none"`.
 - **Creating a small object** (schedule, model, webhook, key): a modal asking
   only what it needs to exist, opened by a URL param from every entry point
   with the context preselected, then the object's page takes the rest
@@ -270,11 +271,15 @@ A `Select` never holds hundreds of entries.
   write (no `onError` that toasts again, `lib/mutation-error.ts`). A refusal is
   worded by its `code` (`apiError.<code>` in `locales/{fr,en}/common.json`). A
   raw server payload (JSON, an English sentence) never reaches the screen.
+- **What ended a run** is stored verbatim (an English platform line, a model
+  provider's JSON body); a screen shows it through `runErrorText`
+  (`lib/run-error.ts`), never `run.error` as is.
 - **Toasts**: `sonner`, through the shared `Toaster` (`AppToaster`). A failure,
   or a result the screen does not show. No success toast where the row or the
   field already shows the change.
 - An expected refusal that asks for a choice (a 409 naming candidates) is a
-  form state with the choice, not « Erreur d'enregistrement ».
+  form state with the choice, not « Erreur d'enregistrement ». Any other refusal
+  puts the control back on the stored value (`ActorSelect` in a schedule's identity).
 - **Tooltips** explain an icon or a disabled control, never carry the only copy
   of information. They are shadcn `Tooltip` wrapped in a `TooltipProvider`
   (`delayDuration` 250 or 300). A disabled control gets its reason through
@@ -285,6 +290,9 @@ A `Select` never holds hundreds of entries.
 - Same navigation for every role; what a role may not do is said where the
   content would be: `RoleLimitNotice` (`components/role-limit-notice.tsx`) in a
   section, a rail item with a lock.
+- The « view as » preview (`ViewAsBanner`) is on every shell and on a refusal
+  with no shell around it (the chat), and the product tabs judge the persona on its
+  grants alone (its own conversations do not count).
 - An action the role cannot perform is **not offered**. When it must stay
   visible to explain itself, it is disabled with its reason
   (`DisabledReasonTooltip`, `components/disabled-reason-tooltip.tsx`). Never a
@@ -347,7 +355,12 @@ every module on (`lab/install.ts`).
   sentence case; « 1 problème », not « 1 problèmes ».
 - « Espace de travail » (workspace) in the UI, never « application », except an
   external OAuth application.
-- No development wording in the product (« à brancher », « dev », TODO).
+- No development wording in the product (« à brancher », « dev », TODO). A control
+  not wired yet is rendered only under `import.meta.env.DEV` (the global search in
+  `shell-frame.tsx`), never as a disabled button in a production build.
+- A permission is always named by its sentence (`lib/permission-labels.ts`:
+  `permissionLabel`, `permissionResourceLabel`), in the matrix, in the pickers
+  (`ScopeMultiSelect`) and in badges, never by its wire string (`agents:share`).
 
 ## 16. Motion
 
@@ -363,8 +376,12 @@ movement uses `motion-reduce:animate-pulse`. No animation library.
 
 Every screen at 390 px: no horizontal page scroll, a grid has a single-column
 variant (`max-md:grid-cols-1`, `lg:grid-cols-…`; a card grid is `CardGrid`),
-header actions wrap (`PageHeader wrapActions`), the sidebar becomes a sheet, a
-panel's rail becomes a select (`PanelDialog mobileNav`).
+header actions wrap (`PageHeader wrapActions`: the group of badges and buttons
+wraps under the title as a whole), the sidebar becomes a sheet, a panel's rail
+becomes a select (`PanelDialog mobileNav`). A surface that covers the page on a
+phone (`PanelDialog mobileAsSurface`) sits at `z-30`, above the `z-10` / `z-20`
+stretched links and action clusters of the cards under it. Tabs tighten to `px-2`
+below `sm` (`DetailTabsTrigger`) so four of them fit 390 px.
 
 ## 18. The lab
 

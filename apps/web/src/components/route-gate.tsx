@@ -10,6 +10,7 @@ import { useAppConfig } from "../hooks/use-app-config";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
 import { routeOf } from "../lib/route-match";
 import { EmptyState, LoadingState } from "./page-states";
+import { ViewAsBanner } from "./view-as-banner";
 
 /**
  * Route-level gate, read off the route's declaration in `lib/route-access.ts`:
@@ -42,7 +43,17 @@ export function RouteGate({ path, children }: { path: RoutePath; children: React
   }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
-  return ready ? <NoAccessState /> : <LoadingState />;
+  if (!ready) return <LoadingState />;
+  // The chat is mounted beside Studio, not inside it: a refusal there has no
+  // shell around it, so a preview would show no banner and no way out.
+  return path.startsWith("/chat") ? (
+    <>
+      <ViewAsBanner />
+      <NoAccessState />
+    </>
+  ) : (
+    <NoAccessState />
+  );
 }
 
 /**

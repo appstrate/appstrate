@@ -55,6 +55,7 @@ import {
   getRuntimeTools,
   setRuntimeTools,
   withNormalizedManifest,
+  withOutputTool,
   toResourceEntry,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
@@ -232,7 +233,10 @@ function AgentEditorInner({
     setSchemaFields((prev) => ({ ...prev, [key]: fields }));
     const wrapper = fieldsToSchema(fields, key, manifestSchemaWrapper(state.manifest, key)?.schema);
     if (wrapper) {
-      updateManifest({ [key]: wrapper });
+      setState((s) => {
+        const manifest = { ...s.manifest, [key]: wrapper };
+        return { ...s, manifest: key === "output" ? withOutputTool(manifest) : manifest };
+      });
     } else {
       setState((s) => {
         const { [key]: _, ...rest } = s.manifest;
@@ -563,7 +567,7 @@ function PackageEditorInner({
       // The same checker the write routes run — fixed here, not via a 400.
       const frontmatter = skillFrontmatterError(content);
       if (frontmatter) {
-        return { error: t(frontmatter.key, { detail: frontmatter.detail }), tab: "files" };
+        return { error: t(frontmatter.key), tab: "files" };
       }
       return null;
     },

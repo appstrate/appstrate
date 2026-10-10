@@ -277,7 +277,8 @@ export function OrgSettingsMembersPage() {
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("orgSettings.removeMemberTitle")}
+        confirmLabel={t("btn.remove", { ns: "common" })}
         description={
           confirmState ? t("orgSettings.removeMember", { name: confirmState.label }) : ""
         }

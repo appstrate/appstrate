@@ -322,7 +322,8 @@ function GeneralForm({
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("applications.deleteDialogTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={t("applications.deleteConfirm", { name: application.name })}
         isPending={deleteMutation.isPending}
         onConfirm={() => {

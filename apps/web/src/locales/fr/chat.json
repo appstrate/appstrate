@@ -70,7 +70,7 @@
   "connect.resumed": "{{name}} connectée",
   "connect.active": "Connexion active",
   "connect.failed": "La connexion a échoué.",
-  "connect.expired": "Lien expiré — relancez la connexion depuis la page de l'intégration.",
+  "connect.expired": "Lien expiré : relancez la connexion depuis la page de l'intégration.",
   "tool.op.launch": "Lancement",
   "tool.op.create": "Création",
   "tool.op.update": "Modification",

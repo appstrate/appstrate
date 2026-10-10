@@ -22,6 +22,14 @@ import { launchFromOptions } from "../../lib/run-launch";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
 
+/** The title of each confirmation names its act; the button repeats the verb. */
+const CONFIRM_TITLES = {
+  deleteAgent: "detail.deleteTitle",
+  clearRuns: "detail.clearRunsTitle",
+  clearMemories: "detail.clearMemoriesTitle",
+  deactivateAgent: "detail.deactivateTitle",
+} as const;
+
 export function AgentActions({
   packageId,
   isOwned,
@@ -183,12 +191,12 @@ export function AgentActions({
         open={confirmState !== null}
         onClose={() => setConfirmState(null)}
         onConfirm={handleConfirm}
-        title={t("btn.confirm", { ns: "common" })}
+        title={confirmState ? t(CONFIRM_TITLES[confirmState.type]) : ""}
         description={confirmState?.label ?? ""}
         confirmLabel={
           confirmState?.type === "deactivateAgent"
             ? t("packages.deactivate", { ns: "settings" })
-            : undefined
+            : t("btn.delete", { ns: "common" })
         }
         isPending={
           deleteAgent.isPending ||

@@ -130,6 +130,7 @@ export function CreateVersionModal({
                   <button
                     key={opt.type}
                     type="button"
+                    aria-pressed={isSelected}
                     onClick={() => setValue("selectedBump", opt.type)}
                     className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
                       isSelected
@@ -137,10 +138,10 @@ export function CreateVersionModal({
                         : "border-border hover:border-muted-foreground"
                     }`}
                   >
-                    <div className="font-medium">{opt.label}</div>
-                    <div className="text-muted-foreground mt-0.5 text-xs">
+                    <span className="block font-medium">{opt.label}</span>{" "}
+                    <span className="text-muted-foreground mt-0.5 block text-xs">
                       {latestVersion} &rarr; {bumped}
-                    </div>
+                    </span>
                   </button>
                 );
               })}

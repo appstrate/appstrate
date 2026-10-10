@@ -29,6 +29,7 @@ import {
   getRuntimeTools,
   withNormalizedManifest,
   setRuntimeTools,
+  withOutputTool,
 } from "../utils";
 import type { SchemaField } from "../schema-section";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
@@ -865,6 +866,18 @@ describe("getRuntimeTools", () => {
 // (`@appstrate/core`). The former is gated on `type: "agent"` — the fixtures
 // carry it because the only call site (`package-editor.tsx`) runs in the agent
 // branch on a stored AFPS manifest, where `type` is required by the schema.
+describe("withOutputTool", () => {
+  it("turns the output tool on next to the tools already chosen", () => {
+    expect(withOutputTool({ runtime_tools: ["log"] }).runtime_tools).toEqual(["log", "output"]);
+    expect(withOutputTool({}).runtime_tools).toEqual(["output"]);
+  });
+
+  it("returns the same manifest when the tool is already there", () => {
+    const manifest = { runtime_tools: ["output", "log"] };
+    expect(withOutputTool(manifest)).toBe(manifest);
+  });
+});
+
 describe("withNormalizedManifest", () => {
   it("strips a retired id from the manifest loaded into the editor", () => {
     const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };

@@ -66,7 +66,7 @@ export function ManualModelFields({
         label={t("models.form.modelId")}
         fieldProps={modelIdProps}
         error={modelIdError}
-        placeholder="ex: claude-sonnet-4-5-20250929"
+        placeholder={t("models.form.modelIdPlaceholder")}
       />
       <TextField
         id={`${idPrefix}-label`}

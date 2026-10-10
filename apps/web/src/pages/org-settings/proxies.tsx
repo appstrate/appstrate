@@ -285,7 +285,8 @@ export function OrgSettingsProxiesPage() {
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("proxies.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={confirmState ? t("proxies.deleteConfirm", { label: confirmState.label }) : ""}
         isPending={deleteMutation.isPending}
         onConfirm={() => {

@@ -223,20 +223,22 @@ export function ShellHeader({
         <div className="flex shrink-0 items-center gap-1">
           {actions}
           {/* Not wired to anything yet: there is no global search in the app.
-              Present so the arrangement can be judged; disabled rather than
-              inert so nobody wonders why nothing happens. */}
-          <button
-            type="button"
-            disabled
-            title="Recherche globale (à brancher)"
-            aria-label="Rechercher"
-            // `p-0` is not decoration: the base layer gives every `button`
-            // `px-3 py-1.5`, which leaves an 18px icon 8px of room in a 32px
-            // box and squashes it. Same reset the notification bell carries.
-            className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-8 shrink-0 items-center justify-center rounded-md p-0 disabled:opacity-40"
-          >
-            <Search size={18} />
-          </button>
+              Shown in development only, so the arrangement can be judged; a
+              production build carries no dead control. */}
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              disabled
+              title="Recherche globale (à brancher)"
+              aria-label="Rechercher"
+              // `p-0` is not decoration: the base layer gives every `button`
+              // `px-3 py-1.5`, which leaves an 18px icon 8px of room in a 32px
+              // box and squashes it. Same reset the notification bell carries.
+              className="text-muted-foreground hover:bg-accent hover:text-foreground inline-flex size-8 shrink-0 items-center justify-center rounded-md p-0 disabled:opacity-40"
+            >
+              <Search size={18} />
+            </button>
+          )}
           <NotificationBell />
         </div>
       </div>

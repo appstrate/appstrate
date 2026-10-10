@@ -276,7 +276,7 @@ function CredentialFormBody({
         {...register("label", {
           validate: (v) => (!v.trim() ? t("validation.required", { ns: "common" }) : undefined),
         })}
-        placeholder="ex: My Anthropic Key"
+        placeholder={t("credentials.form.labelPlaceholder")}
         aria-invalid={showError("label") ? true : undefined}
         className={cn(showError("label") && "border-destructive")}
       />
@@ -441,7 +441,7 @@ function CredentialFormBody({
                 id="pk-apiKey"
                 type="password"
                 {...register("apiKey", { validate: apiKeyValidate })}
-                placeholder="sk-..."
+                placeholder={t("credentials.form.apiKeyPlaceholder")}
                 aria-invalid={showError("apiKey") ? true : undefined}
                 className={cn(showError("apiKey") && "border-destructive")}
               />

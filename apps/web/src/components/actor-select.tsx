@@ -19,7 +19,10 @@ import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useEndUsers, useEndUser } from "../hooks/use-end-users";
 import { useAuth } from "../hooks/use-auth";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
+import { useRoles } from "../hooks/use-roles";
+import { useSpaceMembers } from "../hooks/use-space-members";
 import { mayGovernMemberSchedule } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
 
@@ -79,8 +82,25 @@ export function ActorSelect({
   // themselves, an end user, or the member the field started on — kept listed after picking
   // someone else, so it can be put back. The server decides (403).
   const { user } = useAuth();
-  const { orgRole } = usePermissions();
+  const { orgRole, can } = usePermissions();
   const callerId = user?.id;
+  // Only a member who reaches the space with a role holding `agents:run` can be an actor (the
+  // server's `schedule_actor_invalid`). Without the two reads the list is not narrowed and the
+  // server's refusal does the talking.
+  const spaceId = useCurrentSpaceId();
+  const { data: spaceMembers } = useSpaceMembers(spaceId ?? "", can("space-members:read"));
+  const { data: roles } = useRoles(can("roles:read"));
+  const mayRunIds = useMemo(() => {
+    if (!spaceMembers || !roles) return null;
+    const runRoles = new Set(
+      roles.filter((r) => r.permissions.includes("agents:run")).map((r) => `${r.kind}:${r.key}`),
+    );
+    return new Set(
+      spaceMembers
+        .filter((m) => m.role && runRoles.has(`${m.role.kind}:${m.role.key}`))
+        .map((m) => m.userId),
+    );
+  }, [spaceMembers, roles]);
   const [initialUserId] = useState(value?.userId);
 
   const { data: endUserPage } = useEndUsers({
@@ -98,7 +118,8 @@ export function ActorSelect({
       .filter(
         (m) =>
           m.userId === initialUserId ||
-          mayGovernMemberSchedule(m.userId, { userId: callerId, orgRole }),
+          (mayGovernMemberSchedule(m.userId, { userId: callerId, orgRole }) &&
+            (mayRunIds === null || mayRunIds.has(m.userId))),
       )
       .filter(
         (m) =>
@@ -111,7 +132,7 @@ export function ActorSelect({
         name: primaryLabel(m.displayName, m.email ?? null, m.userId),
         email: m.email ?? null,
       }));
-  }, [members, debouncedQuery, orgRole, callerId, initialUserId]);
+  }, [members, debouncedQuery, orgRole, callerId, initialUserId, mayRunIds]);
 
   const endUserOptions = useMemo<Option[]>(
     () =>

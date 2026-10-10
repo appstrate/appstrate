@@ -334,6 +334,18 @@ describe("errorMessage", () => {
     expect(errorMessage(other)).toBe(`Requête refusée : ${detail}`);
   });
 
+  it("tells an output schema without the output tool what to turn on", async () => {
+    await i18n.changeLanguage("fr");
+    const message =
+      "The 'output' runtime tool must be enabled when an output schema is defined — an agent must return its result.";
+    const err = await problem({
+      code: "validation_failed",
+      detail: `manifest.runtime_tools: ${message}`,
+      errors: [{ field: "manifest.runtime_tools", code: "invalid_manifest", message }],
+    });
+    expect(errorMessage(err)).toBe(agentsFr["error.outputToolRequired"]);
+  });
+
   it("words a 'no connection' override on a required integration as the pin's refusal", async () => {
     await i18n.changeLanguage("fr");
     const err = await problem({
@@ -402,7 +414,7 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe(detail);
   });
 
-  it("quotes the checker's rule for a SKILL.md refusal, wherever it surfaces", async () => {
+  it("says the rule of a SKILL.md refusal in French, never the checker's English", async () => {
     await i18n.changeLanguage("fr");
     const err = await problem({
       code: "validation_failed",
@@ -411,8 +423,8 @@ describe("errorMessage", () => {
         { field: "content", code: "skill_invalid_frontmatter", message: "Map keys must be unique" },
       ],
     });
-    expect(errorMessage(err)).toContain("Map keys must be unique");
-    expect(errorMessage(err)).not.toContain("{{detail}}");
+    expect(errorMessage(err)).toBe(agentsFr["editor.errorSkillInvalidFrontmatter"]);
+    expect(errorMessage(err)).not.toContain("Map keys must be unique");
   });
 
   it("reads Better Auth's upper-case codes from the same table", async () => {

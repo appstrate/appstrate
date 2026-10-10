@@ -4,7 +4,7 @@ import * as React from "react";
 import { TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 
-/** Stock shadcn tabs, with horizontal overflow for narrow detail pages. */
+/** Stock shadcn tabs, tighter on a phone, with horizontal overflow when they still do not fit. */
 export function DetailTabsList({
   className,
   ...props
@@ -20,5 +20,5 @@ export function DetailTabsTrigger({
   className,
   ...props
 }: React.ComponentPropsWithoutRef<typeof TabsTrigger>) {
-  return <TabsTrigger className={className} {...props} />;
+  return <TabsTrigger className={cn("max-sm:px-2", className)} {...props} />;
 }

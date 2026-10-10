@@ -16,6 +16,7 @@ import {
   CommandSeparator,
 } from "@appstrate/ui/components/command";
 import { cn } from "@appstrate/ui/cn";
+import { permissionLabel, permissionResourceLabel } from "../lib/permission-labels";
 
 /** What the picker calls the things it picks. API keys say "scopes", roles say "permissions". */
 interface ScopeMultiSelectLabels {
@@ -130,19 +131,25 @@ export function ScopeMultiSelect({
               </CommandGroup>
               <CommandSeparator />
               {groups.map(({ resource, scopes }) => (
-                <CommandGroup key={resource} heading={resource}>
+                <CommandGroup key={resource} heading={permissionResourceLabel(resource, t)}>
                   {scopes.map((scope) => {
-                    const action = scope.split(":")[1]!;
+                    const label = permissionLabel(scope, t);
                     const isSelected = selected.includes(scope);
                     const note = hint?.(scope);
                     const mark = tag?.(scope);
                     return (
-                      <CommandItem key={scope} value={scope} onSelect={() => toggle(scope)}>
+                      <CommandItem
+                        key={scope}
+                        value={scope}
+                        keywords={[label]}
+                        title={scope}
+                        onSelect={() => toggle(scope)}
+                      >
                         <Check
                           className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")}
                         />
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <span>{action}</span>
+                          <span>{label}</span>
                           {note && <span className="text-muted-foreground text-xs">{note}</span>}
                         </span>
                         {mark && (
@@ -174,7 +181,7 @@ export function ScopeMultiSelect({
               .filter((g) => g.selectedCount > 0)
               .map((g) => (
                 <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                  {g.resource}
+                  {permissionResourceLabel(g.resource, t)}
                   {g.selectedCount < g.scopes.length && (
                     <span className="ml-0.5 opacity-60">
                       {g.selectedCount}/{g.scopes.length}

@@ -89,7 +89,8 @@ export function ApiKeysPage() {
       <ConfirmModal
         open={!!confirmState}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("settings:apiKeys.revokeTitle")}
+        confirmLabel={t("settings:apiKeys.revoke")}
         description={t("settings:apiKeys.revokeConfirm", { name: confirmState?.label })}
         isPending={revokeApiKeyMutation.isPending}
         onConfirm={() => {

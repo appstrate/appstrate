@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
+import { usePermissions } from "../hooks/use-permissions";
 import { TableRowActions } from "../components/table-row-actions";
 import { EndUserAvatar } from "../components/end-user-avatar";
 import type { EndUserInfo } from "../hooks/use-end-users";
@@ -24,6 +25,9 @@ export function useEndUserColumns({
   onDelete: (user: EndUserInfo) => void;
 }): DataColumn<EndUserInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
+  const { can } = usePermissions();
+  // An operator may edit an end-user but not delete one: the deed is not offered.
+  const canDelete = can("end-users:delete");
 
   return [
     {
@@ -85,13 +89,15 @@ export function useEndUserColumns({
           isPending={deletingUserId === user.id}
           pendingLabel={t("common:loading")}
         >
-          <DropdownMenuItem
-            onSelect={() => onDelete(user)}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 />
-            {t("common:btn.delete")}
-          </DropdownMenuItem>
+          {canDelete && (
+            <DropdownMenuItem
+              onSelect={() => onDelete(user)}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 />
+              {t("common:btn.delete")}
+            </DropdownMenuItem>
+          )}
         </TableRowActions>
       ),
     },

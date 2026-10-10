@@ -24,6 +24,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { DocumentListPanel } from "../document-list-panel";
 import { formatDateField } from "../../lib/format-date";
 import { runConnectionRows } from "../../lib/run-connections";
+import { runErrorText } from "../../lib/run-error";
 import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
 import type { ExecutionEntry } from "../log-utils";
 import { OverviewCardAction } from "../overview-card-action";
@@ -100,7 +101,7 @@ export function RunSnapshotInspector({
   // problem card (the agent page's Diagnostic card); a cancellation is no
   // problem and says who stopped it among the execution facts.
   const problem = run.error && (run.status === "failed" || run.status === "timeout");
-  const stopped = run.error && run.status === "cancelled" ? run.error : null;
+  const stopped = run.error && run.status === "cancelled" ? runErrorText(run, t) : null;
 
   return (
     <>
@@ -118,7 +119,7 @@ export function RunSnapshotInspector({
             >
               <ul className={cardHeaders ? "px-4" : "mt-3"}>
                 <HealthCardItem
-                  title={run.error}
+                  title={runErrorText(run, t)}
                   cardHeaders={cardHeaders}
                   actions={
                     <HealthAction onClick={() => onOpenJournal("errors")}>

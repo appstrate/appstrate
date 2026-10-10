@@ -314,7 +314,12 @@ export function OrgSettingsModelsPage() {
       <ConfirmModal
         open={!!confirmState}
         onClose={closeConfirm}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t(
+          confirmState?.type === "deleteCredential"
+            ? "credentials.deleteTitle"
+            : "models.deleteTitle",
+        )}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           confirmState?.type === "deleteModel"
             ? t("models.deleteConfirm", { label: confirmState.label })

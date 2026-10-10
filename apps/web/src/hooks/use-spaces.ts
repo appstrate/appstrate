@@ -97,10 +97,20 @@ export function useUpdateSpace() {
 }
 
 export function useDeleteSpace() {
-  const invalidate = useInvalidateSpaces();
+  const qc = useQueryClient();
   return $api.useMutation("delete", "/api/spaces/{id}", {
     meta: { errorHandledByCaller: true },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
+      // The page still showing the deleted space would re-read it, a 404: stale only.
+      for (const path of [
+        "/api/spaces/{id}",
+        "/api/spaces/{id}/roles",
+        "/api/spaces/{id}/members",
+      ]) {
+        void qc.invalidateQueries({ queryKey: ["get", path], refetchType: "none" });
+      }
+    },
   });
 }
 

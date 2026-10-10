@@ -10,7 +10,7 @@ import i18n from "../i18n";
 import { ApiError } from "../api/errors";
 import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
 
-/** SKILL.md frontmatter refusals; their sentences quote the checker's own `{{detail}}`. */
+/** SKILL.md frontmatter refusals; each key is one rule, said in the reader's language. */
 export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
   skill_invalid_frontmatter: "editor.errorSkillInvalidFrontmatter",
   skill_missing_frontmatter_name: "editor.errorSkillFrontmatterName",
@@ -61,6 +61,8 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
 const PARAM_REFUSAL_KEYS: Record<string, string> = {
   // An override key the launched version does not declare.
   "invalid_request:connection_overrides": "error.connectionOverridesRefused",
+  // The only rule on the whole `runtime_tools` member: an output schema needs the `output` tool.
+  "invalid_manifest:manifest.runtime_tools": "error.outputToolRequired",
 };
 
 /** What a refusal carries: a problem body, or one item of its `errors[]`. */

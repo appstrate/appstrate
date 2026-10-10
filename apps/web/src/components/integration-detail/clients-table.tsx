@@ -482,7 +482,8 @@ export function ClientsTable({
       <ConfirmModal
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("integration.oauthClient.delete.title")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           confirmDelete && tierOf(confirmDelete) === "org"
             ? t("integration.oauthClient.delete.confirmOrg")

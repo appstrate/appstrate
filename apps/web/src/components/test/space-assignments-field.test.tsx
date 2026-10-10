@@ -89,7 +89,7 @@ describe("space assignment catalog recovery", () => {
         onRetry={() => {}}
       />,
     );
-    expect(html).toContain("Tous les espaces — tous les droits");
+    expect(html).toContain("Tous les espaces, tous les droits");
     expect(html).toContain('disabled=""');
     expect(html).not.toContain("Impossible de charger les rôles disponibles.");
     expect(html).not.toContain('role="status"');

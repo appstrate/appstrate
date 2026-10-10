@@ -152,7 +152,11 @@ export function useDeleteSchedule() {
     mutationFn: async (id: string) => {
       await client.DELETE("/api/schedules/{id}", { params: { path: { id } } });
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
+      // The page still showing the deleted schedule would re-read it, a 404: stale only.
+      qc.invalidateQueries({ queryKey: scheduleKeys.detailAll, refetchType: "none" });
+    },
   });
 }
 

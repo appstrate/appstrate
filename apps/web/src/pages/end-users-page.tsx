@@ -235,7 +235,8 @@ function EndUsersPageContent() {
       <ConfirmModal
         open={pendingDelete !== null}
         onClose={() => setPendingDelete(null)}
-        title={t("common:btn.confirm")}
+        title={t("applications.deleteEndUserTitle")}
+        confirmLabel={t("common:btn.delete")}
         description={t("applications.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}
         onConfirm={async () => {

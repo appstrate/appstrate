@@ -134,7 +134,7 @@ export function PanelDialog({
       <section
         data-settings-mobile-surface
         aria-label={title}
-        className="bg-background fixed inset-x-0 top-24 bottom-0 z-10 flex min-w-0 flex-col overflow-hidden"
+        className="bg-background fixed inset-x-0 top-24 bottom-0 z-30 flex min-w-0 flex-col overflow-hidden"
       >
         {contentScrollArea ? (
           <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>

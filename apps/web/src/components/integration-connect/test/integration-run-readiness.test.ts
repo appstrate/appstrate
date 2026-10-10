@@ -240,24 +240,24 @@ describe("unboundLabel", () => {
       expect(label).toBeString();
       expect(label).not.toContain("detail.");
     }
-    expect(unboundLabel(warning("not_connected"))).toBe("Non connectée — l'agent s'exécute sans");
+    expect(unboundLabel(warning("not_connected"))).toBe("Non connectée : l'agent s'exécute sans");
     expect(unboundLabel(warning("must_choose_connection"))).toBe(
-      "Seules des connexions partagées existent — choisissez-en une pour l'utiliser",
+      "Seules des connexions partagées existent : choisissez-en une pour l'utiliser",
     );
     expect(unboundLabel(warning("auth_key_mismatch"))).toBe(
-      "Connectée avec une autre méthode d'authentification — l'agent s'exécute sans",
+      "Connectée avec une autre méthode d'authentification : l'agent s'exécute sans",
     );
     expect(unboundLabel(warning("integration_not_active"))).toBe(
-      "Désactivée dans cet espace — l'agent s'exécute sans",
+      "Désactivée dans cet espace : l'agent s'exécute sans",
     );
   });
 
   it("names the layer that chose no connection, from the warning's `source`", () => {
     expect(unboundLabel(warning("integration_unbound", { source: "member_pin" }))).toBe(
-      "Aucune connexion (votre choix) — l'agent s'exécute sans",
+      "Aucune connexion (votre choix) : l'agent s'exécute sans",
     );
     expect(unboundLabel(warning("integration_unbound", { source: "admin_pin" }))).toBe(
-      "Aucune connexion (choix d'un admin) — l'agent s'exécute sans",
+      "Aucune connexion (choix d'un admin) : l'agent s'exécute sans",
     );
     const phrases = NONE_CHOOSING_SOURCES.map((source) =>
       unboundLabel(warning("integration_unbound", { source })),
@@ -266,7 +266,7 @@ describe("unboundLabel", () => {
     for (const phrase of phrases) expect(phrase).not.toContain("noneChosenBy.");
     // No layer named: the sentence claims nobody.
     expect(unboundLabel(warning("integration_unbound"))).toBe(
-      "Aucune connexion — l'agent s'exécute sans",
+      "Aucune connexion : l'agent s'exécute sans",
     );
   });
 });
@@ -279,16 +279,16 @@ describe("requiredNoneLabel", () => {
 
   it("names the layer whose set is empty, from `source`", () => {
     expect(requiredNoneLabel(resolution({ ...refused, source: "admin_pin" }))).toBe(
-      "Aucune connexion (choix d'un admin) alors que l'agent l'exige — lancement bloqué",
+      "Aucune connexion (choix d'un admin) alors que l'agent l'exige : lancement bloqué",
     );
     expect(requiredNoneLabel(resolution({ ...refused, source: "member_pin" }))).toBe(
-      "Aucune connexion (votre choix) alors que l'agent l'exige — lancement bloqué",
+      "Aucune connexion (votre choix) alors que l'agent l'exige : lancement bloqué",
     );
   });
 
   it("still says none was chosen when no layer is named", () => {
     expect(requiredNoneLabel(resolution({ ...refused, source: null }))).toBe(
-      "Aucune connexion choisie alors que l'agent l'exige — lancement bloqué",
+      "Aucune connexion choisie alors que l'agent l'exige : lancement bloqué",
     );
   });
 

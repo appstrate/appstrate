@@ -205,7 +205,9 @@ export function PickerMenu({
               // Toggling must not close the menu — "Valider" writes.
               onSelect={(e) => {
                 if (oneClick) {
-                  void persist([c.id]);
+                  // The row is ticked: clicking it again unticks it, back to the cascade.
+                  const ticked = explicitIds?.length === 1 && explicitIds[0] === c.id;
+                  void persist(ticked ? null : [c.id]);
                   return;
                 }
                 e.preventDefault();

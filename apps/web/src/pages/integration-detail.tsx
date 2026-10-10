@@ -746,7 +746,8 @@ export function IntegrationDetailPage() {
       <ConfirmModal
         open={confirmDeactivate}
         onClose={() => setConfirmDeactivate(false)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("integrations.deactivate.title")}
+        confirmLabel={t("packages.deactivate")}
         description={t("integrations.deactivate.confirm")}
         variant="default"
         isPending={setActive.isPending}
@@ -756,7 +757,8 @@ export function IntegrationDetailPage() {
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("integrations.delete.title")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={t("packages.deleteConfirm", {
           type: t("packages.type.integration"),
           name: m.display_name ?? packageId,

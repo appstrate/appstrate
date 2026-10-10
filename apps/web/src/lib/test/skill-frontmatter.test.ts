@@ -36,9 +36,9 @@ describe("skillFrontmatterError", () => {
     ).toBeNull();
   });
 
-  it("carries the checker's own message as `detail`", () => {
-    expect(
-      skillFrontmatterError("---\nname: word-count\ndescription: a: b\n---\n")?.detail,
-    ).toContain("not valid YAML");
+  it("names the rule by key only, never by the checker's English sentence", () => {
+    expect(skillFrontmatterError("---\nname: word-count\ndescription: a: b\n---\n")).toEqual({
+      key: "editor.errorSkillInvalidFrontmatter",
+    });
   });
 });

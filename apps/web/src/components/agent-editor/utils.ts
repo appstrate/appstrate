@@ -198,6 +198,20 @@ export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): vo
   }
 }
 
+/**
+ * An agent that declares an output schema must be able to return its result: the server
+ * refuses a manifest whose schema has no `output` runtime tool. Declaring the schema turns the
+ * tool on, so the author never meets that refusal. Returns the same reference when the tool
+ * is already there.
+ */
+export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
+  const tools = getRuntimeTools(m);
+  if (tools.includes("output")) return m;
+  const next = { ...m };
+  setRuntimeTools(next, [...tools, "output"]);
+  return next;
+}
+
 // ─── Manifest accessors ─────────────────────────────────────
 
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {

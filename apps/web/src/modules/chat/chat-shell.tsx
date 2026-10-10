@@ -30,6 +30,7 @@ import {
 } from "@appstrate/module-chat/ui";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { ShellHeader, ShellSidebar } from "@/components/shell-frame";
+import { ViewAsBanner } from "@/components/view-as-banner";
 import { useSpaceResolver } from "@/hooks/use-current-space";
 import { useChatSidebarStore } from "@/stores/sidebar-store";
 import { ChatTitleCrumb } from "./chat-title-crumb";
@@ -78,6 +79,9 @@ export function ChatShell({
           <SidebarInset className="bg-canvas h-svh min-h-0 overflow-hidden">
             <ChatTitleCrumb conversationId={conversationId} t={t} can={can} />
             <ShellHeader actions={headerActions} />
+            {/* The preview's only visible state and its only exit: the chat is
+                a route of its own, so it carries the banner like Studio does. */}
+            <ViewAsBanner />
             <div className="flex min-h-0 min-w-0 flex-1">{children}</div>
           </SidebarInset>
         </SidebarProvider>

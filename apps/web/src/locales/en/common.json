@@ -16,6 +16,7 @@
   "switcher.role.owner": "Owner",
   "switcher.role.admin": "Admin",
   "switcher.role.member": "Member",
+  "switcher.role.guest": "Guest",
   "switcher.role.viewer": "Viewer",
   "products.ariaLabel": "Switch product",
   "products.studio": "Studio",

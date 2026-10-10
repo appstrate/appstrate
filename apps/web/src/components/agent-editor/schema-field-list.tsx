@@ -492,7 +492,7 @@ function FieldModal({
                             </SelectContent>
                           </Select>
                         </Row>
-                        <Row label="minLength">
+                        <Row label={t("editor.fieldMinLength")}>
                           <NumberKeywordInput
                             prop={prop}
                             keyword="minLength"
@@ -501,7 +501,7 @@ function FieldModal({
                             onChange={setProp}
                           />
                         </Row>
-                        <Row label="maxLength">
+                        <Row label={t("editor.fieldMaxLength")}>
                           <NumberKeywordInput
                             prop={prop}
                             keyword="maxLength"
@@ -510,7 +510,7 @@ function FieldModal({
                             onChange={setProp}
                           />
                         </Row>
-                        <Row label="pattern">
+                        <Row label={t("editor.fieldPattern")}>
                           <Input
                             value={prop.pattern ?? ""}
                             onChange={(e) =>
@@ -523,7 +523,7 @@ function FieldModal({
                     )}
                     {isNumeric && (
                       <>
-                        <Row label="min">
+                        <Row label={t("editor.fieldMin")}>
                           <NumberKeywordInput
                             prop={prop}
                             keyword="minimum"
@@ -532,7 +532,7 @@ function FieldModal({
                             onChange={setProp}
                           />
                         </Row>
-                        <Row label="max">
+                        <Row label={t("editor.fieldMax")}>
                           <NumberKeywordInput
                             prop={prop}
                             keyword="maximum"
@@ -541,7 +541,7 @@ function FieldModal({
                             onChange={setProp}
                           />
                         </Row>
-                        <Row label="step">
+                        <Row label={t("editor.fieldStep")}>
                           <NumberKeywordInput
                             prop={prop}
                             keyword="multipleOf"

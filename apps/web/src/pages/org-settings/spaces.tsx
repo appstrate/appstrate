@@ -121,7 +121,14 @@ export function OrgSettingsSpacesPage() {
       <ConfirmModal
         open={pending !== null}
         onClose={() => setPending(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t(
+          pending?.action === "sweep"
+            ? "spaces.personal.sweepTitle"
+            : "spaces.personal.convertTitle",
+        )}
+        confirmLabel={t(
+          pending?.action === "sweep" ? "spaces.personal.sweep" : "spaces.personal.convert",
+        )}
         description={
           pending?.action === "sweep"
             ? t("spaces.personal.sweepConfirm")

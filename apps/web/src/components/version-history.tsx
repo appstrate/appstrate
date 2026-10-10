@@ -195,7 +195,14 @@ export function VersionHistory({
       <ConfirmModal
         open={confirmState !== null}
         onClose={() => setConfirmState(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={
+          confirmState?.type === "restore" ? t("version.restoreTitle") : t("version.deleteTitle")
+        }
+        confirmLabel={
+          confirmState?.type === "restore"
+            ? t("version.restore")
+            : t("btn.delete", { ns: "common" })
+        }
         description={
           confirmState?.type === "restore"
             ? t("version.restoreConfirm", { version: confirmState.version })

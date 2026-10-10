@@ -20,6 +20,7 @@ import { Spinner } from "./spinner";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
+import { permissionResourceLabel } from "../lib/permission-labels";
 
 interface Props {
   open: boolean;
@@ -145,7 +146,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             <div className="flex flex-wrap gap-1">
               {summary.map((g) => (
                 <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                  {g.resource}
+                  {permissionResourceLabel(g.resource, t)}
                   {!g.full && (
                     <span className="ml-0.5 opacity-60">
                       {g.count}/{g.total}
@@ -181,7 +182,7 @@ export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
             form="create-api-key-form"
             disabled={createMutation.isPending || effectiveScopes.length === 0}
           >
-            {createMutation.isPending ? <Spinner /> : t("apiKeys.createBtn")}
+            {createMutation.isPending ? <Spinner /> : t("btn.create", { ns: "common" })}
           </Button>
         </>
       }

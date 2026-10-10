@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
 import {
   ArrowRight,
@@ -63,12 +64,12 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
 }
 
 function DashboardHeader({ firstName, runningCount }: { firstName: string; runningCount: number }) {
-  const { t } = useTranslation("agents");
+  const { t, i18n } = useTranslation("agents");
   const { features } = useAppConfig();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isAiOpen = searchParams.get("assist") === "1";
-  const date = new Intl.DateTimeFormat("fr-CA", {
+  const date = new Intl.DateTimeFormat(i18n.language, {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -95,7 +96,11 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
   return (
     <>
       <PageHeader
-        title={`Bonjour, ${firstName || "Olivier"}`}
+        title={
+          firstName
+            ? t("dashboard.greeting", { name: firstName })
+            : t("dashboard.greetingAnonymous")
+        }
         titleClassName="text-3xl font-bold tracking-tight"
         breadcrumbs={[{ label: t("dashboard.breadcrumb") }]}
         actions={
@@ -106,7 +111,7 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
         }
       >
         <p className="text-muted-foreground mt-1 text-sm first-letter:uppercase">
-          {date} · {runningCount} exécution{runningCount === 1 ? "" : "s"} en cours
+          {t("dashboard.subtitle", { date, count: runningCount })}
         </p>
       </PageHeader>
 
@@ -195,6 +200,7 @@ function MetricCard({
 }
 
 function DashboardAgentCard({ agent, className }: { agent: AgentListItem; className?: string }) {
+  const { t } = useTranslation("agents");
   const href = packageDetailPath("agent", agent.id);
 
   return (
@@ -207,7 +213,7 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
       <Link
         to={href}
         className="absolute inset-0 z-10 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2"
-        aria-label={`Ouvrir ${agent.display_name || agent.id}`}
+        aria-label={t("dashboard.openAgent", { name: agent.display_name || agent.id })}
       />
       <div className="flex items-start justify-between gap-3">
         <AgentIdentityTile
@@ -218,7 +224,10 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
         />
         <div className="relative z-20 flex items-center gap-1.5">
           {agent.source === "system" && (
-            <ShieldCheck className="text-muted-foreground size-4" aria-label="Agent système" />
+            <ShieldCheck
+              className="text-muted-foreground size-4"
+              aria-label={t("dashboard.systemAgent")}
+            />
           )}
           {agent.running_runs ? <Badge status="running" /> : null}
           <RunAgentButton
@@ -231,7 +240,7 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
       </div>
       <h3 className="mt-4 truncate text-sm font-semibold">{agent.display_name || agent.id}</h3>
       <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5">
-        {agent.description || "Agent Appstrate"}
+        {agent.description || t("dashboard.agentFallbackDescription")}
       </p>
       <div className="mt-auto flex items-center gap-2 pt-4">
         {agent.version && (
@@ -240,7 +249,7 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
           </span>
         )}
         <span className="text-muted-foreground group-hover:text-foreground ml-auto text-[11px] transition-colors">
-          Ouvrir
+          {t("dashboard.open")}
         </span>
         <ArrowRight className="text-muted-foreground size-3.5 transition-transform group-hover:translate-x-0.5" />
       </div>
@@ -249,6 +258,7 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
 }
 
 function RecentAgents({ agents, className }: { agents: AgentListItem[]; className?: string }) {
+  const { t } = useTranslation("agents");
   const rootRef = useRef<HTMLDivElement>(null);
   const [canScrollBack, setCanScrollBack] = useState(false);
   const [canScrollForward, setCanScrollForward] = useState(false);
@@ -294,7 +304,7 @@ function RecentAgents({ agents, className }: { agents: AgentListItem[]; classNam
     <div
       className={cn("relative", className)}
       role="region"
-      aria-label="Agents récents"
+      aria-label={t("dashboard.recentAgents")}
       data-dashboard-agent-carousel
     >
       <ScrollArea ref={rootRef} className="w-full [&_[data-radix-scroll-area-scrollbar]]:hidden">
@@ -312,7 +322,7 @@ function RecentAgents({ agents, className }: { agents: AgentListItem[]; classNam
           size="icon"
           className="absolute top-1/2 left-2 z-10 size-8 -translate-y-1/2 rounded-full"
           onClick={() => scroll(-1)}
-          aria-label="Afficher les agents précédents"
+          aria-label={t("dashboard.previousAgents")}
         >
           <ChevronLeft />
         </Button>
@@ -333,7 +343,7 @@ function RecentAgents({ agents, className }: { agents: AgentListItem[]; classNam
           size="icon"
           className="absolute top-1/2 right-2 z-10 size-8 -translate-y-1/2 rounded-full"
           onClick={() => scroll(1)}
-          aria-label="Afficher plus d’agents"
+          aria-label={t("dashboard.moreAgents")}
         >
           <ChevronRight />
         </Button>
@@ -351,6 +361,7 @@ function DashboardRunRow({
   agentName: (run: EnrichedRun) => string;
   agent?: AgentListItem;
 }) {
+  const { t } = useTranslation("agents");
   const name = agentName(run);
   const content = (
     <>
@@ -370,7 +381,7 @@ function DashboardRunRow({
           )}
         </div>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
-          {run.started_at ? formatDateField(run.started_at) : "Démarrage en attente"}
+          {run.started_at ? formatDateField(run.started_at) : t("dashboard.runPending")}
         </p>
       </div>
       <Badge status={run.status} unread={run.unread} />
@@ -428,6 +439,7 @@ function DashboardScheduleRow({
   schedule: EnrichedSchedule;
   agent?: AgentListItem;
 }) {
+  const { t } = useTranslation("agents");
   return (
     <Link
       to={`/schedules/${schedule.id}`}
@@ -448,7 +460,7 @@ function DashboardScheduleRow({
       <div className="shrink-0 text-right">
         <ScheduleStatusBadge schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
-          {schedule.next_run_at ? formatDateField(schedule.next_run_at) : "Aucune date"}
+          {schedule.next_run_at ? formatDateField(schedule.next_run_at) : t("dashboard.noDate")}
         </p>
       </div>
     </Link>
@@ -475,7 +487,11 @@ function UpcomingSchedules({
   );
 }
 
-function dashboardMetrics(data: DashboardData, sections: ReturnType<typeof dashboardSections>) {
+function dashboardMetrics(
+  data: DashboardData,
+  sections: ReturnType<typeof dashboardSections>,
+  t: TFunction,
+) {
   const running = data.runs.filter((run) => run.status === "running").length;
   const terminal = data.runs.filter((run) => !["running", "pending"].includes(run.status));
   const successful = terminal.filter((run) => run.status === "success").length;
@@ -489,26 +505,30 @@ function dashboardMetrics(data: DashboardData, sections: ReturnType<typeof dashb
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
       sections.recentRuns && {
-        label: "Runs",
+        label: t("dashboard.metric.runs"),
         value: data.runTotal,
-        detail: `${running} en cours dans les derniers runs`,
+        detail: t("dashboard.metric.runsDetail", { count: running }),
       },
       sections.recentAgents && {
-        label: "Agents disponibles",
+        label: t("dashboard.metric.agents"),
         value: data.agents.length,
-        detail: `${data.agents.filter((agent) => agent.running_runs).length} actifs maintenant`,
+        detail: t("dashboard.metric.agentsDetail", {
+          count: data.agents.filter((agent) => agent.running_runs).length,
+        }),
       },
       sections.recentRuns && {
-        label: "Réussite des derniers runs",
+        label: t("dashboard.metric.success"),
         value: `${successRate} %`,
-        detail: `${successful}/${terminal.length} runs terminés`,
+        detail: t("dashboard.metric.successDetail", { successful, count: terminal.length }),
       },
       sections.schedules && {
-        label: "Planifications actives",
+        label: t("dashboard.metric.schedules"),
         value: activeSchedules.length,
         detail: activeSchedules[0]?.next_run_at
-          ? `Prochaine ${formatDateField(activeSchedules[0].next_run_at)}`
-          : "Aucune exécution prévue",
+          ? t("dashboard.metric.schedulesNext", {
+              date: formatDateField(activeSchedules[0].next_run_at),
+            })
+          : t("dashboard.metric.schedulesNone"),
       },
     ].filter((card) => card !== false),
   };
@@ -521,7 +541,7 @@ export function DashboardContent(data: DashboardData) {
   // section answers to the guard of the query that feeds it (#1556).
   const sections = dashboardSections(can);
   const canReadSchedules = sections.schedules;
-  const metrics = dashboardMetrics(data, sections);
+  const metrics = dashboardMetrics(data, sections, t);
   const agentById = new Map(data.agents.map((agent) => [agent.id, agent]));
 
   if (!sections.recentRuns && !sections.recentAgents && !sections.schedules) {
@@ -542,7 +562,7 @@ export function DashboardContent(data: DashboardData) {
       <DashboardHeader firstName={data.firstName} runningCount={metrics.running} />
 
       {metrics.cards.length > 0 && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {metrics.cards.map((metric) => (
             <MetricCard key={metric.label} {...metric} />
           ))}
@@ -566,10 +586,10 @@ export function DashboardContent(data: DashboardData) {
           takes the full width rather than leaving a hole. */}
       <div
         className={cn(
-          "grid gap-6",
-          canReadSchedules && sections.recentRuns
-            ? "grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]"
-            : "grid-cols-1",
+          "grid grid-cols-1 gap-6",
+          canReadSchedules &&
+            sections.recentRuns &&
+            "lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]",
         )}
       >
         {sections.recentRuns && (

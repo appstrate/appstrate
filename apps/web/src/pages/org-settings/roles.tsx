@@ -271,7 +271,8 @@ export function OrgSettingsRolesPage() {
       <ConfirmModal
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("roles.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={
           deleteError ??
           (confirmDelete ? t("roles.deleteConfirm", { name: confirmDelete.name }) : "")

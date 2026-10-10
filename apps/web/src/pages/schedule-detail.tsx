@@ -204,7 +204,8 @@ export function ScheduleDetailPage() {
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("schedule.deleteTitle")}
+        confirmLabel={t("schedule.delete")}
         description={t("schedule.deleteConfirm")}
         isPending={deleteSchedule.isPending}
         onConfirm={() => {

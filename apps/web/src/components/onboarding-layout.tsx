@@ -117,25 +117,31 @@ export function OnboardingLayout({
     <div className="bg-background flex min-h-svh flex-col items-center justify-center gap-6 p-6 md:p-10">
       <div className="w-full max-w-lg">
         {/*
-         * Header: logo optically centred, account cluster pinned right. The
-         * cluster is what lets a user escape a half-finished onboarding —
-         * sign out (wrong account, account switch) or, once an org exists,
-         * go straight to the app. It sits outside the scrollable content
-         * area below so the dropdown is never clipped.
+         * Header: logo left, account cluster right. The cluster is what lets
+         * a user escape a half-finished onboarding — sign out (wrong account,
+         * account switch) or, once an org exists, go straight to the app. It
+         * sits outside the scrollable content area below so the dropdown is
+         * never clipped. The two share a row rather than overlapping: the
+         * « back to the workspace » button is wider than the room a centred
+         * logo leaves it.
          */}
-        <div className="relative mb-6 flex items-center justify-center">
+        <div className="mb-6 flex items-center justify-between gap-2">
           <img
             src={resolvedTheme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
             alt="Appstrate"
-            className="h-[34px] w-auto"
+            className="h-[34px] w-auto shrink-0"
           />
-          <div className="absolute right-0 flex items-center gap-1">
+          <div className="flex min-w-0 items-center justify-end gap-1">
             {orgs.length > 0 && (
-              <Button variant="ghost" size="sm" asChild>
-                <Link to="/">{t("onboarding.backToApp")}</Link>
+              <Button variant="ghost" size="sm" className="min-w-0" asChild>
+                <Link to="/" className="truncate">
+                  {t("onboarding.backToApp")}
+                </Link>
               </Button>
             )}
-            <NavUser minimal />
+            <div className="shrink-0">
+              <NavUser minimal />
+            </div>
           </div>
         </div>
 

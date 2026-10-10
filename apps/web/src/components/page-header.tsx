@@ -68,7 +68,13 @@ export function PageHeader({
           {titleTrailing}
         </h2>
         {actions && (
-          <div data-page-actions className="flex shrink-0 items-center gap-2">
+          <div
+            data-page-actions
+            className={cn(
+              "flex items-center gap-2",
+              wrapActions ? "max-w-full flex-wrap" : "shrink-0",
+            )}
+          >
             {actions}
           </div>
         )}

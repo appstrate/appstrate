@@ -122,6 +122,7 @@ function OAuthClientFormBody({
     setError,
     clearErrors,
     formState: { errors },
+    showError,
   } = useAppForm<FormData>({
     defaultValues: { name: client?.name ?? "" },
   });
@@ -279,8 +280,6 @@ function OAuthClientFormBody({
     ? t("settings:oauthClients.editTitle")
     : t("settings:oauthClients.createTitle");
 
-  const submitLabel = isEditing ? t("common:btn.save") : t("settings:oauthClients.createBtn");
-
   return (
     <Modal
       open
@@ -293,7 +292,7 @@ function OAuthClientFormBody({
             {t("common:btn.cancel")}
           </Button>
           <Button type="submit" form="oauth-client-form" disabled={isPending}>
-            {isPending ? <Spinner /> : submitLabel}
+            {isPending ? <Spinner /> : t("common:btn.save")}
           </Button>
         </>
       }
@@ -318,7 +317,7 @@ function OAuthClientFormBody({
               {t("settings:oauthClients.nameReadonlyHint")}
             </p>
           )}
-          {errors.name && (
+          {showError("name") && (
             <p className="text-destructive text-xs">{t("common:validation.required")}</p>
           )}
         </div>

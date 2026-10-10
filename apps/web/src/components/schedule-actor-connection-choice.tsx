@@ -115,7 +115,10 @@ function CandidateLabel({ candidate: c }: { candidate: ConnectionChoice["candida
   return (
     <>
       {c.label}
-      <span className="text-muted-foreground"> · {c.account_id}</span>
+      {/* "default" is the placeholder of a connection with no account identity. */}
+      {c.account_id !== "default" && (
+        <span className="text-muted-foreground"> · {c.account_id}</span>
+      )}
       {!c.owned_by_actor && (
         <span className="text-muted-foreground">
           {" "}

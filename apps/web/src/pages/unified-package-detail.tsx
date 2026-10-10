@@ -595,7 +595,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           <span className="text-blue-400">{t("ownership.readOnly")}</span>
           {forkedFrom && (
             <span className="text-muted-foreground">
-              — {t("ownership.forkedFrom")}
+              {t("ownership.forkedFrom")}
               <Link
                 to={packageDetailPath(type, forkedFrom)}
                 className="text-blue-400 hover:underline"
@@ -773,13 +773,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <ConfirmModal
         open={!!confirmAction}
         onClose={() => setConfirmAction(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={
+          confirmAction?.type === "deactivatePackage"
+            ? t("detail.deactivateTitle")
+            : t("detail.deletePackageTitle")
+        }
         description={confirmAction?.description ?? ""}
         isPending={deletePkgMutation.isPending || setActive.isPending}
         confirmLabel={
           confirmAction?.type === "deactivatePackage"
             ? t("packages.deactivate", { ns: "settings" })
-            : undefined
+            : t("btn.delete", { ns: "common" })
         }
         onConfirm={() => {
           if (!confirmAction) return;

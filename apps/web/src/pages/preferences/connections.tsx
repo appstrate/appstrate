@@ -16,6 +16,7 @@ import {
 import { formatDateField } from "../../lib/format-date";
 import { EmptyState, ErrorState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
+import { IntegrationIcon } from "../../components/integration-icon";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import { ConnectionTeardownSteps } from "../../components/integration-connect/connection-teardown-steps";
@@ -277,13 +278,7 @@ function SourceGroupCard({
     <div className="border-border bg-card rounded-lg border p-5">
       <div className="flex cursor-pointer items-center justify-between" onClick={onToggle}>
         <div className="flex items-center gap-3">
-          {group.logo && (
-            <img
-              className="h-8 w-8 rounded-md object-contain"
-              src={group.logo}
-              alt={group.display_name}
-            />
-          )}
+          <IntegrationIcon src={group.logo ?? undefined} size="sm" />
           <div className="flex-1">
             <div className="flex items-center gap-2">
               <h3 className="text-[0.95rem] font-semibold">{group.display_name}</h3>

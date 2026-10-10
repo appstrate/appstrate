@@ -33,6 +33,7 @@ import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
 import { EmptyState } from "./page-states";
 import { formatDateField } from "../lib/format-date";
+import { runErrorText } from "../lib/run-error";
 
 function DocumentCounts({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation(["agents"]);
@@ -151,9 +152,9 @@ export function useRunColumns({
         run.error ? (
           <span
             className="text-destructive relative z-10 truncate font-mono text-xs"
-            title={run.error}
+            title={runErrorText(run, t)}
           >
-            {run.error}
+            {runErrorText(run, t)}
           </span>
         ) : (
           <span className="text-muted-foreground/50">—</span>

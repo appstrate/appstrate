@@ -132,8 +132,18 @@ export function useUpdateWebhook() {
 }
 
 export function useDeleteWebhook() {
-  const invalidate = useInvalidateWebhooks();
-  return $api.useMutation("delete", "/api/webhooks/{id}", { onSuccess: invalidate });
+  const qc = useQueryClient();
+  return $api.useMutation("delete", "/api/webhooks/{id}", {
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks"] });
+      // The page still showing the deleted webhook would re-read it, a 404: stale only.
+      void qc.invalidateQueries({ queryKey: ["get", "/api/webhooks/{id}"], refetchType: "none" });
+      void qc.invalidateQueries({
+        queryKey: ["get", "/api/webhooks/{id}/deliveries"],
+        refetchType: "none",
+      });
+    },
+  });
 }
 
 export function useTestWebhook() {

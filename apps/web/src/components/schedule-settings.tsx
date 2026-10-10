@@ -265,7 +265,13 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
           setChoices([]);
           setPicks({});
         },
-        onError: (err) => setChoices(scheduleConnectionChoices(err)),
+        onError: (err) => {
+          const refused = scheduleConnectionChoices(err);
+          setChoices(refused);
+          // Any other refusal changed nothing: the field goes back to the stored identity. A
+          // connection choice keeps the picked one, the picks answer it.
+          if (refused.length === 0) setActor(stored);
+        },
       },
     );
 
@@ -308,7 +314,12 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
           </Button>
         </div>
       )}
-      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={update.isError} />
+      {/* A choice to make is the form's state, not a failed save. */}
+      <SaveFeedback
+        pending={update.isPending}
+        success={update.isSuccess}
+        error={update.isError && choices.length === 0}
+      />
     </>
   );
 }

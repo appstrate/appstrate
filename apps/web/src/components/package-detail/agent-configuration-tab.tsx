@@ -2,6 +2,9 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
+import { Globe } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -25,6 +28,9 @@ import {
 import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
+import { useCanReach } from "../../hooks/use-can-reach";
+import { openAsModal } from "../../lib/modal-route";
+import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
@@ -388,13 +394,37 @@ function ModelSectionEditor({
 
 // ─── Proxy Section ──────────────────────────────────────────────────
 
+/** The organisation has no proxy to route through: say where one is added. */
+function NoProxyState() {
+  const { t } = useTranslation(["agents", "settings"]);
+  const location = useLocation();
+  const canReach = useCanReach();
+  return (
+    <EmptyState
+      icon={Globe}
+      compact
+      message={t("detail.configuration.proxyEmpty")}
+      hint={t("detail.configuration.proxyEmptyHint")}
+    >
+      {canReach("/org-settings/proxies") && (
+        <Button asChild variant="outline" size="sm">
+          <Link to="/org-settings/proxies" state={openAsModal(location)}>
+            {t("proxies.add", { ns: "settings" })}
+          </Link>
+        </Button>
+      )}
+    </EmptyState>
+  );
+}
+
 /** Shared with the visual map so both surfaces edit the same proxy setting. */
 export function ProxySection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgProxies } = useProxies();
   const { data: agentProxy } = useAgentProxy(packageId);
   const setAgentProxy = useSetAgentProxy(packageId);
-  if (!orgProxies || orgProxies.length === 0) return null;
+  if (!orgProxies) return null;
+  if (orgProxies.length === 0) return <NoProxyState />;
 
   const agentProxyId = agentProxy?.proxyId;
   const orgDefaultProxy = orgProxies.find((p) => p.is_default && p.enabled);

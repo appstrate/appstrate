@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Modal } from "@/components/modal";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
 import { toggleEvent } from "../hooks/use-webhooks";
@@ -57,7 +57,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       },
       {
         onSuccess: () => {
-          toast.success(t("common:btn.save"));
+          toast.success(t("settings:webhooks.saved"));
         },
       },
     );
@@ -85,7 +85,6 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
           setRotateOpen(false);
           setRotatedSecret(result.secret);
         },
-        onError: () => setRotateOpen(false),
       },
     );
   }
@@ -97,7 +96,6 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
         onSuccess: () => {
           navigate("/workspace-settings/webhooks", { state: location.state });
         },
-        onError: () => setDeleteConfirmOpen(false),
       },
     );
   }
@@ -154,23 +152,16 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       </div>
 
       {/* Rotate confirmation modal */}
-      <Modal
+      <ConfirmModal
         open={rotateOpen}
         onClose={() => setRotateOpen(false)}
         title={t("settings:webhooks.rotateConfirmTitle")}
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setRotateOpen(false)}>
-              {t("common:btn.cancel")}
-            </Button>
-            <Button onClick={handleRotate} disabled={rotateMutation.isPending}>
-              {rotateMutation.isPending ? <Spinner /> : t("common:btn.confirm")}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-muted-foreground text-sm">{t("settings:webhooks.rotateConfirm")}</p>
-      </Modal>
+        description={t("settings:webhooks.rotateConfirm")}
+        confirmLabel={t("settings:webhooks.rotateSecret")}
+        variant="default"
+        isPending={rotateMutation.isPending}
+        onConfirm={handleRotate}
+      />
 
       {/* Rotated secret display */}
       {rotatedSecret && (
@@ -214,27 +205,15 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       )}
 
       {/* Delete confirmation */}
-      <Modal
+      <ConfirmModal
         open={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
-        title={t("settings:webhooks.deleteConfirm")}
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
-              {t("common:btn.cancel")}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? <Spinner /> : t("common:btn.confirm")}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-muted-foreground text-sm">{t("settings:webhooks.deleteConfirm")}</p>
-      </Modal>
+        title={t("settings:webhooks.deleteTitle")}
+        description={t("settings:webhooks.deleteConfirm")}
+        confirmLabel={t("common:btn.delete")}
+        isPending={deleteMutation.isPending}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

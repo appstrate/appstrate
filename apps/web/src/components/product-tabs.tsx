@@ -30,6 +30,7 @@ import { useCanReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "@/lib/scoping-headers";
+import { useViewAsHeader } from "@/stores/view-as-store";
 
 interface Product {
   id: string;
@@ -47,6 +48,7 @@ export function ProductTabs() {
   const { pathname } = useLocation();
   const canReach = useCanReach();
   const { can } = usePermissions();
+  const previewing = useViewAsHeader() !== null;
   const chatReachable = canReach("/chat");
   // The chat has no entry in the Studio's navigation: its unread count rides
   // on the tab that switches to it.
@@ -55,7 +57,11 @@ export function ProductTabs() {
   // the chat (a viewer) only ever rereads what it wrote before: without any,
   // the tab would lead to a page with nothing to do.
   const hasChatSessions = useHasChatSessions(buildScopingHeaders, chatReachable);
-  const chatShown = chatReachable && (can("chat:write") || hasChatSessions === true);
+  // A preview restricts the caller without replacing them, so the sessions it
+  // finds are the previewer's own: the persona is judged on its grants alone,
+  // the way a fresh account of that role would see the product tabs.
+  const chatShown =
+    chatReachable && (can("chat:write") || (!previewing && hasChatSessions === true));
 
   // Studio owns every route the chat does not, so it cannot be matched by
   // prefix — it is the active one whenever the chat is not.

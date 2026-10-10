@@ -113,7 +113,9 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
         path === "/api/me/connections" ||
         // The per-agent connection-readiness query lives under /api/agents but
         // is driven entirely by connection state, so refresh it here too.
-        path === "/api/agents/{scope}/{name}/connection-readiness"
+        path === "/api/agents/{scope}/{name}/connection-readiness" ||
+        // The header's "Ready" badge reads the diagnostics, whose connection findings follow it.
+        path === "/api/agents/{scope}/{name}/diagnostics"
       );
     },
   });

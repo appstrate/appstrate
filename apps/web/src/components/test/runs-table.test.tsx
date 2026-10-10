@@ -65,7 +65,7 @@ describe("the runs column set", () => {
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
     // Not "#42": the link sits in the agent column, and a row has to be
     // identifiable out of context.
-    expect(html).toContain('aria-label="Run #42 — Rapport trimestriel"');
+    expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
 });
 
@@ -92,7 +92,7 @@ describe("what a surface subtracts", () => {
     expect(html).not.toContain(">Rapport trimestriel<");
     // The row's accessible NAME keeps it, though: a link has to say which run
     // it leads to even when the column that showed it is gone.
-    expect(html).toContain('aria-label="Run #42 — Rapport trimestriel"');
+    expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
     // The row still leads somewhere: the link moves to the next surviving column.
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
   });

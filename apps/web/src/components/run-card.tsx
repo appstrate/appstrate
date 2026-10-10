@@ -10,6 +10,7 @@ import { Badge, MetaBadge } from "./status-badge";
 import { RunDuration } from "./run-duration";
 import { RunTrigger } from "./run-trigger";
 import { formatDateField } from "../lib/format-date";
+import { runErrorText } from "../lib/run-error";
 import { useFiles } from "../hooks/use-files";
 import { FilePreview } from "./file-preview";
 import { MimeIcon } from "./file-tile";
@@ -90,8 +91,11 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
       {run.file_counts.output === 1 && <ProducedFile runId={run.id} />}
 
       {run.error && (
-        <p className="text-destructive mt-3 line-clamp-2 font-mono text-xs" title={run.error}>
-          {run.error}
+        <p
+          className="text-destructive mt-3 line-clamp-2 font-mono text-xs"
+          title={runErrorText(run, t)}
+        >
+          {runErrorText(run, t)}
         </p>
       )}
 

@@ -35,6 +35,16 @@ import {
 import { useAutoSeedFeaturedModels } from "../hooks/use-auto-seed-models";
 import { quickConnectProviders } from "../lib/provider-registry-helpers";
 
+/**
+ * The registry's own `description` is English text written by the module. The
+ * two subscription providers have a French sentence here; any other OAuth
+ * provider keeps what its module says.
+ */
+const PROVIDER_DESCRIPTION_KEYS: Record<string, string> = {
+  "claude-code": "onboarding.modelSeed.description.claude-code",
+  codex: "onboarding.modelSeed.description.codex",
+};
+
 interface CardProps {
   entry: ProviderRegistryEntry;
   alreadyConnected: boolean;
@@ -109,7 +119,9 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
           <span className="text-muted-foreground line-clamp-2 text-xs">
             {alreadyConnected
               ? t("onboarding.modelSeed.alreadyConnectedHint")
-              : (entry.description ?? t("onboarding.modelSeed.connectHint"))}
+              : PROVIDER_DESCRIPTION_KEYS[entry.providerId]
+                ? t(PROVIDER_DESCRIPTION_KEYS[entry.providerId]!)
+                : (entry.description ?? t("onboarding.modelSeed.connectHint"))}
           </span>
         </div>
 

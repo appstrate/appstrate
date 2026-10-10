@@ -300,7 +300,7 @@ function SortableFieldCard({
                   }
                 >
                   <SelectTrigger className="h-7 w-[110px] text-xs">
-                    <SelectValue placeholder="Format" />
+                    <SelectValue placeholder={t("editor.fieldFormat")} />
                   </SelectTrigger>
                   <SelectContent>
                     {STRING_FORMAT_OPTIONS.map((opt) => (
@@ -317,20 +317,20 @@ function SortableFieldCard({
                   <NumberKeywordInput
                     prop={prop}
                     keyword="minLength"
-                    placeholder="minLength"
-                    className="h-7 w-[90px] text-xs"
+                    placeholder={t("editor.fieldMinLength")}
+                    className="h-7 w-[120px] text-xs"
                     onChange={setProp}
                   />
                   <NumberKeywordInput
                     prop={prop}
                     keyword="maxLength"
-                    placeholder="maxLength"
-                    className="h-7 w-[90px] text-xs"
+                    placeholder={t("editor.fieldMaxLength")}
+                    className="h-7 w-[120px] text-xs"
                     onChange={setProp}
                   />
                   <Input
                     type="text"
-                    placeholder="pattern"
+                    placeholder={t("editor.fieldPattern")}
                     value={prop.pattern ?? ""}
                     onChange={(e) =>
                       setProp(setKeyword(prop, "pattern", e.target.value || undefined))
@@ -345,21 +345,21 @@ function SortableFieldCard({
                   <NumberKeywordInput
                     prop={prop}
                     keyword="minimum"
-                    placeholder="min"
+                    placeholder={t("editor.fieldMin")}
                     className="h-7 w-[70px] text-xs"
                     onChange={setProp}
                   />
                   <NumberKeywordInput
                     prop={prop}
                     keyword="maximum"
-                    placeholder="max"
+                    placeholder={t("editor.fieldMax")}
                     className="h-7 w-[70px] text-xs"
                     onChange={setProp}
                   />
                   <NumberKeywordInput
                     prop={prop}
                     keyword="multipleOf"
-                    placeholder="step"
+                    placeholder={t("editor.fieldStep")}
                     className="h-7 w-[70px] text-xs"
                     onChange={setProp}
                   />
@@ -370,7 +370,7 @@ function SortableFieldCard({
                 <KeywordInput
                   value={itemsEnum}
                   onCommit={(text) => setProp(setItemsEnum(prop, textToList(text, itemType(prop))))}
-                  placeholder="Enum items (a, b, c)"
+                  placeholder={t("editor.fieldItemsEnum")}
                   className="h-7 min-w-[150px] flex-1 text-xs"
                 />
               )}
