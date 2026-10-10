@@ -601,7 +601,7 @@ export async function updateConnection(input: UpdateConnectionInput): Promise<Co
           .where(and(eq(c.id, connectionId), connectionInSpace(spaceId)));
         if (!serves) {
           throw invalidShareTarget(
-            `This connection cannot serve space '${spaceId}': it is confined to its own space, or that space's default OAuth client for this integration is its own`,
+            `This connection cannot serve space '${spaceId}': it is confined to its own space`,
           );
         }
       }

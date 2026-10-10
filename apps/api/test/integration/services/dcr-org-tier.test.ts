@@ -277,7 +277,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     expect(await usableIds(spaceB.spaceId)).toEqual([old!.id]);
   });
 
-  it("a legacy space client does not exclude org rows from its space; a manual one does", async () => {
+  it("a space client, legacy or manual, excludes no org row from its space", async () => {
     const conn = await connect(spaceA, "alice@a");
     await seedLegacySpaceClient(spaceB.spaceId);
     expect(await usableIds(spaceB.spaceId)).toEqual([conn]);
@@ -296,7 +296,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       tokenEndpointAuthMethod: "none",
       isDefault: true,
     });
-    expect(await usableIds(spaceB.spaceId)).toEqual([]);
+    expect(await usableIds(spaceB.spaceId)).toEqual([conn]);
     expect(await usableIds(spaceA.spaceId)).toEqual([conn]);
   });
 

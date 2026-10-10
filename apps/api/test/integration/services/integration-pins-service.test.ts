@@ -1179,7 +1179,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(await sharesOf(id)).toEqual([]);
     });
 
-    it("refuses a target the row does not serve: one defaulting to its own OAuth client, unless made there (400)", async () => {
+    it("accepts a target defaulting to its own OAuth client", async () => {
       await db.insert(integrationOauthClients).values({
         orgId: ctx.orgId,
         spaceId: other,
@@ -1194,12 +1194,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         orgScope: true,
         userId: memberId,
       });
-      await expect(ownerEdit(madeHere, [other])).rejects.toMatchObject({
-        status: 400,
-        code: "invalid_share_target",
-      });
-      const madeThere = await seedConnection({ spaceId: other, orgScope: true, userId: memberId });
-      expect((await ownerEdit(madeThere, [other])).added).toEqual([other]);
+      expect((await ownerEdit(madeHere, [other])).added).toEqual([other]);
     });
 
     it("refuses a target deleted after the edit was read, under the lock (400)", async () => {
