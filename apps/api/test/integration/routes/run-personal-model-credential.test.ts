@@ -39,8 +39,15 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
+import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
+import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
+import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
+import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
+import type { AppstrateModule, BeforeUsageParams, ModuleInitContext } from "@appstrate/core/module";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
+import { TEST_OAUTH_MODEL_ID } from "../../helpers/test-oauth-provider.ts";
 
 const app = getTestApp();
 
@@ -219,6 +226,37 @@ describe("run payer — personal model credentials", () => {
     }
   });
 
+  it("stops the sidecar's subscription door for a holder's pinned run once personal credentials are switched off", async () => {
+    const agentId = `@${ctx.org.slug}/door-agent`;
+    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
+    const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+    await db
+      .update(modelProviderCredentials)
+      .set({ ownerUserId: ctx.user.id })
+      .where(eq(modelProviderCredentials.id, oauth.id));
+    const run = await seedRun({
+      packageId: agentId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      status: "running",
+      modelCredentialId: oauth.id,
+    });
+    const token = await signRunToken(run.id);
+    const read = () =>
+      app.request(`/internal/oauth-token/${oauth.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+    try {
+      expect((await read()).status).toBe(200);
+      await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+      expect((await read()).status).toBe(403);
+    } finally {
+      await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
+    }
+  });
+
   // ── the other doors ───────────────────────────────────────
 
   it("lists a model as billed to the caller's own key, and to the org for an API key", async () => {
@@ -258,5 +296,134 @@ describe("run payer — personal model credentials", () => {
       body: JSON.stringify({ credentialId: personalId }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("run admission — the credential a run spends is the one admitted", () => {
+  const SYSTEM_MODEL = "sys-admission-gpt";
+  let ctx: TestContext;
+  let member: TestContext;
+  let personalId: string;
+
+  function fakeInitCtx(): ModuleInitContext {
+    return {
+      redisUrl: null,
+      appUrl: "http://localhost:3000",
+      getSendMail: async () => async () => {},
+      getOrgOwnerEmails: async () => [],
+      getOrgMembers: async () => [],
+      getOrgName: async () => null,
+      services: {} as ModuleInitContext["services"],
+    };
+  }
+
+  /** A gate whose `beforeUsage` runs `beforeAdmit` and then admits the run. */
+  function gateModule(
+    beforeAdmit: () => Promise<void>,
+    calls: BeforeUsageParams[],
+  ): AppstrateModule {
+    return {
+      manifest: { id: "test-admission-gate", name: "Gate", version: "0.0.0" },
+      async init() {},
+      hooks: {
+        beforeUsage: async (params) => {
+          calls.push(params);
+          await beforeAdmit();
+          return null;
+        },
+      },
+    };
+  }
+
+  /** The member's own openai key, which serves the system model: the run is admitted on it. */
+  async function launchAsMember() {
+    return app.request("/api/runs/inline", {
+      method: "POST",
+      headers: { ...authHeaders(member), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manifest: inlineAgentManifest(),
+        prompt: "do the thing",
+        modelId: SYSTEM_MODEL,
+      }),
+    });
+  }
+
+  beforeAll(() => {
+    _setOrchestratorForTesting(createFakeOrchestrator());
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    resetModules();
+    ctx = await createTestContext({ orgSlug: "admission-race" });
+    member = await memberContext(ctx, "member", "builder");
+    // The system key of the family, and the member's own key of the same family.
+    initSystemModelProviderKeys([
+      {
+        id: "sys-openai-admission",
+        providerId: "openai",
+        apiKey: "sk-system",
+        models: [{ id: SYSTEM_MODEL, modelId: TEST_OAUTH_MODEL_ID }],
+      },
+    ]);
+    personalId = (
+      await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        createdBy: member.user.id,
+        ownerUserId: member.user.id,
+        label: "member-key",
+        providerId: "openai",
+        apiKey: "sk-personal-member",
+      })
+    ).id;
+  });
+
+  afterEach(waitForRunPipelineSettled);
+
+  afterAll(async () => {
+    _setOrchestratorForTesting(null);
+    resetModules();
+    initSystemModelProviderKeys([]);
+    await restoreDiscoveredModules();
+  });
+
+  it("refuses a run whose personal credential is removed by the admission gate, and spends no system key", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances(
+      [
+        gateModule(async () => {
+          await db
+            .delete(modelProviderCredentials)
+            .where(eq(modelProviderCredentials.id, personalId));
+          clearResolvedModelCache();
+        }, calls),
+      ],
+      fakeInitCtx(),
+    );
+
+    const res = await launchAsMember();
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("model_credential_changed");
+    // The gate quoted the member's own key; the run was refused before any row existed.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ credentialSource: "org" });
+    expect(await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId))).toEqual(
+      [],
+    );
+  });
+
+  it("admits the same run when the gate removes nothing (control)", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(async () => {}, calls)], fakeInitCtx());
+
+    const res = await launchAsMember();
+
+    expect(res.status).toBe(201);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ credentialSource: "org" });
+    expect(
+      await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId)),
+    ).toHaveLength(1);
   });
 });

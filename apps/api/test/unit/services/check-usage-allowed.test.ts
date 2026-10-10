@@ -32,9 +32,13 @@
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizations, orgModels } from "@appstrate/db/schema";
+import { modelProviderCredentials, organizations, orgModels } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
+import { enforceSystemProxyAdmission } from "../../../src/services/system-proxy-admission.ts";
+import { loadModel, requireBoundModel } from "../../../src/services/org-models.ts";
+import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
+import { ApiError } from "../../../src/lib/errors.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
@@ -49,6 +53,7 @@ import type {
 } from "@appstrate/core/module";
 
 const SYSTEM_PRESET = "sys-chat-model";
+const OPENAI_PRESET = "sys-chat-openai";
 
 /** The test organization and its session user, created fresh for each test. */
 let ORG_ID = "";
@@ -438,5 +443,65 @@ describe("checkUsageAllowed", () => {
         sessionId: "chs_oss",
       } as never),
     ).resolves.toBeNull();
+  });
+
+  it("holds an admitted chat turn to the credential source it was admitted on, with no module loaded", async () => {
+    // A system preset of a provider whose catalog serves its model, so a personal key of
+    // that family can serve it: the member's own key makes the turn admitted on "org".
+    initSystemModelProviderKeys([
+      {
+        id: "sys-key-openai",
+        providerId: "openai",
+        apiKey: "sk-system-openai",
+        models: [{ id: OPENAI_PRESET, modelId: "gpt-5.5" }],
+      },
+    ]);
+    const personal = await seedOrgModelProviderKey({
+      orgId: ORG_ID,
+      createdBy: USER_ID,
+      ownerUserId: USER_ID,
+      label: "Mine",
+      providerId: "openai",
+      apiKey: "sk-mine",
+    });
+    const sessionId = "chs_pin";
+    expect(
+      await checkUsageAllowed({
+        orgId: ORG_ID,
+        presetId: OPENAI_PRESET,
+        sessionId,
+        subscription: false,
+        userId: USER_ID,
+      }),
+    ).toBeNull();
+
+    const usage = { context: "chat" as const, sessionId, userId: USER_ID };
+    // Control: while the payer's key still exists, the call spends what was admitted.
+    const payerBound = requireBoundModel((await loadModel(ORG_ID, OPENAI_PRESET, USER_ID))!);
+    expect(payerBound.credentialSource).toBe("org");
+    await enforceSystemProxyAdmission({ orgId: ORG_ID, resolved: payerBound, usageContext: usage });
+
+    // The payer's key is removed mid-turn: the next call resolves to the platform key, and is refused.
+    await db.delete(modelProviderCredentials).where(eq(modelProviderCredentials.id, personal.id));
+    clearResolvedModelCache();
+    const platformBound = requireBoundModel((await loadModel(ORG_ID, OPENAI_PRESET, null))!);
+    expect(platformBound.credentialSource).toBe("system");
+    const refusal = await enforceSystemProxyAdmission({
+      orgId: ORG_ID,
+      resolved: platformBound,
+      usageContext: usage,
+    }).catch((err: unknown) => err);
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect((refusal as ApiError).status).toBe(409);
+    expect((refusal as ApiError).code).toBe("model_credential_changed");
+
+    // A turn with no session is not held to a source: nothing was recorded for it.
+    await expect(
+      enforceSystemProxyAdmission({
+        orgId: ORG_ID,
+        resolved: platformBound,
+        usageContext: { context: "chat", sessionId: null, userId: USER_ID },
+      }),
+    ).resolves.toBeUndefined();
   });
 });

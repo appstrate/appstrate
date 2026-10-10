@@ -879,3 +879,83 @@ describe("model-provider-credentials service — visibility and the personal-cre
     expect(await db.select().from(modelProviderCredentials)).toHaveLength(0);
   });
 });
+
+describe("model-provider-credentials service — membership lock on creation", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("refuses a personal API-key credential owned by a non-member, and admits a member's", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-lock-key" });
+    const member = await memberContext(ctx, "member");
+    const outsider = await createTestUser();
+    // A personal credential may not pick its endpoint: the provider must not be overridable.
+    resetModelProviders();
+    registerModelProvider({
+      providerId: "personal-fixed-key",
+      displayName: "Fixed key",
+      iconUrl: "openai",
+      description: "",
+      docsUrl: "",
+      apiShape: "openai-completions",
+      defaultBaseUrl: "https://fixed.example.test/v1",
+      baseUrlOverridable: false,
+      authMode: "api_key",
+      featuredModels: [],
+    });
+    try {
+      const createFor = (userId: string) =>
+        createApiKeyCredential({
+          orgId: ctx.orgId,
+          userId,
+          ownerUserId: userId,
+          label: "Mine",
+          providerId: "personal-fixed-key",
+          apiKey: "sk-personal",
+        });
+
+      const error = await createFor(outsider.id).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(403);
+      expect(
+        await db
+          .select()
+          .from(modelProviderCredentials)
+          .where(eq(modelProviderCredentials.ownerUserId, outsider.id)),
+      ).toHaveLength(0);
+
+      // Control: the same call for a member of the org succeeds.
+      expect(await createFor(member.user.id)).toEqual(expect.any(String));
+    } finally {
+      seedTestModelProviders();
+    }
+  });
+
+  it("refuses a subscription owned by a non-member, and admits a member's", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-lock-oauth" });
+    const member = await memberContext(ctx, "member");
+    const outsider = await createTestUser();
+    const createFor = (userId: string) =>
+      createOAuthCredential({
+        orgId: ctx.orgId,
+        userId,
+        label: "Subscription",
+        providerId: "test-oauth",
+        accessToken: "at",
+        refreshToken: "rt",
+      });
+
+    const error = await createFor(outsider.id).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
+    expect(
+      await db
+        .select()
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.ownerUserId, outsider.id)),
+    ).toHaveLength(0);
+
+    // Control: the same call for a member of the org succeeds.
+    expect(await createFor(member.user.id)).toEqual(expect.any(String));
+  });
+});

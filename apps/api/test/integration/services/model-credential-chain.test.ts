@@ -25,6 +25,7 @@ import {
   setDefaultModel,
 } from "../../../src/services/org-models.ts";
 import { applicableCredentialIds } from "../../../src/services/model-providers/credential-chain.ts";
+import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
@@ -441,6 +442,27 @@ describe("model resolution — a member's own credential first", () => {
     });
   });
 
+  it("a pinned personal credential stops serving its run once the organization switches personal credentials off", async () => {
+    const org = await orgAnthropicKey();
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: org.id,
+      providerId: "anthropic",
+      modelId: ANTHROPIC_A,
+      label: "Claude",
+    });
+    const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
+    const pin = { credentialId: mine.id, source: "org" as const };
+
+    expect(await loadPinnedModel(ctx.orgId, model.id, pin)).toMatchObject({
+      credentialId: mine.id,
+      apiKey: "sk-alice",
+    });
+    // The policy is switched through the service the routes use, which drops the resolved-model cache.
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+    expect(await loadPinnedModel(ctx.orgId, model.id, pin)).toBeNull();
+  });
+
   it("a run whose pinned credential is gone is never served by another credential", async () => {
     const org = await orgAnthropicKey();
     const model = await seedOrgModel({
@@ -508,5 +530,39 @@ describe("model resolution — a member's own credential first", () => {
       apiKey: "sk-org",
     });
     expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), model.id)).toBe("org");
+  });
+});
+
+describe("model writes — one unbound model per provider and model", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "unboundorg" });
+  });
+
+  it("refuses a second unbound model of the same provider and model id, and admits it under another provider", async () => {
+    const first = await createOrgModel(ctx.orgId, "Shared Claude", ANTHROPIC_A, ctx.user.id, {
+      credentialId: null,
+      providerId: "anthropic",
+    });
+
+    const error = await createOrgModel(ctx.orgId, "Shared again", ANTHROPIC_A, ctx.user.id, {
+      credentialId: null,
+      providerId: "anthropic",
+    }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(409);
+    expect((error as ApiError).code).toBe("model_already_added");
+    // The row that already holds the unbound binding, so the caller can act on it.
+    expect((error as ApiError).extensions).toEqual({ existing_model_id: first });
+
+    // Control: the same model id under another provider is another binding.
+    expect(
+      await createOrgModel(ctx.orgId, "OpenAI route", ANTHROPIC_A, ctx.user.id, {
+        credentialId: null,
+        providerId: "openai",
+      }),
+    ).toEqual(expect.any(String));
   });
 });

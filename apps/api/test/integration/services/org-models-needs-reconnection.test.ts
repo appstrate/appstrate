@@ -20,18 +20,20 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
 import {
+  assertExplicitModelExists,
   listOrgModels,
   loadModel,
   resolveModel,
   setDefaultModel,
   modelNeedsReconnection,
 } from "../../../src/services/org-models.ts";
+import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 // Imported for its module-level boot: `setDefaultModel` and `listOrgModels`
 // read the model and provider registries only the app helper initialises.
 import "../../helpers/app.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import {
   corruptCredentialBlob,
   seedOrgModel,
@@ -292,5 +294,62 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     // The security-relevant half: listing the row must NOT make it resolvable
     // for inference. The runtime path is unchanged.
     expect(await loadModel(ctx.orgId, model.id, null)).toBeNull();
+  });
+});
+
+describe("org-models — a member's own credential serves a model whose organization credential is dead", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "deadbutservedorg" });
+  });
+
+  it("lists the model as usable to the member whose own key serves it, and flagged to a member with none", async () => {
+    const alice = await memberContext(ctx, "member");
+    const bob = await memberContext(ctx, "member");
+    // The organization's key is listed but its blob no longer decrypts: a dead binding.
+    const orgKey = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: "Org OpenAI",
+      providerId: "openai",
+      apiShape: "openai-responses",
+      apiKey: "sk-org",
+    });
+    await corruptCredentialBlob(orgKey.id);
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: orgKey.id,
+      providerId: "openai",
+      label: "GPT",
+      modelId: "gpt-5.5",
+      enabled: true,
+    });
+    // Alice's own key of the same family serves the model for her.
+    const aliceKey = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      createdBy: alice.user.id,
+      ownerUserId: alice.user.id,
+      label: "Alice OpenAI",
+      providerId: "openai",
+      apiKey: "sk-alice",
+    });
+    clearResolvedModelCache();
+
+    const forAlice = (await listOrgModels(ctx.orgId, alice.user.id)).find((m) => m.id === model.id);
+    expect(forAlice).toMatchObject({ needs_reconnection: false, billed_to: "user" });
+    const forBob = (await listOrgModels(ctx.orgId, bob.user.id)).find((m) => m.id === model.id);
+    expect(forBob).toMatchObject({ needs_reconnection: true });
+
+    // The explicit choice is resolved for its payer: Alice's key serves it, nobody else's does.
+    expect(await assertExplicitModelExists(ctx.orgId, model.id, alice.user.id)).toMatchObject({
+      credentialId: aliceKey.id,
+      credentialSource: "org",
+    });
+    const refused = await assertExplicitModelExists(ctx.orgId, model.id, null).catch(
+      (err: unknown) => err,
+    );
+    expect(refused).toBeInstanceOf(ApiError);
+    expect((refused as ApiError).status).toBe(404);
   });
 });
