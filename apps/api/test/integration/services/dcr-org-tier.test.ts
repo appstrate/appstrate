@@ -303,9 +303,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
   it("promotes a legacy space client to the org, which every space then reuses", async () => {
     const legacy = await seedLegacySpaceClient(spaceB.spaceId);
     expect(await promoteIntegrationOAuthClient(spaceB, REMOTE, legacy)).toMatchObject({
-      id: legacy,
-      spaceId: null,
-      autoProvisioned: true,
+      client: { id: legacy, spaceId: null, autoProvisioned: true },
     });
     expect(await connectClientRef(spaceA)).toBe(legacy);
     expect(as.registrations).toBe(0);

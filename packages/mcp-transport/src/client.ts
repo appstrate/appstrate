@@ -27,14 +27,25 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type {
-  CallToolResult,
-  Implementation,
-  Progress,
-  ReadResourceResult,
-  ServerCapabilities,
-  Tool,
+import {
+  ErrorCode,
+  McpError,
+  type CallToolResult,
+  type Implementation,
+  type Progress,
+  type ReadResourceResult,
+  type ServerCapabilities,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+
+/**
+ * Total cap on a `callTool` that requests progress. With progress the per-call
+ * `timeout` is an idle timeout (it restarts on each notification), so nothing else
+ * bounds a server that reports progress forever. The run deadline is the operative
+ * bound; this is a backstop, far above the longest first-party progress call
+ * (`ssh_exec`, 600 s). Independent of `APPSTRATE_MCP_TOOL_TIMEOUT_MS`.
+ */
+const MCP_PROGRESS_CALL_MAX_TOTAL_MS = 60 * 60_000;
 
 const DEFAULT_CLIENT_INFO: Implementation = {
   name: "appstrate-mcp-client",
@@ -533,6 +544,7 @@ export function wrapClient(
   client: Client,
   transport: { close(): Promise<void> },
   defaultTimeoutMs?: number,
+  maxTotalMs: number = MCP_PROGRESS_CALL_MAX_TOTAL_MS,
 ): AppstrateMcpClient {
   let closed = false;
   return {
@@ -550,17 +562,41 @@ export function wrapClient(
       return { tools: result.tools };
     },
     async callTool(args, options) {
-      return client.callTool(args, undefined, {
-        // With progress, `timeout` is an idle timeout: no `maxTotalTimeout`, the
-        // caller bounds the total with `signal` (an agent run: its deadline).
-        ...(options?.onProgress
-          ? { onprogress: options.onProgress, resetTimeoutOnProgress: true }
-          : {}),
-        ...(options?.signal ? { signal: options.signal } : {}),
-        ...((options?.timeoutMs ?? defaultTimeoutMs)
-          ? { timeout: options?.timeoutMs ?? defaultTimeoutMs }
-          : {}),
-      }) as Promise<CallToolResult>;
+      const timeout = options?.timeoutMs ?? defaultTimeoutMs;
+      const timeoutOption = timeout ? { timeout } : {};
+      if (!options?.onProgress) {
+        return client.callTool(args, undefined, {
+          ...(options?.signal ? { signal: options.signal } : {}),
+          ...timeoutOption,
+        }) as Promise<CallToolResult>;
+      }
+      // With progress, `timeout` is an idle timeout: the total is capped by `maxTotalMs`
+      // through the signal, so the SDK's cancel path sends `notifications/cancelled`.
+      // The SDK's own `maxTotalTimeout` (1.32.1) rejects without telling the server.
+      const total = new AbortController();
+      const timer = setTimeout(
+        () =>
+          total.abort(
+            new McpError(ErrorCode.RequestTimeout, "Maximum total timeout exceeded", {
+              maxTotalTimeout: maxTotalMs,
+            }),
+          ),
+        maxTotalMs,
+      );
+      (timer as { unref?: () => void }).unref?.();
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, total.signal])
+        : total.signal;
+      try {
+        return (await client.callTool(args, undefined, {
+          onprogress: options.onProgress,
+          resetTimeoutOnProgress: true,
+          signal,
+          ...timeoutOption,
+        })) as CallToolResult;
+      } finally {
+        clearTimeout(timer);
+      }
     },
     async readResource(args, options) {
       return client.readResource(args, {

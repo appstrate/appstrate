@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
+import type { ConnectionScope } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
@@ -14,43 +15,51 @@ import {
   CommandList,
 } from "@appstrate/ui/components/command";
 import { cn } from "@appstrate/ui/cn";
-import { useOrgSpaces } from "../../hooks/use-spaces";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
-import { withSpaceShare } from "./connection-ownership";
 
-/** The spaces a connection is shared into (rules: `connectionRowGrants`); a write sends the whole set. */
+/**
+ * The spaces a connection is shared into. Which controls show is decided by the caller from the
+ * row's `allowed_actions`; the editor only renders them and reports the space to share or withdraw.
+ */
 export function ConnectionShareEditor({
   connectionId,
-  orgId,
   scope,
-  sharedSpaceIds,
-  ownSpaceId,
+  rowSpaceId,
   hereSpaceId,
-  canEditShares,
+  targets,
+  sharedSpaceIds,
+  sharedHere,
+  canShare,
   canUnshareHere,
   lockHint,
   pending,
-  onChange,
+  onShare,
+  onUnshare,
 }: {
   connectionId: string;
-  orgId: string | null;
-  scope: "org" | "space";
-  /** As read: the owner's full set, anyone else's projection of the current space. */
-  sharedSpaceIds: string[];
-  ownSpaceId: string | null;
+  scope: ConnectionScope;
+  /** The one space a space-scoped row lives in; its share toggle targets that space. */
+  rowSpaceId: string | null;
+  /** The space the request is made from: the target of a governor's withdrawal. */
   hereSpaceId: string | null;
-  canEditShares: boolean;
+  /** Spaces offered in the picker, with their names. */
+  targets: { id: string; name: string }[];
+  /** The owner's full set of shared spaces; empty for anyone else. */
+  sharedSpaceIds: string[];
+  /** Whether the connection is shared into `hereSpaceId`. */
+  sharedHere: boolean;
+  canShare: boolean;
   canUnshareHere: boolean;
   /** Why a governor's withdrawal here is refused; the owner's edits ignore it. */
   lockHint: string | null;
   pending: boolean;
-  onChange: (sharedSpaceIds: string[]) => void;
+  onShare: (spaceId: string) => void;
+  onUnshare: (spaceId: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
-  const { data: spaces } = useOrgSpaces(canEditShares && scope === "org" ? orgId : null);
 
-  if (canEditShares && scope === "space") {
+  if (canShare && scope === "space") {
     return (
       <label
         className="flex items-center gap-1.5 text-xs"
@@ -58,10 +67,12 @@ export function ConnectionShareEditor({
       >
         <input
           type="checkbox"
-          checked={!!ownSpaceId && sharedSpaceIds.includes(ownSpaceId)}
-          disabled={pending || !ownSpaceId}
+          checked={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
+          disabled={pending || !rowSpaceId}
           onChange={(e) => {
-            if (ownSpaceId) onChange(withSpaceShare(sharedSpaceIds, ownSpaceId, e.target.checked));
+            if (!rowSpaceId) return;
+            if (e.target.checked) onShare(rowSpaceId);
+            else onUnshare(rowSpaceId);
           }}
           data-testid={`share-toggle-${connectionId}`}
         />
@@ -70,8 +81,7 @@ export function ConnectionShareEditor({
     );
   }
 
-  if (canEditShares) {
-    const targets = (spaces ?? []).filter((s) => s.access === "member");
+  if (canShare) {
     const names = targets.filter((s) => sharedSpaceIds.includes(s.id)).map((s) => s.name);
     return (
       <Popover open={open} onOpenChange={setOpen}>
@@ -105,7 +115,7 @@ export function ConnectionShareEditor({
                       key={space.id}
                       value={`${space.name} ${space.id}`}
                       disabled={pending}
-                      onSelect={() => onChange(withSpaceShare(sharedSpaceIds, space.id, !selected))}
+                      onSelect={() => (selected ? onUnshare(space.id) : onShare(space.id))}
                       data-testid={`share-target-${connectionId}-${space.id}`}
                     >
                       <Check className={cn("size-4", selected ? "opacity-100" : "opacity-0")} />
@@ -130,7 +140,7 @@ export function ConnectionShareEditor({
           className="h-7 text-xs"
           disabled={pending || !!lockHint}
           title={lockHint ? undefined : t("integration.connection.share.removeHereHelp")}
-          onClick={() => onChange(withSpaceShare(sharedSpaceIds, hereSpaceId, false))}
+          onClick={() => onUnshare(hereSpaceId)}
           data-testid={`share-remove-here-${connectionId}`}
         >
           {t("integration.connection.share.removeHere")}
@@ -141,9 +151,7 @@ export function ConnectionShareEditor({
 
   return (
     <span className="text-muted-foreground text-xs">
-      {hereSpaceId && sharedSpaceIds.includes(hereSpaceId)
-        ? t("integration.connection.share.sharedHere")
-        : "—"}
+      {sharedHere ? t("integration.connection.share.sharedHere") : "—"}
     </span>
   );
 }

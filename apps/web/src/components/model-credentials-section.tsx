@@ -26,9 +26,6 @@ export function CredentialsSection({
   onDelete,
   onRename,
   onConnectOAuth,
-  canWrite,
-  canDelete,
-  userId,
   showOwner,
   empty,
 }: {
@@ -39,11 +36,6 @@ export function CredentialsSection({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => Promise<void>;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  /** Whether the caller may change the organization's rows (adding is the host page's control). */
-  canWrite: boolean;
-  canDelete: boolean;
-  /** The caller: a personal credential is editable only by its owner. */
-  userId: string | undefined;
   /** Whether the owner column shows; a personal-only list has one owner, the caller. */
   showOwner: boolean;
   /** Empty-state copy; the organization's by default. */
@@ -55,9 +47,6 @@ export function CredentialsSection({
   const { data: registry } = useProvidersRegistry();
 
   const columns = useCredentialColumns({
-    canWrite,
-    canDelete,
-    userId,
     showOwner,
     registry,
     testingIds,

@@ -59,11 +59,8 @@ export function useDisconnectIntegrationConnection() {
   });
 }
 
-/**
- * Rename the caller's own connection and/or replace the set of spaces it is
- * shared into, from the user-scope page.
- */
-export function useUpdateMeIntegrationConnection() {
+/** Rename the caller's own connection from the user-scope page. */
+export function useRenameMeConnection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -71,7 +68,7 @@ export function useUpdateMeIntegrationConnection() {
       body,
     }: {
       connectionId: string;
-      body: { label?: string; shared_space_ids?: string[] };
+      body: { label: string };
     }) => {
       const { data } = await client.PATCH("/api/me/connections/{connectionId}", {
         params: { path: { connectionId } },
@@ -79,11 +76,8 @@ export function useUpdateMeIntegrationConnection() {
       });
       return data;
     },
-    onSuccess: (_data, { body }) => {
-      // Unsharing disables other people's schedules naming the connection.
-      if (body.shared_space_ids) invalidateSchedules(qc);
-      // Returned: the mutation stays pending until the list refetch lands, so the
-      // share editor never re-enables on a stale `shared_space_ids` (next pick would drop one).
+    onSuccess: () => {
+      // A label shows on every picker and readiness view, not just the connection list.
       return invalidateIntegrationQueries(qc);
     },
   });

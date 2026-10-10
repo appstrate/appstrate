@@ -57,14 +57,16 @@ export function useModelColumns({
   credentialLabels: ReadonlyMap<string, string>;
 }): DataColumn<OrgModelInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
-  // A managed (aliased) row hides its binding, so it names no credential.
-  // An unbound one is paid by whoever uses it: each member brings their own.
+  // A managed row hides its binding, so it names no credential. A member-served one is paid by
+  // whoever uses it: each member brings their own.
   const credentialText = (m: OrgModelInfo) =>
-    m.aliased
+    m.binding === "managed"
       ? "—"
-      : m.credentialId === null
+      : m.binding === "member"
         ? t("models.credentialEachMember")
-        : (credentialLabels.get(m.credentialId) ?? "—");
+        : m.credentialId === null
+          ? "—"
+          : (credentialLabels.get(m.credentialId) ?? "—");
 
   return [
     {
@@ -239,9 +241,6 @@ export function useCredentialColumns({
   onDelete,
   onRename,
   onConnectOAuth,
-  canWrite,
-  canDelete,
-  userId,
   showOwner = false,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
@@ -252,22 +251,17 @@ export function useCredentialColumns({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  /** Resolved once by the page: a row action absent here 403s if clicked. */
-  canWrite: boolean;
-  canDelete: boolean;
-  /** The caller: a personal credential is changed by its holder alone. */
-  userId: string | undefined;
   /** Whether the owner column shows; a personal-only list has one owner, the caller. */
   showOwner?: boolean;
 }): DataColumn<ModelProviderCredentialInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
   const isOauth = (pk: ModelProviderCredentialInfo) => pk.authMode === "oauth2";
-  const isOwn = (pk: ModelProviderCredentialInfo) =>
-    pk.owner_type === "user" && pk.owner_id === userId;
-  // A personal credential is changed by its holder alone (404 to anyone else),
-  // so an administrator's write right covers the organization's rows only.
-  const canEdit = (pk: ModelProviderCredentialInfo) =>
-    pk.owner_type === "org" ? canWrite : isOwn(pk);
+  // What the caller may do with a row is the server's verdict (`allowed_actions`): a personal
+  // credential is changed by its holder alone, an administrator's right covers the organization's.
+  const can = (
+    pk: ModelProviderCredentialInfo,
+    action: ModelProviderCredentialInfo["allowed_actions"][number],
+  ) => pk.allowed_actions.includes(action);
 
   return [
     {
@@ -286,7 +280,7 @@ export function useCredentialColumns({
                 value={pk.label}
                 // A subscription is renamed here too: its connection changes only
                 // through the reconnect, never its label.
-                editable={pk.source === "custom" && canEdit(pk)}
+                editable={pk.source === "custom" && can(pk, "edit")}
                 onSave={(newLabel) => onRename(pk, newLabel)}
               />
               {testResults[pk.id] && (
@@ -377,13 +371,15 @@ export function useCredentialColumns({
       align: "end",
       cell: (pk) => {
         const oauth = isOauth(pk);
-        const isCustomKey = !oauth && pk.source === "custom";
-        // Reconnecting is the holder's own act: the helper pairs an account to them.
+        // Reconnecting is the holder's own act (the helper pairs an account to them); the server
+        // allows it on any own subscription, the row offers it once the subscription fails.
         const canReconnect =
-          oauth && pk.needs_reconnection && Boolean(pk.providerId) && isOwn(pk) && canWrite;
-        const canEditKey = isCustomKey && canEdit(pk);
+          can(pk, "reconnect") && pk.needs_reconnection && Boolean(pk.providerId);
+        const canEditKey = !oauth && pk.source === "custom" && can(pk, "edit");
+        const canTest = can(pk, "test");
+        const canDelete = can(pk, "delete");
         const isTesting = testingIds.has(pk.id);
-        if (!isCustomKey && !oauth) return null;
+        if (!canEditKey && !canReconnect && !canTest && !canDelete) return null;
         return (
           <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
@@ -402,15 +398,15 @@ export function useCredentialColumns({
               isPending={isTesting}
               pendingLabel={t("common:loading")}
             >
-              {(canEditKey || canDelete) && (
+              {(canTest || canDelete) && (
                 <>
-                  {canEditKey && (
+                  {canTest && (
                     <DropdownMenuItem onSelect={() => onTest(pk.id)} disabled={isTesting}>
                       <FlaskConical />
                       {t("credentials.test")}
                     </DropdownMenuItem>
                   )}
-                  {canEditKey && canDelete && <DropdownMenuSeparator />}
+                  {canTest && canDelete && <DropdownMenuSeparator />}
                   {canDelete && (
                     <DropdownMenuItem
                       onSelect={() => onDelete(pk)}

@@ -293,6 +293,7 @@
       "name": "@appstrate/env",
       "version": "0.0.0",
       "dependencies": {
+        "@appstrate/afps-shared": "workspace:*",
         "@appstrate/core": "workspace:*",
         "zod": "^4.6.5",
       },

@@ -69,7 +69,7 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       expiresAt: null,
       needsReconnection: false,
       variables,
-      ...(ctx.connectionId ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
+      ...(ctx.target ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });
     // insert / update-owned always return a summary (or throw).
     return summary!;

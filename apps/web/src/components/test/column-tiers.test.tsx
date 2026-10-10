@@ -202,9 +202,6 @@ const SETS = {
         onDelete: () => {},
         onRename: () => {},
         onConnectOAuth: () => {},
-        canWrite: true,
-        canDelete: true,
-        userId: undefined,
         // The administrator's list, the wider of the two: it adds the owner column.
         showOwner: true,
       }),

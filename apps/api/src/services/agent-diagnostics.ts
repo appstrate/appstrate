@@ -10,7 +10,7 @@
  */
 
 import type { LoadedPackage } from "../types/index.ts";
-import type { Actor } from "../lib/actor.ts";
+import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
@@ -151,17 +151,17 @@ export async function collectBundleReadinessErrors(
 export async function getAgentDiagnostics(args: {
   scope: SpaceScope;
   agent: LoadedPackage;
-  actor: Actor;
+  /** Who acts on connections, decided at the door (`connectionPrincipal(c)`). */
+  principal: ConnectionPrincipal;
   /** The connect routes' own guards, so a diagnostic cannot promise what they refuse. */
   canConnect: boolean;
   canConfigureIntegrations: boolean;
-  /** A user credential reaches the connections of every space it belongs to; a delegated one only this space. */
-  wholeReach: boolean;
   /** Who would pay the model of a launch: `requestPayerUserId(c)`, computed at the door. */
   payerUserId: string | null;
   version?: string;
 }): Promise<AgentDiagnosticsResult> {
-  const { scope, actor, canConnect, canConfigureIntegrations, wholeReach, payerUserId } = args;
+  const { scope, principal, canConnect, canConfigureIntegrations, payerUserId } = args;
+  const { actor } = principal;
   const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
@@ -178,10 +178,9 @@ export async function getAgentDiagnostics(args: {
     resolveAgentConnectionReadiness({
       scope,
       agentPackageId: agent.id,
-      actor,
+      principal,
       canConnect,
       canConfigureIntegrations,
-      wholeReach,
       version: versionRef,
     }),
     resolveModel(scope.orgId, agent.id, packageConfig.modelId, payerUserId),

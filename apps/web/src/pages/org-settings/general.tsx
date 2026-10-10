@@ -68,9 +68,7 @@ export function OrgSettingsGeneralPage() {
   const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
   // Unknown until the settings load: the toggle then reads neither as on nor off.
-  const personalModelCredentialsAllowed = orgSettings
-    ? orgSettings.personal_model_credentials !== false
-    : undefined;
+  const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials;
   const updateSettingsMutation = useUpdateOrgSettings();
   const canUpdateOrg = can("org:update");
   const queryClient = useQueryClient();
@@ -341,8 +339,8 @@ export function OrgSettingsGeneralPage() {
         </SettingRow>
       </SettingsGroup>
 
-      {/* Opt-out: absent means allowed. The switch reads neither on nor off until
-          the settings load, so a click can never send a value read off a default. */}
+      {/* The switch reads neither on nor off until the settings load, so a click can never
+          send a value read off a default. */}
       <SettingsGroup title={t("models.tabTitle")}>
         <SettingRow
           variant="toggle"

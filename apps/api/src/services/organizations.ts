@@ -23,10 +23,11 @@ import {
   oauthRefreshToken,
   modelProviderCredentials,
   modelProviderPairings,
+  spaces,
 } from "@appstrate/db/schema";
 import {
   and,
-  arrayContains,
+  arrayOverlaps,
   eq,
   ne,
   inArray,
@@ -54,9 +55,9 @@ import {
 } from "./space-members.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
-import type { RevokedSpaceAssignment } from "./space-members.ts";
+import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
-import { getMcpOrgResourceUri } from "../lib/audiences.ts";
+import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../lib/audiences.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 
 interface OrgResult {
@@ -175,7 +176,10 @@ export async function updateOrganization(
 // Re-exporting `orgSettingsSchema` from here died with the second
 // `.partial()`: the two readers it had now take the base straight from
 // `@appstrate/core/permissions` or the patch schema below.
-import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/permissions";
+import {
+  orgSettingsReadSchema,
+  orgSettingsSchema as orgSettingsBaseSchema,
+} from "@appstrate/core/permissions";
 
 /**
  * Body of `PATCH /api/orgs/{orgId}/settings` — an RFC 7396 merge over the org settings
@@ -190,13 +194,9 @@ import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/perm
  * schema in `@appstrate/core/permissions` never parses anything. It has
  * exactly two consumers — this `.partial().strict()` derivation, and the
  * `OrgSettings` type alias in `packages/shared-types` (`z.infer`, erased at
- * runtime). Nothing validates a stored row through it: `getOrgSettings` below
- * CASTS the JSONB column and returns it. So the base being a plain
- * `z.object()` is not a read-path affordance — a plain `z.object()` STRIPS
- * unknown keys rather than tolerating them, and would drop exactly the
- * newer-writer keys such a rationale would be protecting. Its strictness is
- * simply unobservable, and the closure that matters is the one on this line.
- * `test/integration/services/organizations.test.ts` pins both halves.
+ * runtime). The read side is `orgSettingsReadSchema` (the same base with its
+ * defaults applied, unknown keys kept), which `getOrgSettings` parses every
+ * stored row through. `test/integration/services/organizations.test.ts` pins both halves.
  */
 export const orgSettingsPatchSchema = orgSettingsBaseSchema.partial().strict();
 import type { OrgSettings } from "@appstrate/shared-types";
@@ -213,7 +213,7 @@ export async function getOrgSettings(orgId: string): Promise<OrgSettings> {
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  return (row?.orgSettings as OrgSettings) ?? {};
+  return orgSettingsReadSchema.parse(row?.orgSettings ?? {});
 }
 
 /**
@@ -277,7 +277,7 @@ export async function updateOrgSettings(
   // Resolved models carry the payer's personal credentials only while the policy allows them.
   if (updates.personal_model_credentials !== undefined) clearResolvedModelCache();
 
-  return (row?.orgSettings as OrgSettings) ?? {};
+  return orgSettingsReadSchema.parse(row?.orgSettings ?? {});
 }
 
 export async function getOrgMembers(orgId: string) {
@@ -408,7 +408,8 @@ interface MemberActor {
 interface MemberExitResult {
   orphanedSpaceIds: string[];
   revokedApiKeyIds: string[];
-  unsharedConnectionIds: string[];
+  unsharedShares: ConnectionShare[];
+  deletedModelCredentialIds: string[];
 }
 
 /**
@@ -485,12 +486,15 @@ async function removeMemberInTx(
 
   // A personal model credential is the member's own money and serves only them: it
   // goes with the membership. Organization credentials stay (they are not owned by anyone).
-  await tx.delete(modelProviderCredentials).where(
-    scopedWhere(modelProviderCredentials, {
-      orgId,
-      extra: [eq(modelProviderCredentials.ownerUserId, userId)],
-    }),
-  );
+  const deletedModelCredentials = await tx
+    .delete(modelProviderCredentials)
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [eq(modelProviderCredentials.ownerUserId, userId)],
+      }),
+    )
+    .returning({ id: modelProviderCredentials.id });
   await tx
     .delete(modelProviderPairings)
     .where(and(eq(modelProviderPairings.orgId, orgId), eq(modelProviderPairings.userId, userId)));
@@ -506,14 +510,18 @@ async function removeMemberInTx(
     .returning({ id: apiKeys.id });
 
   // Tokens that grant only this org: its own clients' (a refresh through an
-  // `allowSignup` one re-provisions the member) and those bound to its MCP
-  // resource. Only opaque tokens are rows; a JWT lives until its TTL, stopped by
-  // the per-request membership check.
+  // `allowSignup` one re-provisions the member) and those bound to one of its
+  // MCP resources (the org's or a space's). Only opaque tokens are rows; a JWT
+  // lives until its TTL, stopped by the per-request membership check.
   const orgClientIds = tx
     .select({ clientId: oauthClient.clientId })
     .from(oauthClient)
     .where(and(eq(oauthClient.level, "org"), eq(oauthClient.referencedOrgId, orgId)));
-  const mcpResource = [getMcpOrgResourceUri(orgId)];
+  const orgSpaces = await tx.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, orgId));
+  const mcpResources = [
+    getMcpOrgResourceUri(orgId),
+    ...orgSpaces.map((s) => getMcpSpaceResourceUri(orgId, s.id)),
+  ];
   const revokedAt = new Date();
   await tx
     .update(oauthRefreshToken)
@@ -524,7 +532,7 @@ async function removeMemberInTx(
         isNull(oauthRefreshToken.revoked),
         or(
           inArray(oauthRefreshToken.clientId, orgClientIds),
-          arrayContains(oauthRefreshToken.resources, mcpResource),
+          arrayOverlaps(oauthRefreshToken.resources, mcpResources),
         ),
       ),
     );
@@ -537,7 +545,7 @@ async function removeMemberInTx(
         isNull(oauthAccessToken.revoked),
         or(
           inArray(oauthAccessToken.clientId, orgClientIds),
-          arrayContains(oauthAccessToken.resources, mcpResource),
+          arrayOverlaps(oauthAccessToken.resources, mcpResources),
         ),
       ),
     );
@@ -574,7 +582,8 @@ async function removeMemberInTx(
   return {
     orphanedSpaceIds,
     revokedApiKeyIds: revokedKeys.map((row) => row.id),
-    unsharedConnectionIds: unshared.connectionIds,
+    unsharedShares: unshared.shares,
+    deletedModelCredentialIds: deletedModelCredentials.map((row) => row.id),
     disabledScheduleIds: [...unshared.disabledScheduleIds, ...disabled.map((row) => row.id)],
   };
 }
@@ -636,7 +645,7 @@ export async function leaveOrganization(orgId: string, userId: string): Promise<
  * `role`, or owner is granted or taken outside a dashboard session.
  *
  * @returns the previous role, the space grants the promotion revoked and the
- *   connections the demotion unshared, for the audit.
+ *   connection shares the demotion withdrew, for the audit.
  */
 export async function updateMemberRole(
   orgId: string,
@@ -646,7 +655,7 @@ export async function updateMemberRole(
 ): Promise<{
   previousRole: OrgRole;
   revoked: RevokedSpaceAssignment[];
-  unsharedConnectionIds: string[];
+  unsharedShares: ConnectionShare[];
 }> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
     await lockOrgOwnership(tx, orgId);
@@ -687,7 +696,7 @@ export async function updateMemberRole(
     return {
       previousRole: target.role,
       revoked,
-      unsharedConnectionIds: unshared.connectionIds,
+      unsharedShares: unshared.shares,
       disabledScheduleIds: unshared.disabledScheduleIds,
     };
   });

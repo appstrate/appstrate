@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  credentialSourceValues,
   orgRoleEnum,
   packageSourceValues,
   packageTypeValues,
   runOriginValues,
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
+import { MODEL_PAYERS } from "@appstrate/core/model-payer";
 import { runStatusValues } from "@appstrate/core/run-status";
 import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
@@ -36,7 +36,9 @@ import {
   connectionIdSetJsonSchema,
   connectionScopeSchema,
   originSpaceIdSchema,
+  sharedHereSchema,
   sharedSpaceIdsSchema,
+  spaceIdSchema,
 } from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
@@ -71,7 +73,9 @@ const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
  * verbatim, so the READ genuinely can carry keys this document does not name.
  * Closing the shared component would publish that read as a promise the server
  * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
- * from drifting on the descriptions.
+ * from drifting on the descriptions. The READ is parsed through
+ * `orgSettingsReadSchema`, so the read-side defaults (`personal_model_credentials`)
+ * are present on every read.
  */
 /**
  * The `home_space_id` / `home_writable` / `home_deletable` / `home_shareable`
@@ -123,7 +127,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   personal_model_credentials: {
     type: "boolean",
     description:
-      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call.",
+      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
   },
 };
 
@@ -331,6 +335,24 @@ export const schemas = {
         type: "object",
         properties: {
           code: { type: "string", enum: [...MISSING_INTEGRATION_CONNECTION_CODES] },
+        },
+      },
+    ],
+  },
+  ScheduleIdsProblem: {
+    description:
+      "A problem that may name schedules. On `model_scheduled` — the write would leave enabled schedules running a model served only by each member's own credential, which a schedule has none of — `schedule_ids` lists them. A schedule's effective model is its `model_id_override`, else its agent's model in its space, else the organization default. Change those schedules' model, or bind the model to an organization credential.",
+    allOf: [
+      { $ref: "#/components/schemas/ProblemDetail" },
+      {
+        type: "object",
+        properties: {
+          schedule_ids: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "On `model_scheduled`: the enabled schedules the write would leave on that model.",
+          },
         },
       },
     ],
@@ -615,6 +637,7 @@ export const schemas = {
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
+    required: ["personal_model_credentials"],
     properties: ORG_SETTINGS_PROPERTIES,
   },
   ProfileBatchItem: {
@@ -1391,9 +1414,9 @@ export const schemas = {
       model_label: { type: ["string", "null"], description: "Model label used at run time" },
       model_source: {
         type: ["string", "null"],
-        enum: [...credentialSourceValues, null],
+        enum: [...MODEL_PAYERS, null],
         description:
-          "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.",
+          "Who paid for the run's model: 'system' (platform-provided), 'org' (an organization credential) or 'user' (the launching member's own personal credential). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.",
       },
       cost: { type: ["number", "null"], description: "Run cost in USD" },
       cost_pricing_status: {
@@ -1892,6 +1915,8 @@ export const schemas = {
       "owner_type",
       "owner_id",
       "owner_name",
+      "allowed_actions",
+      "bindable",
       "created_by",
       "createdAt",
       "updatedAt",
@@ -1932,6 +1957,17 @@ export const schemas = {
         type: ["string", "null"],
         description: "Display name of `owner_id`; `null` for `org`.",
       },
+      allowed_actions: {
+        type: "array",
+        items: { type: "string", enum: ["edit", "delete", "test", "reconnect"] },
+        description:
+          "The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`, and `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to its owner holding `model-provider-credentials:connect` when it is an OAuth credential, whether or not it needs reconnection (`needs_reconnection`).",
+      },
+      bindable: {
+        type: "boolean",
+        description:
+          "Whether an organization model may be bound to this credential: `true` for an organization API key (not a subscription), `false` for a personal credential, an organization subscription or a built-in credential.",
+      },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1957,6 +1993,7 @@ export const schemas = {
       "iconUrl",
       "source",
       "credentialId",
+      "binding",
       "billed_to",
       "created_by",
       "createdAt",
@@ -2032,13 +2069,19 @@ export const schemas = {
       credentialId: {
         type: ["string", "null"],
         description:
-          "ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed.",
+          "The bound organization credential; `null` when `binding` is `member` or `managed`. `null` for managed models — binding not exposed.",
+      },
+      binding: {
+        type: "string",
+        enum: ["org", "member", "managed"],
+        description:
+          "How the model is served. `org` — bound to one credential (an organization credential, or the platform key for a built-in model). `member` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.",
       },
       billed_to: {
         type: ["string", "null"],
-        enum: ["user", "org", null],
+        enum: [...MODEL_PAYERS, null],
         description:
-          "Who pays for a call to this model, for the caller. `org` — a built-in model or a model bound to an organization credential: the organization (or the platform) pays whoever calls (a dead credential is `needs_reconnection`). `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — an unbound model nothing of the caller's serves: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.",
+          "Who pays for a call to this model, for the caller. `system` — a built-in model, paid by the platform. `org` — bound to an organization credential: the organization pays whoever calls (a dead credential is `needs_reconnection`). `user` — unbound, and served by one of the caller's own credentials. `null` — unbound and nothing of the caller's serves it: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.",
       },
       cost: {
         type: ["object", "null"],
@@ -2238,8 +2281,8 @@ export const schemas = {
             "owner_name",
             "scopes_granted",
             "scope",
-            "shared_space_ids",
-            "origin_space_id",
+            "spaceId",
+            "shared_here",
             "needs_reconnection",
             "missing_scopes",
             "is_own",
@@ -2258,6 +2301,8 @@ export const schemas = {
             owner_name: { type: ["string", "null"] },
             scopes_granted: { type: "array", items: { type: "string" } },
             scope: connectionScopeSchema,
+            spaceId: spaceIdSchema,
+            shared_here: sharedHereSchema,
             shared_space_ids: sharedSpaceIdsSchema,
             origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },

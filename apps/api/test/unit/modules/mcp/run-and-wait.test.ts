@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
-import { ErrorCode, McpError, type CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import {
@@ -17,11 +17,9 @@ import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_CONNECT_OFFERS_HEADER,
 } from "@appstrate/core/run-and-wait-client";
-import {
-  CONNECTION_RESOLUTION_WARNING_CODES,
-  MAX_CONNECTIONS_PER_INTEGRATION,
-} from "@appstrate/core/integration";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
+import { connectionIdSetJsonSchema } from "../../../../src/openapi/paths/integrations.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { instructionsFor, toolsFor } from "./helpers.ts";
 
@@ -215,10 +213,13 @@ describe("run_and_wait", () => {
       noExtra,
     );
 
-    await expect(call).rejects.toMatchObject({
-      code: ErrorCode.InvalidParams,
-      message: expect.stringContaining("Unknown argument(s): contextFiles"),
-    } satisfies Partial<McpError>);
+    const refused = await call;
+    expect(refused.isError).toBe(true);
+    expect(parseResult(refused)).toMatchObject({
+      code: "unknown_argument",
+      arguments: expect.arrayContaining(["contextFiles"]),
+      accepted: expect.arrayContaining(["context_files"]),
+    });
     // The whole point: no launch happened. A silent drop would have 201'd.
     expect(calls.find((c) => c.method === "POST")).toBeUndefined();
   });
@@ -226,20 +227,25 @@ describe("run_and_wait", () => {
   it("names the replacement for a retired argument", async () => {
     const { tool } = makeRunAndWait({});
 
-    await expect(
-      tool.handler(
-        { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
-        noExtra,
-      ),
-    ).rejects.toThrow(/Unknown argument\(s\): context_documents\. Accepted: .*context_files/);
+    const res = await tool.handler(
+      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
+      noExtra,
+    );
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toMatch(
+      /Unknown argument\(s\): context_documents\. Accepted: .*context_files/,
+    );
   });
 
   it("refuses an inline-only argument the caller's descriptor does not declare", async () => {
     const { tool, calls } = makeRunAndWait({ permissions: [...LAUNCHES, "agents:run"] });
 
-    await expect(
-      tool.handler({ kind: "agent", scope: "@acme", name: "writer", prompt: "p" }, noExtra),
-    ).rejects.toThrow("Unknown argument(s): prompt");
+    const res = await tool.handler(
+      { kind: "agent", scope: "@acme", name: "writer", prompt: "p" },
+      noExtra,
+    );
+    expect(res.isError).toBe(true);
+    expect(parseResult(res)).toMatchObject({ code: "unknown_argument", arguments: ["prompt"] });
     expect(calls).toHaveLength(0);
   });
 
@@ -336,6 +342,17 @@ describe("run_and_wait", () => {
       }
       const shared = ["kind", "scope", "name", "version", "input", "connection_overrides"];
       expect(declared).toEqual(expect.arrayContaining(shared));
+    });
+
+    it('refuses `kind:"inline"` before any launch', async () => {
+      const { tool, calls } = makeRunAndWait({ permissions: [...LAUNCHES, "agents:run"] });
+      const res = await tool.handler({ kind: "inline" }, noExtra);
+      expect(parseResult(res)).toMatchObject({
+        code: "invalid_argument",
+        arguments: ["kind"],
+        accepted: ["agent"],
+      });
+      expect(calls).toHaveLength(0);
     });
 
     it("mentions inline runs nowhere in the descriptor", () => {
@@ -603,9 +620,18 @@ describe("run_and_wait", () => {
       expect(res.content.slice(1)).toEqual([{ type: "text", text: RUN_AND_WAIT_LONG_POLL_RESUME }]);
       // Nothing to enrich on a run still going: no file read, and no 200 getRun in telemetry.
       expect(calls.some((c) => c.path === "/api/files")).toBe(false);
-      expect(events.find((e) => e.operationId === "getRun")?.status).toBe(202);
+      expect(events.at(-1)).toMatchObject({ tool: "run_and_wait", runStatus: "pending" });
+      expect(events.some((e) => e.operationId === "getRun")).toBe(false);
       expect(sent).toEqual([]);
     });
+  });
+
+  it("ends its telemetry on the run's status when the wait reaches a terminal run", async () => {
+    const { tool, events } = makeRunAndWait({
+      getRun: [jsonResponse({ id: "run_1", status: "success" })],
+    });
+    await tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, noExtra);
+    expect(events.at(-1)).toMatchObject({ tool: "run_and_wait", runStatus: "success" });
   });
 
   it("opts the launch into connect offers, and only the launch", async () => {
@@ -679,13 +705,8 @@ describe("run_and_wait", () => {
       ).connection_overrides;
       expect(property).toBeDefined();
       expect(property!.type).toBe("object");
-      // 0..MAX connection ids per integration (`[]` = none), always an array — the route's shape.
-      expect(property!.additionalProperties).toEqual({
-        type: "array",
-        items: { type: "string" },
-        minItems: 0,
-        maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-      });
+      // The route's own connection id set, not a restatement of it.
+      expect(property!.additionalProperties).toBe(connectionIdSetJsonSchema);
       // Not required: the argument only exists for the retry after the 409, so
       // demanding it would break every ordinary launch. Pinned as an exact set
       // rather than a `not.toContain` — `kind` is the ONE required argument,
@@ -857,13 +878,42 @@ describe("run_and_wait", () => {
     expect(calls.length).toBe(0);
   });
 
-  it("validates required arguments", async () => {
+  it("validates required arguments, telling an absent one from a malformed one", async () => {
     const { tool } = makeRunAndWait({});
-    expect((await tool.handler({ kind: "agent", name: "b" }, noExtra)).isError).toBe(true);
-    expect((await tool.handler({ kind: "inline" }, noExtra)).isError).toBe(true);
-    await expect(tool.handler({ kind: "bad" }, noExtra)).rejects.toMatchObject({
-      code: ErrorCode.InvalidParams,
-    } satisfies Partial<McpError>);
+    const noScope = await tool.handler({ kind: "agent", name: "b" }, noExtra);
+    expect(noScope.isError).toBe(true);
+    expect(parseResult(noScope)).toMatchObject({
+      code: "missing_argument",
+      arguments: ["scope"],
+    });
+    const badScope = await tool.handler({ kind: "agent", scope: 7, name: "b" }, noExtra);
+    expect(parseResult(badScope)).toMatchObject({ code: "invalid_argument", arguments: ["scope"] });
+    const noManifest = await tool.handler({ kind: "inline" }, noExtra);
+    expect(noManifest.isError).toBe(true);
+    expect(parseResult(noManifest)).toMatchObject({
+      code: "missing_argument",
+      arguments: ["manifest"],
+    });
+    const badManifest = await tool.handler({ kind: "inline", manifest: "{}" }, noExtra);
+    expect(parseResult(badManifest)).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["manifest"],
+    });
+    const noPrompt = await tool.handler({ kind: "inline", manifest: { name: "tmp" } }, noExtra);
+    expect(parseResult(noPrompt)).toMatchObject({
+      code: "missing_argument",
+      arguments: ["prompt"],
+    });
+    const noKind = await tool.handler({}, noExtra);
+    expect(parseResult(noKind)).toMatchObject({ code: "missing_argument", arguments: ["kind"] });
+    const badInput = await tool.handler(
+      { kind: "agent", scope: "@a", name: "b", input: "{}" },
+      noExtra,
+    );
+    expect(parseResult(badInput)).toMatchObject({ code: "invalid_argument", arguments: ["input"] });
+    const bad = await tool.handler({ kind: "bad" }, noExtra);
+    expect(bad.isError).toBe(true);
+    expect(parseResult(bad)).toMatchObject({ code: "invalid_argument", arguments: ["kind"] });
   });
 
   it("launches for a caller whose only run-read grant is `runs:read-all`", async () => {

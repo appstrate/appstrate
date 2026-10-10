@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Before the deploy, check `EGRESS_ALLOW_INTERNAL_HOSTS`.** A malformed entry
+  fails boot and names itself: a port (`host:8443`), a scheme, a path, a wildcard,
+  an IPv6 literal or a non-canonical spelling. List bare hostnames, and review the
+  value before upgrading (#1912). The release adds a boot warning that names each
+  set environment variable the platform does not read when its namespace is one it
+  reads (`docs/ENV.md` § Unread keys). The SSH MCP server is ssh-mcp 1.0.3 (see
+  Changed).
+
 - **Before the deploy, mark `required: true` on every agent integration a run
   cannot do without** (#1830). After it, a declared integration blocks a run
   only when the agent marks it `required` (below): an agent whose user has no
@@ -80,8 +88,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
+- **Run `scripts/migration/0044-connection-shares.ts --apply` between the
+  migration and the app's start** (#1910). Migration `0089` creates
+  `integration_connection_shares` and copies nothing into it: an app serving
+  `0089` before 0044 has run sees no share, and every connection shared into
+  another space, including those `0086` folded from `shared_with_org`, would be
+  visible only to its owner. Before the deploy, `SELECT count(*) FROM
+integration_connections WHERE shared_with_org;` tells whether the step
+  applies; a non-zero result makes it required. The order, app stopped and
+  `pg_dump` taken: the `appstrate-migrate` service run alone (applies `0089`), then 0044's dry run
+  (`set -a && . ./.env && set +a && bun scripts/migration/0044-connection-shares.ts`),
+  which writes nothing and lists the shares it will insert and the target
+  spaces it will skip (deleted, or owned by another organization), then the
+  same with `--apply`, then start the app. It runs in one transaction, empties
+  `shared_space_ids` once copied, and audits each share it adds
+  (`share_added`, `reason: migrated`, `system` actor): a second `--apply`
+  inserts nothing, so a share withdrawn since stays withdrawn. The
+  `shared_space_ids` column and its two CHECKs are dropped in beta.68.
+
 - **`pg_dump` the platform database BEFORE deploying, then after the deploy
-  run `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
+  and after `0044`, run
+  `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
   Migration `0086` is one-way at boot (`shared_with_org` dropped, `org_id`
   NOT NULL): rolling back means restoring that dump. Drizzle `0086` adds `org_id` to `integration_connections`, makes
   `space_id` nullable and folds `shared_with_org` into `shared_space_ids`,
@@ -140,7 +167,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cannot migrate safely (`scripts/migration/README.md`). Production never
   enables a subscription module, so its report should show none.
 
+- **After the deploy, run `scripts/migration/0043-promote-auto-clients-to-org.ts`,
+  dry, then with `--apply`, once `0044` and `0041` are done** (#1910). It
+  promotes the auto-provisioned OAuth clients (RFC 7591 DCR, CIMD) that were
+  registered at a space's tier to the organization tier, so one client per
+  authorization server serves the organization. Where an organization holds
+  several clients for one issuer, the one with the most connections wins
+  (an organization-tier client wins a tie) and the others are deleted; their
+  connections move to the winner and are flagged `needs_reconnection`, so their
+  owners reconnect them in the UI.
+  The dry run prints that number. A second `--apply` promotes nothing.
+  Details: `scripts/migration/README.md`.
+
 ### Changed
+
+- **BREAKING (API): MCP refusals, space identity and per-space audience**
+  (#1911).
+  - A refused tool call is a tool result with `isError: true` and JSON text
+    `{ code, error, … }` (`missing_argument`, `unknown_argument`,
+    `invalid_argument`, `unknown_operation`, `unknown_space`, `space_mismatch`,
+    `not_granted`, `not_found`, `too_large`; `arguments` names the faulty
+    arguments where one is known), where argument errors were JSON-RPC
+    `-32602`. Only an unknown tool name remains a `-32602`. An operation the
+    route answered with an HTTP error (`invoke_operation`, a `run_and_wait`
+    launch the route rejected) is an outcome, not a refusal: `{ status, body }`
+    with `isError: true`, except an `invoke_operation` `403` the caller's
+    permissions explain, which is a `not_granted` refusal.
+  - `resources/read` of an `appfile://` file that does not resolve is the
+    JSON-RPC error `-32002` (resource not found); a malformed URI stays `-32602`.
+  - Spaces are identified by `spc_…` id in every machine field: `granted_in`
+    and the operation index's `[…]` tags carried names. Names appear in prose
+    only.
+  - Each space endpoint, `/api/mcp/o/:org/s/:space`, is its own RFC 8707
+    resource: its RFC 9728 metadata's `resource` is the space endpoint URL,
+    where it was the organization's URI. It accepts a token bound to that space
+    or to its organization. The authorization server mints a space's resource
+    on first request, and removing a member revokes their space-bound tokens.
+  - A space-bound token is pinned to its space on the REST API and capped like
+    a space API key: organization-level permissions (member management,
+    organization settings) are out of its reach whatever the user's
+    organization role. Use an organization-bound token for that work.
+  - `run_and_wait`'s `connection_overrides` shares the connection-set schema of
+    the REST routes (UUIDs, no duplicates).
+- **BREAKING (operators): `EGRESS_ALLOW_INTERNAL_HOSTS` takes bare hostnames
+  only** (#1912). An IPv6 literal, a port, a scheme, a path, a wildcard or a
+  non-canonical spelling now refuses boot; see Operators.
+- **ssh-mcp 1.0.3: hand-rolled JSON-RPC server.** Protocol versions `2025-11-25`,
+  `2025-06-18` and `2024-11-05` (no JSON-RPC batches, so not `2025-03-26`);
+  malformed input answers `-32700`, an invalid request `-32600`. stdin is read
+  continuously and tool calls run one at a time. A caller that asks for progress
+  gets a notification every 15 s. A cancelled `ssh_exec` (client timeout or
+  abort) stops the command on the target, as a timed-out one is, and so do the
+  client leaving (stdin closed) and SIGTERM, SIGINT or SIGHUP. The stop sends
+  SIGTERM and returns; SIGKILL follows 5 s later from a detached process on the
+  target, so `remote_process` is now `stopping`, `already_exited` or `unknown`
+  (no more `terminated` or `still_running`). A cancelled `ssh_write_file` or
+  `ssh_edit_file` writes nothing unless its upload had started.
+- **Progress-reporting MCP calls are capped at 1 h** (`MCP_PROGRESS_CALL_MAX_TOTAL_MS`,
+  `packages/mcp-transport`), in addition to the run deadline. `MAX_WAIT_SECONDS`
+  stays 55, below the MCP SDK's 60 s request timeout (a unit test holds it there).
+- **API: one payer vocabulary, the member payer recorded in the ledger**
+  (#1909). Wire changes on the model and credential endpoints:
+  - `billed_to` gains `system` (a built-in model, paid by the platform); it
+    takes the values of `MODEL_PAYERS` (`system`, `org`, `user`) or `null`.
+  - `binding` (`org` | `member` | `managed`) is required on every model: `org`
+    bound to one credential, `member` unbound (each member serves it), `managed`
+    an alias. `credentialId` is `null` for `member` and `managed`.
+  - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
+    `bindable`. `reconnect` is the pairing route's own rule: the holder's OAuth
+    credential, flagged or not; any other `credentialId` on a pairing is a 404. The registry gains `personal_allowed`.
+  - `model_source` takes `user` (a member's own credential), with `org` and
+    `system` (`credential_source` is `MODEL_PAYERS`).
+  - `personal_model_credentials` is always served in the organization settings.
+  - `PATCH /api/models/{id}` refuses an unbinding with `409 model_scheduled`
+    carrying `schedule_ids` when enabled schedules run the model (through their
+    override, their agent's model in their space or the organization default).
+    `model_credential_required` on a schedule write is judged on its effective
+    model.
+  - `llm_usage.payer_user_id` and `runs.payer_user_id` record the member whose
+    credential paid; a run's OAuth door compares against `runs.payer_user_id`.
 
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
@@ -200,22 +305,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).
   - `shared_with_org` is gone from the connection DTOs (connection list,
-    accessible connections, pin candidates) and from the body of
-    `PATCH /api/integrations/{packageId}/connections/{connectionId}`, which
-    takes `shared_space_ids`, the full target set, instead. The DTOs add
-    `scope` (`"org"` | `"space"`), `shared_space_ids` (the full set for the
-    owner; for anyone else the current space when shared into it, else
-    `[]`) and `origin_space_id` (owner only). New refusals:
-    `400 invalid_share_target`, `403` on a share into a space where the
-    owner lacks `integrations:connect`, `403 connection_blocked_by_admin` on
-    one into a space blocking user connections without
-    `integrations:configure` there, `403` on renaming an org-scoped
-    connection one does not own, and `403` on reconnecting one with an API
-    key or a third-party token.
-  - New `PATCH /api/me/connections/{connectionId}` (owner,
-    `integrations:connect` ceiling): label and `shared_space_ids`.
+    accessible connections, pin candidates). Shares are rows of
+    `integration_connection_shares` (#1910), one per connection and space.
+    The DTOs add `scope` (`"org"` | `"space"`), `spaceId`, `shared_here`
+    (the connection is shared into the current space), `allowed_actions` and
+    `origin_space_id` (owner only). The owner also gets `shared_space_ids`
+    (the full target set) and `shareable_spaces` (`{id, name}`, the shape
+    `/me` uses); a delegated owner sees both filtered to its bound space.
+  - A share is changed with `PUT` (`204`, idempotent) and `DELETE` (`204`) on
+    `/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}`
+    and `/api/me/connections/{connectionId}/shares/{spaceId}`. `PATCH` on the
+    connection takes the label only: `shared_space_ids` in its body answers
+    `400 validation_failed`. New refusals: `400 invalid_share_target`, `403`
+    on a share into a space where the owner lacks `integrations:connect`,
+    `403 connection_blocked_by_admin` on one into a space blocking user
+    connections without `integrations:configure` there, `403` on renaming an
+    org-scoped connection one does not own, `403` on reconnecting one with an
+    API key or a third-party token, and `409 connection_pinned` on a removal
+    an admin pin or an org default still names.
+  - `PATCH /api/me/connections/{connectionId}` (owner,
+    `integrations:connect` ceiling): label; answers the connection resource.
+    A malformed share `spaceId` answers `400 invalid_request`.
   - `GET /api/me/connections`: `space` is `null` for an org-scoped
-    connection; new `scope`, `origin_space` and `shared_spaces`.
+    connection; new `scope`, `origin_space`, `shared_spaces`,
+    `shareable_spaces` and `allowed_actions`.
   - The realtime `connection_update` event adds `orgId`, and `spaceId` is
     `null` for an org-scoped connection, delivered to its owner in every
     space of the org.
@@ -507,6 +620,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Boot warning for environment keys this version does not read.** One `warn`
+  line lists each set key whose namespace is one the platform reads and that no
+  current setting consumes, so a renamed, retired or misspelled variable is
+  visible. Namespace rule and limits: `docs/ENV.md` § Unread keys.
+
 - **Personal model credentials** (#1875). A member brings their own model
   credential (an API key for a fixed-endpoint provider, or a subscription where
   a subscription module is enabled) from Préférences → Identifiants de modèle,
@@ -614,6 +732,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   once a Cloud token for `@appstrate/browserless` is in `CONFORMANCE_TOKENS`.
   Cloud calls consume units.
 
+- **Playwright MCP — a self-hosted Chromium driven through Microsoft's
+  Playwright MCP server (#1917).** `@appstrate/playwright-mcp@1.0.0` speaks
+  `streamable-http` to a `base_url` connection variable with no default, as
+  `coolify-mcp` does. The operator runs `mcr.microsoft.com/playwright/mcp`
+  (Apache-2.0) with
+  `node /app/cli.js --headless --browser chromium --no-sandbox --isolated --no-webmcp --port 8931 --host 0.0.0.0 --allowed-hosts <Host:port>`.
+  `--isolated` is required, `--cdp-endpoint` included: without it every MCP
+  session shares one persistent profile, so concurrent runs fail and a run
+  inherits the cookies and logins of earlier runs, across users; with it each
+  run gets a fresh in-memory browser context. `--allowed-hosts` compares the
+  raw `Host` header the server receives, port included (behind a reverse
+  proxy, the one it forwards). `--no-webmcp` keeps pages from publishing their
+  own tools: they are filtered, but their listings would reach the snapshot as
+  untrusted text. The browser reaches whatever its container reaches, internal
+  services and cloud metadata (169.254.169.254) included, while
+  `authorized_uris` and the SSRF guard cover only the sidecar's call to
+  `base_url`: run it on a network with restricted egress (for example
+  `--proxy-server` to an egress proxy), never next to internal services. A
+  private `base_url` must be listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. The
+  agent drives the page through accessibility snapshots (navigate, click,
+  type, forms, dialogs, tabs, console, network, JavaScript evaluation,
+  screenshots). The six `browser_mouse_*` tools exist only with
+  `--caps vision`, so a live conformance instance runs with it.
+  `browser_pdf_save` (`--caps pdf`) is not declared: it writes the PDF to the
+  server's disk, where the agent never reads it. With `--cdp-endpoint` the
+  server drives an existing Chromium instead, for example a headful one whose
+  live view lets a person watch or take over. Playwright MCP has no
+  authentication of its own, so the one `api_key` auth, sent as
+  `Authorization: Bearer`, is for a token-checking reverse proxy the operator
+  puts in front of it; anyone who reaches the port directly drives the
+  browser. `hidden_tools` holds `browser_run_code_unsafe`, which runs
+  arbitrary JavaScript in the server process, and `browser_file_upload` and
+  `browser_drop`, which read files from the server's disk, never the agent's.
+  No `allow_undeclared_tools`: a new upstream tool is reviewed first.
+  `default_tools` lists every declared tool that is not hidden, so an agent
+  that selects no tools (the chat's default) gets the browser rather than a run
+  that fails at boot with zero tools registered.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
@@ -625,6 +781,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the payload Pi builds.
 
 ### Fixed
+
+- **A session is refused for a user with no user row.** The session hook throws
+  instead of creating a session without a realm.
+- **The Pi resource loader guard throws when Pi no longer exposes
+  `packageManager.resolve` or `resolveExtensionSources`.** Without the host-isolation
+  shim Pi would scan the host's skill and extension directories.
 
 - **The connect form lists credential fields in the schema's `required`
   order, required fields first** (#1904). jsonb storage reorders a schema's

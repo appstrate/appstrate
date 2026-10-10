@@ -12,12 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import {
-  connectionRowGrants,
-  isConnectionOwnedBy,
-  isSharedInSpace,
-  withSpaceShare,
-} from "../connection-ownership";
+import { connectionLockHintKey, isConnectionOwnedBy } from "../connection-ownership";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;
@@ -47,100 +42,25 @@ describe("isConnectionOwnedBy", () => {
   });
 });
 
-describe("connectionRowGrants", () => {
-  const base = {
-    isOwn: false,
-    isShared: false,
-    scope: "org",
-    canConnect: true,
-    canConfigure: false,
-  } as const;
-
-  it("gives the owner rename and the share targets, never the governor's withdrawal", () => {
-    expect(connectionRowGrants({ ...base, isOwn: true, isShared: true })).toEqual({
-      canRename: true,
-      canEditShares: true,
-      canUnshareHere: false,
-    });
+describe("connectionLockHintKey", () => {
+  it("names the lock that refuses an unshare or delete, and what unlocks it", () => {
+    expect(connectionLockHintKey("admin_pin", true)).toBe("integration.connection.lock.adminPin");
+    expect(connectionLockHintKey("org_default", true)).toBe(
+      "integration.connection.lock.orgDefault",
+    );
   });
 
-  it("gives an owner who governs the space the same, not a second door", () => {
-    expect(
-      connectionRowGrants({ ...base, isOwn: true, isShared: true, canConfigure: true }),
-    ).toEqual({ canRename: true, canEditShares: true, canUnshareHere: false });
+  it("tells anyone who may not change the access rules whom to ask", () => {
+    expect(connectionLockHintKey("admin_pin", false)).toBe(
+      "integration.connection.lock.adminPinAsk",
+    );
+    expect(connectionLockHintKey("org_default", false)).toBe(
+      "integration.connection.lock.orgDefaultAsk",
+    );
   });
 
-  it("lets a governor withdraw a colleague's row from this space, never share one", () => {
-    // Sharing is the owner's consent; `integrations:configure` only unshares here.
-    expect(connectionRowGrants({ ...base, isShared: true, canConfigure: true })).toMatchObject({
-      canEditShares: false,
-      canUnshareHere: true,
-    });
-    expect(connectionRowGrants({ ...base, isShared: false, canConfigure: true })).toMatchObject({
-      canEditShares: false,
-      canUnshareHere: false,
-    });
-  });
-
-  it("lets a governor rename a space-scoped row, never an org-scoped one", () => {
-    // An org-scoped row spans spaces: the API refuses a governor's rename (403).
-    expect(
-      connectionRowGrants({ ...base, isShared: true, canConfigure: true, scope: "space" })
-        .canRename,
-    ).toBe(true);
-    expect(
-      connectionRowGrants({ ...base, isShared: true, canConfigure: true, scope: "org" }).canRename,
-    ).toBe(false);
-  });
-
-  it("gives a plain member nothing on a colleague's shared row", () => {
-    expect(connectionRowGrants({ ...base, isShared: true, scope: "space" })).toEqual({
-      canRename: false,
-      canEditShares: false,
-      canUnshareHere: false,
-    });
-  });
-
-  it("gives nothing without integrations:connect, whoever owns the row", () => {
-    const denied = { canRename: false, canEditShares: false, canUnshareHere: false };
-    expect(
-      connectionRowGrants({ ...base, isOwn: true, isShared: true, canConnect: false }),
-    ).toEqual(denied);
-    expect(
-      connectionRowGrants({
-        ...base,
-        isShared: true,
-        scope: "space",
-        canConnect: false,
-        canConfigure: true,
-      }),
-    ).toEqual(denied);
-  });
-});
-
-describe("isSharedInSpace", () => {
-  it("reads the current space in the owner's full set", () => {
-    expect(isSharedInSpace({ shared_space_ids: ["spc_b", "spc_a"] }, "spc_a")).toBe(true);
-    expect(isSharedInSpace({ shared_space_ids: ["spc_b"] }, "spc_a")).toBe(false);
-  });
-
-  it("is false without a current space", () => {
-    expect(isSharedInSpace({ shared_space_ids: ["spc_a"] }, null)).toBe(false);
-  });
-});
-
-describe("withSpaceShare", () => {
-  it("adds the space to the owner's set, keeping the other targets", () => {
-    expect(withSpaceShare(["spc_b"], "spc_a", true)).toEqual(["spc_b", "spc_a"]);
-    expect(withSpaceShare(["spc_a"], "spc_a", true)).toEqual(["spc_a"]);
-  });
-
-  it("removes only that space", () => {
-    expect(withSpaceShare(["spc_b", "spc_a"], "spc_a", false)).toEqual(["spc_b"]);
-  });
-
-  it("sends an empty set for a governor withdrawing a colleague's share here", () => {
-    // A non-owner sees `[current space]`; the API accepts only that minus the space.
-    expect(withSpaceShare(["spc_a"], "spc_a", false)).toEqual([]);
+  it("is null for an unlocked connection", () => {
+    expect(connectionLockHintKey(null, true)).toBeNull();
+    expect(connectionLockHintKey(undefined, false)).toBeNull();
   });
 });

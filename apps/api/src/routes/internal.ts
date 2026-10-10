@@ -857,9 +857,10 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *      read ANY credential, so it is rejected outright — a leaked run token
  *      from such a run must not be able to enumerate the org's credentials.
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
- *   3. Holder: a personal credential (`owner_user_id` set) serves only its
- *      owner's runs, never one an API key triggered, and nothing while the
- *      organization has personal credentials off. Subscriptions are personal by rule.
+ *   3. Holder: a personal credential (`owner_user_id` set) serves only the run
+ *      whose recorded payer (`runs.payer_user_id`) is its owner, and nothing
+ *      while the organization has personal credentials off. Subscriptions are
+ *      personal by rule.
  *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
  * Remote-origin runs (where the pin is structurally absent) are already
@@ -908,9 +909,9 @@ async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun
   if (row.orgId !== run.orgId) {
     throw forbidden(`Credential ${credentialId} not in run org`);
   }
-  // A personal credential serves only its owner's run, and never one an API key
-  // triggered (an API key pays nothing, see `requestPayerUserId`).
-  if (row.ownerUserId !== null && (row.ownerUserId !== run.userId || run.apiKeyId !== null)) {
+  // One rule for the door: the run's recorded payer is the only member a personal
+  // credential may serve. An API-key run records no payer, so it never matches.
+  if (row.ownerUserId !== null && row.ownerUserId !== run.payerUserId) {
     throw forbidden(`Credential ${credentialId} is another member's`);
   }
   if (row.ownerUserId !== null && !(await personalModelCredentialsAllowed(run.orgId))) {

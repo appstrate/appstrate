@@ -73,6 +73,8 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   // same name, so a host the platform-side checks just exempted (internal model
   // endpoint, allowlisted remote MCP server) isn't re-blocked in-run by the
   // sidecar's own literal/fail-closed gates. Empty/unset ⇒ nothing exempted.
+  // Validated by `@appstrate/env` at API boot; the sidecar re-validates with the
+  // same parser (`parseSidecarEnv`), which is what guards the Firecracker daemon path.
   // Raw process.env read, NOT getEnv(): this also runs inside the standalone
   // firecracker runner daemon, which does not carry the platform's required env
   // vars (BETTER_AUTH_SECRET, …), so getEnv()'s fail-fast validation would

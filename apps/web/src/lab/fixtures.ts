@@ -155,6 +155,13 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           org: { id: ORG_ID, name: "Tractr" },
           space: null,
           origin_space: { id: APP_ID, name: "Production" },
+          allowed_actions: ["rename", "share"],
+          // Org-wide: any space the owner reaches.
+          shareable_spaces: [
+            { id: APP_ID, name: "Production" },
+            { id: "app_lab_default", name: "Default" },
+            { id: "app_lab_sandbox", name: "Bac à sable" },
+          ],
         },
         {
           connection_id: "conn_personal_lab_2",
@@ -174,6 +181,9 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           org: { id: ORG_ID, name: "Tractr" },
           space: { id: APP_ID, name: "Production" },
           origin_space: null,
+          allowed_actions: ["rename", "share"],
+          // Space-confined: its own space alone.
+          shareable_spaces: [{ id: APP_ID, name: "Production" }],
         },
       ],
     },
@@ -2788,6 +2798,8 @@ export const agentConnectionReadiness: Json200<
               "https://www.googleapis.com/auth/drive.file",
             ],
             scope: "org",
+            spaceId: null,
+            shared_here: false,
             shared_space_ids: [],
             origin_space_id: null,
             needs_reconnection: false,
@@ -2804,9 +2816,9 @@ export const agentConnectionReadiness: Json200<
             owner_name: "Pierre",
             scopes_granted: ["https://www.googleapis.com/auth/drive"],
             scope: "org",
-            // Another member's row lists only the current space, the one it is shared into here.
-            shared_space_ids: ["app_lab_default"],
-            origin_space_id: null,
+            // Another member's row says only whether it is shared into the current space.
+            spaceId: null,
+            shared_here: true,
             needs_reconnection: false,
             // Under-scoped on purpose: the amber warning under a candidate is a
             // state of this picker that nothing else in the lab reaches.
@@ -3757,6 +3769,7 @@ export const soloOrgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
 export const orgSettings: Json200<"/api/orgs/{orgId}/settings", "get"> = {
   api_version: "2026-08-01",
   dashboard_sso_enabled: true,
+  personal_model_credentials: true,
 };
 
 export const oauthClients: Json200<"/api/oauth/clients", "get"> = {
@@ -3967,8 +3980,15 @@ const driveConnections: Connection[] = [
     owner_name: "Olivier Tarbès",
     label: "olivier@tractr.net",
     scope: "org",
+    spaceId: null,
+    shared_here: true,
     shared_space_ids: ["app_lab_default", "app_lab_sandbox"],
     origin_space_id: "app_lab_default",
+    allowed_actions: ["rename", "share"],
+    shareable_spaces: [
+      { id: "app_lab_default", name: "Default" },
+      { id: "app_lab_sandbox", name: "Bac à sable" },
+    ],
     // Named by the org default (`integrationOrgDefault`): deleting it is refused (409).
     locked_by: "org_default",
     client_ref: "cli_lab_custom",
@@ -3990,8 +4010,12 @@ const driveConnections: Connection[] = [
     owner_name: "Olivier Tarbès",
     label: "olivier@appstrate.com",
     scope: "space",
+    spaceId: "app_lab_default",
+    shared_here: false,
     shared_space_ids: [],
     origin_space_id: null,
+    allowed_actions: ["rename", "share"],
+    shareable_spaces: [{ id: "app_lab_default", name: "Default" }],
     client_ref: "cli_lab_custom",
     // A self-hosted instance (AFPS §7.12): what tells two accounts of one integration apart.
     variables: { base_url: "https://drive.tractr.ca" },
@@ -4015,9 +4039,11 @@ const driveConnections: Connection[] = [
     owner_name: "Pierre",
     label: "compta@tractr.net",
     scope: "org",
-    // Another member's row lists only the current space, the one it is shared into here.
-    shared_space_ids: ["app_lab_default"],
-    origin_space_id: null,
+    // Another member's row says only whether it is shared into the current space; what a
+    // governor may do to it is the lab handler's, from the persona's permissions.
+    spaceId: null,
+    shared_here: true,
+    allowed_actions: [],
     // An admin pin names it (`integrationPins`), which outranks the default.
     locked_by: "admin_pin",
     client_ref: "cli_lab_custom",
@@ -4462,6 +4488,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: "cred_builtin",
+      binding: "org",
       billed_to: "org",
       created_by: null,
       source: "built-in",
@@ -4485,6 +4512,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: "cred_openai",
+      binding: "org",
       billed_to: "org",
       created_by: "Olivier Tarbès",
       source: "custom",
@@ -4508,6 +4536,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: "cred_openai",
+      binding: "org",
       billed_to: "org",
       created_by: "Pierre",
       source: "custom",
@@ -4534,6 +4563,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: null,
+      binding: "member",
       billed_to: "user",
       created_by: "Olivier Tarbès",
       source: "custom",
@@ -4559,6 +4589,7 @@ export const models: Json200<"/api/models", "get"> = {
       pi_dialect: null,
       generation: null,
       credentialId: null,
+      binding: "member",
       billed_to: null,
       created_by: "Pierre",
       source: "custom",
@@ -4596,6 +4627,8 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       owner_id: null,
       owner_name: null,
       created_by: null,
+      allowed_actions: ["test"],
+      bindable: false,
       createdAt: "2026-05-02T10:00:00.000Z",
       updatedAt: "2026-05-02T10:00:00.000Z",
     },
@@ -4613,6 +4646,8 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       owner_id: null,
       owner_name: null,
       created_by: "Olivier Tarbès",
+      allowed_actions: ["edit", "delete", "test"],
+      bindable: true,
       createdAt: "2026-06-11T16:45:00.000Z",
       updatedAt: "2026-06-11T16:45:00.000Z",
     },
@@ -4631,6 +4666,8 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       owner_id: USER_ID,
       owner_name: "Olivier Tarbès",
       created_by: "Olivier Tarbès",
+      allowed_actions: ["edit", "delete", "test", "reconnect"],
+      bindable: false,
       createdAt: "2026-08-01T11:00:00.000Z",
       updatedAt: "2026-08-19T07:20:00.000Z",
     },
@@ -4649,6 +4686,8 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       owner_id: "user_lab_2",
       owner_name: "Pierre",
       created_by: "Pierre",
+      allowed_actions: ["delete"],
+      bindable: false,
       createdAt: "2026-08-03T14:30:00.000Z",
       updatedAt: "2026-08-21T09:45:00.000Z",
     },
@@ -4667,6 +4706,8 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       owner_id: USER_ID,
       owner_name: "Olivier Tarbès",
       created_by: "Olivier Tarbès",
+      allowed_actions: ["edit", "delete", "test"],
+      bindable: false,
       createdAt: "2026-09-21T08:30:00.000Z",
       updatedAt: "2026-09-21T08:30:00.000Z",
     },

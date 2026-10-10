@@ -55,6 +55,9 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     owner_id: null,
     owner_name: null,
     created_by: "usr_admin",
+    allowed_actions: ["edit", "delete"],
+    bindable: true,
+    needs_reconnection: false,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...over,
@@ -72,6 +75,8 @@ const BOB_SUBSCRIPTION = credential({
   owner_id: "usr_bob",
   owner_name: "Bob",
   created_by: "usr_bob",
+  allowed_actions: ["edit", "delete", "test"],
+  bindable: false,
 });
 const ALICE_SUBSCRIPTION = credential({
   ...BOB_SUBSCRIPTION,
@@ -81,9 +86,10 @@ const ALICE_SUBSCRIPTION = credential({
   owner_id: "usr_alice",
   owner_name: "Alice",
   created_by: "usr_alice",
+  allowed_actions: [],
 });
 
-function credentialsPage(credentials: ModelProviderCredentialInfo[], userId: string): string {
+function credentialsPage(credentials: ModelProviderCredentialInfo[]): string {
   return render(
     <CredentialsSection
       credentials={credentials}
@@ -93,9 +99,6 @@ function credentialsPage(credentials: ModelProviderCredentialInfo[], userId: str
       onDelete={() => {}}
       onRename={async () => {}}
       onConnectOAuth={() => {}}
-      canWrite
-      canDelete
-      userId={userId}
       showOwner
     />,
     { queryClient: seededClient() },
@@ -114,7 +117,7 @@ function rowOf(html: string, text: string): string {
 const RENAMABLE = "hover:underline";
 
 describe("the credentials table, as Bob sees it", () => {
-  const html = credentialsPage([ORG_KEY, BOB_SUBSCRIPTION, ALICE_SUBSCRIPTION], "usr_bob");
+  const html = credentialsPage([ORG_KEY, BOB_SUBSCRIPTION, ALICE_SUBSCRIPTION]);
   const row = (credential: ModelProviderCredentialInfo) => rowOf(html, credential.label);
 
   it("names the organization for an organization credential", () => {
@@ -131,24 +134,37 @@ describe("the credentials table, as Bob sees it", () => {
     expect(row(ALICE_SUBSCRIPTION)).not.toContain(RENAMABLE);
   });
 
-  it("lets the organization credential be renamed by a writer", () => {
+  it("lets the organization credential be renamed where the server allows it", () => {
     expect(row(ORG_KEY)).toContain(RENAMABLE);
   });
 });
 
 describe("the credentials table, where a subscription needs reconnecting", () => {
-  const html = credentialsPage(
-    [
-      { ...BOB_SUBSCRIPTION, needs_reconnection: true },
-      { ...ALICE_SUBSCRIPTION, needs_reconnection: true },
-    ],
-    "usr_bob",
-  );
+  const html = credentialsPage([
+    {
+      ...BOB_SUBSCRIPTION,
+      needs_reconnection: true,
+      allowed_actions: ["edit", "delete", "reconnect"],
+    },
+    { ...ALICE_SUBSCRIPTION, needs_reconnection: true, allowed_actions: [] },
+  ]);
   const row = (credential: ModelProviderCredentialInfo) => rowOf(html, credential.label);
 
   it("offers the reconnect to the holder only", () => {
     expect(row(BOB_SUBSCRIPTION)).toContain(settingsFr["credentials.oauth.reconnect"]);
     expect(row(ALICE_SUBSCRIPTION)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
+  });
+});
+
+describe("the credentials table, where a subscription the holder may re-pair is healthy", () => {
+  const html = credentialsPage([
+    { ...BOB_SUBSCRIPTION, allowed_actions: ["edit", "delete", "test", "reconnect"] },
+  ]);
+
+  it("does not offer the reconnect", () => {
+    expect(rowOf(html, BOB_SUBSCRIPTION.label)).not.toContain(
+      settingsFr["credentials.oauth.reconnect"],
+    );
   });
 });
 
@@ -171,6 +187,7 @@ describe("the models table, for the credential each model names", () => {
     iconUrl: null,
     source: "custom",
     credentialId: "cred_org",
+    binding: "org",
     billed_to: "org",
     created_by: null,
     createdAt: CREATED,
@@ -181,6 +198,7 @@ describe("the models table, for the credential each model names", () => {
   const unbound = model({
     id: "mdl_each",
     label: "Sonnet des membres",
+    binding: "member",
     credentialId: null,
     billed_to: null,
   });

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgModels, schedules } from "@appstrate/db/schema";
+import { orgModels, organizations, schedules, spacePackages } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import {
   type CatalogScope,
@@ -34,14 +34,17 @@ import {
   loadCredentialBinding,
   loadCredentialMetadata,
   loadInferenceCredentials,
+  personalCredentialCustomEndpoint,
   personalModelCredentialsAllowed,
 } from "./model-providers/credentials.ts";
 import {
   applicableCredentialIds,
-  isSubscription,
+  isBindableCredential,
   listPersonalCredentials,
+  providerAllowsPersonalCredentials,
   servesModel,
 } from "./model-providers/credential-chain.ts";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { EncryptionKeyUnavailableError } from "../lib/stored-credential.ts";
 import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import { clearResolvedModelCache, resolveModelCached } from "./resolved-model-cache.ts";
@@ -58,6 +61,7 @@ import { mapFetchErrorToTestResult } from "../lib/network-error.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { listedModelIds } from "./model-providers/model-listing.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
+import { placementRowJoin } from "./package-placement.ts";
 import {
   MODEL_REASONING_LEVELS,
   ModelGenerationError,
@@ -223,6 +227,7 @@ export function projectAliasedModel(model: OrgModelInfo): OrgModelInfo {
     // The label names the backing credential, so it stays private; `billed_to`
     // names only the payer side.
     billed_to: model.billed_to,
+    binding: model.binding,
     // Capability/cost — identifying catalog metadata stays private. Generation
     // exposes only the portable support vector needed by the controls; adaptive
     // transport semantics stay on the resolved model.
@@ -322,7 +327,6 @@ async function payerCredentialIds(
   target: { providerId: string; modelId: string },
   options?: { excludeSubscriptions?: boolean },
 ): Promise<string[]> {
-  if (!payerUserId) return [];
   return applicableCredentialIds(
     await listPersonalCredentials(orgId, payerUserId),
     target,
@@ -352,11 +356,11 @@ export async function listOrgModels(
   // only a row with no resolvable provider is dropped.
   const renderableRows = rows.filter((r) => bindings.has(r.id));
 
-  // Who pays, for the caller: the organization for a bound or built-in model; the
-  // caller's own credential for an unbound one, or nobody when none of theirs serves it.
+  // Who pays, for the caller: the platform for a built-in model, the organization for a
+  // bound one; the caller's own credential for an unbound one, or nobody when none of
+  // theirs serves it.
   const unboundRows = renderableRows.filter((r) => r.credentialId === null);
-  const personal =
-    payerUserId && unboundRows.length ? await listPersonalCredentials(orgId, payerUserId) : [];
+  const personal = unboundRows.length ? await listPersonalCredentials(orgId, payerUserId) : [];
   const paidByCaller = new Set<string>();
   const reconnect = new Set<string>();
   // A personal credential is read once per call, however many models it applies to.
@@ -388,7 +392,7 @@ export async function listOrgModels(
     }),
   );
   // A dead organization credential is `needs_reconnection`, never the caller's to fix.
-  const billedTo = (r: (typeof renderableRows)[number]): "user" | "org" | null =>
+  const billedTo = (r: (typeof renderableRows)[number]): ModelPayer | null =>
     r.credentialId !== null ? "org" : paidByCaller.has(r.id) ? "user" : null;
 
   return mergeSystemAndDb<ModelDefinition, (typeof renderableRows)[number], OrgModelInfo>({
@@ -422,7 +426,8 @@ export async function listOrgModels(
         iconUrl: def.iconUrl ?? null,
         source: "built-in",
         credentialId: def.credentialId,
-        billed_to: "org",
+        billed_to: "system",
+        binding: def.aliased === true ? "managed" : "org",
         created_by: null,
         createdAt: now,
         updatedAt: now,
@@ -459,6 +464,7 @@ export async function listOrgModels(
         source: row.source as "custom" | "built-in",
         credentialId: row.credentialId,
         billed_to: billedTo(row),
+        binding: row.aliased ? "managed" : row.credentialId === null ? "member" : "org",
         created_by: row.createdBy,
         createdAt: toISORequired(row.createdAt),
         updatedAt: toISORequired(row.updatedAt),
@@ -628,13 +634,14 @@ async function resolveOrgBinding(
     if (!def) {
       throw invalidRequest(`Provider '${input.providerId}' is not registered`, "providerId");
     }
+    if (!providerAllowsPersonalCredentials(def)) {
+      throw personalCredentialCustomEndpoint(def.providerId, "providerId");
+    }
     return { credentialId: null, providerId: input.providerId };
   }
   const credential = await loadCredentialBinding(orgId, input.credentialId);
   if (!credential) throw invalidRequest("credentialId is unknown", "credentialId");
-  if (credential.ownerUserId !== null || isSubscription(credential.providerId)) {
-    throw personalCredentialNotBindable();
-  }
+  if (!isBindableCredential(credential)) throw personalCredentialNotBindable();
   if (input.providerId !== undefined && input.providerId !== credential.providerId) {
     throw invalidRequest(
       `providerId must be '${credential.providerId}', the provider of this credential`,
@@ -768,16 +775,26 @@ export async function updateOrgModel(
         binding ? binding.credentialId : locked.credentialId,
       );
       if (binding?.credentialId === null && locked.credentialId !== null) {
-        // A schedule spends organization credentials only: unbinding its model
-        // override would fail every fire.
-        const overriding = await tx
+        // A schedule spends organization credentials only. Its effective model is
+        // the order the scheduler fires with: its override, else its agent's model
+        // in its space, else the organization default.
+        const scheduled = await tx
           .select({ id: schedules.id })
           .from(schedules)
-          .where(and(eq(schedules.orgId, orgId), eq(schedules.modelIdOverride, modelDbId)));
-        if (overriding.length) {
+          .innerJoin(organizations, eq(organizations.id, schedules.orgId))
+          .leftJoin(spacePackages, placementRowJoin(schedules.packageId, schedules.spaceId))
+          .where(
+            and(
+              eq(schedules.orgId, orgId),
+              eq(schedules.enabled, true),
+              sql`COALESCE(${schedules.modelIdOverride}, ${spacePackages.modelId}, ${organizations.defaultModelId}) = ${modelDbId}`,
+            ),
+          );
+        if (scheduled.length) {
           throw conflict(
             "model_scheduled",
-            `Schedules run this model on the organization credential: ${overriding.map((r) => r.id).join(", ")}. Change their model before letting each member serve it with their own credential.`,
+            "Enabled schedules run this model, and a schedule spends organization credentials only. Change those schedules' model before letting each member serve it with their own credential.",
+            { schedule_ids: scheduled.map((r) => r.id) },
           );
         }
       }
@@ -1003,10 +1020,12 @@ export interface ResolvedModel extends Pick<
   label: string;
   /**
    * Whose credential serves inference: the platform's (`system`, SYSTEM_PROVIDER_KEYS),
-   * a customer-supplied one (`org`: an organization's or a member's own), or `null`
-   * for an unbound model that no credential serves for this caller.
+   * an organization's (`org`), a member's own (`user`), or `null` for an unbound
+   * model that no credential serves for this caller.
    */
-  credentialSource: "system" | "org" | null;
+  credentialSource: ModelPayer | null;
+  /** The member whose own credential serves the call — set iff credentialSource === "user". */
+  payerUserId?: string;
   /**
    * Model-alias flag (LLM-gateway alias pattern). When true the run executor
    * hands the sidecar the {@link aliasId} as the container's `MODEL_ID` and the
@@ -1035,7 +1054,7 @@ export interface ResolvedModel extends Pick<
 }
 
 /** A resolved model with a credential to spend: what every spend site runs on. */
-export type BoundModel = ResolvedModel & { credentialSource: "system" | "org" };
+export type BoundModel = ResolvedModel & { credentialSource: ModelPayer };
 
 /** What a resolved model is built from: an org row or a system definition. */
 interface ModelHead extends ModelMetadata {
@@ -1059,9 +1078,13 @@ interface DbModelCredentials {
   accountId?: string;
 }
 
-/** The credential a resolved model is served with; no `credentialId` for an unbound model. */
+/**
+ * The credential a resolved model is served with; no `credentialId` for an unbound
+ * model, an `ownerUserId` for a member's own credential.
+ */
 interface ServingCredentials extends DbModelCredentials {
   credentialId?: string;
+  ownerUserId?: string | null;
 }
 
 /**
@@ -1202,6 +1225,16 @@ function buildSystemResolvedModel(def: ModelDefinition): ResolvedModel {
   };
 }
 
+/** Who pays a stored credential: its owner for a member's own, the organization otherwise. */
+export function credentialPayer(ownerUserId: string | null | undefined): {
+  credentialSource: ModelPayer;
+  payerUserId?: string;
+} {
+  return ownerUserId
+    ? { credentialSource: "user", payerUserId: ownerUserId }
+    : { credentialSource: "org" };
+}
+
 /**
  * Build a `ResolvedModel` from its definition and the credential serving it.
  * `apiShape` and `baseUrl` come from that credential (the registry resolves them
@@ -1227,7 +1260,9 @@ function buildResolvedModel(head: ModelHead, serving: ServingCredentials): Resol
       reasoning: metadata.reasoning,
       aliased,
     }),
-    credentialSource: serving.credentialId === undefined ? null : "org",
+    ...(serving.credentialId === undefined
+      ? { credentialSource: null }
+      : credentialPayer(serving.ownerUserId)),
     aliased,
     aliasId: head.id,
     accountId: serving.accountId,
@@ -1312,7 +1347,9 @@ async function resolvePersonalModel(
     excludeSubscriptions,
   })) {
     const creds = await loadPersonalInference(orgId, credentialId);
-    if (creds) return buildResolvedModel(head, { ...creds, credentialId });
+    if (creds) {
+      return buildResolvedModel(head, { ...creds, credentialId, ownerUserId: payerUserId });
+    }
   }
   return null;
 }
@@ -1335,34 +1372,43 @@ export async function loadModel(
     return buildSystemResolvedModel(systemDef);
   }
   const excludeSubscriptions = options?.viaProxy === true;
-  const slot = `${payerUserId ?? ""}${excludeSubscriptions ? ":proxy" : ""}`;
-  return resolveModelCached(orgId, modelDbId, slot, () =>
-    resolveDbModel(orgId, modelDbId, payerUserId, excludeSubscriptions),
+  return resolveModelCached(
+    orgId,
+    modelDbId,
+    { kind: "payer", payerUserId, viaProxy: excludeSubscriptions },
+    () => resolveDbModel(orgId, modelDbId, payerUserId, excludeSubscriptions),
   );
 }
 
 /**
  * The model a run's proxy calls are served: a personal credential the run launched
  * with keeps serving that run (it applied to the model then, and the run is never
- * moved to another payer); anything else is served as the model is now, by the
- * organization or the platform. A member-paid model whose launch credential is
- * gone resolves unbound and is refused. `credentialId` is `runs.model_credential_id`.
+ * moved to another payer), and only for the payer the run recorded; anything else
+ * is served as the model is now, by the organization or the platform. A
+ * member-paid model whose launch credential is gone resolves unbound and is
+ * refused. `run` is `runs.model_credential_id` and `runs.payer_user_id`.
  */
 export async function loadRunModel(
   orgId: string,
   modelDbId: string,
-  credentialId: string | null,
+  run: { credentialId: string | null; payerUserId: string | null },
 ): Promise<ResolvedModel | null> {
+  const { credentialId } = run;
   if (!credentialId) return loadModel(orgId, modelDbId, null, { viaProxy: true });
-  return resolveModelCached(orgId, modelDbId, `run:${credentialId}`, async () => {
+  const slot = { kind: "run", credentialId, payerUserId: run.payerUserId } as const;
+  return resolveModelCached(orgId, modelDbId, slot, async () => {
     const binding = await loadCredentialBinding(orgId, credentialId);
     if (!binding?.ownerUserId) return loadModel(orgId, modelDbId, null, { viaProxy: true });
+    // A personal credential serves only the payer the run recorded.
+    if (binding.ownerUserId !== run.payerUserId) return null;
     const row = await loadOrgModelHead(orgId, modelDbId);
     if (!row || !row.enabled || !servesModel(binding.providerId, row)) return null;
     // Switching personal credentials off ends the runs on one too.
     if (!(await personalModelCredentialsAllowed(orgId))) return null;
     const creds = await loadPersonalInference(orgId, credentialId);
-    return creds ? buildResolvedModel(row, { ...creds, credentialId }) : null;
+    return creds
+      ? buildResolvedModel(row, { ...creds, credentialId, ownerUserId: binding.ownerUserId })
+      : null;
   });
 }
 

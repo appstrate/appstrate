@@ -237,7 +237,7 @@
   "apiError.model_already_added": "Ce modèle est déjà ajouté pour cet identifiant fournisseur.",
   "apiError.model_not_offered": "Ce modèle n'est pas proposé par ce fournisseur : {{message}}",
   "apiError.credential_in_use": "Cet identifiant est utilisé par des modèles : supprimez-les d'abord.",
-  "apiError.model_scheduled": "Des planifications utilisent ce modèle avec l'identifiant de l'organisation. Changez leur modèle avant de laisser chaque membre le servir avec son propre identifiant.",
+  "apiError.model_scheduled": "Des planifications activées exécuteraient un modèle servi uniquement par l'identifiant de chaque membre ; changez leur modèle ou liez-le à un identifiant de l'organisation.",
   "apiError.model_credential_required": "Ce modèle est payé par votre propre identifiant fournisseur. Ajoutez-le dans Préférences → Identifiants de modèle, ou demandez à un administrateur de lier un identifiant de l'organisation.",
   "apiError.personal_model_credentials_disabled": "L'organisation n'autorise pas les identifiants personnels de modèle : demandez à un administrateur de l'activer.",
   "apiError.personal_credential_custom_endpoint": "Un identifiant personnel ne peut pas servir un endpoint personnalisé : utilisez un identifiant de l'organisation.",

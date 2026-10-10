@@ -2,15 +2,21 @@
 
 /**
  * Widening a space-scoped connection to the org sets `origin_space_id`, whose foreign-key check
- * share-locks the space. A space deletion locks the space, then cascades to its connections and
- * clients, so a widening that locked one of those rows first would deadlock against it: both
- * widening paths must wait on the space before they touch a row.
+ * share-locks the space; so do inserting an org-scoped row there and sharing a row into it. A
+ * space deletion locks the space, then cascades to its connections, clients and shares, so a
+ * write that locked one of those rows first would deadlock against it: every such write must wait
+ * on the space before it touches a row.
  */
 
 import { beforeEach, expect, it } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db, toRows } from "@appstrate/db/client";
-import { integrationConnections, integrationOauthClients, spaces } from "@appstrate/db/schema";
+import {
+  integrationConnectionShares,
+  integrationConnections,
+  integrationOauthClients,
+  spaces,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -20,12 +26,15 @@ import {
   persistCredentialBundle,
   promoteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
+import { shareConnection } from "../../../src/services/connection-shares.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
+import type { Permission } from "../../../src/lib/permissions.ts";
 
 const INTEGRATION = "@lockorg/svc";
 const AUTH = "google";
 
 // Separate PostgreSQL connections are required: PGlite serializes transactions.
-describeRequiresPostgres("widening a connection locks its space before its row", () => {
+describeRequiresPostgres("a write naming a space locks the space before its rows", () => {
   let ctx: TestContext;
   let space: string;
 
@@ -69,24 +78,95 @@ describeRequiresPostgres("widening a connection locks its space before its row",
     return { connection: row!.id, client: client!.id };
   }
 
-  const widenings: Record<string, (ids: Ids) => Promise<unknown>> = {
-    "a client promotion": ({ client }) =>
-      promoteIntegrationOAuthClient({ orgId: ctx.orgId, spaceId: space }, INTEGRATION, client),
-    "a session reconnect through a system client": ({ connection }) =>
-      persistCredentialBundle(
-        {
-          kind: "update-owned",
-          scope: { orgId: ctx.orgId, spaceId: space },
-          actor: { type: "user", id: ctx.user.id },
+  /** The seeded row now serves the whole org, connected from the space. */
+  async function expectWidened(ids: Ids): Promise<void> {
+    const [row] = await db
+      .select({
+        spaceId: integrationConnections.spaceId,
+        originSpaceId: integrationConnections.originSpaceId,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, ids.connection));
+    expect(row).toEqual({ spaceId: null, originSpaceId: space });
+  }
+
+  const connectAndConfigure: ReadonlySet<Permission> = new Set<Permission>([
+    "integrations:connect",
+    "integrations:configure",
+  ]);
+
+  const widenings: Record<
+    string,
+    { write: (ids: Ids) => Promise<unknown>; expectDone: (ids: Ids) => Promise<void> }
+  > = {
+    "a client promotion": {
+      write: ({ client }) =>
+        promoteIntegrationOAuthClient({ orgId: ctx.orgId, spaceId: space }, INTEGRATION, client),
+      expectDone: expectWidened,
+    },
+    "a session reconnect through a system client": {
+      write: ({ connection }) =>
+        persistCredentialBundle(
+          {
+            kind: "update-owned",
+            scope: { orgId: ctx.orgId, spaceId: space },
+            actor: { type: "user", id: ctx.user.id },
+            connectionId: connection,
+            packageId: INTEGRATION,
+            authKey: AUTH,
+          },
+          { credentials: { access_token: "new" }, clientRef: "lock-system" },
+        ),
+      expectDone: expectWidened,
+    },
+    "an insert": {
+      write: () =>
+        persistCredentialBundle(
+          {
+            kind: "insert",
+            scope: { orgId: ctx.orgId, spaceId: space },
+            actor: { type: "user", id: ctx.user.id },
+          },
+          {
+            credentials: { access_token: "fresh" },
+            packageId: INTEGRATION,
+            authKey: AUTH,
+            accountId: "acct-inserted",
+          },
+        ),
+      expectDone: async () => {
+        const [row] = await db
+          .select({
+            spaceId: integrationConnections.spaceId,
+            originSpaceId: integrationConnections.originSpaceId,
+          })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.accountId, "acct-inserted"));
+        expect(row).toEqual({ spaceId: null, originSpaceId: space });
+      },
+    },
+    "a share": {
+      write: ({ connection }) =>
+        shareConnection({
           connectionId: connection,
-          packageId: INTEGRATION,
-          authKey: AUTH,
-        },
-        { credentials: { access_token: "new" }, clientRef: "lock-system" },
-      ),
+          spaceId: space,
+          integrationId: INTEGRATION,
+          caller: testCaller(
+            { kind: "person", actor: { type: "user", id: ctx.user.id } },
+            { spaceId: space, governs: true, permissionsIn: async () => connectAndConfigure },
+          ),
+        }),
+      expectDone: async ({ connection }) => {
+        const rows = await db
+          .select({ spaceId: integrationConnectionShares.spaceId })
+          .from(integrationConnectionShares)
+          .where(eq(integrationConnectionShares.connectionId, connection));
+        expect(rows).toEqual([{ spaceId: space }]);
+      },
+    },
   };
 
-  for (const [path, widen] of Object.entries(widenings)) {
+  for (const [path, { write, expectDone }] of Object.entries(widenings)) {
     it(`${path} waits on a deleting space before locking its rows`, async () => {
       const ids = await seedSpaceRow();
       const locked = Promise.withResolvers<void>();
@@ -99,7 +179,7 @@ describeRequiresPostgres("widening a connection locks its space before its row",
       });
       await locked.promise;
       let settled = false;
-      const outcome = widen(ids).then(
+      const outcome = write(ids).then(
         () => {
           settled = true;
           return null;
@@ -139,14 +219,7 @@ describeRequiresPostgres("widening a connection locks its space before its row",
         await deletion;
       }
       expect(await outcome).toBeNull();
-      const [row] = await db
-        .select({
-          spaceId: integrationConnections.spaceId,
-          originSpaceId: integrationConnections.originSpaceId,
-        })
-        .from(integrationConnections)
-        .where(eq(integrationConnections.id, ids.connection));
-      expect(row).toEqual({ spaceId: null, originSpaceId: space });
+      await expectDone(ids);
     });
   }
 });

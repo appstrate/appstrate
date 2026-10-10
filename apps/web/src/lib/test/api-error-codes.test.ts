@@ -52,7 +52,9 @@ const SOURCES = [
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
 ];
-const NOT_A_SOURCE = /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\//;
+// The MCP module's `code` literals are tool-result refusals read by the model, never a problem body.
+const NOT_A_SOURCE =
+  /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\/|^apps\/api\/src\/modules\/mcp\//;
 
 /** Literal codes, wherever a problem can be raised. */
 const CODE_PATTERNS = [

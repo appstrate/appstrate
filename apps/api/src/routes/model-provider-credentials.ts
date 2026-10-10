@@ -32,6 +32,7 @@ import {
   updateModelProviderCredential,
   type ModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
+import { providerAllowsPersonalCredentials } from "../services/model-providers/credential-chain.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { hasLiveModelSearch } from "../services/model-search.ts";
 import { listServedModels } from "../services/model-providers/model-listing.ts";
@@ -252,7 +253,7 @@ async function resolveTestTarget(
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
   // Same line as creation: a custom endpoint is an organization credential, so only
   // its managers may point a probe at a host of their choosing.
-  if (cfg.baseUrlOverridable && !caller.writesOrg) {
+  if (!providerAllowsPersonalCredentials(cfg) && !caller.writesOrg) {
     throw personalCredentialCustomEndpoint(cfg.providerId, "providerId");
   }
   if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
@@ -302,6 +303,7 @@ export function createModelProviderCredentialsRouter() {
     "defaultBaseUrl",
     "baseUrlOverridable",
     "authMode",
+    "personal_allowed",
     "featured",
     "live_model_search",
     "models",
@@ -324,6 +326,7 @@ export function createModelProviderCredentialsRouter() {
       defaultBaseUrl: p.defaultBaseUrl,
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
+      personal_allowed: providerAllowsPersonalCredentials(p),
       featured: p.featured ?? false,
       live_model_search: hasLiveModelSearch(p.providerId),
       models: includeModels ? serializeProviderModels(p) : [],
@@ -530,13 +533,18 @@ export function createModelProviderCredentialsRouter() {
     }
     const data = await readJsonBody(c, updateSchema);
     try {
-      const { api_key: apiKey, ...auditData } = data;
-      await updateModelProviderCredential(caller, id, { ...auditData, apiKey });
+      await updateModelProviderCredential(caller, id, {
+        label: data.label,
+        apiKey: data.api_key,
+      });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.updated",
         resourceType: "model_provider_credential",
         resourceId: id,
-        after: auditData,
+        after: {
+          ...(data.label !== undefined ? { label: data.label } : {}),
+          ...(data.api_key !== undefined ? { rotated: true } : {}),
+        },
       });
       // Return the bare updated resource (non-secret
       // `ModelProviderCredentialInfo` projection, same as GET/list). The api
@@ -562,11 +570,20 @@ export function createModelProviderCredentialsRouter() {
       throw systemEntityForbidden("model provider credential", id, "delete");
     }
     try {
-      await deleteModelProviderCredential(caller, id);
+      const deleted = await deleteModelProviderCredential(caller, id);
       await recordAuditFromContext(c, {
         action: "model_provider_credential.deleted",
         resourceType: "model_provider_credential",
         resourceId: id,
+        before: {
+          ownerType: deleted.ownerUserId === null ? "org" : "user",
+          ownerId: deleted.ownerUserId,
+          providerId: deleted.providerId,
+          label: deleted.label,
+          ...(deleted.ownerUserId !== null && deleted.ownerUserId !== caller.userId
+            ? { breakGlass: true }
+            : {}),
+        },
       });
       return c.body(null, 204);
     } catch (err) {

@@ -237,7 +237,7 @@
   "apiError.model_already_added": "This model is already added for this credential.",
   "apiError.model_not_offered": "This model is not offered by this provider: {{message}}",
   "apiError.credential_in_use": "This credential is used by models: delete them first.",
-  "apiError.model_scheduled": "Schedules run this model on the organization credential. Change their model before letting each member serve it with their own credential.",
+  "apiError.model_scheduled": "Enabled schedules would run a model served only by each member's own credential; change their model or bind it to an organization credential.",
   "apiError.model_credential_required": "This model is paid by your own provider credential. Add it under Preferences → Model credentials, or ask an administrator to bind an organization credential.",
   "apiError.personal_model_credentials_disabled": "The organization does not allow personal model credentials: ask an administrator to enable them.",
   "apiError.personal_credential_custom_endpoint": "A personal credential cannot serve a custom endpoint: use an organization credential.",

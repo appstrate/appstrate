@@ -614,6 +614,10 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
       method: "tools/call",
       params: { name: "read_skill", arguments: { id: TONE, version: "draft" } },
     });
-    expect(JSON.stringify(envelope)).toContain("Unknown argument(s): version");
+    expect(envelope.error).toBeUndefined();
+    const refused = toolData(envelope);
+    expect(refused.isError).toBe(true);
+    expect(refused.data).toMatchObject({ code: "unknown_argument", arguments: ["version"] });
+    expect(refused.data.error as string).toContain("Unknown argument(s): version");
   });
 });

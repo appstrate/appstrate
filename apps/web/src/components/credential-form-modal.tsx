@@ -54,7 +54,6 @@ import {
   resolveProviderId,
 } from "@/lib/provider-registry-helpers";
 import { parsesAsUrl } from "@/lib/model-discovery";
-import { personalCredentialProviders } from "@/lib/personal-model-credentials";
 import { EndpointFields } from "./model-form/endpoint-fields";
 import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
@@ -132,7 +131,7 @@ function CredentialFormBody({
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
-  const options = buildOptions(personal ? personalCredentialProviders(registry) : registry);
+  const options = buildOptions(personal ? registry.filter((p) => p.personal_allowed) : registry);
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (credential?.providerId) {

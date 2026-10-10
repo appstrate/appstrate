@@ -211,9 +211,7 @@ describe("module-loader", () => {
   /**
    * The module→platform half of the contract (#973): an out-of-tree module
    * built against an older core is invisible to `tsc`, and a stale caller of a
-   * platform service fails SILENTLY (core 6.0.0 made
-   * `checkUsageAllowed.subscription` required — a 5.x caller omitting it reads
-   * a subscription turn as platform-funded). Ranges are derived from
+   * platform service fails SILENTLY. Ranges are derived from
    * `CORE_VERSION` so the expectations survive the next major bump.
    *
    * Driven through `loadModules()` against real on-disk packages, because that

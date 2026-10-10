@@ -1613,6 +1613,22 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 10 October evening merge of main (5 commits, 14 conflicted files)**
+
+Connection shares as rows (#1922): the redesign's tables and lists keep their
+shape, and every row action (rename, share with a space, withdraw from this
+space) now follows the server's `allowed_actions`; share targets come from
+`shareable_spaces`, the "shared" filter from `shared_here`. Model payer
+vocabulary (#1921): the models table reads `binding` (`org`, `member`,
+`managed`), provider-key row actions follow `allowed_actions` (so "Tester"
+reaches the platform key and subscriptions), and personal credentials are
+offered only when the org setting reads `true`. Main's connection principal
+(`connectionPrincipal(c)`) replaces the redesign's `actor` + `wholeReach` in
+the agent diagnostics and the agent map. `0088_org_logo` met main's `0088` and
+`0089` and is now `0090_org_logo`, proven with `drizzle-kit generate` and on an
+empty Postgres 16. Main's success toasts for rename and share are not taken:
+the row shows the change.
+
 **The 10 October merge of main (6 commits, 17 conflicted files)**
 
 Personal model credentials (#1895): Préférences › Identifiants de modèle (the

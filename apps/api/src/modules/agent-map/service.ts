@@ -40,7 +40,7 @@ import { listPackageSchedules } from "../../services/scheduler.ts";
 import { getSpacePackageSettings } from "../../services/space-packages.ts";
 import { resolveAgentConnectionReadiness } from "../../services/integration-pins-service.ts";
 import { collectBundleReadinessErrors } from "../../services/agent-diagnostics.ts";
-import { isUserPrincipal } from "../../lib/principal.ts";
+import { connectionPrincipal } from "../../lib/connection-principal.ts";
 import { requestPayerUserId } from "../../services/model-providers/credential-chain.ts";
 import { listOrgModels } from "../../services/org-models.ts";
 import { listOrgProxies } from "../../services/org-proxies.ts";
@@ -412,10 +412,9 @@ export async function buildAgentMap(
       ? resolveAgentConnectionReadiness({
           scope,
           agentPackageId: agent.id,
-          actor,
+          principal: connectionPrincipal(c),
           canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
-          wholeReach: isUserPrincipal(c),
           version: versionRef,
         })
       : Promise.resolve(null),

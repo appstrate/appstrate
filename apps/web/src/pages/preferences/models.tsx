@@ -40,9 +40,10 @@ export function PreferencesModelsPage() {
 
   const canConnect = can("model-provider-credentials:connect");
   const { data: orgSettings } = useOrgSettings();
-  // Absent means allowed (the setting is opt-out). Only an explicit `false` withdraws adding:
-  // a key or a subscription pairing is then refused, and existing credentials can still be deleted.
+  // Until the settings load the flag is unknown: adding stays off, and nothing is withdrawn
+  // from the credentials already held (deleting is never gated by the policy).
   const personalModelCredentialsDisabled = orgSettings?.personal_model_credentials === false;
+  const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials === true;
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
   const createCredential = useCreateModelProviderCredential();
@@ -115,7 +116,7 @@ export function PreferencesModelsPage() {
 
       <div className="mb-4 flex items-start justify-between gap-4">
         <p className="text-muted-foreground text-sm">{t("modelCredentials.description")}</p>
-        {canConnect && !personalModelCredentialsDisabled && (
+        {canConnect && personalModelCredentialsAllowed && (
           <Button
             type="button"
             variant="outline"
@@ -137,9 +138,6 @@ export function PreferencesModelsPage() {
         onDelete={(credential) => setConfirmDelete(credential)}
         onRename={renameCredential}
         onConnectOAuth={openEdit}
-        canWrite={canConnect && !personalModelCredentialsDisabled}
-        canDelete={canConnect}
-        userId={userId}
         showOwner={false}
         empty={{
           message: t("modelCredentials.empty"),

@@ -5,37 +5,39 @@ import { db } from "@appstrate/db/client";
 import { integrationConnections } from "@appstrate/db/schema";
 
 import type { Actor } from "../lib/actor.ts";
-import type { SpaceScope } from "../lib/scope.ts";
 import { ownRowInSpace } from "./connection-reach.ts";
+import type { ReconnectTarget } from "./integration-connections.ts";
 
 /**
- * `scopesGranted` of a single connection row the actor owns — the row
- * being reconnected/upgraded, keyed by `connectionId`. The kickoff route
- * unions this into the re-consent request so an upgrade never silently
- * shrinks what that specific account already authorized (incremental
- * consent is per-account). A fresh connect has no `connectionId` and the
- * route skips this entirely, so it stays at the manifest default scopes.
- *
- * Actor-filtered for safety — a caller can't read another actor's granted
- * scopes by guessing a connection id.
+ * The connection a reconnect or scope upgrade targets: the actor's own row of this integration and
+ * auth reaching the space, read once per connect. Its `scopesGranted` are unioned into the
+ * re-consent request, so an upgrade never silently shrinks what that account already authorized;
+ * its `spaceId` says whether the reconnect resolves an org-tier client. `null` when the id names
+ * no such row, so a caller cannot read another actor's row by guessing its id.
  */
-export async function getCurrentScopesGranted(input: {
-  scope: SpaceScope;
+export async function readReconnectTarget(input: {
+  connectionId: string;
+  spaceId: string;
   integrationId: string;
   authKey: string;
   actor: Actor;
-  connectionId: string;
-}): Promise<string[]> {
-  const rows = await db
-    .select({ scopesGranted: integrationConnections.scopesGranted })
+}): Promise<ReconnectTarget | null> {
+  const [row] = await db
+    .select({
+      id: integrationConnections.id,
+      spaceId: integrationConnections.spaceId,
+      label: integrationConnections.label,
+      scopesGranted: integrationConnections.scopesGranted,
+    })
     .from(integrationConnections)
     .where(
       and(
         eq(integrationConnections.id, input.connectionId),
         eq(integrationConnections.integrationId, input.integrationId),
         eq(integrationConnections.authKey, input.authKey),
-        ownRowInSpace(input.scope.spaceId, input.actor),
+        ownRowInSpace(input.spaceId, input.actor),
       ),
-    );
-  return rows[0]?.scopesGranted ?? [];
+    )
+    .limit(1);
+  return row ?? null;
 }

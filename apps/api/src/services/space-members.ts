@@ -9,9 +9,10 @@
  *    org column, so the org tier is enforced here, in the service.
  */
 
-import { and, arrayContains, asc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
+  integrationConnectionShares,
   integrationConnections,
   organizationMembers,
   profiles,
@@ -35,8 +36,9 @@ import {
 } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
-import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
+import { sharedInto } from "./connection-reach.ts";
 
 /** Assignment as the write routes accept it: one preset, or one custom role id. */
 export type SpaceRoleAssignment = { preset_role: SpaceRolePreset } | { custom_role_id: string };
@@ -249,8 +251,8 @@ export interface SpaceMemberRemoval {
    * space no longer.
    */
   accessAfter: SpaceRoleRef | null;
-  /** The connections the removal unshared, for the caller's audit. */
-  unsharedConnectionIds: string[];
+  /** The shares the removal withdrew, for the caller's audit. */
+  unsharedShares: ConnectionShare[];
   /** Other actors' schedules the unshare disabled, whose jobs the caller removes. */
   disabledScheduleIds: string[];
 }
@@ -327,7 +329,7 @@ function removal(
   return {
     removed,
     accessAfter,
-    unsharedConnectionIds: unshared.connectionIds,
+    unsharedShares: unshared.shares,
     disabledScheduleIds: unshared.disabledScheduleIds,
   };
 }
@@ -386,79 +388,71 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
   alsoLockSchedules?: SQL,
 ): Promise<ConnectionsUnshared> {
   const c = integrationConnections;
+  const s = integrationConnectionShares;
   const lost = await sharesOfOwnersWithoutAccess(
     tx,
     and(
-      sql`${spaces.id} = ANY(${c.sharedSpaceIds})`,
+      sharedInto(spaces.id),
       scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
     )!,
     and(
       eq(c.orgId, scope.orgId),
       scope.userId === undefined ? undefined : eq(c.userId, scope.userId),
-      scope.spaceId === undefined ? undefined : arrayContains(c.sharedSpaceIds, [scope.spaceId]),
+      scope.spaceId === undefined ? undefined : sharedInto(scope.spaceId),
     ),
   );
   const locked =
     lost.length === 0
       ? []
       : await tx
-          .select({
-            id: c.id,
-            userId: c.userId,
-            endUserId: c.endUserId,
-            sharedSpaceIds: c.sharedSpaceIds,
-          })
+          .select({ id: c.id, userId: c.userId, endUserId: c.endUserId })
           .from(c)
           .where(inArray(c.id, [...new Set(lost.map((share) => share.connectionId))]))
           .orderBy(asc(c.id))
           .for("update");
-  const lostShares: { id: string; owner: Actor; inSpaceId: string }[] = [];
+  const withdrawn: ConnectionShare[] = [];
   for (const row of locked) {
-    // Re-read under the lock: a concurrent unshare may have withdrawn some already.
-    const gone = lost
-      .filter(
-        (share) => share.connectionId === row.id && row.sharedSpaceIds.includes(share.spaceId),
-      )
+    const targets = lost
+      .filter((share) => share.connectionId === row.id)
       .map((share) => share.spaceId);
+    // The DELETE is the re-read under the lock: a concurrent unshare may have withdrawn some already.
+    const gone = await tx
+      .delete(s)
+      .where(and(eq(s.connectionId, row.id), inArray(s.spaceId, targets)))
+      .returning({ spaceId: s.spaceId });
     if (gone.length === 0) continue;
-    await tx
-      .update(c)
-      .set({
-        sharedSpaceIds: row.sharedSpaceIds.filter((id) => !gone.includes(id)),
-        updatedAt: new Date(),
-      })
-      .where(eq(c.id, row.id));
-    const owner = actorFromIds(row.userId, row.endUserId)!;
-    for (const spaceId of gone) {
-      lostShares.push({ id: row.id, owner, inSpaceId: spaceId });
-    }
+    await tx.update(c).set({ updatedAt: new Date() }).where(eq(c.id, row.id));
+    for (const { spaceId } of gone) withdrawn.push({ connectionId: row.id, spaceId });
   }
+  const ownerOf = new Map(locked.map((row) => [row.id, actorFromIds(row.userId, row.endUserId)!]));
   const disabledScheduleIds = await disableForeignSchedules(
     tx,
-    lostShares,
+    withdrawn.map((share) => ({
+      id: share.connectionId,
+      owner: ownerOf.get(share.connectionId)!,
+      inSpaceId: share.spaceId,
+    })),
     "connection_unshared",
     alsoLockSchedules,
   );
-  return {
-    connectionIds: [...new Set(lostShares.map((share) => share.id))],
-    disabledScheduleIds,
-  };
+  return { shares: withdrawn, disabledScheduleIds };
 }
 
-interface ConnectionShare {
+/** One share of a connection into a space. */
+export interface ConnectionShare {
   connectionId: string;
   spaceId: string;
 }
 
-/** What an access loss unshared, and the other actors' schedules that disabled. */
+/** The shares an access loss withdrew, and the other actors' schedules that disabled. */
 export interface ConnectionsUnshared {
-  connectionIds: string[];
+  shares: ConnectionShare[];
   disabledScheduleIds: string[];
 }
 
 /** {@link unshareConnectionsOfOwnersWithoutAccess} when nothing loses access, fresh each call. */
 export function nothingUnshared(): ConnectionsUnshared {
-  return { connectionIds: [], disabledScheduleIds: [] };
+  return { shares: [], disabledScheduleIds: [] };
 }
 
 export function invalidShareTarget(detail: string): ApiError {
@@ -467,21 +461,20 @@ export function invalidShareTarget(detail: string): ApiError {
     code: "invalid_share_target",
     title: "Invalid Share Target",
     detail,
-    param: "shared_space_ids",
+    param: "spaceId",
   });
 }
 
 /**
- * The gate of a share into `targets`, in the sharing transaction: 409 for an end user's row or an
- * owner not reaching a target ({@link unshareConnectionsOfOwnersWithoutAccess}'s twin), 400 for a
- * target outside the row's org. Locks the owner's membership, then the targets in id order.
+ * The gate of a share into `spaceId`, in the sharing transaction: 409 for an end user's row or an
+ * owner not reaching it ({@link unshareConnectionsOfOwnersWithoutAccess}'s twin), 400 for a space
+ * outside the row's org. Locks the owner's membership, then the space.
  */
 export async function assertConnectionShareable(
   tx: Tx,
   connectionId: string,
-  targets: readonly string[],
+  spaceId: string,
 ): Promise<void> {
-  if (targets.length === 0) return;
   const [conn] = await tx
     .select({ userId: integrationConnections.userId, orgId: integrationConnections.orgId })
     .from(integrationConnections)
@@ -495,28 +488,23 @@ export async function assertConnectionShareable(
     );
   }
   await lockOrgMember(tx, conn.orgId, conn.userId);
-  const inTargets = inArray(spaces.id, [...targets]);
-  const locked = await tx
+  const target = eq(spaces.id, spaceId);
+  const [locked] = await tx
     .select({ id: spaces.id })
     .from(spaces)
-    .where(and(inTargets, eq(spaces.orgId, conn.orgId)))
-    .orderBy(asc(spaces.id))
+    .where(and(target, eq(spaces.orgId, conn.orgId)))
     .for("share");
-  if (locked.length !== new Set(targets).size) {
-    const ids = new Set(locked.map((space) => space.id));
-    const missing = targets.find((id) => !ids.has(id))!;
-    throw invalidShareTarget(`'${missing}' is not a space of this organization`);
-  }
+  if (!locked) throw invalidShareTarget(`'${spaceId}' is not a space of this organization`);
   const [lost] = await sharesOfOwnersWithoutAccess(
     tx,
-    inTargets,
+    target,
     eq(integrationConnections.id, connectionId),
   );
   if (lost) {
     throw conflict(
       "connection_owner_without_access",
-      `The connection's owner has no access to space '${lost.spaceId}', so it cannot be shared there.`,
-      { space_id: lost.spaceId },
+      `The connection's owner has no access to space '${spaceId}', so it cannot be shared there.`,
+      { space_id: spaceId },
     );
   }
 }
@@ -531,13 +519,14 @@ export async function lockSpacesOfSharedConnections(
   userId: string,
 ): Promise<void> {
   const c = integrationConnections;
+  const s = integrationConnectionShares;
   await tx
     .select({ id: spaces.id })
     .from(spaces)
     .where(
       and(
         eq(spaces.orgId, orgId),
-        sql`${spaces.id} IN (SELECT unnest(${c.sharedSpaceIds}) FROM ${c} WHERE ${c.userId} = ${userId})`,
+        sql`${spaces.id} IN (SELECT ${s.spaceId} FROM ${s} INNER JOIN ${c} ON ${c.id} = ${s.connectionId} WHERE ${c.userId} = ${userId})`,
       ),
     )
     .orderBy(asc(spaces.id))

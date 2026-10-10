@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The durable half of the per-org RFC 8707 audience model: the `oauth_resources`
- * row that makes `${APP_URL}/api/mcp/o/<orgId>` mintable by the AS.
+ * The durable half of the RFC 8707 audience model: the `oauth_resources` rows
+ * that make `${APP_URL}/api/mcp/o/<orgId>` and `…/o/<orgId>/s/<spaceId>`
+ * mintable by the AS.
  *
  * The module owns one row per organization, written on `onOrgCreate`, removed on
  * `onOrgDelete`, and reconciled against the `organizations` roster at `init()`
- * and on the periodic tick. Both directions are asserted here, including the
- * sweep's blast radius: a row outside the per-org prefix is not the module's to
- * delete.
+ * and on the periodic tick. A space's row is written on demand by the AS gate
+ * (`ensureMcpResourceMintable`), kept by the reconcile while the space lives,
+ * and removed with its org or once the space is gone. Both directions are
+ * asserted here, including the sweep's blast radius: a row outside the MCP
+ * prefix is not the module's to delete.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import { oauthResource } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { createTestContext } from "../../../../../test/helpers/auth.ts";
-import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
+import { seedSpace } from "../../../../../test/helpers/seed.ts";
+import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../../../../lib/audiences.ts";
+import { ensureMcpResourceMintable } from "../../oauth-resources.ts";
 import mcpModule from "../../index.ts";
 
 // `oauth_resources` is deliberately outside `truncateAll` — the AS seeds the two
@@ -120,5 +125,95 @@ describe("per-org MCP audience rows", () => {
     expect(live?.id).toBe(liveRowId);
     expect(await identifiers([orphanUri])).toEqual([]);
     expect(await identifiers([UNRELATED_IDENTIFIER])).toEqual([UNRELATED_IDENTIFIER]);
+  });
+});
+
+describe("per-space MCP audience rows", () => {
+  let orgUris: string[] = [];
+
+  async function rowId(identifier: string): Promise<string | undefined> {
+    const [row] = await db
+      .select({ id: oauthResource.id })
+      .from(oauthResource)
+      .where(eq(oauthResource.identifier, identifier));
+    return row?.id;
+  }
+
+  beforeEach(async () => {
+    await truncateAll();
+    orgUris = [];
+  });
+
+  afterEach(async () => {
+    for (const uri of orgUris) {
+      await db.delete(oauthResource).where(like(oauthResource.identifier, `${uri}%`));
+    }
+  });
+
+  it("reconcile keeps a live space's row and sweeps a row whose space is gone", async () => {
+    const ctx = await createTestContext({ orgSlug: "mcpspc1" });
+    orgUris.push(getMcpOrgResourceUri(ctx.orgId));
+    const space = await seedSpace({ orgId: ctx.orgId, name: "Live" });
+    const liveUri = getMcpSpaceResourceUri(ctx.orgId, space.id);
+    const goneUri = getMcpSpaceResourceUri(ctx.orgId, `spc_${crypto.randomUUID()}`);
+    const liveRowId = crypto.randomUUID();
+    await db.insert(oauthResource).values([
+      { id: liveRowId, identifier: liveUri, name: "live space endpoint" },
+      { id: crypto.randomUUID(), identifier: goneUri, name: "deleted space endpoint" },
+    ]);
+
+    await (mcpModule.init as () => Promise<void>)();
+
+    expect(await rowId(liveUri)).toBe(liveRowId);
+    expect(await identifiers([goneUri])).toEqual([]);
+  });
+
+  it("deletes the org row and its space rows on org deletion", async () => {
+    const ctx = await createTestContext({ orgSlug: "mcpspc2" });
+    const orgUri = getMcpOrgResourceUri(ctx.orgId);
+    orgUris.push(orgUri);
+    const space = await seedSpace({ orgId: ctx.orgId, name: "Doomed" });
+    const spaceUri = getMcpSpaceResourceUri(ctx.orgId, space.id);
+    await mcpModule.events!.onOrgCreate!(ctx.orgId, ctx.user.email);
+    await ensureMcpResourceMintable(spaceUri);
+    expect(await identifiers([orgUri, spaceUri])).toEqual(
+      expect.arrayContaining([orgUri, spaceUri]),
+    );
+
+    await mcpModule.events!.onOrgDelete!(ctx.orgId);
+
+    expect(await identifiers([orgUri, spaceUri])).toEqual([]);
+  });
+
+  it("writes a live space's row on demand, once", async () => {
+    const ctx = await createTestContext({ orgSlug: "mcpspc3" });
+    orgUris.push(getMcpOrgResourceUri(ctx.orgId));
+    const space = await seedSpace({ orgId: ctx.orgId, name: "On demand" });
+    const spaceUri = getMcpSpaceResourceUri(ctx.orgId, space.id);
+    expect(await identifiers([spaceUri])).toEqual([]);
+
+    await ensureMcpResourceMintable(spaceUri);
+    const firstId = await rowId(spaceUri);
+    expect(firstId).toBeDefined();
+
+    await ensureMcpResourceMintable(spaceUri);
+    expect(await rowId(spaceUri)).toBe(firstId);
+  });
+
+  it("writes no row for another org's space, a nonexistent space, or an org URI", async () => {
+    const ctx = await createTestContext({ orgSlug: "mcpspc4" });
+    const other = await createTestContext({ orgSlug: "mcpspc5" });
+    const orgUri = getMcpOrgResourceUri(ctx.orgId);
+    orgUris.push(orgUri, getMcpOrgResourceUri(other.orgId));
+    const otherSpace = await seedSpace({ orgId: other.orgId, name: "Elsewhere" });
+    const foreignUri = getMcpSpaceResourceUri(ctx.orgId, otherSpace.id);
+    const missingUri = getMcpSpaceResourceUri(ctx.orgId, `spc_${crypto.randomUUID()}`);
+    await db.delete(oauthResource).where(eq(oauthResource.identifier, orgUri));
+
+    await ensureMcpResourceMintable(foreignUri);
+    await ensureMcpResourceMintable(missingUri);
+    await ensureMcpResourceMintable(orgUri);
+
+    expect(await identifiers([foreignUri, missingUri, orgUri])).toEqual([]);
   });
 });

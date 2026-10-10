@@ -6,13 +6,13 @@
  * Returns integration connections in a single shape, grouped by their
  * "source" (the package they connect to).
  *
- * Scope depends on the caller's AUTHORITY, not just their identity:
- *   - A `user` principal crosses orgs and spaces — the connection list
+ * Scope depends on the caller's principal, not just their identity:
+ *   - A `person` principal crosses orgs and spaces — the connection list
  *     belongs to the person, not to any single org context.
- *   - Every other kind authenticates as its issuer but is bound; its listing
- *     is hard-scoped to that binding at the SQL level so a leaked credential
- *     can never enumerate the issuer's connections elsewhere
- *     ({@link MeConnectionAuthority}).
+ *   - A `delegated` principal authenticates as its issuer but is bound; its
+ *     listing is hard-scoped to that binding at the SQL level so a leaked
+ *     credential can never enumerate the issuer's connections elsewhere
+ *     ({@link ConnectionPrincipal}).
  */
 
 import { db } from "@appstrate/db/client";
@@ -29,6 +29,8 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
+import { displayAccountId } from "../lib/connection-identity.ts";
+import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -41,46 +43,35 @@ import { activeHereSql } from "./package-activation.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 import {
   connectionLocks,
-  connectionReachView,
+  connectionReach,
+  connectionViewOf,
+  loadConnectionShares,
   planConnectionForget,
 } from "./integration-connections.ts";
 import {
+  connectionActions,
   meConnectionAuthorityFilter,
   usableInSpace,
-  type MeConnectionAuthority,
+  type ConnectionCaller,
 } from "./connection-reach.ts";
+import { shareableSpaces } from "./connection-shares.ts";
 import { listSpacesForPrincipal } from "./spaces.ts";
 import { spacePermissions } from "../lib/space-role.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 
-/**
- * The authority boundary of the credential presented on `/api/me/connections`.
- *
- * REQUIRED on every read/delete path of this module so the scoping decision
- * is made explicitly at the callsite and lands in the SQL `WHERE` — a caller
- * cannot "forget" to scope an API key.
- *
- *   - `user_global`: a `user` principal (cookie session, CLI or instance
- *     token, chat loopback). Cross-org, cross-space by design — that is the
- *     dashboard connections-management feature.
- *   - `bound`: any other kind — an API key (org + space), a third-party OAuth
- *     client (org only), an end-user token (org + space). Its blast radius is
- *     its binding, and that binding lands in the WHERE clause. On `main` an
- *     end-user token took the global view.
- */
 /** The same binding over `schedules`, which carry both columns. */
-function scheduleAuthorityFilter(authority: MeConnectionAuthority): SQL | undefined {
-  if (authority.kind !== "bound") return undefined;
+function scheduleAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
+  if (principal.kind !== "delegated") return undefined;
   return and(
-    eq(schedules.orgId, authority.orgId),
-    authority.spaceId ? eq(schedules.spaceId, authority.spaceId) : undefined,
+    eq(schedules.orgId, principal.orgId),
+    principal.spaceId ? eq(schedules.spaceId, principal.spaceId) : undefined,
   );
 }
 
 /** Its space over member pins — a pin of the connection is in the connection's org already. */
-function pinAuthorityFilter(authority: MeConnectionAuthority): SQL | undefined {
-  return authority.kind === "bound" && authority.spaceId
-    ? eq(integrationPins.spaceId, authority.spaceId)
+function pinAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
+  return principal.kind === "delegated" && principal.spaceId
+    ? eq(integrationPins.spaceId, principal.spaceId)
     : undefined;
 }
 
@@ -118,7 +109,7 @@ async function spacesServedToOwner(
       const usable = await db
         .select({ id: integrationConnections.id })
         .from(integrationConnections)
-        .where(usableInSpace(space.id, actor));
+        .where(and(usableInSpace(space.id, actor), actorFilter(actor, integrationConnections)));
       if (usable.length > 0) orgOfSpace.set(space.id, space.orgId);
       for (const { id } of usable) {
         byConnection.set(id, [...(byConnection.get(id) ?? []), space.id]);
@@ -128,11 +119,17 @@ async function spacesServedToOwner(
   return { byConnection, orgOfSpace };
 }
 
-/** Every connection the actor owns, within the authority ({@link meConnectionAuthorityFilter}). */
-async function listAllActorIntegrationConnections(
-  actor: Actor,
-  authority: MeConnectionAuthority,
+/**
+ * Every connection the caller owns, within its credential's binding, grouped by integration; the
+ * connections of a group keep the order of the query. The route derives the principal from the
+ * credential, so a delegated credential is scoped to its own binding while a `person` principal
+ * keeps the cross-org dashboard view. Groups sorted by display name.
+ */
+export async function listMeConnections(
+  caller: ConnectionCaller,
 ): Promise<MeConnectionSourceGroup[]> {
+  const principal = caller.principal;
+  const actor = principal.actor;
   const rows = await db
     .select({
       connectionId: integrationConnections.id,
@@ -140,9 +137,10 @@ async function listAllActorIntegrationConnections(
       authKey: integrationConnections.authKey,
       accountId: integrationConnections.accountId,
       orgId: integrationConnections.orgId,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
       spaceId: integrationConnections.spaceId,
       originSpaceId: integrationConnections.originSpaceId,
-      sharedSpaceIds: integrationConnections.sharedSpaceIds,
       scopesGranted: integrationConnections.scopesGranted,
       needsReconnection: integrationConnections.needsReconnection,
       expiresAt: integrationConnections.expiresAt,
@@ -151,7 +149,7 @@ async function listAllActorIntegrationConnections(
       createdAt: integrationConnections.createdAt,
     })
     .from(integrationConnections)
-    .where(and(actorFilter(actor, integrationConnections), meConnectionAuthorityFilter(authority)));
+    .where(and(actorFilter(actor, integrationConnections), meConnectionAuthorityFilter(principal)));
 
   if (rows.length === 0) return [];
 
@@ -180,15 +178,28 @@ async function listAllActorIntegrationConnections(
     }
   }
 
-  // A credential bound to a space sees only that space of a row's reach.
-  const within = authority.kind === "bound" ? (authority.spaceId ?? null) : null;
-  const views = new Map(rows.map((r) => [r.connectionId, connectionReachView(r, within)]));
+  const shares = await loadConnectionShares(
+    db,
+    rows.map((r) => r.connectionId),
+  );
+  const reaches = new Map(
+    rows.map((r) => [
+      r.connectionId,
+      connectionReach(r, connectionViewOf(principal, r, null, shares.get(r.connectionId) ?? [])),
+    ]),
+  );
+  // The shares each row's caller sees (all of them, or its bound space's).
+  const sharesOf = (connectionId: string) => reaches.get(connectionId)!.shared_space_ids ?? [];
   // The spaces each row reaches by name: its home (its space, else its origin) and its shares.
   const reachedSpaces = (r: (typeof rows)[number]) => {
-    const view = views.get(r.connectionId)!;
-    const home = r.spaceId ?? view.origin_space_id;
-    return [...new Set([...(home ? [home] : []), ...view.shared_space_ids])];
+    const home = r.spaceId ?? reaches.get(r.connectionId)!.origin_space_id ?? null;
+    return [...new Set([...(home ? [home] : []), ...sharesOf(r.connectionId)])];
   };
+  const shareable = await shareableSpaces(
+    caller,
+    rows.map((r) => ({ ...r, id: r.connectionId })),
+    orgRoles,
+  );
   const uniqueSpaceIds = [...new Set(rows.flatMap(reachedSpaces))];
   const spaceRows =
     uniqueSpaceIds.length === 0
@@ -220,17 +231,17 @@ async function listAllActorIntegrationConnections(
   }
 
   // Where a row serves agents: for the owner, every space they run in that it is usable in; for a
-  // bound credential, its home and shares within the binding. Share targets count either way.
+  // delegated credential, its home and shares within the binding. Share targets count either way.
   const served =
-    authority.kind === "user_global"
+    principal.kind === "person"
       ? await spacesServedToOwner(actor, orgRoles)
       : { byConnection: new Map<string, string[]>(), orgOfSpace: new Map<string, string>() };
   const servingSpaces = (r: (typeof rows)[number]) =>
-    authority.kind === "user_global"
+    principal.kind === "person"
       ? [
           ...new Set([
             ...(served.byConnection.get(r.connectionId) ?? []),
-            ...views.get(r.connectionId)!.shared_space_ids,
+            ...sharesOf(r.connectionId),
           ]),
         ]
       : reachedSpaces(r);
@@ -311,7 +322,7 @@ async function listAllActorIntegrationConnections(
       groups.set(row.packageId, group);
     }
 
-    const view = views.get(row.connectionId)!;
+    const reach = reaches.get(row.connectionId)!;
     const claims = asRecord(row.identityClaims);
     const identity =
       typeof claims.account_email === "string"
@@ -320,7 +331,7 @@ async function listAllActorIntegrationConnections(
           ? claims.email
           : typeof claims.sub === "string"
             ? claims.sub
-            : row.accountId;
+            : (displayAccountId(row.accountId) ?? row.label);
 
     const entry: MeConnectionEntry = {
       connection_id: row.connectionId,
@@ -332,34 +343,21 @@ async function listAllActorIntegrationConnections(
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       identity,
       auth_key: row.authKey,
-      scope: view.scope,
-      shared_spaces: view.shared_space_ids.flatMap((id) => spaceRef(id) ?? []),
+      scope: reach.scope,
+      shared_spaces: sharesOf(row.connectionId).flatMap((id) => spaceRef(id) ?? []),
+      allowed_actions: connectionActions(row, caller, false),
+      shareable_spaces: shareable.get(row.connectionId) ?? [],
       locked_by: locks.get(row.connectionId) ?? null,
       reused_by_agents: reusingAgents(row),
       org: { id: row.orgId, name: orgName },
       space: spaceRef(row.spaceId),
-      origin_space: spaceRef(view.origin_space_id),
+      origin_space: spaceRef(reach.origin_space_id ?? null),
     };
     group.connections.push(entry);
     group.total_connections += 1;
   }
 
-  return [...groups.values()];
-}
-
-/**
- * Unified user-scope listing of integration connection groups, sorted
- * alphabetically by display name. `authority` is required — the route derives
- * it from the principal's kind, so a bound credential is scoped to its own
- * binding while a `user` principal keeps the cross-org dashboard view.
- */
-export async function listMeConnections(
-  actor: Actor,
-  authority: MeConnectionAuthority,
-): Promise<MeConnectionSourceGroup[]> {
-  const integrations = await listAllActorIntegrationConnections(actor, authority);
-  integrations.sort((a, b) => a.display_name.localeCompare(b.display_name));
-  return integrations;
+  return [...groups.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
 }
 
 /** One of the caller's member pins that deleting a connection would shrink. */
@@ -408,10 +406,10 @@ export function noConnectionDeleteImpact(): ConnectionDeleteImpact {
  * space), though the delete rewrites the others too. A pinned connection is listed: its delete is a 409.
  */
 export async function getConnectionDeleteImpact(
-  actor: Actor,
+  principal: ConnectionPrincipal,
   connectionId: string,
-  authority: MeConnectionAuthority,
 ): Promise<ConnectionDeleteImpact> {
+  const actor = principal.actor;
   const [row] = await db
     .select({ id: integrationConnections.id })
     .from(integrationConnections)
@@ -419,7 +417,7 @@ export async function getConnectionDeleteImpact(
       and(
         eq(integrationConnections.id, connectionId),
         actorFilter(actor, integrationConnections),
-        meConnectionAuthorityFilter(authority),
+        meConnectionAuthorityFilter(principal),
       ),
     )
     .limit(1);
@@ -428,8 +426,8 @@ export async function getConnectionDeleteImpact(
     db,
     { id: row.id, owner: actor },
     {
-      scheduleFilter: scheduleAuthorityFilter(authority),
-      pinFilter: pinAuthorityFilter(authority),
+      scheduleFilter: scheduleAuthorityFilter(principal),
+      pinFilter: pinAuthorityFilter(principal),
     },
   );
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];

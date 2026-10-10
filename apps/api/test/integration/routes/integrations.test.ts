@@ -22,10 +22,12 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedUnreachableSpace } from "../../helpers/seed.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
+  integrationConnectionShares,
   integrationConnections,
   integrationOauthClients,
   integrationPins,
@@ -1656,10 +1658,10 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, shared ? [ctx.defaultSpaceId] : []);
     return row!.id;
   }
 
@@ -1797,7 +1799,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
   });
 });
 
-describe("PATCH /api/integrations/:packageId/connections/:connectionId (share targets)", () => {
+describe("PATCH/PUT/DELETE /api/integrations/:packageId/connections/:connectionId (shares)", () => {
   let ctx: TestContext;
   let spaceB: string;
 
@@ -1825,10 +1827,10 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
         originSpaceId: opts.spaceId ? null : ctx.defaultSpaceId,
         userId: opts.userId,
         credentialsEncrypted: "x",
-        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
     return row!.id;
   }
 
@@ -1840,17 +1842,33 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
     });
   }
 
+  function share(
+    method: "PUT" | "DELETE",
+    headers: Record<string, string>,
+    connectionId: string,
+    spaceId: string,
+  ) {
+    return app.request(
+      `/api/integrations/@myorg/gmail/connections/${connectionId}/shares/${spaceId}`,
+      { method, headers },
+    );
+  }
+
   async function sharesOf(connectionId: string): Promise<string[]> {
-    const [row] = await db
-      .select({ shared: integrationConnections.sharedSpaceIds })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connectionId));
-    return row!.shared.toSorted();
+    const rows = await db
+      .select({ spaceId: integrationConnectionShares.spaceId })
+      .from(integrationConnectionShares)
+      .where(eq(integrationConnectionShares.connectionId, connectionId));
+    return rows.map((row) => row.spaceId).toSorted();
   }
 
   async function shareAudits(connectionId: string) {
     return db
-      .select({ action: auditEvents.action, after: auditEvents.after })
+      .select({
+        action: auditEvents.action,
+        spaceId: auditEvents.spaceId,
+        after: auditEvents.after,
+      })
       .from(auditEvents)
       .where(
         and(
@@ -1861,37 +1879,64 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
       .orderBy(asc(auditEvents.id));
   }
 
-  it("lets the owner replace the whole target set, one audit row per space", async () => {
+  it("the owner's PATCH renames and answers the owner's view of the shares", async () => {
+    const id = await seedConn({ userId: ctx.user.id, sharedSpaceIds: [ctx.defaultSpaceId] });
+
+    const res = await patch(authHeaders(ctx), id, { label: "Renamed" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      scope: string;
+      label: string;
+      shared_here: boolean;
+      shared_space_ids: string[];
+    };
+    expect(body).toMatchObject({ scope: "org", label: "Renamed", shared_here: true });
+    expect(body.shared_space_ids).toEqual([ctx.defaultSpaceId]);
+  });
+
+  it("refuses shared_space_ids on the PATCH: a share is its own sub-resource (400)", async () => {
     const id = await seedConn({ userId: ctx.user.id });
 
-    const res = await patch(authHeaders(ctx), id, {
-      shared_space_ids: [ctx.defaultSpaceId, spaceB],
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { scope: string; shared_space_ids: string[] };
-    expect(body.scope).toBe("org");
-    expect(body.shared_space_ids.toSorted()).toEqual([ctx.defaultSpaceId, spaceB].toSorted());
+    const res = await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("validation_failed");
+    expect(await sharesOf(id)).toEqual([]);
+  });
 
-    expect((await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] })).status).toBe(200);
+  it("PUT shares into a space with 204, audited in that space; a repeat is idempotent", async () => {
+    const id = await seedConn({ userId: ctx.user.id });
+
+    expect((await share("PUT", authHeaders(ctx), id, spaceB)).status).toBe(204);
     expect(await sharesOf(id)).toEqual([spaceB]);
+    expect((await share("PUT", authHeaders(ctx), id, spaceB)).status).toBe(204);
 
     const audits = await shareAudits(id);
-    expect(audits.filter((a) => a.action === "integration.connection.share_added")).toHaveLength(2);
-    expect(audits.filter((a) => a.action === "integration.connection.share_removed")).toEqual([
-      { action: "integration.connection.share_removed", after: { spaceId: ctx.defaultSpaceId } },
+    expect(audits).toEqual([
+      {
+        action: "integration.connection.share_added",
+        spaceId: spaceB,
+        after: { spaceId: spaceB },
+      },
     ]);
-    // Each recorded in the space it opens or closes, not the one the edit was made from.
-    const recorded = await db
-      .select({
-        action: auditEvents.action,
-        spaceId: auditEvents.spaceId,
-        after: auditEvents.after,
-      })
-      .from(auditEvents)
-      .where(eq(auditEvents.resourceId, id));
-    for (const row of recorded.filter((a) => a.action.includes(".share_"))) {
-      expect(row.spaceId).toBe((row.after as { spaceId: string }).spaceId);
-    }
+  });
+
+  it("DELETE withdraws with 204, audited in the space it closes", async () => {
+    const id = await seedConn({
+      userId: ctx.user.id,
+      sharedSpaceIds: [ctx.defaultSpaceId, spaceB],
+    });
+
+    expect((await share("DELETE", authHeaders(ctx), id, ctx.defaultSpaceId)).status).toBe(204);
+    expect(await sharesOf(id)).toEqual([spaceB]);
+    expect((await share("DELETE", authHeaders(ctx), id, ctx.defaultSpaceId)).status).toBe(204);
+
+    expect(await shareAudits(id)).toEqual([
+      {
+        action: "integration.connection.share_removed",
+        spaceId: ctx.defaultSpaceId,
+        after: { spaceId: ctx.defaultSpaceId },
+      },
+    ]);
   });
 
   it("lets a governor withdraw a member's connection from this space only", async () => {
@@ -1901,20 +1946,17 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
       sharedSpaceIds: [ctx.defaultSpaceId, spaceB],
     });
 
-    const res = await patch(authHeaders(ctx), id, { shared_space_ids: [] });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { shared_space_ids: string[]; identity_claims: unknown };
-    // The governor reads the projection: no longer shared here, the rest is not theirs to see.
-    expect(body.shared_space_ids).toEqual([]);
-    expect(body.identity_claims).toBeNull();
+    // Another space's share is not the governor's to withdraw, and the row stays reachable here.
+    expect((await share("DELETE", authHeaders(ctx), id, spaceB)).status).toBe(403);
+    expect((await share("DELETE", authHeaders(ctx), id, ctx.defaultSpaceId)).status).toBe(204);
     expect(await sharesOf(id)).toEqual([spaceB]);
   });
 
-  it("refuses a governor anything but withdrawing this space (403)", async () => {
+  it("refuses a governor sharing a colleague's connection (403)", async () => {
     const member = await memberContext(ctx, "member");
     const id = await seedConn({ userId: member.user.id, sharedSpaceIds: [ctx.defaultSpaceId] });
 
-    expect((await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] })).status).toBe(403);
+    expect((await share("PUT", authHeaders(ctx), id, spaceB)).status).toBe(403);
     expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId]);
   });
 
@@ -1936,12 +1978,10 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
     const orgRow = await seedConn({ userId: ctx.user.id });
     const spaceRow = await seedConn({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
 
-    const outside = await patch(authHeaders(ctx), orgRow, {
-      shared_space_ids: [otherOrg.defaultSpaceId],
-    });
+    const outside = await share("PUT", authHeaders(ctx), orgRow, otherOrg.defaultSpaceId);
     expect(outside.status).toBe(400);
     expect(((await outside.json()) as { code: string }).code).toBe("invalid_share_target");
-    const foreign = await patch(authHeaders(ctx), spaceRow, { shared_space_ids: [spaceB] });
+    const foreign = await share("PUT", authHeaders(ctx), spaceRow, spaceB);
     expect(foreign.status).toBe(400);
     expect(await sharesOf(orgRow)).toEqual([]);
     expect(await sharesOf(spaceRow)).toEqual([]);
@@ -1951,12 +1991,12 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
     const id = await seedConn({ userId: ctx.user.id });
     const unreachable = await seedUnreachableSpace(ctx.orgId);
 
-    const res = await patch(authHeaders(ctx), id, { shared_space_ids: [unreachable] });
+    const res = await share("PUT", authHeaders(ctx), id, unreachable);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("connection_owner_without_access");
   });
 
-  it("refuses removing a space whose admin pin names the connection, not another (409)", async () => {
+  it("refuses withdrawing a space whose admin pin names the connection, not another (409)", async () => {
     const id = await seedConn({
       userId: ctx.user.id,
       sharedSpaceIds: [ctx.defaultSpaceId, spaceB],
@@ -1970,26 +2010,78 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId (share ta
       connectionIds: [id],
     });
 
-    const locked = await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] });
+    const locked = await share("DELETE", authHeaders(ctx), id, ctx.defaultSpaceId);
     expect(locked.status).toBe(409);
     expect(((await locked.json()) as { code: string }).code).toBe("connection_pinned");
-    expect(
-      (await patch(authHeaders(ctx), id, { shared_space_ids: [ctx.defaultSpaceId] })).status,
-    ).toBe(200);
+    expect((await share("DELETE", authHeaders(ctx), id, spaceB)).status).toBe(204);
     expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId]);
   });
 
   it("answers 404 for a connection that does not reach this space", async () => {
     const id = await seedConn({ userId: ctx.user.id, spaceId: spaceB });
     expect((await patch(authHeaders(ctx), id, { label: "x" })).status).toBe(404);
+    expect((await share("PUT", authHeaders(ctx), id, ctx.defaultSpaceId)).status).toBe(404);
   });
 
-  it("refuses an empty body and a repeated space id (400)", async () => {
+  it("refuses an empty PATCH body (400)", async () => {
     const id = await seedConn({ userId: ctx.user.id });
     expect((await patch(authHeaders(ctx), id, {})).status).toBe(400);
-    expect((await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB, spaceB] })).status).toBe(
-      400,
+  });
+
+  it("promoting a space client that minted a connection audits one scope_widened from that space", async () => {
+    const [client] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        integrationId: "@myorg/gmail",
+        authKey: "api",
+        clientId: "byo-app",
+        clientSecretEncrypted: "x",
+      })
+      .returning({ id: integrationOauthClients.id });
+    const [minted] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@myorg/gmail",
+        authKey: "api",
+        accountId: "acct-minted",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        originSpaceId: null,
+        userId: ctx.user.id,
+        clientRef: client!.id,
+        credentialsEncrypted: "x",
+        label: "Minted",
+      })
+      .returning({ id: integrationConnections.id });
+
+    const res = await app.request(
+      `/api/integrations/@myorg/gmail/oauth-clients/${client!.id}/promote`,
+      { method: "POST", headers: authHeaders(ctx) },
     );
+    expect(res.status).toBe(200);
+
+    const widened = await db
+      .select({
+        before: auditEvents.before,
+        after: auditEvents.after,
+        spaceId: auditEvents.spaceId,
+      })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.resourceId, minted!.id),
+          eq(auditEvents.action, "integration.connection.scope_widened"),
+        ),
+      );
+    expect(widened).toEqual([
+      {
+        before: { spaceId: ctx.defaultSpaceId, label: "Minted" },
+        after: { originSpaceId: ctx.defaultSpaceId, label: "Minted" },
+        spaceId: ctx.defaultSpaceId,
+      },
+    ]);
   });
 });
 

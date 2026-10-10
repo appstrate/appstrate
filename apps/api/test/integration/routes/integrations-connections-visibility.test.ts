@@ -30,6 +30,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   integrationConnections,
@@ -56,8 +57,11 @@ interface ConnectionDTO {
   locked_by?: "admin_pin" | "org_default" | null;
   identity_claims: Record<string, unknown> | null;
   scope: "org" | "space";
-  shared_space_ids: string[];
-  origin_space_id: string | null;
+  shared_here: boolean;
+  /** Owner's own session only. */
+  shared_space_ids?: string[];
+  /** Owner's own session only. */
+  origin_space_id?: string | null;
 }
 
 describe("GET /api/integrations/:packageId/connections — own ∪ shared into the space", () => {
@@ -98,10 +102,10 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         identityClaims: { email: `${opts.accountId}@example.com`, sub: `sub-${opts.accountId}` },
-        sharedSpaceIds: opts.sharedSpaceIds ?? (opts.shared ? [ctx.defaultSpaceId] : []),
         needsReconnection: opts.needsReconnection ?? false,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? (opts.shared ? [ctx.defaultSpaceId] : []));
     return row!.id;
   }
 
@@ -357,14 +361,15 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     });
 
     const asOwner = (await listAs(otherHeaders())).find((c) => c.id === orgRow)!;
-    expect(asOwner.shared_space_ids.toSorted()).toEqual(
+    expect(asOwner.shared_space_ids!.toSorted()).toEqual(
       [elsewhere.id, ctx.defaultSpaceId].toSorted(),
     );
     expect(asOwner.origin_space_id).toBe(elsewhere.id);
 
     const asOther = (await listAs(authHeaders(ctx))).find((c) => c.id === orgRow)!;
-    expect(asOther.shared_space_ids).toEqual([ctx.defaultSpaceId]);
-    expect(asOther.origin_space_id).toBeNull();
+    expect(asOther).not.toHaveProperty("shared_space_ids");
+    expect(asOther).not.toHaveProperty("origin_space_id");
+    expect(asOther.shared_here).toBe(true);
   });
 
   it("projects the owner's own row to this space for a delegated credential", async () => {
@@ -386,7 +391,12 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
     const viaKey = (await listAs({ Authorization: `Bearer ${key.rawKey}` })).find(
       (c) => c.id === mine,
     )!;
-    expect(viaKey).toMatchObject({ shared_space_ids: [ctx.defaultSpaceId], origin_space_id: null });
+    // A delegated credential sees the row projected onto its space: its shares there, no origin.
+    expect(viaKey).toMatchObject({
+      shared_here: true,
+      shared_space_ids: [ctx.defaultSpaceId],
+      origin_space_id: null,
+    });
     expect(viaKey.identity_claims).not.toBeNull();
     const viaSession = (await listAs(authHeaders(ctx))).find((c) => c.id === mine)!;
     expect(viaSession.origin_space_id).toBe(elsewhere.id);

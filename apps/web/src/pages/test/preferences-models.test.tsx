@@ -42,13 +42,16 @@ function credential(over: Partial<ModelProviderCredentialInfo>): ModelProviderCr
     owner_id: null,
     owner_name: null,
     created_by: "usr_admin",
+    allowed_actions: [],
+    bindable: false,
+    needs_reconnection: false,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...over,
   };
 }
 
-const ORG_KEY = credential({});
+const ORG_KEY = credential({ bindable: true });
 const MY_KEY = credential({
   id: "cred_mine_key",
   label: "Ma clé perso",
@@ -56,6 +59,7 @@ const MY_KEY = credential({
   owner_id: ME,
   owner_name: "Moi",
   created_by: ME,
+  allowed_actions: ["edit", "delete", "test"],
 });
 const MY_SUBSCRIPTION = credential({
   id: "cred_mine_sub",
@@ -68,6 +72,7 @@ const MY_SUBSCRIPTION = credential({
   owner_name: "Moi",
   created_by: ME,
   needs_reconnection: true,
+  allowed_actions: ["edit", "delete", "reconnect"],
 });
 const ALICE_KEY = credential({
   id: "cred_alice",
@@ -78,8 +83,11 @@ const ALICE_KEY = credential({
   created_by: "usr_alice",
 });
 
-/** Render the page for a caller holding exactly `permissions`, with `credentials` in the cache. */
-function renderFor(permissions: string[]): string {
+/**
+ * Render the page for a caller holding exactly `permissions`, with `credentials` in the
+ * cache, and the org settings loaded unless `settingsLoaded` is false.
+ */
+function renderFor(permissions: string[], settingsLoaded = true): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   queryClient.setQueryData(
     ["orgs"],
@@ -98,6 +106,12 @@ function renderFor(permissions: string[]): string {
     ["get", "/api/model-provider-credentials", { params: { header: { "X-Org-Id": ORG_ID } } }],
     { data: [ORG_KEY, MY_KEY, MY_SUBSCRIPTION, ALICE_KEY] },
   );
+  if (settingsLoaded) {
+    queryClient.setQueryData(
+      ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
+      { personal_model_credentials: true },
+    );
+  }
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
     id: ORG_ID,
@@ -152,6 +166,15 @@ describe("the Preferences models page, for a member who holds connect", () => {
 
   it("offers the add button", () => {
     expect(html).toContain(settingsFr["credentials.add"]);
+  });
+});
+
+describe("the Preferences models page, before the org settings load", () => {
+  const html = renderFor(["model-provider-credentials:connect"], false);
+
+  it("withholds the add button and claims no policy", () => {
+    expect(html).not.toContain(settingsFr["credentials.add"]);
+    expect(html).not.toContain(settingsFr["modelCredentials.policyDisabled"]);
   });
 });
 

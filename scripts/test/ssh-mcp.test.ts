@@ -57,6 +57,11 @@ const {
   TOOLS,
   runProcess,
   _resetForTests,
+  createDispatcher,
+  negotiateProtocolVersion,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  SERVER_VERSION,
+  PROGRESS_INTERVAL_MS,
 } = await import(join(SOURCES, serverDir, "server/index.ts"));
 const { parseConnectResponse, proxyUrlFromEnv } = await import(
   join(SOURCES, serverDir, "server/proxy-connect.ts")
@@ -105,6 +110,7 @@ type Answer = {
   stderr?: string;
   code?: number | null;
   timedOut?: boolean;
+  cancelled?: boolean;
   stdoutTruncated?: boolean;
   stderrTruncated?: boolean;
 };
@@ -269,10 +275,41 @@ afterEach(async () => {
 // ───────────────────────────── protocol ──────────────────────────────
 
 describe("handleRequest — protocol surface without any configuration", () => {
-  it("answers initialize", async () => {
+  it("answers initialize with the requested version when supported, the newest otherwise", async () => {
     restoreEnv = withEnv({});
-    const res = await handleRequest({ jsonrpc: "2.0", id: 1, method: "initialize" });
-    expect(res?.result).toMatchObject({ protocolVersion: "2024-11-05" });
+    const init = (protocolVersion?: string) =>
+      handleRequest({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: protocolVersion === undefined ? {} : { protocolVersion },
+      });
+    for (const v of ["2025-11-25", "2025-06-18", "2024-11-05"]) {
+      expect((await init(v))?.result).toMatchObject({ protocolVersion: v });
+    }
+    // 2025-03-26 requires JSON-RPC batches, which this server does not read.
+    expect((await init("2025-03-26"))?.result).toMatchObject({ protocolVersion: "2025-11-25" });
+    expect((await init("1999-01-01"))?.result).toMatchObject({ protocolVersion: "2025-11-25" });
+    const bare = await init();
+    expect(bare?.result).toMatchObject({ protocolVersion: "2025-11-25" });
+    expect((bare?.result as { serverInfo: unknown }).serverInfo).toEqual({
+      name: "appstrate-ssh-mcp",
+      version: SERVER_VERSION,
+    });
+    expect(SUPPORTED_PROTOCOL_VERSIONS[0]).toBe("2025-11-25");
+    expect(negotiateProtocolVersion(42)).toBe("2025-11-25");
+  });
+
+  it("carries the manifest's version", async () => {
+    const manifest = (await Bun.file(join(SOURCES, serverDir, "manifest.json")).json()) as {
+      version: string;
+    };
+    expect(SERVER_VERSION).toBe(manifest.version);
+  });
+
+  it("answers ping with an empty result", async () => {
+    const res = await handleRequest({ jsonrpc: "2.0", id: 7, method: "ping" });
+    expect(res).toEqual({ jsonrpc: "2.0", id: 7, result: {} });
   });
 
   // The conformance gate spawns the server with an env allowlist that carries
@@ -377,6 +414,304 @@ describe("handleRequest — protocol surface without any configuration", () => {
     expect(await handleRequest({ jsonrpc: "2.0", method: "notifications/x" })).toBeNull();
     const res = await handleRequest({ jsonrpc: "2.0", id: 5, method: "nope" });
     expect(res?.error?.code).toBe(-32601);
+  });
+});
+
+// ───────────────────────────── dispatcher ────────────────────────────
+
+// The dispatcher reads lines without waiting on a tool: calls queue behind one
+// another, while queries, progress and cancellations go on around them. The
+// 20 ms progress interval stands in for the real 15 s one.
+describe("dispatcher: queue, cancellation, progress", () => {
+  type Msg = any;
+  type Run = (argv: string[], opts: { signal?: AbortSignal }) => Promise<Answer>;
+
+  /** Records each non-master invocation and answers through `answer`. */
+  function recordingRunner(
+    answer: (argv: string[], opts: { signal?: AbortSignal }, n: number) => Promise<Answer>,
+  ) {
+    const calls: Array<{ argv: string[]; signal?: AbortSignal }> = [];
+    const run: Run = async (argv, opts) => {
+      if (isMasterCheck(argv)) return { stdout: "", stderr: "", code: 0 };
+      calls.push({ argv, signal: opts.signal });
+      const a = await answer(argv, opts, calls.length - 1);
+      return {
+        ...a,
+        stdout: a.stdout ?? "",
+        stderr: a.stderr ?? "",
+        code: a.code === undefined ? 0 : a.code,
+      };
+    };
+    return { run, calls };
+  }
+
+  function harness(run: Run, onWrite: (m: Msg) => void = () => {}) {
+    const out: Msg[] = [];
+    const d = createDispatcher({
+      write: (m: Msg) => {
+        out.push(m);
+        onWrite(m);
+      },
+      deps: { run, sessionDir: scratch },
+      progressIntervalMs: 20,
+    });
+    const send = (obj: Record<string, unknown>) => d.acceptLine(JSON.stringify(obj));
+    return { out, d, send };
+  }
+
+  const execCall = (id: number, command: string, meta?: Record<string, unknown>) => ({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: {
+      name: "ssh_exec",
+      arguments: { command, timeout_seconds: 90 },
+      ...(meta ? { _meta: meta } : {}),
+    },
+  });
+  const cancel = (requestId: number) => ({
+    jsonrpc: "2.0",
+    method: "notifications/cancelled",
+    params: { requestId },
+  });
+  const progressFor = (out: Msg[], token: string) =>
+    out.filter((m) => m.method === "notifications/progress" && m.params.progressToken === token);
+  const responseIndex = (out: Msg[], id: number) =>
+    out.findIndex((m) => m.id === id && m.method === undefined);
+  const payloadOf = (res: Msg) => JSON.parse(res.result.content[0].text);
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+
+  it("reports progress every 15 s and says so in ssh_exec's description", () => {
+    expect(PROGRESS_INTERVAL_MS).toBe(15_000);
+    const exec = (TOOLS as Array<{ name: string; description: string }>).find(
+      (t) => t.name === "ssh_exec",
+    )!;
+    expect(exec.description).toContain("every 15 s");
+    expect(exec.description).toContain("cancelled before then stops the command");
+  });
+
+  // A client gives up on a request that is silent past its timeout; progress
+  // is what keeps a 90 s ssh_exec alive past a 60 s one.
+  it("keeps a long call alive past a client's idle timeout by reporting progress", async () => {
+    restoreEnv = withEnv(ENV);
+    const fiveTicks = deferred();
+    const { run } = recordingRunner(async (argv) => {
+      await fiveTicks.promise;
+      return { stdout: `${markerOf(argv)}77\nok`, code: 0 };
+    });
+    let expired = false;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    // Five progress intervals: generous against a loaded event loop.
+    const armIdleTimeout = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => (expired = true), 100);
+    };
+    const { out, d, send } = harness(run, (m) => {
+      if (m.method === "notifications/progress" && m.params.progressToken === "p1") {
+        armIdleTimeout();
+        if (m.params.progress === 5) fiveTicks.resolve();
+      }
+      if (m.id === 1 && m.method === undefined) clearTimeout(idleTimer);
+    });
+    armIdleTimeout();
+    send(execCall(1, "long", { progressToken: "p1" }));
+    await d.idle();
+    clearTimeout(idleTimer);
+
+    expect(expired).toBe(false);
+    const at = responseIndex(out, 1);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(payloadOf(out[at])).toMatchObject({ exit_code: 0 });
+    const progress = progressFor(out, "p1");
+    expect(progress.length).toBeGreaterThanOrEqual(5);
+    expect(progress.map((m) => m.params.progress)).toEqual(progress.map((_, i) => i + 1));
+    expect(progress.every((m) => !("total" in m.params))).toBe(true);
+    expect(progress.every((m) => out.indexOf(m) < at)).toBe(true);
+  });
+
+  it("stops the remote command of a cancelled call and sends no response", async () => {
+    restoreEnv = withEnv(ENV);
+    const started = deferred();
+    const { run, calls } = recordingRunner(async (argv, opts, n) => {
+      if (n > 0) return { code: 0 };
+      started.resolve();
+      await new Promise<void>((resolve) => {
+        if (opts.signal?.aborted) resolve();
+        opts.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { stdout: `${markerOf(argv)}4242\n`, code: null, cancelled: true };
+    });
+    const { out, d, send } = harness(run);
+    send(execCall(1, "sleep 600", { progressToken: "p1" }));
+    await started.promise;
+    send(cancel(1));
+    const ticksAtCancel = progressFor(out, "p1").length;
+    await d.idle();
+
+    expect(out.filter((m) => m.id === 1)).toEqual([]);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.argv.at(-1)).toBe(stopScript(4242));
+    await Bun.sleep(100);
+    expect(progressFor(out, "p1").length).toBe(ticksAtCancel);
+  });
+
+  it("never runs a call cancelled while it waits its turn, and never answers it", async () => {
+    restoreEnv = withEnv(ENV);
+    const release = deferred();
+    const { run, calls } = recordingRunner(async () => {
+      await release.promise;
+      return { code: 0 };
+    });
+    const { out, d, send } = harness(run);
+    send(execCall(1, "first"));
+    send(execCall(2, "second"));
+    send(cancel(2));
+    release.resolve();
+    await d.idle();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.argv.at(-1)!.endsWith("\nfirst")).toBe(true);
+    expect(responseIndex(out, 1)).toBeGreaterThanOrEqual(0);
+    expect(out.filter((m) => m.id === 2)).toEqual([]);
+  });
+
+  it("answers queries while a call runs", async () => {
+    restoreEnv = withEnv(ENV);
+    const answered = deferred();
+    const { run } = recordingRunner(async () => {
+      await answered.promise;
+      return { code: 0 };
+    });
+    const { out, d, send } = harness(run, () => {
+      if (responseIndex(out, 9) >= 0 && responseIndex(out, 10) >= 0) answered.resolve();
+    });
+    send(execCall(1, "slow"));
+    send({ jsonrpc: "2.0", id: 9, method: "tools/list" });
+    send({ jsonrpc: "2.0", id: 10, method: "ping" });
+    await d.idle();
+
+    const call = responseIndex(out, 1);
+    expect(call).toBeGreaterThanOrEqual(0);
+    expect(responseIndex(out, 9)).toBeGreaterThanOrEqual(0);
+    expect(responseIndex(out, 9)).toBeLessThan(call);
+    expect(responseIndex(out, 10)).toBeGreaterThanOrEqual(0);
+    expect(responseIndex(out, 10)).toBeLessThan(call);
+  });
+
+  it("runs calls one at a time, in order", async () => {
+    restoreEnv = withEnv(ENV);
+    const spans: Array<{ start: number; end: number }> = [];
+    const { run } = recordingRunner(async () => {
+      const start = performance.now();
+      await Bun.sleep(50);
+      spans.push({ start, end: performance.now() });
+      return { code: 0 };
+    });
+    const { out, d, send } = harness(run);
+    send(execCall(1, "a"));
+    send(execCall(2, "b"));
+    await d.idle();
+
+    expect(spans).toHaveLength(2);
+    expect(spans[1]!.start).toBeGreaterThanOrEqual(spans[0]!.end);
+    expect(responseIndex(out, 1)).toBeLessThan(responseIndex(out, 2));
+  });
+
+  it("refuses a second call reusing an id still in flight", async () => {
+    restoreEnv = withEnv(ENV);
+    const { run, calls } = recordingRunner(async () => ({ code: 0 }));
+    const { out, d, send } = harness(run);
+    send(execCall(1, "a"));
+    send(execCall(1, "b"));
+    await d.idle();
+
+    expect(out.find((m) => m.id === 1 && m.error)?.error.code).toBe(-32600);
+    expect(out.filter((m) => m.id === 1 && m.result)).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+  });
+
+  // The pid marker is the target's first line; a cancel that beats it waits for it.
+  it("stops a command cancelled before the target reported its pid, once it does", async () => {
+    restoreEnv = withEnv(ENV);
+    const stops: string[] = [];
+    const started = deferred();
+    const run: Run = async (argv, opts) => {
+      if (isMasterCheck(argv)) return { code: 0 };
+      const marker = markerOf(argv);
+      if (!marker) {
+        stops.push(argv.at(-1)!);
+        return { code: 0 };
+      }
+      started.resolve();
+      return runProcess(
+        [
+          "bun",
+          "-e",
+          'await Bun.sleep(300); console.log(process.argv.at(-1) + "4242"); await Bun.sleep(30_000)',
+          marker,
+        ],
+        opts,
+      );
+    };
+    const { out, d, send } = harness(run);
+    const t0 = performance.now();
+    send(execCall(1, "sleep 600"));
+    await started.promise;
+    send(cancel(1));
+    await d.idle();
+
+    expect(performance.now() - t0).toBeLessThan(5_000);
+    expect(stops).toEqual([stopScript(4242)]);
+    expect(out.filter((m) => m.id === 1)).toEqual([]);
+  });
+
+  it("holds an abort until stdout shows the awaited text, at most the grace", async () => {
+    const res = await runProcess(["sh", "-c", "sleep 0.3; echo ready; sleep 5"], {
+      signal: AbortSignal.abort(),
+      abortAfterStdout: { text: "ready", ms: 4_000 },
+    });
+    expect(res).toMatchObject({ code: null, cancelled: true, stdout: "ready\n" });
+
+    const started = performance.now();
+    const silent = await runProcess(["sh", "-c", "sleep 5"], {
+      signal: AbortSignal.abort(),
+      abortAfterStdout: { text: "ready", ms: 200 },
+    });
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(silent).toMatchObject({ code: null, cancelled: true });
+  });
+
+  it("survives a client that is gone: a throwing write rejects nothing", async () => {
+    restoreEnv = withEnv(ENV);
+    const { run } = recordingRunner(async () => ({ code: 0 }));
+    const d = createDispatcher({
+      write: () => {
+        throw new Error("EPIPE");
+      },
+      deps: { run, sessionDir: scratch },
+      progressIntervalMs: 20,
+    });
+    d.acceptLine(JSON.stringify({ jsonrpc: "2.0", id: 9, method: "ping" }));
+    d.acceptLine("not json");
+    d.acceptLine(JSON.stringify(execCall(1, "a", { progressToken: "p" })));
+    await d.idle();
+  });
+
+  it("kills a process whose signal aborts, keeping it from settling as a timeout", async () => {
+    const controller = new AbortController();
+    const started = performance.now();
+    const running = runProcess(["sh", "-c", "sleep 5"], { signal: controller.signal });
+    controller.abort();
+    const res = await running;
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(res).toMatchObject({ code: null, cancelled: true, timedOut: false });
+
+    const already = await runProcess(["sh", "-c", "sleep 5"], { signal: AbortSignal.abort() });
+    expect(already).toMatchObject({ code: null, cancelled: true });
   });
 });
 
@@ -686,9 +1021,8 @@ describe("ssh_exec via injected runner", () => {
   // Killing the local client only closes its channel: the command runs on.
   // Its process group is killed from a second channel on the same master.
   it.each([
-    [0, "terminated", "was terminated"],
+    [0, "stopping", "SIGKILL follows in 5 s"],
     [3, "already_exited", "had already ended"],
-    [4, "still_running", "survived SIGKILL"],
     [255, "unknown", "stopping the command failed (exit 255)"],
     [null, "unknown", "stopping the command failed (timed out)"],
   ])(
@@ -789,6 +1123,12 @@ describe("ssh_exec against a real shell", () => {
       return false;
     }
   };
+  const diesWithin = async (pid: number, ms: number) => {
+    for (const end = performance.now() + ms; alive(pid) && performance.now() < end;) {
+      await Bun.sleep(50);
+    }
+    return !alive(pid);
+  };
 
   it("keeps the command's exit status and output, without the pid line", async () => {
     restoreEnv = withEnv(ENV);
@@ -808,21 +1148,23 @@ describe("ssh_exec against a real shell", () => {
       viaShell(),
     );
     const pid = res.payload.remote_pid as number;
-    expect(res.payload).toMatchObject({ timed_out: true, remote_process: "terminated" });
+    expect(res.payload).toMatchObject({ timed_out: true, remote_process: "stopping" });
     expect(pid).toBeGreaterThan(1);
-    expect(alive(pid)).toBe(false);
-    expect(alive(-pid)).toBe(false); // no member of the group is left
+    expect(await diesWithin(-pid, 2_000)).toBe(true); // no member of the group is left
   });
 
-  it("sends SIGKILL when SIGTERM is ignored", async () => {
+  // The stop returns once SIGTERM is sent; the SIGKILL comes from a process that outlives it.
+  it("sends SIGKILL when SIGTERM is ignored, after the call returned", async () => {
     restoreEnv = withEnv(ENV);
     const res = await callTool(
       "ssh_exec",
       { command: "trap '' TERM; sleep 30; echo done", timeout_seconds: 1 },
       viaShell(),
     );
-    expect(res.payload.remote_process).toBe("terminated");
-    expect(alive(-(res.payload.remote_pid as number))).toBe(false);
+    const group = -(res.payload.remote_pid as number);
+    expect(res.payload.remote_process).toBe("stopping");
+    expect(alive(group)).toBe(true);
+    expect(await diesWithin(group, 10_000)).toBe(true);
   }, 15_000);
 
   // A forced command that runs `sh -c "$SSH_ORIGINAL_COMMAND"` leads the group
@@ -841,8 +1183,8 @@ describe("ssh_exec against a real shell", () => {
         sessionDir: scratch,
       },
     );
-    expect(res.payload.remote_process).toBe("terminated");
-    expect(alive(res.payload.remote_pid as number)).toBe(false);
+    expect(res.payload.remote_process).toBe("stopping");
+    expect(await diesWithin(res.payload.remote_pid as number, 2_000)).toBe(true);
   });
 
   it("reports a group that ended before the stop as already exited", async () => {
@@ -867,6 +1209,24 @@ describe("ssh_write_file", () => {
     expect(host.batches()[0]).toBe('ls -la "/data/new.txt"\n'); // not found: a new file
     expect(host.batches()[1]).toMatch(/^put "[^"]+" "\/data\/new\.txt"\n$/);
     expect(host.written["/data/new.txt"]).toBe("x");
+  });
+
+  it("does nothing for a call cancelled before it starts", async () => {
+    restoreEnv = withEnv(ENV);
+    const host = fakeHost({ files: { "/etc/app.conf": "a\n" } });
+    const deps = { ...host.deps(), signal: AbortSignal.abort() };
+    const call = (name: string, args: Record<string, unknown>) =>
+      handleRequest(
+        { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } },
+        deps,
+      );
+    await expect(call("ssh_write_file", { path: "/etc/app.conf", content: "b" })).rejects.toThrow();
+    await expect(
+      call("ssh_edit_file", { path: "/etc/app.conf", old_str: "a", new_str: "b" }),
+    ).rejects.toThrow();
+    await expect(call("ssh_read", { path: "/etc/app.conf" })).rejects.toThrow();
+    expect(host.calls).toEqual([]);
+    expect(host.files["/etc/app.conf"]).toBe("a\n");
   });
 
   // Measured: `put` onto a directory drops the scratch file INSIDE it under its
@@ -1518,6 +1878,8 @@ describe("OutputCapture", () => {
     const small = new OutputCapture(3);
     small.push(Buffer.from("abc"));
     expect([small.render(), small.truncated]).toEqual(["abc", false]);
+    // What `utf8Cut` exists for: a cut sequence decodes to U+FFFD on this bun.
+    expect(Buffer.from([0xc3]).toString("utf8")).toBe("\uFFFD");
   });
 
   // The runner feeds chunks as the pipe delivers them, splitting characters
@@ -1725,10 +2087,21 @@ describe("session directory", () => {
 // calls used. The real entry point runs with a fake `ssh` on PATH: it records
 // each invocation and, like a master, leaves a file at the ControlPath.
 describe("server shutdown", () => {
+  // A command ending in a `block` line reports pid 4242 and runs on until killed; one ending in
+  // `hang` records its own pid and runs on without reporting any.
   const FAKE_SSH = `#!/bin/sh
 printf '%s\\n' "$@" ::end:: >> "$FAKE_SSH_LOG"
-for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl=1 ;; esac; done
+for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl=1 ;; esac; last="$a"; done
 [ -n "$cp" ] && [ -z "$ctl" ] && : > "$cp"
+case "$last" in *"
+block")
+  printf '%s4242\\n' "$(printf '%s\\n' "$last" | sed -n "1s/^sh -c 'echo \\(appstrate-ssh-pid-[0-9a-f]*=\\).*/\\1/p")"
+  exec sleep 30 ;;
+*"
+hang")
+  echo $$ > "$FAKE_SSH_LOG.pid"
+  exec sleep 30 ;;
+esac
 exit 0
 `;
 
@@ -1788,6 +2161,59 @@ exit 0
     },
   );
 
+  // The client leaving, or the platform stopping the runner, must not leave the
+  // command running on the target: it is stopped before the master closes.
+  it.each([
+    ["stdin ends", undefined, 0],
+    ["SIGTERM", "SIGTERM", 143],
+  ] as const)("stops a running command on the target when %s", async (_, signal, code) => {
+    const { child, invocations } = await spawnServer();
+    const call = { name: "ssh_exec", arguments: { command: "block" } };
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: call })}\n`,
+    );
+    child.stdin.flush();
+    for (let i = 0; i < 250 && !invocations().some((r) => r.at(-1) === "block"); i++) {
+      await Bun.sleep(20);
+    }
+    if (signal) child.kill(signal);
+    else child.stdin.end();
+    expect(await child.exited).toBe(code);
+    const records = invocations();
+    const stop = records.findIndex((r) => r.at(-1) === stopScript(4242));
+    expect(stop).toBeGreaterThan(-1);
+    const last = records.at(-1)!;
+    expect(last.slice(last.indexOf("-O"), last.indexOf("-O") + 2)).toEqual(["-O", "exit"]);
+    expect(stop).toBeLessThan(records.length - 1);
+  });
+
+  // A command cancelled before it reports its pid waits longer than the shutdown ceiling allows:
+  // the ssh client is killed before the exit instead of outliving the server.
+  it("kills an ssh client still waiting for its pid when the shutdown ceiling hits", async () => {
+    const { child } = await spawnServer();
+    const call = { name: "ssh_exec", arguments: { command: "hang" } };
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: call })}\n`,
+    );
+    child.stdin.flush();
+    const pidFile = join(scratch, "ssh.log.pid");
+    for (let i = 0; i < 250 && !existsSync(pidFile); i++) await Bun.sleep(20);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(alive()).toBe(true);
+    child.kill("SIGTERM");
+    expect(await child.exited).toBe(143);
+    for (let i = 0; i < 50 && alive(); i++) await Bun.sleep(20);
+    expect(alive()).toBe(false);
+  });
+
   // The master binds `<ControlPath>.<16 characters>`, and the bind fails past
   // sockaddr_un's 104 bytes (macOS): a HOME that deep is passed over.
   it("keeps the control socket path short enough to bind", async () => {
@@ -1797,6 +2223,55 @@ exit 0
     await child.exited;
     expect(dir.startsWith(deep)).toBe(false);
     expect(Buffer.byteLength(join(dir, "cm.0123456789abcdef"))).toBeLessThan(104);
+  });
+});
+
+// ───────────────────────── the stdio entry point ─────────────────────
+
+// What a client sends wrong gets a JSON-RPC error line, in order, and the
+// server goes on reading.
+describe("the stdio entry point", () => {
+  it("answers a parse error and an invalid request, then serves the next line", async () => {
+    const child = Bun.spawn(["bun", join(SOURCES, serverDir!, "server/index.ts")], {
+      env: { ...process.env, ...ENV, HOME: scratch },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    child.stdin.write("not json\n");
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, methd: "x" })}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" })}\n`);
+    child.stdin.flush();
+    const reader = child.stdout.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    const deadline = performance.now() + 10_000;
+    while (text.split("\n").length <= 3 && performance.now() < deadline) {
+      const timeout = Bun.sleep(deadline - performance.now()).then(() => ({ done: true }) as const);
+      const next = await Promise.race([reader.read(), timeout]);
+      if (next.done) break;
+      text += decoder.decode(next.value, { stream: true });
+    }
+    child.stdin.end();
+    expect(await child.exited).toBe(0);
+
+    const lines = text
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32700, message: "Parse error" },
+    });
+    expect(lines[1]).toEqual({
+      jsonrpc: "2.0",
+      id: 3,
+      error: { code: -32600, message: "Invalid Request" },
+    });
+    expect(lines[2].id).toBe(2);
+    expect(lines[2].result.tools).toHaveLength(5);
   });
 });
 
@@ -1910,7 +2385,15 @@ describe.skipIf(!SSHD && !process.env.CI)("against a real sshd", () => {
         { command: "sleep 30; echo done", timeout_seconds: 1 },
         deps,
       );
-      expect(slow.payload).toMatchObject({ timed_out: true, remote_process: "terminated" });
+      expect(slow.payload).toMatchObject({ timed_out: true, remote_process: "stopping" });
+      for (let i = 0; i < 40 && slow.payload.remote_pid; i++) {
+        try {
+          process.kill(slow.payload.remote_pid as number, 0);
+        } catch {
+          break;
+        }
+        await Bun.sleep(50);
+      }
       expect(() => process.kill(slow.payload.remote_pid as number, 0)).toThrow();
 
       const log = readFileSync(join(dir, "sshd.log"), "utf8");

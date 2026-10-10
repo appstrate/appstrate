@@ -330,6 +330,11 @@ A `Select` never holds hundreds of entries.
   visible to explain itself, it is disabled with its reason
   (`DisabledReasonTooltip`, `components/disabled-reason-tooltip.tsx`). Never a
   button that ends in a 403 toast.
+- A row's controls (a connection's rename and share, a model credential's edit,
+  test, delete and reconnect) follow the row's `allowed_actions`, which the API
+  computes for the caller; never re-derive them from permissions and ownership
+  in the component. The lab fixtures carry the field, the lab handlers rewrite it
+  for the persona.
 - A choice lists only what the caller may pick (an actor who can run agents, a
   connection the actor can reach).
 - Who reaches a route is declared once in `lib/route-access.ts` and enforced by

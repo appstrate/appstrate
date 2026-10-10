@@ -42,6 +42,7 @@ import { selectAccessibleConnection } from "../../../src/services/integration-co
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -181,12 +182,12 @@ describe("credential-proxy integration-resolver", () => {
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read"],
-        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
     return row!.id;
   }
 

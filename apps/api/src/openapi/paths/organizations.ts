@@ -497,6 +497,7 @@ export const organizationsPaths = {
               schema: { $ref: "#/components/schemas/OrgSettings" },
               example: {
                 api_version: "2026-03-21",
+                personal_model_credentials: true,
               },
             },
           },

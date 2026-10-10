@@ -19,8 +19,6 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { isSharedInSpace } from "../integration-connect/connection-ownership";
 import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
@@ -37,11 +35,10 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
   const { data: connections } = useIntegrationConnections(packageId);
-  const spaceId = useCurrentSpaceId();
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
-  const shared = (connections ?? []).filter((c) => isSharedInSpace(c, spaceId));
+  const shared = (connections ?? []).filter((c) => c.shared_here);
   const sharedIds = shared.map((c) => c.id);
   const storedIds = orgDefault?.connection_ids ?? [];
   // Stored members no longer shared are named apart: every run falling back on

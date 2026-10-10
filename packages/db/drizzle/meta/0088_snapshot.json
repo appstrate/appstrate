@@ -1,5 +1,5 @@
 {
-  "id": "c5f24545-471e-46bf-9466-d052df570af5",
+  "id": "37b5be8b-a5b2-4972-b71e-fc3e0f0f73db",
   "prevId": "2c0a7710-6638-49e7-b732-24e14a20a072",
   "version": "7",
   "dialect": "postgresql",
@@ -1577,12 +1577,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3150,6 +3144,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "payer_user_id": {
+          "name": "payer_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "input_tokens": {
           "name": "input_tokens",
           "type": "integer",
@@ -4130,6 +4130,12 @@
         "model_credential_id": {
           "name": "model_credential_id",
           "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payer_user_id": {
+          "name": "payer_user_id",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -9405,7 +9411,7 @@
     "public.credential_source": {
       "name": "credential_source",
       "schema": "public",
-      "values": ["system", "org"]
+      "values": ["system", "org", "user"]
     },
     "public.file_purpose": {
       "name": "file_purpose",

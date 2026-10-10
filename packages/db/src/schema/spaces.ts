@@ -62,6 +62,9 @@ export const spaces = pgTable(
   },
   (table) => [
     index("idx_spaces_org_id").on(table.orgId),
+    // Referenced target of `integration_connections`' composite origin FK, which keeps
+    // `origin_space_id` inside the row's own org. `id` alone is the PK, so it never collides.
+    uniqueIndex("uq_spaces_id_org_id").on(table.id, table.orgId),
     uniqueIndex("idx_spaces_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),

@@ -90,6 +90,7 @@ describe("inline-metered chat turn", () => {
         apiShape: "anthropic-messages",
         baseUrl: "https://api.anthropic.com",
         accessToken: "oauth-secret-in-memory",
+        credentialId: "cred-test",
         input: ["text"],
         contextWindow: 200_000,
         maxTokens: 16_384,

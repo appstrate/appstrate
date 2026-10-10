@@ -260,17 +260,12 @@ export function useConnectionColumns({
   authForConnection?: (connection: IntegrationConnection) => ConnectionAuthContext;
 }): DataColumn<IntegrationConnection>[] {
   const { t } = useTranslation("settings");
-  // Said once rather than in each of the four cells that key off it.
-  const owns = (c: IntegrationConnection) => isConnectionOwnedBy(c, userId);
-
   return [
     {
       id: "account",
       header: t("integration.connection.col.account"),
       width: "minmax(124px,1.5fr)",
-      cell: (c) => (
-        <AccountCell connection={c} packageId={packageId} isOwn={owns(c)} isAdmin={isAdmin} />
-      ),
+      cell: (c) => <AccountCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },
     {
       id: "status",
@@ -323,9 +318,7 @@ export function useConnectionColumns({
       header: t("integration.connection.col.shared"),
       width: "minmax(112px,1fr)",
       tier: 2,
-      cell: (c) => (
-        <ScopeCell connection={c} packageId={packageId} isOwn={owns(c)} isAdmin={isAdmin} />
-      ),
+      cell: (c) => <ScopeCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },
     {
       id: "actions",
@@ -337,7 +330,7 @@ export function useConnectionColumns({
           connection={c}
           packageId={packageId}
           {...(authForConnection?.(c) ?? { authKey, authType, canRenew })}
-          isOwn={owns(c)}
+          isOwn={isConnectionOwnedBy(c, userId)}
           isAdmin={isAdmin}
         />
       ),

@@ -20,10 +20,14 @@ export {
 } from "./member-role-policy.ts";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
-import type { AgentIntegrationEntry, ConnectionScope } from "./integrations.ts";
+import type { AgentIntegrationEntry, ConnectionAction, ConnectionScope } from "./integrations.ts";
+export { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "./integrations.ts";
 export type {
   AccessibleIntegrationConnection,
   AgentIntegrationEntry,
+  ConnectionAction,
+  ConnectionReach,
+  ConnectionScope,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
@@ -44,11 +48,8 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type {
-  CredentialSource,
-  RunArtifactsSummary,
-  ScheduleDisabledReason,
-} from "@appstrate/db/schema";
+import type { RunArtifactsSummary, ScheduleDisabledReason } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -125,7 +126,7 @@ export interface RunWireDto {
   version_ref: string;
   proxy_label: string | null;
   model_label: string | null;
-  model_source: CredentialSource | null;
+  model_source: ModelPayer | null;
   /** Effective generation controls frozen at kickoff and raw override layer. */
   generation: ModelGenerationSettings | null;
   generation_override: ModelGenerationSettings | null;
@@ -385,8 +386,8 @@ export type { OrgRole };
  */
 export type { SpaceAssignment };
 
-import type { orgSettingsSchema } from "@appstrate/core/permissions";
-export type OrgSettings = z.infer<typeof orgSettingsSchema>;
+import type { orgSettingsReadSchema } from "@appstrate/core/permissions";
+export type OrgSettings = z.output<typeof orgSettingsReadSchema>;
 
 /**
  * Mirrored by an OpenAPI response schema, and reached only by name.
@@ -468,6 +469,10 @@ export interface MeConnectionEntry {
   scope: ConnectionScope;
   /** Spaces whose members may use it. */
   shared_spaces: { id: string; name: string }[];
+  /** Actions the caller may take on this connection. */
+  allowed_actions: ConnectionAction[];
+  /** Spaces the caller may share this connection into. */
+  shareable_spaces: { id: string; name: string }[];
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
   /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */
@@ -985,18 +990,25 @@ export interface OrgModelInfo extends ModelMetadata {
   iconUrl: string | null;
   source: "built-in" | "custom";
   /**
-   * The bound organization credential. `null` for an unbound model (each member
-   * serves it with their own personal credential for {@link providerId}) and for
-   * model aliases — see {@link apiShape}.
+   * The bound organization credential; `null` when {@link binding} is `member`
+   * or `managed`.
    */
   credentialId: string | null;
   /**
-   * Who pays for a call to this model, as seen by the caller: `user` when their
-   * own personal credential serves it, `org` when an organization or platform
-   * credential does, `null` when they have neither (the spend is refused with
-   * `model_credential_required`). Never `user` for a model alias.
+   * How the model is served: `org` — bound to one credential (an organization
+   * credential, or the platform key for a built-in model); `member` — unbound,
+   * each member serves it with their own credential for {@link providerId};
+   * `managed` — an alias, whose binding is not exposed.
    */
-  billed_to: "user" | "org" | null;
+  binding: "org" | "member" | "managed";
+  /**
+   * Who pays for a call to this model, as seen by the caller: `system` for a
+   * built-in model, `org` when an organization credential serves it, `user` when
+   * the caller's own personal credential serves it, `null` when they have neither
+   * (the spend is refused with `model_credential_required`). Never `user` for a
+   * model alias.
+   */
+  billed_to: ModelPayer | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -1037,10 +1049,22 @@ export interface ModelProviderCredentialInfo {
   owner_id: string | null;
   /** Display name of {@link owner_id}; `null` for `org`. */
   owner_name: string | null;
+  /**
+   * The actions the caller may take on this credential. Built-in: `test` to an org-credentials reader.
+   * Organization: `edit` / `delete` / `test` to holders of the org write / delete / read permission.
+   * Personal: `edit` to its owner (connect or org write), `delete` to its owner (connect) or an org
+   * delete holder; while the org allows personal model credentials, `test` to its owner (connect or
+   * org read) and `reconnect` to its owner (connect) on an OAuth credential needing reconnection.
+   */
+  allowed_actions: ModelProviderCredentialAction[];
+  /** Whether an organization model may be bound to this credential: `true` for an organization API key (not a subscription), `false` for a personal credential, an organization subscription or a built-in one. */
+  bindable: boolean;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type ModelProviderCredentialAction = "edit" | "delete" | "test" | "reconnect";
 
 /**
  * Wire shape of `GET /api/model-provider-credentials/registry` — surfaces the
@@ -1060,6 +1084,8 @@ export interface ProviderRegistryEntry {
   defaultBaseUrl: string;
   baseUrlOverridable: boolean;
   authMode: "api_key" | "oauth2";
+  /** Whether members may bring their own credential for this provider (`false` when the endpoint is the organization's to choose). */
+  personal_allowed: boolean;
   /** Surface in the picker's "Featured" group. Module-supplied metadata. */
   featured: boolean;
   /** Models are searched live on the provider and any id is accepted, not only `models`. */

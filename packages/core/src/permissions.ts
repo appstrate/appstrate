@@ -522,6 +522,11 @@ export const orgSettingsSchema = z.object({
   personal_model_credentials: z.boolean().optional(),
 });
 
+/** The org settings as served: each defaulted policy read as its effective value; other stored keys kept. */
+export const orgSettingsReadSchema = orgSettingsSchema
+  .extend({ personal_model_credentials: z.boolean().default(true) })
+  .loose();
+
 // ---------------------------------------------------------------------------
 // Module permission aggregator — runtime registry shared by apps/api and
 // modules.

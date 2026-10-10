@@ -27,7 +27,9 @@ const SHARED = {
   label: "Équipe",
   account_id: "team@acme.test",
   auth_key: "oauth",
-  shared_space_ids: [SPACE],
+  scope: "org" as const,
+  spaceId: null,
+  shared_here: true,
 };
 
 function renderSection(opts: {

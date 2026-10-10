@@ -50,7 +50,10 @@ import type { ModelSwap } from "@appstrate/core/sidecar-types";
 interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
-  /** The public route's payer (`requestPayerUserId(c)`), for a member-paid model. */
+  /**
+   * Who pays for a member-paid model: the public route's `requestPayerUserId(c)`, or
+   * the payer a run recorded at launch (`runs.payer_user_id`).
+   */
   payerUserId: string | null;
   /** A run's own inference: the credential it launched with (`runs.model_credential_id`). */
   runCredentialId?: string | null;
@@ -411,7 +414,10 @@ async function resolvePresetForOrg(
   try {
     loaded =
       inputs.runCredentialId !== undefined
-        ? await loadRunModel(orgId, presetId, inputs.runCredentialId)
+        ? await loadRunModel(orgId, presetId, {
+            credentialId: inputs.runCredentialId,
+            payerUserId: inputs.payerUserId,
+          })
         : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)

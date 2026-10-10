@@ -13,7 +13,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { components } from "../api/schema";
 import type { Scenario } from "./scenario";
 import * as f from "./fixtures";
-import { getRole } from "./role";
+import { getRole, orgPermissionsForRole, spacePermissionsForPreset } from "./role";
 import { projectDraftFiles } from "../lib/package-file-drafts";
 import type { PackageFileEntry, PackageFileWriteOperation } from "../lib/package-file-tree";
 
@@ -73,13 +73,112 @@ const settingsByOrg = new Map<string, Partial<OrgSettings>>();
 const renamedCredentials = new Map<string, string>();
 const addedCredentials: f.Json200<"/api/model-provider-credentials", "get">["data"] = [];
 const deletedCredentials = new Set<string>();
+
+type LabCredential = f.Json200<"/api/model-provider-credentials", "get">["data"][number];
+
+/**
+ * The actions the persona holds on a credential, as `credentialActions` answers them: a built-in
+ * one is tested by a reader; an organization one follows the write, delete and read grants; a
+ * personal one is its holder's (connect or write to edit, connect to delete, test and re-pair)
+ * while the organization allows personal credentials, plus the deletion any delete holder has.
+ */
+function credentialActionsFor(pk: LabCredential): LabCredential["allowed_actions"] {
+  const held = new Set(orgPermissionsForRole());
+  const has = (action: string) => held.has(`model-provider-credentials:${action}`);
+  if (pk.source === "built-in") return has("read") ? ["test"] : [];
+  const actions: LabCredential["allowed_actions"] = [];
+  if (pk.owner_type === "org") {
+    if (has("write")) actions.push("edit");
+    if (has("delete")) actions.push("delete");
+    if (has("read")) actions.push("test");
+    return actions;
+  }
+  const own = pk.owner_id === f.USER_ID;
+  const personalAllowed =
+    (settingsByOrg.get(f.ORG_ID)?.personal_model_credentials ??
+      f.orgSettings.personal_model_credentials) !== false;
+  if (own && (has("connect") || has("write"))) actions.push("edit");
+  if ((own && has("connect")) || has("delete")) actions.push("delete");
+  if (own && personalAllowed && (has("connect") || has("read"))) actions.push("test");
+  if (own && personalAllowed && has("connect") && pk.authMode === "oauth2")
+    actions.push("reconnect");
+  return actions;
+}
 /** The sets of spaces the share editor wrote, by connection id: the lab keeps them for the session. */
 const sharedSpacesByConnection = new Map<string, string[]>();
 
-/** A connection as the share editor last wrote it. */
-function withWrittenShares<T extends { id: string; shared_space_ids: string[] }>(connection: T): T {
+type ConnectionAction = "rename" | "share" | "unshare_here";
+interface ShareableConnection {
+  id: string;
+  spaceId: string | null;
+  shared_here: boolean;
+  /** Only the owner's own rows carry the full set. */
+  shared_space_ids?: string[];
+  allowed_actions?: ConnectionAction[];
+}
+
+/**
+ * A connection as the server would answer it for the persona: the shares the editor wrote this
+ * session, `shared_here` against the request's space, and, for a row the persona does not own, the
+ * actions a governor of this space holds (`connectionActions`: rename a row of this space, withdraw a
+ * share from it). Fixtures author the owner's own rows; the rest follows the role panel.
+ */
+function asConnectionCaller<T extends ShareableConnection>(connection: T, here: string): T {
+  const held = new Set([...orgPermissionsForRole(), ...spacePermissionsForPreset()]);
+  const canConnect = held.has("integrations:connect");
+  const owned = connection.shared_space_ids !== undefined;
   const written = sharedSpacesByConnection.get(connection.id);
-  return written ? { ...connection, shared_space_ids: written } : connection;
+  const shares = written ?? connection.shared_space_ids ?? (connection.shared_here ? [here] : []);
+  const sharedHere = shares.includes(here);
+  const governs = canConnect && held.has("integrations:configure");
+  const actions: ConnectionAction[] = owned
+    ? canConnect
+      ? (connection.allowed_actions ?? [])
+      : []
+    : governs
+      ? [
+          ...(connection.spaceId === here ? (["rename"] as const) : []),
+          ...(sharedHere ? (["unshare_here"] as const) : []),
+        ]
+      : [];
+  return {
+    ...connection,
+    shared_here: sharedHere,
+    ...(owned ? { shared_space_ids: shares } : {}),
+    allowed_actions: actions,
+  };
+}
+
+/** Where a connection is shared before the editor writes anything: the fixture's own account of it. */
+function fixtureShares(connectionId: string, here: string): string[] {
+  const drive = f.integrationDetail.auths
+    .flatMap((auth) => auth.connections)
+    .find((connection) => connection.id === connectionId);
+  if (drive) return drive.shared_space_ids ?? (drive.shared_here ? [here] : []);
+  const mine = f.myConnections.data
+    .flatMap((group) => group.connections)
+    .find((connection) => connection.connection_id === connectionId);
+  return mine?.shared_spaces.map((space) => space.id) ?? [];
+}
+
+/** The share a PUT or DELETE writes: `…/connections/{connectionId}/shares/{spaceId}`. */
+function writeConnectionShare(
+  url: URL,
+  scenario: Scenario,
+  headers: Headers,
+  share: boolean,
+): LabResponse {
+  const segments = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  const spaceId = segments[segments.length - 1]!;
+  const connectionId = segments[segments.length - 3]!;
+  if (scenario !== "error") {
+    const base =
+      sharedSpacesByConnection.get(connectionId) ??
+      fixtureShares(connectionId, currentSpace(headers));
+    const rest = base.filter((id) => id !== spaceId);
+    sharedSpacesByConnection.set(connectionId, share ? [...rest, spaceId] : rest);
+  }
+  return { status: 204, body: null };
 }
 const organizationLogoByOrg = new Map<string, string | null>();
 const changedAgentBundles = new Map<string, LabAgentDetail>();
@@ -813,18 +912,22 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
-    // The user-scope door of the same share editor.
+    // The user-scope door of the share editor: a share is a row under the connection.
+    method: "PUT",
+    pattern: /^\/api\/me\/connections\/[^/]+\/shares\/[^/]+$/,
+    handler: (url, scenario, headers) => writeConnectionShare(url, scenario, headers, true),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/me\/connections\/[^/]+\/shares\/[^/]+$/,
+    handler: (url, scenario, headers) => writeConnectionShare(url, scenario, headers, false),
+  },
+  {
+    // A rename: the label is not kept, the lab shows the stored one.
     method: "PATCH",
     pattern: /^\/api\/me\/connections\/[^/]+$/,
-    handler: (url, scenario, _headers, body) => {
+    handler: (url) => {
       const id = decodeURIComponent(url.pathname.split("/").filter(Boolean)[3] ?? "");
-      if (
-        scenario !== "error" &&
-        typeof body === "object" &&
-        body !== null &&
-        "shared_space_ids" in body
-      )
-        sharedSpacesByConnection.set(id, body.shared_space_ids as string[]);
       return { status: 200, body: { id } };
     },
   },
@@ -928,7 +1031,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: (_u, s) => {
       const all = [...f.modelCredentials.data, ...addedCredentials]
         .filter((pk) => !deletedCredentials.has(pk.id))
-        .map((pk) => ({ ...pk, label: renamedCredentials.get(pk.id) ?? pk.label }));
+        .map((pk) => ({
+          ...pk,
+          label: renamedCredentials.get(pk.id) ?? pk.label,
+          allowed_actions: credentialActionsFor(pk),
+        }));
       const readsAll = getRole() === "owner" || getRole() === "admin";
       const rows = readsAll
         ? all
@@ -963,6 +1070,8 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         owner_id: personal ? f.USER_ID : null,
         owner_name: personal ? (f.profile.displayName ?? null) : null,
         created_by: f.profile.displayName ?? null,
+        allowed_actions: ["edit", "delete", "test"] as LabCredential["allowed_actions"],
+        bindable: !personal,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -1027,7 +1136,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     // below; everything else on the screen is in this one body.
     method: "GET",
     pattern: /^\/api\/integrations\/[^/]+\/[^/]+$/,
-    handler: (url, scenario) => {
+    handler: (url, scenario, headers) => {
       const id = genericPackageId(url);
       const technical = id === "@lab/auth-methods";
       const detail = technical ? f.integrationAuthLabDetail : f.integrationDetail;
@@ -1061,7 +1170,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
               auth.auth_key === f.INTEGRATION_AUTH_KEY
                 ? list(auth.connections, scenario, f.heavyIntegrationConnections)
                 : auth.connections
-            ).map(withWrittenShares);
+            ).map((connection) => asConnectionCaller(connection, currentSpace(headers)));
             return {
               ...auth,
               connections,
@@ -1075,7 +1184,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/connections$/,
-    handler: (_u, s) => ({
+    handler: (_u, s, headers) => ({
       status: 200,
       body: {
         object: "list" as const,
@@ -1084,26 +1193,32 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
           f.integrationDetail.auths.find((a) => a.auth_key === f.INTEGRATION_AUTH_KEY)!.connections,
           s,
           f.heavyIntegrationConnections,
-        ).map(withWrittenShares),
+        ).map((connection) => asConnectionCaller(connection, currentSpace(headers))),
       },
     }),
   },
   {
-    // The share editor writes the whole set of spaces a connection is shared into.
+    // The share editor shares into a space or withdraws from it, one row at a time.
+    method: "PUT",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/connections\/[^/]+\/shares\/[^/]+$/,
+    handler: (url, scenario, headers) => writeConnectionShare(url, scenario, headers, true),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/connections\/[^/]+\/shares\/[^/]+$/,
+    handler: (url, scenario, headers) => writeConnectionShare(url, scenario, headers, false),
+  },
+  {
+    // A rename: the label is not kept, the lab shows the stored one.
     method: "PATCH",
     pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/connections\/[^/]+$/,
-    handler: (url, scenario, _headers, body) => {
+    handler: (url, _scenario, headers) => {
       const id = decodeURIComponent(url.pathname.split("/").filter(Boolean)[5] ?? "");
       const connection = f.integrationDetail.auths
         .flatMap((auth) => auth.connections)
         .find((candidate) => candidate.id === id);
       if (!connection) return { status: 404, body: {} };
-      const ids =
-        typeof body === "object" && body !== null && "shared_space_ids" in body
-          ? (body.shared_space_ids as string[])
-          : undefined;
-      if (scenario !== "error" && ids) sharedSpacesByConnection.set(id, ids);
-      return { status: 200, body: withWrittenShares(connection) };
+      return { status: 200, body: asConnectionCaller(connection, currentSpace(headers)) };
     },
   },
   {

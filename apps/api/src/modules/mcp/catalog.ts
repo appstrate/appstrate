@@ -163,27 +163,25 @@ export function buildOperationIndex(
 /**
  * The index of an org-wide connection, ranked by tag exactly as
  * {@link buildOperationIndex}: one grouping, whatever the spaces. An operation
- * granted in only some reachable spaces carries them after its id
- * (`createAgent [gestion]`); one granted everywhere carries nothing, so the
+ * granted in only some reachable spaces carries their IDs after its id
+ * (`createAgent [spc_a, spc_b]`); one granted everywhere carries nothing, so the
  * index is the pinned one when the roles agree.
  */
 export function buildOrgWideOperationIndex(
-  spaces: ReadonlyArray<{ name: string; permissions: ReadonlySet<string> }>,
+  spaces: ReadonlyArray<{ id: string; permissions: ReadonlySet<string> }>,
   ceiling: ReadonlySet<string> | undefined,
 ): string {
   const { operations } = getCatalog();
   const where = new Map<string, string[]>();
   for (const op of operations.values()) {
-    const names = spaces
-      .filter((s) => operationGranted(op, s.permissions, ceiling))
-      .map((s) => s.name);
-    if (names.length > 0) where.set(op.operationId, names);
+    const ids = spaces.filter((s) => operationGranted(op, s.permissions, ceiling)).map((s) => s.id);
+    if (ids.length > 0) where.set(op.operationId, ids);
   }
   return indexByTag(
     [...operations.values()].filter((op) => where.has(op.operationId)),
     (id) => {
-      const names = where.get(id)!;
-      return names.length === spaces.length ? id : `${id} [${names.join(", ")}]`;
+      const ids = where.get(id)!;
+      return ids.length === spaces.length ? id : `${id} [${ids.join(", ")}]`;
     },
   );
 }

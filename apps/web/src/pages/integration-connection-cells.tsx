@@ -9,16 +9,16 @@
  * `integration-columns.tsx` also keeps that file what its siblings are: column
  * DATA, exporting nothing but its two hooks.
  *
- * Ownership is the rule that decides most of them, and it is passed in rather
- * than re-derived: the list returns org-shared rows owned by OTHER members, and
- * delete, share and reconnect are all owner-only server-side, so a control
- * drawn on a row the caller does not own is a button that answers 403. Every
- * write also guards on `integrations:connect`, whoever owns the row, and a row
- * an admin pin or the space default names refuses an unshare or a delete (409
+ * What the caller may do to a row is the server's verdict, read from the row's `allowed_actions`
+ * (rename, share, unshare here) rather than re-derived: the list returns org-shared rows owned by
+ * OTHER members, and a control drawn on a row the caller may not touch is a button that answers
+ * 403. Delete and reconnect stay on ownership alone (`DELETE /api/me/connections/:id` has no admin
+ * escape hatch by design). Every write also guards on `integrations:connect`, whoever owns the
+ * row, and a row an admin pin or the space default names refuses an unshare or a delete (409
  * `connection_pinned`): those controls stay, disabled, with the reason on them.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, ShieldCheck, Trash2 } from "lucide-react";
@@ -32,13 +32,10 @@ import { ConnectionVariablesLine } from "../components/integration-connect/conne
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
+import { connectionLockHintKey } from "../components/integration-connect/connection-ownership";
 import {
-  connectionLockHintKey,
-  connectionRowGrants,
-  isSharedInSpace,
-} from "../components/integration-connect/connection-ownership";
-import {
-  useUpdateIntegrationConnection,
+  useRenameIntegrationConnection,
+  useConnectionShare,
   type IntegrationAuthType,
   type IntegrationConnection,
   useAgentsConsumingIntegration,
@@ -52,6 +49,7 @@ import { isQueryInFlight } from "../lib/query-state";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { useOrgSpaces } from "../hooks/use-spaces";
 import { useCanReach } from "../hooks/use-can-reach";
 import { packageDetailPath } from "../lib/package-paths";
 import { TableRowActions } from "../components/table-row-actions";
@@ -104,31 +102,26 @@ function useLockText(
   };
 }
 
-/** What the caller may do to this row, as the API enforces it. */
-function useRowGrants(connection: IntegrationConnection, isOwn: boolean, isAdmin: boolean) {
+/** What the caller may do to this row: the API's verdict on it (`allowed_actions`). */
+function useRowGrants(connection: IntegrationConnection, isAdmin: boolean) {
   const { can } = usePermissions();
   const spaceId = useCurrentSpaceId();
-  const canConnect = can("integrations:connect");
-  const lockKey = connectionLockHintKey(connection.locked_by, isAdmin);
+  const actions = connection.allowed_actions ?? [];
   return {
-    canConnect,
+    canConnect: can("integrations:connect"),
     spaceId,
-    ...connectionRowGrants({
-      isOwn,
-      isShared: isSharedInSpace(connection, spaceId),
-      scope: connection.scope,
-      canConnect,
-      canConfigure: isAdmin,
-    }),
-    lockKey,
+    canRename: actions.includes("rename"),
+    canShare: actions.includes("share"),
+    canUnshareHere: actions.includes("unshare_here"),
+    lockKey: connectionLockHintKey(connection.locked_by, isAdmin),
   };
 }
 
 /**
  * The account, renamed in place.
  *
- * Renaming is the owner's, or a governor's on a row of this space — the same rule
- * the route enforces — while sharing and deleting are strictly the owner's. A
+ * Renaming is the owner's, or a governor's on a row of this space (`allowed_actions`
+ * says which), while sharing and deleting are strictly the owner's. A
  * connection's variables (its instance URL) sit under the label: they are what
  * tells two accounts of one integration apart.
  *
@@ -142,17 +135,15 @@ function useRowGrants(connection: IntegrationConnection, isOwn: boolean, isAdmin
 export function AccountCell({
   connection,
   packageId,
-  isOwn,
   isAdmin,
 }: {
   connection: IntegrationConnection;
   packageId: string;
-  isOwn: boolean;
   isAdmin: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const updateConnection = useUpdateIntegrationConnection();
-  const { canRename } = useRowGrants(connection, isOwn, isAdmin);
+  const renameConnection = useRenameIntegrationConnection();
+  const { canRename } = useRowGrants(connection, isAdmin);
 
   return (
     <div className="min-w-0">
@@ -164,7 +155,7 @@ export function AccountCell({
         placeholder={t("integration.connection.labelPlaceholder")}
         testId={`label-edit-${connection.id}`}
         onSave={async (next) => {
-          await updateConnection.mutateAsync({
+          await renameConnection.mutateAsync({
             params: { path: { packageId, connectionId: connection.id } },
             body: { label: next },
           });
@@ -208,41 +199,48 @@ export function StatusCell({ connection }: { connection: IntegrationConnection }
 export function ScopeCell({
   connection,
   packageId,
-  isOwn,
   isAdmin,
 }: {
   connection: IntegrationConnection;
   packageId: string;
-  isOwn: boolean;
   isAdmin: boolean;
 }) {
-  const updateConnection = useUpdateIntegrationConnection();
+  const shareConnection = useConnectionShare("share", packageId);
+  const unshareConnection = useConnectionShare("unshare", packageId);
   const orgId = useCurrentOrgId();
-  const { spaceId, canEditShares, canUnshareHere, lockKey } = useRowGrants(
-    connection,
-    isOwn,
-    isAdmin,
-  );
+  const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockText } = useLockText(connection, packageId, isAdmin, lockKey);
+  // Share targets: the spaces the owner may share into, plus those it is already shared into
+  // (named by the org's spaces). Only the owner carries either list.
+  const { data: orgSpaces } = useOrgSpaces(canShare ? orgId : null);
+  const shareTargets = useMemo(() => {
+    const names = new Map((orgSpaces ?? []).map((s) => [s.id, s.name]));
+    const shareable = connection.shareable_spaces ?? [];
+    const sharedOnly = (connection.shared_space_ids ?? []).filter(
+      (id) => !shareable.some((s) => s.id === id),
+    );
+    return [...shareable, ...sharedOnly.map((id) => ({ id, name: names.get(id) ?? id }))];
+  }, [orgSpaces, connection.shareable_spaces, connection.shared_space_ids]);
   return (
     <div className="flex min-w-0 flex-col items-start gap-1.5">
       <ConnectionScopeBadge scope={connection.scope} testId={`connection-scope-${connection.id}`} />
       <ConnectionShareEditor
         connectionId={connection.id}
-        orgId={orgId}
         scope={connection.scope}
-        sharedSpaceIds={connection.shared_space_ids}
-        ownSpaceId={connection.scope === "space" ? spaceId : null}
+        rowSpaceId={connection.spaceId}
         hereSpaceId={spaceId}
-        canEditShares={canEditShares}
+        targets={shareTargets}
+        sharedSpaceIds={connection.shared_space_ids ?? []}
+        sharedHere={connection.shared_here}
+        canShare={canShare}
         canUnshareHere={canUnshareHere}
         lockHint={lockText}
-        pending={updateConnection.isPending}
-        onChange={(sharedSpaceIds) =>
-          updateConnection.mutate({
-            params: { path: { packageId, connectionId: connection.id } },
-            body: { shared_space_ids: sharedSpaceIds },
-          })
+        pending={shareConnection.isPending || unshareConnection.isPending}
+        onShare={(targetSpaceId) =>
+          shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
+        }
+        onUnshare={(targetSpaceId) =>
+          unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
         }
       />
     </div>
@@ -272,7 +270,7 @@ export function ConnectionActionsCell({
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Read only while the confirmation is open; the button waits for it.
   const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
-  const { canConnect, lockKey } = useRowGrants(connection, isOwn, isAdmin);
+  const { canConnect, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockHint, agents: pinningAgents } = useLockText(
     connection,
     packageId,

@@ -28,7 +28,8 @@ const NO_PACKAGE_RESOURCES = {
  * `noSkills` and its sibling flags, so the flags alone do not stop the scan:
  * its two discovery calls are replaced with ones that resolve nothing.
  * `packageManager` is private in Pi's TypeScript surface but a normal instance
- * field at runtime.
+ * field at runtime. The guard fails loudly if a Pi version no longer exposes
+ * those two methods, because an unpatched loader would scan the host.
  */
 export async function createIsolatedResourceLoader({
   DefaultResourceLoader,
@@ -55,6 +56,15 @@ export async function createIsolatedResourceLoader({
     systemPrompt,
     appendSystemPrompt: [],
   });
+  const live: unknown = Reflect.get(resourceLoader, "packageManager");
+  if (
+    typeof (live as { resolve?: unknown } | null)?.resolve !== "function" ||
+    typeof (live as { resolveExtensionSources?: unknown }).resolveExtensionSources !== "function"
+  ) {
+    throw new Error(
+      "Pi's DefaultResourceLoader no longer exposes packageManager.resolve/resolveExtensionSources: the host-isolation shim cannot be applied, and without it Pi would scan the host's skill and extension directories. Update packages/runner-pi/src/isolated-resource-loader.ts for this Pi version.",
+    );
+  }
   Reflect.set(resourceLoader, "packageManager", {
     resolve: async () => NO_PACKAGE_RESOURCES,
     resolveExtensionSources: async () => NO_PACKAGE_RESOURCES,

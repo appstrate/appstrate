@@ -52,8 +52,8 @@ const credentialsOnly = (p: string) => p === "model-provider-credentials:write";
 
 describe("turnErrorState", () => {
   it("is null for a turn that did not fail", () => {
-    expect(turnErrorState(message({ status: { type: "complete" } }), t, member)).toBeNull();
-    expect(turnErrorState(message({}), t, member)).toBeNull();
+    expect(turnErrorState(message({ status: { type: "complete" } }), t, member, true)).toBeNull();
+    expect(turnErrorState(message({}), t, member, true)).toBeNull();
   });
 
   it("localizes the persisted category, which survives reload", () => {
@@ -69,6 +69,7 @@ describe("turnErrorState", () => {
         ),
         t,
         member,
+        true,
       ),
     ).toEqual({ text: "turn.error.rateLimited", retryable: true, requestId: "req_abc123" });
   });
@@ -77,7 +78,7 @@ describe("turnErrorState", () => {
     // Turns persisted before the category existed carried the provider's own
     // string. It is no longer read, so nothing unclassified reaches the UI.
     expect(
-      turnErrorState(message(turn({ finishReason: "error", errorText: "boom" })), t, member),
+      turnErrorState(message(turn({ finishReason: "error", errorText: "boom" })), t, member, true),
     ).toMatchObject({ text: "turn.error.unknown" });
   });
 
@@ -97,6 +98,7 @@ describe("turnErrorState", () => {
         ),
         t,
         member,
+        true,
       ),
     ).toEqual({ text: "turn.error.upstreamUnavailable", retryable: true, requestId: "req_slow1" });
   });
@@ -113,6 +115,7 @@ describe("turnErrorState", () => {
         ),
         t,
         member,
+        true,
       ),
     ).toMatchObject({ text: "turn.error.credentialUnavailableMember", retryable: false });
   });
@@ -129,7 +132,7 @@ describe("turnErrorState", () => {
     );
     const live = failed(assistantError("appstrate:chat-turn-error:credential_unavailable"));
     for (const failure of [persisted, live]) {
-      expect(turnErrorState(failure, t, modelAdmin)).toMatchObject({
+      expect(turnErrorState(failure, t, modelAdmin, true)).toMatchObject({
         text: "turn.error.credentialUnavailable",
         retryable: false,
         action: MODELS,
@@ -137,7 +140,7 @@ describe("turnErrorState", () => {
       // "Fix its connection" is not something to tell a reader who cannot: they
       // get a sentence of their own, not that one with an admin tacked on.
       for (const reader of [member, credentialsOnly]) {
-        const state = turnErrorState(failure, t, reader);
+        const state = turnErrorState(failure, t, reader, true);
         expect(state).toMatchObject({
           text: "turn.error.credentialUnavailableMember",
           retryable: false,
@@ -150,11 +153,18 @@ describe("turnErrorState", () => {
   it("offers no link to add a personal credential while the organization refuses them", () => {
     // The link leads to a form the server answers 403 to: the sentence stays, the link goes.
     const refusal = failed(problem({ status: 409, code: "model_credential_required" }));
-    expect(turnErrorState(refusal, t, manager)).toEqual(
+    expect(turnErrorState(refusal, t, manager, true)).toEqual(
       refused("turn.error.modelCredentialRequired", PERSONAL_MODELS),
     );
     expect(turnErrorState(refusal, t, manager, false)).toEqual(
       refused("turn.error.modelCredentialRequiredPolicy"),
+    );
+  });
+
+  it("claims neither the link nor the policy until the organization settings load", () => {
+    const refusal = failed(problem({ status: 409, code: "model_credential_required" }));
+    expect(turnErrorState(refusal, t, manager, undefined)).toEqual(
+      refused("turn.error.modelCredentialRequired"),
     );
   });
 
@@ -164,6 +174,7 @@ describe("turnErrorState", () => {
         failed(assistantError("appstrate:chat-turn-error:upstream_unavailable:req_turn1")),
         t,
         member,
+        true,
       ),
     ).toEqual({ text: "turn.error.upstreamUnavailable", retryable: true, requestId: "req_turn1" });
     // Every problem document the API answers with carries its request id.
@@ -172,10 +183,11 @@ describe("turnErrorState", () => {
         failed(problem({ status: 429, code: "rate_limited", request_id: "req_429" })),
         t,
         member,
+        true,
       ),
     ).toMatchObject({ text: "turn.error.rateLimited", requestId: "req_429" });
     expect(
-      turnErrorState(failed(problem({ status: 500, request_id: "req_500" })), t, member),
+      turnErrorState(failed(problem({ status: 500, request_id: "req_500" })), t, member, true),
     ).toEqual({ text: "turn.error.unknown", retryable: true, requestId: "req_500" });
   });
 
@@ -183,12 +195,17 @@ describe("turnErrorState", () => {
     // Nothing failed — the turn simply ran out of clock, and the notice already
     // says so. A generic "generation failed" here would contradict it and read
     // as a second, different verdict on the same turn.
-    expect(turnErrorState(message(turn({ finishReason: "deadline" })), t, member)).toBeNull();
+    expect(turnErrorState(message(turn({ finishReason: "deadline" })), t, member, true)).toBeNull();
   });
 
   it("localizes an in-stream failure from its marker", () => {
     expect(
-      turnErrorState(failed(assistantError("appstrate:chat-turn-error:rate_limited")), t, member),
+      turnErrorState(
+        failed(assistantError("appstrate:chat-turn-error:rate_limited")),
+        t,
+        member,
+        true,
+      ),
     ).toEqual({
       text: "turn.error.rateLimited",
       retryable: true,
@@ -201,6 +218,7 @@ describe("turnErrorState", () => {
         ),
         t,
         member,
+        true,
       ),
     ).toMatchObject({ text: "turn.error.upstreamUnavailable", retryable: true });
   });
@@ -209,7 +227,7 @@ describe("turnErrorState", () => {
     // The route rate limit and the chat capacity cap both answer 429 before the
     // stream opens: waiting clears either, so it keeps its Retry.
     for (const code of ["rate_limited", "chat_capacity"]) {
-      expect(turnErrorState(failed(problem({ status: 429, code })), t, manager)).toEqual({
+      expect(turnErrorState(failed(problem({ status: 429, code })), t, manager, true)).toEqual({
         text: "turn.error.rateLimited",
         retryable: true,
         requestId: undefined,
@@ -230,20 +248,22 @@ describe("turnErrorState", () => {
     ["subscription_blocked", "turn.error.subscriptionBlocked"],
   ])("%s links a billing manager to billing, and sends anyone else to them", (code, text) => {
     const refusal = failed(problem({ status: 402, code, detail: "org 1" }));
-    expect(turnErrorState(refusal, t, manager)).toEqual(refused(text, BILLING));
-    expect(turnErrorState(refusal, t, member)).toEqual(refused(`${text} turn.error.contactAdmin`));
+    expect(turnErrorState(refusal, t, manager, true)).toEqual(refused(text, BILLING));
+    expect(turnErrorState(refusal, t, member, true)).toEqual(
+      refused(`${text} turn.error.contactAdmin`),
+    );
   });
 
   it("links whoever may connect a personal credential to a revoked subscription, and tells anyone else to ask an administrator", () => {
     // A subscription is its holder's own, so the fix is their Preferences page,
     // gated by the connect permission alone, never an organization screen.
     const reconnect = failed(problem({ status: 409, code: "needs_reconnection" }));
-    expect(turnErrorState(reconnect, t, manager)).toEqual(
+    expect(turnErrorState(reconnect, t, manager, true)).toEqual(
       refused("turn.error.needsReconnection", PERSONAL_MODELS),
     );
     // Billing rights do not reconnect a subscription: no link to a page that
     // refuses them, and the sentence says to ask someone who can.
-    expect(turnErrorState(reconnect, t, (p) => p === "billing:manage")).toEqual(
+    expect(turnErrorState(reconnect, t, (p) => p === "billing:manage", true)).toEqual(
       refused("turn.error.needsReconnection turn.error.contactAdmin"),
     );
   });
@@ -251,13 +271,13 @@ describe("turnErrorState", () => {
   it("names an organization being deleted, with no retry", () => {
     // The 409 `usageRejectionResponse` answers once the org's deletion is reserved.
     const deleting = failed(problem({ status: 409, code: "org_deleting" }));
-    expect(turnErrorState(deleting, t, manager)).toEqual(refused("turn.error.orgDeleting"));
+    expect(turnErrorState(deleting, t, manager, true)).toEqual(refused("turn.error.orgDeleting"));
   });
 
   it("degrades a refusal code it has no sentence for to the generic failure", () => {
     // A server-side code added after this build must not render a missing key.
     expect(
-      turnErrorState(failed(problem({ status: 402, code: "invented_later" })), t, manager),
+      turnErrorState(failed(problem({ status: 402, code: "invented_later" })), t, manager, true),
     ).toEqual({
       text: "turn.error.unknown",
       retryable: true,
@@ -265,7 +285,7 @@ describe("turnErrorState", () => {
     });
     // Nor may a code that happens to name an Object.prototype member.
     expect(
-      turnErrorState(failed(problem({ status: 402, code: "toString" })), t, manager),
+      turnErrorState(failed(problem({ status: 402, code: "toString" })), t, manager, true),
     ).toMatchObject({ text: "turn.error.unknown", retryable: true });
   });
 
@@ -285,6 +305,7 @@ describe("turnErrorState", () => {
         ),
         t,
         manager,
+        true,
       ),
     ).toEqual({
       text: "turn.error.unknown",

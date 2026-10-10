@@ -9,10 +9,8 @@ import { EmptyState } from "../page-states";
 import { ListToolbar } from "../list-toolbar";
 import { AddIntegrationConnection } from "../integration-connect/add-integration-connection";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
-import { isSharedInSpace } from "../integration-connect/connection-ownership";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAuth } from "../../hooks/use-auth";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { authMethodLabel } from "../../lib/integration-presentation";
 import { connectionOptionLabel } from "../../lib/connection-set";
 import { useConnectionColumns } from "../../pages/integration-columns";
@@ -58,7 +56,6 @@ export function ConnectionsTable({
     return detail.auths.some((auth) => auth.auth_key === method) ? [method!] : [];
   });
   const { user } = useAuth();
-  const spaceId = useCurrentSpaceId();
   const connections = detail.auths.flatMap((auth) =>
     auth.connections.map((connection) => ({ ...connection, auth_key: auth.auth_key })),
   );
@@ -104,8 +101,7 @@ export function ConnectionsTable({
       `${connectionOptionLabel(connection)} ${connection.owner_name ?? ""} ${auth ? labelFor(auth) : ""}`
         .toLocaleLowerCase()
         .includes(search.trim().toLocaleLowerCase()) &&
-      (sharing.length === 0 ||
-        sharing.includes(isSharedInSpace(connection, spaceId) ? "shared" : "private")) &&
+      (sharing.length === 0 || sharing.includes(connection.shared_here ? "shared" : "private")) &&
       (methods.length === 0 || methods.includes(connection.auth_key))
     );
   });

@@ -36,6 +36,8 @@ function candidate(): IntegrationAgentResolution["candidates"][number] {
     owner_name: "Moi",
     scopes_granted: [],
     scope: "org",
+    spaceId: null,
+    shared_here: false,
     shared_space_ids: [],
     origin_space_id: null,
     needs_reconnection: false,

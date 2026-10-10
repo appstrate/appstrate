@@ -216,13 +216,13 @@ describe("space role delegation", () => {
     expect(await remove(weaker.user.id)).toEqual({
       removed: true,
       accessAfter: null,
-      unsharedConnectionIds: [],
+      unsharedShares: [],
       disabledScheduleIds: [],
     });
     expect(await remove(weaker.user.id)).toEqual({
       removed: false,
       accessAfter: null,
-      unsharedConnectionIds: [],
+      unsharedShares: [],
       disabledScheduleIds: [],
     });
   });

@@ -16,7 +16,11 @@
 
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
-import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
+import type {
+  IntegrationConnectionSummary,
+  PersistTarget,
+  ReconnectTarget,
+} from "../integration-connections.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { validateConnectionCredentials } from "../schema.ts";
@@ -32,8 +36,8 @@ export interface ConnectContext {
   actor: Actor;
   integrationId: string;
   authKey: string;
-  /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
-  connectionId?: string;
+  /** The reconnect / scope-upgrade target, read once at the door. Absent on a fresh connect. */
+  target?: ReconnectTarget;
   /** Started by a delegated credential: the row it writes or reconnects is scoped to the space. */
   delegated?: boolean;
   /**
@@ -163,12 +167,12 @@ export function loginTimedOut(timeoutMs: number): ApiError {
  * when reconnecting an existing connection, otherwise a fresh insert.
  */
 export function connectionTarget(ctx: ConnectContext): PersistTarget {
-  return ctx.connectionId
+  return ctx.target
     ? {
         kind: "update-owned",
         scope: ctx.scope,
         actor: ctx.actor,
-        connectionId: ctx.connectionId,
+        connectionId: ctx.target.id,
         // Re-stamp (integrationId, authKey) into the update target so a
         // caller-supplied `connectionId` for a different integration matches
         // zero rows instead of overwriting an unrelated connection.

@@ -126,9 +126,10 @@ export interface ChatHost {
   /**
    * Whether the organization lets members bring personal model credentials. The
    * shell reads it from the org settings; when off, a refusal that a personal
-   * credential would fix names no link to add one.
+   * credential would fix names no link to add one. `undefined` until the
+   * settings load: such a refusal then names neither the link nor the policy.
    */
-  personalModelCredentials: boolean;
+  personalModelCredentials: boolean | undefined;
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
 }

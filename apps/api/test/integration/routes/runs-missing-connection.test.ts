@@ -71,6 +71,7 @@ import type {
   ModuleInitContext,
   RunConnectionMissingParams,
 } from "@appstrate/core/module";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -1116,10 +1117,10 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
             credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
             scopesGranted,
             needsReconnection: true,
-            sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
             label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
+        await seedShares(row!.id, shared ? [ctx.defaultSpaceId] : []);
         return row!.id;
       }
 

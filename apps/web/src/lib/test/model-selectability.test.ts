@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { isModelSelectable } from "../model-selectability";
+import { isMemberPaid, isModelSelectable } from "../model-selectability";
 import type { OrgModelInfo } from "../../hooks/use-models";
 
 function model(over: Partial<OrgModelInfo>): OrgModelInfo {
@@ -21,6 +21,7 @@ function model(over: Partial<OrgModelInfo>): OrgModelInfo {
     aliased: false,
     iconUrl: null,
     source: "custom",
+    binding: "org",
     credentialId: "c1",
     billed_to: "org",
     created_by: null,
@@ -42,5 +43,18 @@ describe("isModelSelectable", () => {
 
   it("dead credential → not selectable even though the row is listed", () => {
     expect(isModelSelectable(model({ needs_reconnection: true }))).toBe(false);
+  });
+});
+
+describe("isMemberPaid", () => {
+  it("is true for a model each member serves with their own credential", () => {
+    expect(isMemberPaid(model({ binding: "member", credentialId: null, billed_to: null }))).toBe(
+      true,
+    );
+  });
+
+  it("is false for a model bound to one credential or a managed alias", () => {
+    expect(isMemberPaid(model({ binding: "org" }))).toBe(false);
+    expect(isMemberPaid(model({ binding: "managed" }))).toBe(false);
   });
 });

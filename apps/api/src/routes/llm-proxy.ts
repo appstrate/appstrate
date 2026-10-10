@@ -141,7 +141,7 @@ export function createRunLlmProxyRouter() {
       const orgId = run.orgId;
       return proxyAndLog(c, apiShape, limits, {
         principal: { kind: "run", orgId },
-        payerUserId: null,
+        payerUserId: run.payerUserId,
         runCredentialId: run.modelCredentialId,
         runId,
         chatSessionId: null,

@@ -59,6 +59,7 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   featured: false,
   live_model_search: false,
   models: [],
+  personal_allowed: false,
 };
 
 /** The catalog entry every "does this row override it?" case is measured against. */
@@ -86,6 +87,7 @@ const ANTHROPIC: ProviderRegistryEntry = {
   featured: true,
   live_model_search: false,
   models: [SONNET],
+  personal_allowed: true,
 };
 
 /** A subscription provider: same catalog, opened by a connection, not a key. */
@@ -96,7 +98,9 @@ const CLAUDE_CODE: ProviderRegistryEntry = {
   authMode: "oauth2",
 };
 
+/** The row's binding follows its credential, as the server projects it: unbound is `member`. */
 function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
+  const credentialId = overrides.credentialId === undefined ? "cred_1" : overrides.credentialId;
   return {
     id: "mdl_1",
     label: "Local Qwen",
@@ -114,7 +118,8 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
     aliased: false,
     iconUrl: null,
     source: "custom",
-    credentialId: "cred_1",
+    binding: credentialId === null ? "member" : "org",
+    credentialId,
     billed_to: "org",
     created_by: null,
     createdAt: "2026-07-01T10:00:00.000Z",
@@ -157,6 +162,8 @@ const LOCAL_KEY: ModelProviderCredentialInfo = {
   owner_id: null,
   owner_name: null,
   created_by: null,
+  allowed_actions: ["edit", "delete", "test"],
+  bindable: true,
   createdAt: "2026-07-01T10:00:00.000Z",
   updatedAt: "2026-07-01T10:00:00.000Z",
 };
@@ -190,6 +197,8 @@ const CONNECTION: ModelProviderCredentialInfo = {
   owner_type: "user",
   owner_id: "usr_1",
   owner_name: "Alice",
+  allowed_actions: ["edit", "delete", "reconnect"],
+  bindable: false,
 };
 
 function form(

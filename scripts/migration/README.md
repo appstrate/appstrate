@@ -927,6 +927,10 @@ Skipped, `0077`'s first statement refuses a scalar snapshot or override value or
 a label held twice, rolling the batch back and naming both scripts; a skipped
 drop, freeze or normalization it cannot detect.
 
+`0032` belongs to the beta.65 schema (before `0077`): it writes the scalar `connection_id` that
+`0077` drops and `integration_pins.created_by`, which drizzle `0089` drops. It cannot run on a
+later schema and is kept as the record of what production ran.
+
 ## Detail — Connections shared by owners who lost their space (script `0033`)
 
 **Not a runbook**; its place in the window is in the section above. It runs
@@ -1113,8 +1117,11 @@ Rollback:
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0086` | **One-way at boot**: it drops `shared_with_org` and sets `org_id` NOT NULL, which an older build reads and omits. Restore the `pg_dump` taken before the deploy.     | Same.                                                                                                                                                         |
 | `0087` | **One-way at boot**: it sets `org_models.provider_id` NOT NULL with no default, which an older build omits on insert. Restore the `pg_dump` taken before the deploy. | Same.                                                                                                                                                         |
+| `0089` | **One-way at boot**: it drops `integration_pins.created_by` and `integration_org_defaults.created_by`, which an older build writes. Restore the `pg_dump`.           | Same.                                                                                                                                                         |
 | `0041` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run finds nothing. Reverting it would narrow rows back into their origin space; no script does, restore the dump.                       |
 | `0042` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run finds nothing. Reverting it would bind models to subscriptions again and restore deleted orphans; no script does, restore the dump. |
+| `0043` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run finds nothing to promote. Merged clients are deleted; no script restores them, restore the dump.                                    |
+| `0044` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run inserts nothing. Revert: restore the `pg_dump`; the emptied `shared_space_ids` is not rebuilt from the table.                       |
 
 ## Detail — Model subscriptions made personal (script `0042`, drizzle `0087`)
 
@@ -1131,6 +1138,52 @@ It prints the subscriptions to migrate, then per organization (one transaction e
 - An unreadable org-owned blob left after the work. The run fails at the end, after the other organizations have committed, and names it. Repair it or delete it, then re-run.
 
 The first four roll back that organization and exit 1; the last comes last. It also deletes the pending reconnect pairings minted by anyone but a subscription's new owner, and reports the organization default and the agents left on a model it unbinds. A re-run is safe: committed organizations are a no-op.
+
+Rollback: see the table above.
+
+## Detail — Connection shares become rows (scripts `0044`, `0043`, drizzle `0089`)
+
+**Not a runbook.** A connection's shares are rows of `integration_connection_shares`, one per
+(connection, space), each with its foreign keys: a deleted space or connection takes its shares
+with it. Drizzle `0089` creates the table, re-keys `integration_connections.origin_space_id` on a
+space of the row's own org (`SET NULL` on that column alone, PostgreSQL 15+), and drops
+`integration_pins.created_by` and `integration_org_defaults.created_by` (who set a pin or a default
+is in the audit trail). It leaves `integration_connections.shared_space_ids` and its two CHECKs in
+place, read by `0044` only (its unread GIN index goes); the next release drops them. A share row
+carries no author: who added it is in the audit trail (`share_added`).
+
+`0089` copies nothing into the table: an app serving `0089` before `0044` has run sees no
+existing share. So `0044` runs between the migration and the app's start, `pg_dump` taken BEFORE
+the deploy, in this order:
+
+1. Run the migrate service alone — `docker compose run --rm appstrate-migrate` in production
+   (`bun run db:migrate` locally) — it applies `0089` and the release's other drizzle migrations;
+   the app stays stopped.
+2. `0044 --apply` — app still stopped. It locks the target spaces `FOR KEY SHARE` in id order,
+   copies each `(id, unnest(shared_space_ids))` into the table in the connection's org
+   (`ON CONFLICT DO NOTHING`), skipping and printing a target space that no longer exists or
+   belongs to another organization, empties `shared_space_ids` and bumps `updated_at` on every row
+   that held one, then withdraws, as a live access loss does, the shares whose owner no longer
+   reaches their space (other actors' schedules naming them disabled). Each share added is
+   audited `share_added` (`reason: migrated`), each withdrawal `share_removed`
+   (`reason: access_lost`), by the `system` actor. One transaction. A second run finds the column
+   empty and inserts nothing, so a share withdrawn since stays withdrawn.
+3. Start the app.
+4. `0041 --apply` (above), app up: it keeps the shares `0044` copied.
+5. `0042 --apply` (above).
+6. `0043 --apply` — after `0044` and `0041`: space-tier auto-provisioned (DCR/CIMD) OAuth clients
+   moved to their org tier, one per (integration, auth, issuer). The winner is the client of either tier minting the most
+   connections, a tie going to the org-tier one (then the oldest, then the smallest id). Every
+   other client of the key, org tier included, is merged into it: its connections are re-pointed
+   (`client_ref`) and flagged `needs_reconnection` (their refresh token belongs to the merged
+   registration), then it is deleted; a space-tier winner is then promoted as a space admin's
+   promotion does. The user-owned rows of the key are widened to org scope, each audited
+   `scope_widened` in the space it left by the `system` actor. One transaction per organization;
+   with `--apply`, the space-tier auto clients left must be 0 (exit 1 otherwise). The dry run
+   prints how many connections will need a reconnect.
+
+Each is `set -a && . ./.env && set +a && bun scripts/migration/<script>.ts` for the dry run (rolled
+back), `--apply` to commit; each refuses an empty `DATABASE_URL`.
 
 Rollback: see the table above.
 
@@ -1179,3 +1232,5 @@ Rollback: see the table above.
 | 0040 | not applied         | runs whose `token_usage` `parseTokenUsage` keeps only in part rewritten to what it keeps — undeclared keys and malformed `tiers` bands dropped; a value malformed as a whole (not an object, a counter that is not a non-negative integer) listed and left as is (#1846) — **dry run, then `--apply` before deploying the release that publishes `token_usage` as the strict `TokenUsage` component**                                                                                                                                                                                                                     | each run listed with its value before and after, malformed ones apart, then the totals; exits 1 while a malformed row remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 0041 | not applied         | user-owned connections minted by a system or org OAuth client, or by none, widened to org scope (`space_id` NULL, `origin_space_id` the old space, shares kept, a duplicate owner label renamed `<label> (n)`); end users' and space clients' rows left as they are (#1870) — **run after deploying the release carrying drizzle `0086`, app up**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                         | rows to widen, then per organization (one transaction each, rolled back on a dry run) the widened/relabeled counts and each relabel; on `--apply`, the rows left to widen, which must be 0 (exit 1 otherwise; earlier organizations stay committed and a re-run widens the rest)                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 0042 | not applied         | subscriptions (`oauth` model credentials, recognised by decrypting the blob, never through the provider registry) made personal (#1875): a subscription whose creator is still a member becomes theirs (`owner_user_id`); an orphan (no creator, or a creator who left) and its pairings deleted; non-aliased organization models bound to any subscription unbound (`credential_id` NULL, `provider_id` kept) — **`pg_dump` before the deploy carrying drizzle `0087`, then run it after the deploy, app up, while no run is active**; `.ts`, dry run by default, `--apply` to commit                                    | subscriptions to migrate, then per organization (one transaction each, rolled back on a dry run) the owned, orphan, pairing and unbound counts with each row, and the members who ran on a subscription they do not own; a blob that does not decrypt is listed and kept; on `--apply`, the subscriptions and the unreadable credentials left org-owned, which must be 0 (exit 1 otherwise); `--apply` also refuses an organization with an aliased model or a pending/running run bound to one of its subscriptions                                                                                                                                                                                         |
+| 0043 | not applied         | space-tier auto-provisioned (DCR/CIMD) OAuth clients moved to their org tier: per (integration, auth, issuer) the client of either tier with the most connections, a tie going to the org tier, is the winner; the others are merged into it and a space-tier winner promoted (connections re-pointed and flagged `needs_reconnection`, client deleted) and the key's user-owned rows widened to org scope, each audited `scope_widened` by the `system` actor (#1910) — **run after the deploy carrying drizzle `0089`, app up, after `0044` and `0041`**; `.ts`, dry run by default, `--apply` to commit                | per organization (one transaction each, rolled back on a dry run) the promoted, merged, re-pointed and widened counts; on `--apply`, the space-tier auto clients left, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to promote                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 0044 | not applied         | `integration_connections.shared_space_ids` copied into `integration_connection_shares` (`ON CONFLICT DO NOTHING`, each audited `share_added` with `reason: migrated`) and emptied, a missing or other-organization target space skipped and printed, then the shares whose owner no longer reaches their space withdrawn as a live access loss does (#1910) — **run after the migrate service (`appstrate-migrate`) applies drizzle `0089` and BEFORE the app starts**: an app serving `0089` before it runs sees no existing share; `.ts`, dry run by default, `--apply` to commit                                       | rows copied, targets skipped (each printed), columns emptied, shares withdrawn and schedules disabled, in one transaction rolled back on a dry run; a second `--apply` inserts nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

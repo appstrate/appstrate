@@ -19,7 +19,7 @@
  * So this gate checks the half a machine can check and leaves the prose alone:
  *
  *   keys(envSchema) ∪ modules ⊆ rows(ENV.md)
- *   keys(*.env.example)    ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
+ *   keys(*.env.example)    ⊆ rows(ENV.md) ∪ INFRA_ENV_KEYS
  *   required(envSchema)    ⊆ keys(EACH shipped .env.example)
  * Module schemas are discovered; the third line is not unioned — modules are opt-in via `MODULES`.
  *
@@ -63,46 +63,13 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { envSchema } from "../packages/env/src/index.ts";
+import { envSchema, INFRA_ENV_KEYS } from "../packages/env/src/index.ts";
 import { moduleEnvSchemas, type ModuleEnvFiles } from "./lib/module-env-schemas.ts";
 import { ENV_EXAMPLE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
 const ENV_DOC = "docs/ENV.md";
-
-/**
- * Variables that appear in a shipped `.env.example` and deliberately have NO
- * row in `docs/ENV.md`, with the reason each one is out of scope.
- *
- * `docs/ENV.md` documents what the PLATFORM reads. Everything below is read by
- * something else that happens to be configured from the same file — a sibling
- * container's entrypoint, docker compose's own interpolation, or a vendor SDK's
- * private credential chain. Documenting them in the platform's env table would
- * imply `getEnv()` knows about them, and it does not: none of these names
- * appears in `packages/env/src/index.ts` at all.
- *
- * An entry here is a claim that has to stay true, so it carries its consumer.
- * Adding a name to silence a finding — rather than because the platform really
- * does not read it — rebuilds the hole this gate closes.
- */
-const INFRA_ALLOWLIST: Record<string, string> = {
-  POSTGRES_USER: "read by the `postgres` container's entrypoint; the platform reads DATABASE_URL",
-  POSTGRES_PASSWORD:
-    "read by the `postgres` container's entrypoint; the platform reads DATABASE_URL",
-  MINIO_ROOT_USER: "read by the `minio` container's entrypoint; the platform reads S3_*",
-  MINIO_ROOT_PASSWORD: "read by the `minio` container's entrypoint; the platform reads S3_*",
-  AWS_ACCESS_KEY_ID:
-    "consumed by the AWS SDK's own credential-provider chain inside @appstrate/core/storage-s3; never named by platform code",
-  AWS_SECRET_ACCESS_KEY:
-    "consumed by the AWS SDK's own credential-provider chain inside @appstrate/core/storage-s3; never named by platform code",
-  APPSTRATE_VERSION:
-    "compose-level image-tag interpolation, never read by the platform process; kept current by `bun run verify:release-version`",
-  DOCKER_GID:
-    "compose-level: the host gid the container joins to reach the docker socket. Appears only in compose files",
-  APPSTRATE_RUNNER_SOCKET_DIR:
-    "compose-level bind-mount path for the appstrate-runner UDS, written by `appstrate install`. The platform reads FIRECRACKER_RUNNER_URL, not this",
-};
 
 /**
  * The variables `docs/ENV.md`'s MAIN table documents.
@@ -248,11 +215,11 @@ export function findUndocumented(
 
   for (const [name, file] of [...envExampleKeys].sort(([a], [b]) => a.localeCompare(b))) {
     if (documented.has(name) || schemaKeys.has(name)) continue;
-    if (name in INFRA_ALLOWLIST) continue;
+    if (name in INFRA_ENV_KEYS) continue;
     findings.push({
       name,
       source: `shipped in ${file}`,
-      fix: `add a row to ${ENV_DOC} (with the \`[not in the Zod schema]\` tag and the process that reads it), or — only if the PLATFORM genuinely never reads it — add it to INFRA_ALLOWLIST in this script with its real consumer`,
+      fix: `add a row to ${ENV_DOC} (with the \`[not in the Zod schema]\` tag and the process that reads it), or — only if the PLATFORM genuinely never reads it — add it to INFRA_ENV_KEYS in packages/env/src/env-key-inventory.ts with its real consumer`,
     });
   }
 
@@ -371,7 +338,7 @@ export async function main(deps: MainDeps = {}): Promise<number> {
       `\x1b[32m✓\x1b[0m verify-env-docs: ${ENV_DOC} documents all ${schemaKeys.size} schema ` +
         `vars (${moduleNote}) and every var in ${exampleFiles.length} .env.example file(s) ` +
         `(${documented.size} rows: ${schemaBacked} schema-backed, ${documented.size - schemaBacked} ` +
-        `read straight from process.env; ${Object.keys(INFRA_ALLOWLIST).length} infra vars ` +
+        `read straight from process.env; ${Object.keys(INFRA_ENV_KEYS).length} infra vars ` +
         `allowlisted), and all ${required.size} hard-required platform vars appear in every ` +
         `example file.`,
     );

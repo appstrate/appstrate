@@ -32,9 +32,8 @@ import { splitPackageRef } from "../lib/package-paths";
 // Spec-pinned narrowing for the integration detail endpoint. It takes the
 // generated OpenAPI response shape verbatim (so a rename/removal of any
 // non-`manifest` field breaks compilation) and narrows only the freeform AFPS
-// `manifest` JSON to IntegrationManifestView — the single trust boundary the
-// legacy `api<IntegrationSummary>()` cast drew. This replaces a blind
-// `as IntegrationSummary[]` that erased the spec type and could hide drift on
+// `manifest` JSON to IntegrationManifestView — the one trust boundary of these reads. This
+// replaces a blind `as IntegrationSummary[]` that erased the spec type and could hide drift on
 // every non-manifest field.
 type RawIntegrationSummary = NonNullable<
   paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
@@ -716,14 +715,14 @@ export function useDeleteIntegrationOrgDefault() {
   });
 }
 
-export function useUpdateIntegrationConnection() {
+export function useRenameIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({
     // 200 + the bare connection resource (#657) — same serializer as the
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };
-      body: { label?: string; shared_space_ids?: string[] };
+      body: { label: string };
     }) => {
       const { data } = await client.PATCH(
         "/api/integrations/{packageId}/connections/{connectionId}",
@@ -731,11 +730,35 @@ export function useUpdateIntegrationConnection() {
       );
       return data;
     },
-    onSuccess: (_data, vars) => {
-      // Unsharing disables other people's schedules naming the connection.
-      if (vars.body.shared_space_ids) invalidateSchedules(qc);
+    onSuccess: () => {
       // A label shows on every picker and readiness view, not just the connection list.
-      // Returned so the share editor stays disabled until the refetched sharing lands.
+      return invalidateIntegrationQueries(qc);
+    },
+  });
+}
+
+/**
+ * Share a connection into a space (`share`, idempotent) or withdraw it (`unshare`), through the
+ * space's door (`packageId` set) or the account's. The returned promise keeps the mutation pending
+ * until the refetched sharing lands, so the share editor never re-enables on a stale state.
+ * Withdrawing disables other actors' schedules there naming the connection.
+ */
+export function useConnectionShare(op: "share" | "unshare", packageId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ connectionId, spaceId }: { connectionId: string; spaceId: string }) => {
+      if (packageId) {
+        const path = "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}";
+        const init = { params: { path: { packageId, connectionId, spaceId } } };
+        await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
+      } else {
+        const path = "/api/me/connections/{connectionId}/shares/{spaceId}";
+        const init = { params: { path: { connectionId, spaceId } } };
+        await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
+      }
+    },
+    onSuccess: () => {
+      if (op === "unshare") invalidateSchedules(qc);
       return invalidateIntegrationQueries(qc);
     },
   });

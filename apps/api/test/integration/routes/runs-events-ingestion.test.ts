@@ -27,17 +27,11 @@
  *      container POSTs a complete `result`, the row is complete too.
  */
 
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn, type Mock } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  runs,
-  runLogs,
-  llmUsage,
-  packages,
-  packagePersistence,
-  type CredentialSource,
-} from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage, packages, packagePersistence } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
@@ -98,7 +92,7 @@ async function seedRunWithSink(
      */
     tokenUsage?: Record<string, number> | null;
     /** Persisted on `runs.modelSource` — forwarded to the terminal broadcast. */
-    modelSource?: CredentialSource | null;
+    modelSource?: ModelPayer | null;
     /** Persisted on `runs.modelCost` — the kickoff rate snapshot the runner row is classified against. */
     modelCost?: ModelCost | null;
     /** Persisted on `runs.versionRef` — pins the manifest finalize validates against. */

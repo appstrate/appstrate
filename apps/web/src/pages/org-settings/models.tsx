@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useStore } from "zustand";
 import { BrainCircuit, Plus } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -36,7 +35,6 @@ import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
-import { authStore } from "../../stores/auth-store";
 
 export function ModelsList({
   models,
@@ -124,8 +122,6 @@ export function OrgSettingsModelsPage() {
   const canDeleteModels = can("models:delete");
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
-  const canDeleteCredentials = can("model-provider-credentials:delete");
-  const userId = useStore(authStore, (s) => s.user?.id);
 
   const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
   const [confirmState, setConfirmState] = useState<{
@@ -249,9 +245,6 @@ export function OrgSettingsModelsPage() {
               });
             }}
             onConnectOAuth={(credential) => editPkParam.open(credential.id)}
-            canWrite={canWriteCredentials}
-            canDelete={canDeleteCredentials}
-            userId={userId}
             showOwner
           />
         </>

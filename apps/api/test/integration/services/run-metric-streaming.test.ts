@@ -90,6 +90,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
       writeLedger: true,
       modelSource: null,
       modelCredentialId: null,
+      payerUserId: null,
       inferenceRoute: null,
     });
   }

@@ -39,6 +39,8 @@ import {
   uniqueIndex,
   jsonb,
   check,
+  foreignKey,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
@@ -63,8 +65,8 @@ export const integrationConnections = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     /** NULL = org scope; else the only space this row serves (the minting client's tier). */
     spaceId: text("space_id").references(() => spaces.id, { onDelete: "cascade" }),
-    /** Org scope only: the space it was connected from. */
-    originSpaceId: text("origin_space_id").references(() => spaces.id, { onDelete: "set null" }),
+    /** Org scope only: the space it was connected from, in the row's own org (composite FK below). */
+    originSpaceId: text("origin_space_id"),
     /** Owner: dashboard user XOR headless end-user (constraint below). */
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
@@ -127,9 +129,8 @@ export const integrationConnections = pgTable(
     // gymnastics. Never empty and unique per owner (`idx_integration_conn_owner_label`);
     // the resolver disambiguates a bound set holding two owners' equal labels.
     label: text("label").notNull(),
-    // Owner-set opt-in: the spaces where any actor may bind this connection by
-    // an explicit pick (member pin, launch override, admin pin, org default);
-    // the resolver's fallback never binds a share. Empty by default.
+    // Read only by scripts/migration/0044; no code reads or writes it. Dropped with its CHECKs in
+    // the next release. Shares live in `integration_connection_shares`.
     sharedSpaceIds: text("shared_space_ids")
       .array()
       .notNull()
@@ -138,6 +139,14 @@ export const integrationConnections = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    // SET NULL on `origin_space_id` alone: migration 0089 writes `ON DELETE SET NULL
+    // ("origin_space_id")`, which drizzle cannot express. Never let drizzle regenerate this FK
+    // without that column list: a plain composite SET NULL would null `org_id` (NOT NULL) and fail.
+    foreignKey({
+      name: "integration_connections_origin_space_org_fk",
+      columns: [table.originSpaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("set null"),
     // No uniqueness on (packageId, authKey, accountId, space, owner): an
     // actor may hold multiple connections on the same integration auth
     // (even pointing at the same upstream account — it's their call to
@@ -161,8 +170,8 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // Serves `shared_space_ids @> ARRAY[$space]` (drizzle `arrayContains`), not `= ANY`.
-    index("idx_integration_conn_shared").using("gin", table.sharedSpaceIds),
+    // Referenced target of the shares' composite FK, which keeps a share in its connection's org.
+    uniqueIndex("uq_integration_conn_id_org_id").on(table.id, table.orgId),
     // `coalesce` stands in for NULLS NOT DISTINCT (drizzle cannot express it).
     uniqueIndex("idx_integration_conn_owner_label").on(
       table.orgId,
@@ -208,6 +217,46 @@ export const integrationConnections = pgTable(
       "integration_connections_label_normalized",
       sql`label <> '' AND label !~ '^[ \\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]|[ \\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]$' AND label !~ '[\\u0001-\\u001F\\u007F-\\u009F\\u00AD\\u115F\\u1160\\u17B4\\u17B5\\u180E\\u200B-\\u200F\\u2028\\u2029\\u202A-\\u202E\\u2060-\\u206F\\u3164\\uFEFF\\uFFA0\\U000E0000-\\U000E007F]' AND char_length(label) + regexp_count(label, '[\\U00010000-\\U0010FFFF]') <= 80`,
     ),
+  ],
+);
+
+/**
+ * One row per (connection, space) the owner shared it into: any actor of that space may bind it by
+ * an explicit pick (member pin, launch override, admin pin, org default); the resolver's fallback
+ * never binds a share. Deleting the space or the connection takes the share with it. `org_id` is the
+ * connection's org, and both FKs are composite on it, so a share never names a space of another org.
+ *
+ * Two invariants are enforced by the share service (`apps/api/src/services/connection-shares.ts`),
+ * not by a CHECK of this table: an end user's connection is never shared
+ * (`assertConnectionShareable`), and a space-scoped row is shared only into its own space (its
+ * reach check, `connectionInSpace`). Who added a share is in the audit trail
+ * (`integration.connection.share_added`), not on the row.
+ */
+export const integrationConnectionShares = pgTable(
+  "integration_connection_shares",
+  {
+    connectionId: uuid("connection_id").notNull(),
+    spaceId: text("space_id").notNull(),
+    /** The connection's org, and so the space's: both composite FKs below pin it. */
+    orgId: uuid("org_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "integration_connection_shares_pk",
+      columns: [table.connectionId, table.spaceId],
+    }),
+    index("idx_ics_space").on(table.spaceId),
+    foreignKey({
+      name: "ics_connection_org_fk",
+      columns: [table.connectionId, table.orgId],
+      foreignColumns: [integrationConnections.id, integrationConnections.orgId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ics_space_org_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
+    }).onDelete("cascade"),
   ],
 );
 

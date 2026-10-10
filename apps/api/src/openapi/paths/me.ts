@@ -4,9 +4,14 @@ import { packageSourceValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import {
   agentPackageIdParam,
+  connectionActionsSchema,
   connectionIdSetJsonSchema,
   connectionScopeSchema,
   connectionSetRefusals,
+  connectionShareDeleteConflicts,
+  connectionShareEndpoints,
+  connectionSharePutConflicts,
+  connectionShareSpaceIdParam,
   connectionUpdateConflicts,
   connectionUpdateDescription,
   connectionUpdateRefusals400,
@@ -14,16 +19,83 @@ import {
   integrationConnectionSchema,
   integrationPackageIdParam,
   lockedBySchema,
+  namedSpaceSchema,
+  shareableSpacesSchema,
 } from "./integrations.ts";
 
-const namedSpaceSchema = {
+/** One connection on the account surface, as the list (`GET /api/me/connections`) returns it. */
+const meConnectionEntrySchema = {
   type: "object",
-  required: ["id", "name"],
+  required: [
+    "connection_id",
+    "kind",
+    "label",
+    "scopes_granted",
+    "connected_at",
+    "needs_reconnection",
+    "expiresAt",
+    "identity",
+    "auth_key",
+    "scope",
+    "shared_spaces",
+    "allowed_actions",
+    "shareable_spaces",
+    "reused_by_agents",
+    "locked_by",
+    "org",
+    "space",
+    "origin_space",
+  ],
   properties: {
-    id: { type: "string" },
-    name: { type: "string" },
+    connection_id: { type: "string" },
+    kind: { type: "string", enum: ["integration"] },
+    label: { type: "string" },
+    scopes_granted: { type: "array", items: { type: "string" } },
+    connected_at: { type: "string", format: "date-time" },
+    needs_reconnection: { type: "boolean" },
+    expiresAt: {
+      oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    identity: {
+      type: "string",
+      description:
+        "First identity claim (`account_email`, `email`, `sub`), else the account id, else the label.",
+    },
+    reused_by_agents: {
+      type: "integer",
+      description:
+        "Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one.",
+    },
+    auth_key: { type: "string" },
+    scope: connectionScopeSchema,
+    shared_spaces: {
+      type: "array",
+      items: namedSpaceSchema,
+      description: "The spaces whose members may use it.",
+    },
+    allowed_actions: connectionActionsSchema,
+    shareable_spaces: shareableSpacesSchema,
+    locked_by: lockedBySchema,
+    org: {
+      type: "object",
+      required: ["id", "name"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+    },
+    space: {
+      oneOf: [namedSpaceSchema, { type: "null" }],
+      description:
+        "The one space a space-scoped connection lives in; `null` for an org-scoped one.",
+    },
+    origin_space: {
+      oneOf: [namedSpaceSchema, { type: "null" }],
+      description:
+        "The space an org-scoped connection was connected from; `null` for a space-scoped one, or once that space is deleted.",
+    },
   },
-} as const;
+};
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -155,70 +227,7 @@ export const mePaths = {
                         total_connections: { type: "integer" },
                         connections: {
                           type: "array",
-                          items: {
-                            type: "object",
-                            required: [
-                              "connection_id",
-                              "kind",
-                              "label",
-                              "scopes_granted",
-                              "connected_at",
-                              "needs_reconnection",
-                              "expiresAt",
-                              "identity",
-                              "auth_key",
-                              "scope",
-                              "shared_spaces",
-                              "reused_by_agents",
-                              "locked_by",
-                              "org",
-                              "space",
-                              "origin_space",
-                            ],
-                            properties: {
-                              connection_id: { type: "string" },
-                              kind: { type: "string", enum: ["integration"] },
-                              label: { type: "string" },
-                              scopes_granted: { type: "array", items: { type: "string" } },
-                              connected_at: { type: "string", format: "date-time" },
-                              needs_reconnection: { type: "boolean" },
-                              expiresAt: {
-                                oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
-                              },
-                              identity: { type: "string" },
-                              reused_by_agents: {
-                                type: "integer",
-                                description:
-                                  "Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one.",
-                              },
-                              auth_key: { type: "string" },
-                              scope: connectionScopeSchema,
-                              shared_spaces: {
-                                type: "array",
-                                items: namedSpaceSchema,
-                                description: "The spaces whose members may use it.",
-                              },
-                              locked_by: lockedBySchema,
-                              org: {
-                                type: "object",
-                                required: ["id", "name"],
-                                properties: {
-                                  id: { type: "string" },
-                                  name: { type: "string" },
-                                },
-                              },
-                              space: {
-                                oneOf: [namedSpaceSchema, { type: "null" }],
-                                description:
-                                  "The one space a space-scoped connection lives in; `null` for an org-scoped one.",
-                              },
-                              origin_space: {
-                                oneOf: [namedSpaceSchema, { type: "null" }],
-                                description:
-                                  "The space an org-scoped connection was connected from; `null` for a space-scoped one, or once that space is deleted.",
-                              },
-                            },
-                          },
+                          items: meConnectionEntrySchema,
                         },
                       },
                     },
@@ -230,6 +239,90 @@ export const mePaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/me/connections/{connectionId}/shares/{spaceId}": {
+    put: {
+      operationId: "shareMyConnection",
+      tags: ["Profile"],
+      summary: "Share one of the caller's connections into a space",
+      description:
+        "The owner's door to the share `PUT /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` " +
+        "makes, wherever the connection lives. With a delegated or end-user credential, only connections " +
+        "inside its bound organization (and space, when it pins one) are reachable. " +
+        connectionShareEndpoints.put.description,
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        connectionShareSpaceIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "Shared into the space (or already shared there)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionShareEndpoints.put.refusals400,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id that the caller owns inside its credential's binding.",
+        },
+        "409": connectionSharePutConflicts,
+      },
+    },
+    delete: {
+      operationId: "unshareMyConnection",
+      tags: ["Profile"],
+      summary: "Withdraw one of the caller's connections from a space",
+      description:
+        "The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` " +
+        "makes, wherever the connection lives. With a delegated or end-user credential, only connections " +
+        "inside its bound organization (and space, when it pins one) are reachable. " +
+        connectionShareEndpoints.delete.description,
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        connectionShareSpaceIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "Withdrawn from the space (or not shared there)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionShareEndpoints.delete.refusals400,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or a credential bound to another space than the target.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id that the caller owns inside its credential's binding.",
+        },
+        "409": connectionShareDeleteConflicts,
       },
     },
   },
@@ -491,13 +584,12 @@ export const mePaths = {
     patch: {
       operationId: "updateMyConnection",
       tags: ["Profile"],
-      summary: "Rename one of the caller's own connections and/or set the spaces it is shared into",
+      summary: "Rename one of the caller's own connections",
       description:
-        "The owner's door to the edit `PATCH /api/integrations/{packageId}/connections/{connectionId}` " +
+        "The owner's door to the rename `PATCH /api/integrations/{packageId}/connections/{connectionId}` " +
         "makes, wherever the connection lives: an org-scoped connection belongs to no space, so no " +
-        "`X-Space-Id` addresses it. Owner only — a governor withdraws a connection from a space through " +
-        "the space door. With a delegated or end-user credential, only connections inside its bound " +
-        "organization (and space, when it pins one) are reachable. " +
+        "`X-Space-Id` addresses it. Owner only. With a delegated or end-user credential, only connections " +
+        "inside its bound organization (and space, when it pins one) are reachable. " +
         connectionUpdateDescription,
       parameters: [
         {
@@ -510,7 +602,7 @@ export const mePaths = {
       requestBody: connectionUpdateRequestBody,
       responses: {
         "200": {
-          description: "Updated — returns the bare connection resource",
+          description: "Renamed — returns the bare connection resource, as the space door does",
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
@@ -522,7 +614,7 @@ export const mePaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "The credential's scope ceiling lacks `integrations:connect`; a credential bound to a space edits another space's share or renames a connection not scoped to it; or a requested target — added or kept — blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
+            "The credential's scope ceiling lacks `integrations:connect`, or a credential bound to a space renames a connection not scoped to it.",
         },
         "404": {
           $ref: "#/components/responses/NotFound",

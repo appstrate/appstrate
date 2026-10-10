@@ -20,7 +20,8 @@
  * request still goes through {@link guardedFetch} so the manual-redirect
  * discipline (cross-origin credential + body stripping) holds — a trusted IdP
  * that open-redirects cannot forward the secret to a third origin. Empty/unset
- * ⇒ every OAuth egress host is guarded (the secure default).
+ * ⇒ every OAuth egress host is guarded (the secure default). The allowlist is
+ * parsed and validated once by `@appstrate/env`; boot refuses a malformed entry.
  */
 
 import { getEnv } from "@appstrate/env";
@@ -28,25 +29,9 @@ import { guardedFetch, SsrfBlockedError } from "@appstrate/core/ssrf";
 
 export { SsrfBlockedError };
 
-/**
- * Parse `EGRESS_ALLOW_INTERNAL_HOSTS` into a lowercased hostname set.
- * Recomputed per call so a hot env reload is honoured without a restart; the
- * split is trivial next to the network round-trip that follows.
- */
-function allowedInternalIdpHosts(): Set<string> {
-  const raw = getEnv().EGRESS_ALLOW_INTERNAL_HOSTS;
-  if (!raw) return new Set();
-  return new Set(
-    raw
-      .split(",")
-      .map((h) => h.trim().toLowerCase())
-      .filter((h) => h.length > 0),
-  );
-}
-
 /** True when `host` is in the operator's opt-in internal-IdP allowlist. */
 export function isAllowedInternalIdpHost(host: string): boolean {
-  return allowedInternalIdpHosts().has(host.toLowerCase());
+  return getEnv().EGRESS_ALLOW_INTERNAL_HOSTS.has(host.toLowerCase());
 }
 
 /**

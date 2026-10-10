@@ -21,6 +21,7 @@ import { z } from "zod";
 import { pgEnum } from "drizzle-orm/pg-core";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 import { runStatusValues } from "@appstrate/core/run-status";
+import { MODEL_PAYERS } from "@appstrate/core/model-payer";
 
 /**
  * The `org_role` pg enum IS `ORG_ROLES` from `@appstrate/core/permissions` —
@@ -67,12 +68,9 @@ export const llmUsageSourceValues = ["proxy", "runner"] as const;
 export const llmUsageSourceEnum = pgEnum("llm_usage_source", llmUsageSourceValues);
 
 /**
- * Whose credential reaches the upstream provider — `system` (platform-provided)
- * or `org` (the organization's own key or subscription). Attribution only.
+ * Whose credential reaches the upstream provider — `MODEL_PAYERS`. Attribution only.
  */
-export const credentialSourceValues = ["system", "org"] as const;
-export const credentialSourceEnum = pgEnum("credential_source", credentialSourceValues);
-export type CredentialSource = (typeof credentialSourceValues)[number];
+export const credentialSourceEnum = pgEnum("credential_source", MODEL_PAYERS);
 
 /**
  * Distinguishes WHO controls the runner process — `platform` for
