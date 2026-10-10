@@ -2,7 +2,6 @@
 
 /** File-backed package validation/import and MCP runtime discovery tools. */
 
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
@@ -19,7 +18,7 @@ import {
   preflightBundleImport,
 } from "../../services/bundle-import.ts";
 import { recordAudit } from "../../services/audit.ts";
-import { asString, jsonResult } from "./tool-results.ts";
+import { asString, jsonResult, refusalResult, ToolRefusal } from "./tool-results.ts";
 
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
@@ -45,11 +44,12 @@ interface PackageFileBytes {
   mime: string;
 }
 
-function packageSizeError(): McpError {
-  return new McpError(
-    ErrorCode.InvalidParams,
-    `File exceeds the package import limit of ${PACKAGE_ZIP_MAX_COMPRESSED_BYTES} bytes.`,
-  );
+function packageSizeError(): ToolRefusal {
+  return new ToolRefusal({
+    code: "too_large",
+    error: `File exceeds the package import limit of ${PACKAGE_ZIP_MAX_COMPRESSED_BYTES} bytes.`,
+    arguments: ["file_uri"],
+  });
 }
 
 /** Materialize a web stream without ever allocating beyond the package cap. */
@@ -86,16 +86,36 @@ async function readPackageFileBytes(
   uri: string,
 ): Promise<PackageFileBytes> {
   const fileId = parseFileUri(uri);
-  if (!fileId) throw new McpError(ErrorCode.InvalidParams, `Not a file URI: ${uri}`);
+  if (!fileId) {
+    throw new ToolRefusal({
+      code: "invalid_argument",
+      error: `Not a file URI: ${uri}`,
+      arguments: ["file_uri"],
+    });
+  }
   const resolved = await getFileForActor(ctx.scope, ctx.actor, fileId, ctx.permissions);
-  if (!resolved) throw new McpError(ErrorCode.InvalidParams, `File not found: ${uri}`);
+  if (!resolved) {
+    throw new ToolRefusal({
+      code: "not_found",
+      error: `File not found: ${uri}`,
+      arguments: ["file_uri"],
+    });
+  }
   if (!resolved.capabilities.download) {
-    throw new McpError(ErrorCode.InvalidParams, `File is not downloadable: ${uri}`);
+    throw new ToolRefusal({
+      code: "not_granted",
+      error: `File is not downloadable: ${uri}`,
+      arguments: ["file_uri"],
+    });
   }
   if (resolved.row.size > PACKAGE_ZIP_MAX_COMPRESSED_BYTES) throw packageSizeError();
   const stream = await streamFileContent(resolved.row.storageKey);
   if (!stream) {
-    throw new McpError(ErrorCode.InvalidParams, `File content is missing: ${uri}`);
+    throw new ToolRefusal({
+      code: "not_found",
+      error: `File content is missing: ${uri}`,
+      arguments: ["file_uri"],
+    });
   }
   return {
     bytes: await readPackageStream(stream),
@@ -135,7 +155,13 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
   };
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const uri = asString(args.file_uri);
-    if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
+    if (!uri) {
+      return refusalResult({
+        code: "missing_argument",
+        error: "file_uri is required.",
+        arguments: ["file_uri"],
+      });
+    }
     try {
       const file = await readPackageFileBytes(ctx, uri);
       const { bundle, conflicts } = await preflightBundleImport(
@@ -163,7 +189,7 @@ function buildValidatePackageFileTool(ctx: PackageFileToolContext): AppstrateToo
         conflicts: conflicts.map(({ identity, reason }) => ({ identity, reason })),
       });
     } catch (err) {
-      if (err instanceof McpError) throw err;
+      if (err instanceof ToolRefusal) return refusalResult(err.refusal);
       return jsonResult({ valid: false, importable: false, error: getErrorMessage(err) }, true);
     }
   };
@@ -190,7 +216,13 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
   };
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const uri = asString(args.file_uri);
-    if (!uri) throw new McpError(ErrorCode.InvalidParams, "file_uri is required.");
+    if (!uri) {
+      return refusalResult({
+        code: "missing_argument",
+        error: "file_uri is required.",
+        arguments: ["file_uri"],
+      });
+    }
     try {
       const file = await readPackageFileBytes(ctx, uri);
       const result = await handleImportBundle(
@@ -217,7 +249,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
       }
       return jsonResult({ ...result, file_uri: fileUri(file.fileId) });
     } catch (err) {
-      if (err instanceof McpError) throw err;
+      if (err instanceof ToolRefusal) return refusalResult(err.refusal);
       return jsonResult({ error: getErrorMessage(err) }, true);
     }
   };

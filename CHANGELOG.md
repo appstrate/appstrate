@@ -142,6 +142,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (API): MCP refusals, space identity and per-space audience**
+  (#1911).
+  - A refused tool call is a tool result with `isError: true` and JSON text
+    `{ code, error, … }` (`missing_argument`, `unknown_argument`,
+    `invalid_argument`, `unknown_operation`, `unknown_space`, `space_mismatch`,
+    `not_granted`, `not_found`, `too_large`; `arguments` names the faulty
+    arguments where one is known), where argument errors were JSON-RPC
+    `-32602`. Only an unknown tool name remains a `-32602`. An operation the
+    route answered with an HTTP error (`invoke_operation`, a `run_and_wait`
+    launch the route rejected) is an outcome, not a refusal: `{ status, body }`
+    with `isError: true`, except an `invoke_operation` `403` the caller's
+    permissions explain, which is a `not_granted` refusal.
+  - `resources/read` of an `appfile://` file that does not resolve is the
+    JSON-RPC error `-32002` (resource not found); a malformed URI stays `-32602`.
+  - Spaces are identified by `spc_…` id in every machine field: `granted_in`
+    and the operation index's `[…]` tags carried names. Names appear in prose
+    only.
+  - Each space endpoint, `/api/mcp/o/:org/s/:space`, is its own RFC 8707
+    resource: its RFC 9728 metadata's `resource` is the space endpoint URL,
+    where it was the organization's URI. It accepts a token bound to that space
+    or to its organization. The authorization server mints a space's resource
+    on first request, and removing a member revokes their space-bound tokens.
+  - A space-bound token is pinned to its space on the REST API and capped like
+    a space API key: organization-level permissions (member management,
+    organization settings) are out of its reach whatever the user's
+    organization role. Use an organization-bound token for that work.
+  - `run_and_wait`'s `connection_overrides` shares the connection-set schema of
+    the REST routes (UUIDs, no duplicates).
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
   credential is paid by the organization, and a built-in model by the platform,

@@ -9,6 +9,7 @@
 
 import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
+import { getEnv } from "@appstrate/env";
 import { spaceMembers } from "@appstrate/db/schema";
 import * as spacesService from "../../../../services/spaces.ts";
 import { db } from "../../../../../test/helpers/db.ts";
@@ -22,6 +23,7 @@ import { registerTestPlatformApp } from "../../../../../test/helpers/platform-ap
 const app = getTestApp();
 await registerTestPlatformApp();
 const rpc = mcpRpc(app);
+const APP_BASE = getEnv().APP_URL.replace(/\/+$/, "");
 
 function payload(envelope: JsonRpcEnvelope): { isError: boolean; data: Record<string, unknown> } {
   const content = (envelope.result?.content as Array<{ text: string }>) ?? [];
@@ -86,7 +88,8 @@ describe("mcp org-wide connection", () => {
     const instructions = envelope.result?.instructions as string;
     expect(instructions).toContain(NO_FALLBACK_FRAGMENT);
     // Roles differ: an operation granted in some spaces only names them, under its own tag.
-    expect(instructions).toContain("createAgent [Gestion]");
+    expect(instructions).toContain(`createAgent [${gestion.id}]`);
+    expect(instructions).toContain(`Gestion (\`${gestion.id}\``);
   });
 
   it("declares space_id on the tools that act in a space, and only those", async () => {
@@ -121,16 +124,17 @@ describe("mcp org-wide connection", () => {
     const invoke = described("invoke_operation")!;
     // Leading, so a client capping long descriptions keeps it.
     expect(invoke.startsWith("Available in:")).toBe(true);
-    expect(invoke).toContain("Gestion");
-    expect(invoke).not.toContain("Lecture");
+    expect(invoke).toContain(gestion.id);
+    expect(invoke).not.toContain(lecture.id);
     expect(described("read_skill")).not.toContain("Available in:");
   });
 
   it("requires space_id on a read as on a write, and names the space read", async () => {
-    const res = await call("invoke_operation", { operation_id: "listAgents" });
-    expect(res.error?.code).toBe(-32602);
-    expect(res.error?.message).toContain("space_id is required");
-    expect(res.error?.message).toContain(defaultSpaceId);
+    const missing = payload(await call("invoke_operation", { operation_id: "listAgents" }));
+    expect(missing.isError).toBe(true);
+    expect(missing.data.code).toBe("missing_argument");
+    expect(missing.data.error as string).toContain("space_id is required");
+    expect(missing.data.accepted as string[]).toContain(defaultSpaceId);
 
     const inGestion = payload(
       await call("invoke_operation", { operation_id: "listAgents", space_id: gestion.id }),
@@ -139,13 +143,16 @@ describe("mcp org-wide connection", () => {
   });
 
   it("refuses a space the caller does not reach, listing the ones it does", async () => {
-    const res = await call("invoke_operation", {
-      operation_id: "listAgents",
-      space_id: foreign.id,
-    });
-    expect(res.error?.code).toBe(-32602);
-    expect(res.error?.message).toContain("Unknown space_id");
-    expect(res.error?.message).toContain(lecture.id);
+    const res = payload(
+      await call("invoke_operation", {
+        operation_id: "listAgents",
+        space_id: foreign.id,
+      }),
+    );
+    expect(res.isError).toBe(true);
+    expect(res.data.code).toBe("unknown_space");
+    expect(res.data.error as string).toContain("Unknown space_id");
+    expect(res.data.accepted as string[]).toContain(lecture.id);
   });
 
   it("refuses a write in the space whose role lacks it, naming where it is granted", async () => {
@@ -153,7 +160,7 @@ describe("mcp org-wide connection", () => {
       await call("describe_operation", { operation_id: "createAgent", space_id: defaultSpaceId }),
     );
     expect(described.data.granted).toBe(false);
-    expect(described.data.granted_in).toEqual(["Gestion"]);
+    expect(described.data.granted_in).toEqual([gestion.id]);
     expect(described.data.hint as string).toContain(NO_FALLBACK_FRAGMENT);
 
     const refused = payload(
@@ -165,7 +172,8 @@ describe("mcp org-wide connection", () => {
     );
     expect(refused.isError).toBe(true);
     expect(refused.data.status).toBe(403);
-    expect(refused.data.granted_in).toEqual(["Gestion"]);
+    expect(refused.data.code).toBe("not_granted");
+    expect(refused.data.granted_in).toEqual([gestion.id]);
     expect(refused.data.hint as string).toContain(NO_FALLBACK_FRAGMENT);
 
     // The same write named in Gestion passes the guard (the empty body is the
@@ -228,8 +236,8 @@ describe("mcp org-wide connection", () => {
     );
     expect(res.isError).toBe(true);
     expect(res.data.error as string).toContain("Lecture");
-    expect(res.data.granted_in as string[]).toContain("Gestion");
-    expect(res.data.granted_in as string[]).not.toContain("Lecture");
+    expect(res.data.granted_in as string[]).toContain(gestion.id);
+    expect(res.data.granted_in as string[]).not.toContain(lecture.id);
   });
 
   it("answers search for the space named, a denied row naming where it is granted", async () => {
@@ -239,7 +247,7 @@ describe("mcp org-wide connection", () => {
     const row = (res.data.denied as Array<{ operation_id: string; granted_in?: string[] }>).find(
       (op) => op.operation_id === "createAgent",
     );
-    expect(row?.granted_in).toEqual(["Gestion"]);
+    expect(row?.granted_in).toEqual([gestion.id]);
 
     // Granted in every reachable space: no `granted_in` at all, as in the index.
     const everywhere = payload(
@@ -262,7 +270,7 @@ describe("mcp org-wide connection", () => {
     );
     expect(res.isError).toBe(true);
     expect(res.data.error as string).toContain('kind:"inline"');
-    expect(res.data.granted_in).toEqual(["Gestion"]);
+    expect(res.data.granted_in).toEqual([gestion.id]);
   });
 
   it("refuses a caller who reaches no space, rather than landing on the default one", async () => {
@@ -282,9 +290,13 @@ describe("mcp org-wide connection", () => {
     await seedSpaceMember({ spaceId: only.id, userId: solo.user.id, presetRole: "admin" });
     const soloHeaders = { Cookie: solo.cookie, "X-Org-Id": owner.orgId };
 
-    const missing = await call("invoke_operation", { operation_id: "listAgents" }, soloHeaders);
-    expect(missing.error?.code).toBe(-32602);
-    expect(missing.error?.message).toContain("space_id is required");
+    const missing = payload(
+      await call("invoke_operation", { operation_id: "listAgents" }, soloHeaders),
+    );
+    expect(missing.isError).toBe(true);
+    expect(missing.data.code).toBe("missing_argument");
+    expect(missing.data.error as string).toContain("space_id is required");
+    expect(missing.data.accepted as string[]).toContain(only.id);
 
     const named = payload(
       await call(
@@ -338,7 +350,12 @@ describe("mcp org-wide connection", () => {
         arguments: { operation_id: "listAgents", space_id: defaultSpaceId },
       },
     });
-    expect(named.envelope.error?.message).toContain("Unknown argument(s): space_id");
+    const refusal = payload(named.envelope);
+    expect(refusal.isError).toBe(true);
+    expect(refusal.data.code).toBe("unknown_argument");
+    expect(refusal.data.arguments).toEqual(["space_id"]);
+    expect(refusal.data.error as string).toContain("Unknown argument(s): space_id");
+    expect(refusal.data.hint as string).toContain("pinned");
   });
 
   it("refuses a URL naming a space the caller holds no role in", async () => {
@@ -373,14 +390,30 @@ describe("mcp org-wide connection", () => {
     expect(disagree.status).toBe(403);
   });
 
-  it("describes the space-pinned URL with the org's resource metadata", async () => {
+  it("describes the space-pinned URL with the space's own resource", async () => {
     const org = headers["X-Org-Id"]!;
     const res = await app.request(
       `/.well-known/oauth-protected-resource/api/mcp/o/${org}/s/${gestion.id}`,
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { resource: string };
-    expect(body.resource.endsWith(`/api/mcp/o/${org}`)).toBe(true);
+    expect(body.resource).toBe(`${APP_BASE}/api/mcp/o/${org}/s/${gestion.id}`);
+  });
+
+  it("names two spaces with the same name by their ids", async () => {
+    const orgId = headers["X-Org-Id"]!;
+    const twin = await seedSpace({ orgId, name: "Gestion", visibility: "closed" });
+    await seedSpaceMember({ spaceId: twin.id, userId: callerId, presetRole: "admin" });
+
+    const refused = payload(
+      await call("invoke_operation", {
+        operation_id: "createAgent",
+        space_id: defaultSpaceId,
+        body: {},
+      }),
+    );
+    expect(refused.data.code).toBe("not_granted");
+    expect([...(refused.data.granted_in as string[])].sort()).toEqual([gestion.id, twin.id].sort());
   });
 });
 

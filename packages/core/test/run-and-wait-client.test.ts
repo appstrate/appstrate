@@ -207,7 +207,7 @@ describe("run_and_wait client", () => {
     });
 
     await expect(collectSteps(fetchImpl, { kind: "inline" })).resolves.toEqual([
-      { error: "`manifest` is required for kind:'inline'." },
+      { error: "`manifest` is required for kind:'inline'.", arguments: ["manifest"] },
     ]);
   });
 
@@ -220,7 +220,12 @@ describe("run_and_wait client", () => {
     // client must fail fast instead of building a path the routes 404.
     await expect(
       collectSteps(fetchImpl, { kind: "agent", scope: "acme", name: "writer" }),
-    ).resolves.toEqual([{ error: "Invalid agent reference: acme/writer (expected @scope/name)." }]);
+    ).resolves.toEqual([
+      {
+        error: "Invalid agent reference: acme/writer (expected @scope/name).",
+        arguments: ["scope", "name"],
+      },
+    ]);
   });
 
   it("rejects an inline run without a top-level prompt before dispatching", async () => {

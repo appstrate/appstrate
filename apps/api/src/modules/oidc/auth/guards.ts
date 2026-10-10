@@ -22,7 +22,11 @@
  *    We reject up-front with a clear `invalid_request` so satellites get
  *    a diagnosable error instead of a silent-fail cascade. On top of that we
  *    confine self-service (DCR / CIMD) clients to exactly one protected
- *    resource — a rule with no upstream equivalent.
+ *    resource — a rule with no upstream equivalent. On `/oauth2/authorize` and
+ *    `/oauth2/token`, every requested protected resource is first made
+ *    mintable by its family (`ensureProtectedResourcesMintable`): an MCP space
+ *    endpoint's `oauth_resources` row is written on demand, when the space
+ *    exists in that org, before the provider resolves it.
  *
  * 2. **Rate limiting the endpoints upstream does not cover** — the
  *    `/oauth2/*` endpoints are limited per IP by the oauth-provider's own
@@ -49,7 +53,10 @@ import { deviceCode, oauthClient } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { loadClientSignupPolicy } from "../services/orgmember-mapping.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
-import { isProtectedResourceUri } from "../../../lib/protected-resources.ts";
+import {
+  ensureProtectedResourcesMintable,
+  isProtectedResourceUri,
+} from "../../../lib/protected-resources.ts";
 import {
   resolvePendingClientBinding,
   MAGIC_LINK_VERIFY_PATH,
@@ -725,12 +732,13 @@ export function oidcGuardsPlugin() {
               }
               // Self-service (DCR / CIMD) clients carry the connecting user's
               // full authority, so their tokens MUST be confined to a SINGLE
-              // protected resource (one per-org MCP endpoint, `/api/mcp/o/:org`)
-              // — never the broad platform audience (`APP_URL` / `APP_URL/api/auth`),
-              // which would let the token act across the entire REST API, and
-              // never several resources at once (a per-org MCP token is bound to
-              // exactly ONE org by design — a multi-aud request would smuggle a
-              // second org / the platform audience into `aud`). Admin-provisioned
+              // protected resource (one per-org or per-space MCP endpoint,
+              // `/api/mcp/o/:org` or `/api/mcp/o/:org/s/:space`) — never the
+              // broad platform audience (`APP_URL` / `APP_URL/api/auth`), which
+              // would let the token act across the entire REST API, and never
+              // several resources at once (an MCP token is bound to exactly ONE
+              // endpoint by design — a multi-aud request would smuggle a second
+              // org / space / the platform audience into `aud`). Admin-provisioned
               // instance clients — the dashboard SPA / CLI — are NOT self-service
               // and may target the platform audience. The outbound half of
               // `enforceResourceAudience` then keeps the issued token from being
@@ -759,7 +767,23 @@ export function oidcGuardsPlugin() {
                   });
                 }
               }
+              await ensureProtectedResourcesMintable(resources);
             }
+          }),
+        },
+        {
+          // The authorization request resolves `resource` against
+          // `oauth_resources` too (`invalid_target` when it has no row), so a
+          // resource minted on demand must be made mintable here as well.
+          matcher: (ctx: { path?: string }) => ctx.path === "/oauth2/authorize",
+          handler: createAuthMiddleware(async (ctx) => {
+            const raw =
+              (ctx.query as { resource?: unknown } | undefined)?.resource ??
+              (ctx.body as { resource?: unknown } | undefined)?.resource;
+            const resources = (Array.isArray(raw) ? raw : [raw]).filter(
+              (r): r is string => typeof r === "string" && r.length > 0,
+            );
+            await ensureProtectedResourcesMintable(resources);
           }),
         },
         {

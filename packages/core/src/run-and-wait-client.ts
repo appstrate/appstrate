@@ -146,6 +146,10 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+type MaterializedManifest =
+  | { manifest: Record<string, unknown>; error?: undefined }
+  | { manifest?: undefined; error: string };
+
 /**
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
  * AFPS manifest sent to the inline-run route.
@@ -161,10 +165,7 @@ function asString(value: unknown): string | undefined {
  * absent `output` stays absent so side-effect-only agents — including
  * `runtime_tools: []` — remain expressible.
  */
-function materializeInlineManifest(manifest: Record<string, unknown>): {
-  manifest?: Record<string, unknown>;
-  error?: string;
-} {
+function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
 
   let derivedName: string | undefined;
@@ -235,17 +236,26 @@ const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
  * (`context_file`, `contextFiles`, `files`, …) rather than a hand-listed set
  * that lets the rest through to the silent drop this exists to prevent.
  */
-function unknownArgumentsError(args: Record<string, unknown>): string | undefined {
+function unknownArgumentsError(
+  args: Record<string, unknown>,
+): { error: string; arguments: string[] } | undefined {
   const unknown = Object.keys(args).filter(
     (k) => !RUN_AND_WAIT_ARGUMENT_NAMES.has(k) && args[k] !== undefined,
   );
   if (unknown.length === 0) return undefined;
 
-  return (
-    `Unknown argument${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `\`${k}\``).join(", ")}. ` +
-    `This tool accepts only: ${[...RUN_AND_WAIT_ARGUMENT_NAMES].map((k) => `\`${k}\``).join(", ")}. ` +
-    "An unrecognised argument is not applied, so it is refused here rather than ignored."
-  );
+  return {
+    error:
+      `Unknown argument${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `\`${k}\``).join(", ")}. ` +
+      `This tool accepts only: ${[...RUN_AND_WAIT_ARGUMENT_NAMES].map((k) => `\`${k}\``).join(", ")}. ` +
+      "An unrecognised argument is not applied, so it is refused here rather than ignored.",
+    arguments: unknown,
+  };
+}
+
+/** A launch refused before dispatch: the prose plus the arguments at fault. */
+function refuseArguments(error: string, args: readonly string[]): RunAndWaitFailureResult {
+  return { ok: false, step: { payload: { error, arguments: args }, isError: true } };
 }
 
 /**
@@ -552,28 +562,22 @@ export async function launchRunAndWait(
 
   const unknownArgs = unknownArgumentsError(args);
   if (unknownArgs) {
-    return { ok: false, step: { payload: { error: unknownArgs }, isError: true } };
+    return refuseArguments(unknownArgs.error, unknownArgs.arguments);
   }
 
   const inputArg = inputArgument(args);
   if (inputArg.error) {
-    return { ok: false, step: { payload: { error: inputArg.error }, isError: true } };
+    return refuseArguments(inputArg.error, ["input"]);
   }
 
   const connectionOverrides = connectionOverridesArgument(args);
   if (connectionOverrides.error) {
-    return {
-      ok: false,
-      step: { payload: { error: connectionOverrides.error }, isError: true },
-    };
+    return refuseArguments(connectionOverrides.error, ["connection_overrides"]);
   }
 
   const contextFilesArg = contextFilesArgument(args);
   if (contextFilesArg.error) {
-    return {
-      ok: false,
-      step: { payload: { error: contextFilesArg.error }, isError: true },
-    };
+    return refuseArguments(contextFilesArg.error, ["context_files"]);
   }
 
   let launchPath: string;
@@ -586,30 +590,21 @@ export async function launchRunAndWait(
     // rather than dropping the argument, which would mount nothing and leave
     // the model believing the files were delivered.
     if (contextFiles) {
-      return {
-        ok: false,
-        step: {
-          payload: {
-            error:
-              "`context_files` is only supported for kind:'inline'. To give a published " +
-              "agent a file, pass its appfile:// URI through one of the file fields " +
-              'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
-              "via the `input` argument.",
-          },
-          isError: true,
-        },
-      };
+      return refuseArguments(
+        "`context_files` is only supported for kind:'inline'. To give a published " +
+          "agent a file, pass its appfile:// URI through one of the file fields " +
+          'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
+          "via the `input` argument.",
+        ["context_files"],
+      );
     }
     const scope = asString(args.scope);
     const name = asString(args.name);
     if (!scope || !name) {
-      return {
-        ok: false,
-        step: {
-          payload: { error: "`scope` and `name` are required for kind:'agent'." },
-          isError: true,
-        },
-      };
+      return refuseArguments("`scope` and `name` are required for kind:'agent'.", [
+        ...(scope ? [] : ["scope"]),
+        ...(name ? [] : ["name"]),
+      ]);
     }
     const qs = new URLSearchParams();
     const version = asString(args.version);
@@ -620,13 +615,10 @@ export async function launchRunAndWait(
     try {
       encodedId = encodePackageIdPath(`${scope}/${name}`);
     } catch {
-      return {
-        ok: false,
-        step: {
-          payload: { error: `Invalid agent reference: ${scope}/${name} (expected @scope/name).` },
-          isError: true,
-        },
-      };
+      return refuseArguments(`Invalid agent reference: ${scope}/${name} (expected @scope/name).`, [
+        "scope",
+        "name",
+      ]);
     }
     launchPath = `/api/agents/${encodedId}/run` + (qs.size > 0 ? `?${qs.toString()}` : "");
     launchBody = {};
@@ -635,10 +627,7 @@ export async function launchRunAndWait(
   } else if (kind === "inline") {
     const manifest = asRecordOrUndefined(args.manifest);
     if (!manifest) {
-      return {
-        ok: false,
-        step: { payload: { error: "`manifest` is required for kind:'inline'." }, isError: true },
-      };
+      return refuseArguments("`manifest` is required for kind:'inline'.", ["manifest"]);
     }
     // Reject a missing top-level prompt before hitting the route: the route's
     // field error alone doesn't tell the model WHERE the prompt goes, and the
@@ -647,36 +636,24 @@ export async function launchRunAndWait(
     const prompt = asString(args.prompt);
     if (!prompt) {
       const nested = typeof manifest.prompt === "string";
-      return {
-        ok: false,
-        step: {
-          payload: {
-            error: nested
-              ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
-                "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
-              : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
-                "alongside `manifest` (not inside it).",
-          },
-          isError: true,
-        },
-      };
+      return refuseArguments(
+        nested
+          ? "`prompt` was found inside `manifest`. It must be a TOP-LEVEL argument of " +
+              "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
+          : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
+              "alongside `manifest` (not inside it).",
+        ["prompt"],
+      );
     }
     const selected = manifest.runtime_tools;
     if (selected !== undefined && !Array.isArray(selected)) {
-      return {
-        ok: false,
-        step: {
-          payload: { error: "`manifest.runtime_tools` must be an array for kind:'inline'." },
-          isError: true,
-        },
-      };
+      return refuseArguments("`manifest.runtime_tools` must be an array for kind:'inline'.", [
+        "manifest.runtime_tools",
+      ]);
     }
     const materialized = materializeInlineManifest(manifest);
     if (!materialized.manifest) {
-      return {
-        ok: false,
-        step: { payload: { error: materialized.error }, isError: true },
-      };
+      return refuseArguments(materialized.error, ["manifest"]);
     }
     launchPath = "/api/runs/inline";
     launchBody = { manifest: materialized.manifest, prompt };
@@ -687,10 +664,7 @@ export async function launchRunAndWait(
     // only one — nothing is canonicalized here.
     if (contextFiles) launchBody.context_files = contextFiles;
   } else {
-    return {
-      ok: false,
-      step: { payload: { error: "`kind` must be 'agent' or 'inline'." }, isError: true },
-    };
+    return refuseArguments("`kind` must be 'agent' or 'inline'.", ["kind"]);
   }
 
   // Both run bodies carry the same field, so one forward covers both kinds.

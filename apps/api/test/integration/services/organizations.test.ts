@@ -5,7 +5,7 @@ import type { AppstrateModule } from "@appstrate/core/module";
 import { and, eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage, seedSchedule } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSchedule, seedSpace } from "../../helpers/seed.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
 import {
   apiKeys,
@@ -37,7 +37,7 @@ import { orgSettingsSchema } from "@appstrate/core/permissions";
 import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
-import { getMcpOrgResourceUri } from "../../../src/lib/audiences.ts";
+import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../../../src/lib/audiences.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
@@ -784,6 +784,28 @@ describe("organizations service", () => {
       expect(await revokedState(bound)).toEqual({ refresh: true, access: true });
       expect(await revokedState(otherBound)).toEqual({ refresh: false, access: false });
       expect(await revokedState(unbound)).toEqual({ refresh: false, access: false });
+    });
+
+    it("revokes tokens bound to a space of this org's MCP endpoint, not another org's", async () => {
+      const org = await createOrganization("Mcp Space Org", "mcp-space-org", userId);
+      const other = await createOrganization("Other Mcp Space Org", "other-mcp-space-org", userId);
+      const member = await createTestUser();
+      await db.transaction((tx) => provisionMember(tx, org.id, member.id, "member"));
+      await db.transaction((tx) => provisionMember(tx, other.id, member.id, "member"));
+      const space = await seedSpace({ orgId: org.id, name: "Bound" });
+      const otherSpace = await seedSpace({ orgId: other.id, name: "Other bound" });
+      await seedClient("cli_mcp_space", "instance");
+      const bound = await seedTokens("cli_mcp_space", member.id, [
+        getMcpSpaceResourceUri(org.id, space.id),
+      ]);
+      const otherBound = await seedTokens("cli_mcp_space", member.id, [
+        getMcpSpaceResourceUri(other.id, otherSpace.id),
+      ]);
+
+      await removeMember(org.id, member.id, { userId, firstPartySession: true });
+
+      expect(await revokedState(bound)).toEqual({ refresh: true, access: true });
+      expect(await revokedState(otherBound)).toEqual({ refresh: false, access: false });
     });
   });
 

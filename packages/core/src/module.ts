@@ -961,7 +961,11 @@ export interface AuthResolution {
    * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
   spaceId?: string;
-  /** Permission strings already resolved by the strategy. */
+  /**
+   * Permission strings already resolved by the strategy. With
+   * `deferOrgResolution`, an empty list leaves the caller uncapped and a
+   * non-empty list becomes its scope ceiling over the org role resolved later.
+   */
   permissions: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;

@@ -43,7 +43,8 @@ import { getClientCached } from "../services/oauth-admin.ts";
 import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { extractOrgIdFromAudiences } from "../../../lib/audiences.ts";
+import { mcpBindingFromAudiences } from "../../../lib/audiences.ts";
+import { getApiKeyAllowedScopes } from "../../../lib/permissions.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
   id: "oidc-jwt",
@@ -141,9 +142,31 @@ export const oidcAuthStrategy: AuthStrategy = {
       return null;
     }
 
-    // Surface the token's RFC 8707 audiences so a resource server (e.g. a
-    // per-org MCP endpoint `/api/mcp/o/:org`) can enforce that the token was
-    // issued for it.
+    // A token bound to an MCP space resource is confined to that space, like a
+    // space-pinned API key: the pinned `spaceId` makes `requireSpaceContext`
+    // and `pinnedSpaceScopeGuard` refuse every other space, and its ceiling is
+    // that of a space API key carrying every grantable scope, so org-only
+    // authority (members, org settings, …) stays out of reach. A principal
+    // already pinned to a different space contradicts its own audience.
+    const boundSpaceId = mcpBindingFromAudiences(claims.audiences)?.spaceId;
+    if (resolution && boundSpaceId !== undefined) {
+      if (resolution.spaceId !== undefined && resolution.spaceId !== boundSpaceId) {
+        logger.warn("OIDC strategy: token space differs from its audience space — rejecting", {
+          module: "oidc",
+          spaceId: resolution.spaceId,
+          audienceSpaceId: boundSpaceId,
+        });
+        return null;
+      }
+      resolution = {
+        ...resolution,
+        spaceId: boundSpaceId,
+        permissions: spaceKeyCeiling(resolution),
+      };
+    }
+
+    // Surface the token's RFC 8707 audiences so a resource server (e.g. an MCP
+    // endpoint `/api/mcp/o/:org`) can enforce that the token was issued for it.
     if (resolution) {
       resolution = {
         ...resolution,
@@ -153,6 +176,19 @@ export const oidcAuthStrategy: AuthStrategy = {
     return resolution;
   },
 };
+
+/**
+ * The ceiling of a space-bound token: the API-key scope allowlist, narrowed by
+ * the token's own list when it carries one. An empty deferred list is the
+ * uncapped instance token, so it takes the whole allowlist. An end-user
+ * token's list is already its fixed allowlist.
+ */
+function spaceKeyCeiling(resolution: AuthResolution): readonly string[] {
+  if (resolution.principalKind === "end_user") return resolution.permissions;
+  const keyScopes = getApiKeyAllowedScopes();
+  if (resolution.deferOrgResolution && resolution.permissions.length === 0) return [...keyScopes];
+  return resolution.permissions.filter((permission) => keyScopes.has(permission));
+}
 
 async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResolution | null> {
   const [authUserRow] = await db
@@ -167,34 +203,36 @@ async function resolveInstanceUser(claims: AccessTokenClaims): Promise<AuthResol
     });
     return null;
   }
-  // Pin the org from the token's RFC 8707 audience. An MCP instance token is
-  // audience-bound to EXACTLY one org's per-org resource (`/api/mcp/o/:org`),
-  // so the bound org id lives in the token's audiences — not the URL. Pinning
-  // it here makes the downstream org-context middleware run its membership
-  // re-check (and derive role/permissions) against that org, even on the
-  // in-process self-dispatch path where no `X-Org-Id` header is present.
+  // Pin the org (and space) from the token's RFC 8707 audience. An MCP
+  // instance token is audience-bound to EXACTLY one MCP resource — an org's
+  // (`/api/mcp/o/:org`) or one of its spaces' (`/api/mcp/o/:org/s/:space`) — so
+  // the bound ids live in the token's audiences, not the URL. Pinning them here
+  // makes the downstream org-context middleware run its membership re-check
+  // (and derive role/permissions) against that org, and the space-context
+  // middleware confine the token to that space, even on the in-process
+  // self-dispatch path where no `X-Org-Id` header is present.
   //
   // We KEEP `deferOrgResolution: true`: the org is only a candidate at this
   // point. Org-context still re-verifies membership and derives the current
-  // role/permissions. A token with NO per-org audience (header-path instance
+  // role/permissions. A token with NO MCP audience (header-path instance
   // tokens, the dashboard SPA / CLI) leaves `orgId` undefined, preserving the
-  // original "defer entirely to X-Org-Id" behavior.
+  // "defer entirely to X-Org-Id" behavior.
   //
   // `permissions: []` with NO `orgRole` is the session-equivalent shape, not a
   // scope claim: this token IS the user (the CLI's device-flow login), so it
   // gets the user's full authority in whichever org they select, and the
   // pipeline deliberately writes no `scopeCeiling` for it
-  // (`lib/auth-pipeline.ts`, the strategy branch). A narrower token must
-  // resolve an `orgRole` and pass its scope list, the way
-  // `resolveDashboardUser` below does — that is what produces a real ceiling.
-  const boundOrgId = extractOrgIdFromAudiences(claims.audiences ?? []);
+  // (`lib/auth-pipeline.ts`, the strategy branch). A token bound to a space
+  // resource is capped in `authenticate` above, like a space API key.
+  const binding = mcpBindingFromAudiences(claims.audiences ?? []);
   return {
     user: {
       id: authUserRow.id,
       email: authUserRow.email,
       name: authUserRow.name ?? "",
     },
-    orgId: boundOrgId,
+    orgId: binding?.orgId,
+    spaceId: binding?.spaceId,
     authMethod: "oauth2-instance",
     principalKind: "user",
     permissions: [],

@@ -194,10 +194,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           const ceiling = new Set<string>(resolution.permissions);
           c.set("scopeCeiling", ceiling);
           c.set("permissions", new Set(ceiling));
+        } else if (resolution.permissions.length > 0) {
+          // Deferring with a list: the list is the ceiling, and the grant
+          // arrives with the org role the org-context middleware resolves.
+          c.set("scopeCeiling", new Set<string>(resolution.permissions));
         }
-        // No org role + `deferOrgResolution` writes NO ceiling: the OIDC
-        // instance token (CLI as the full user) picks its org via `X-Org-Id`
-        // like a cookie session. A strategy meaning "nothing" must not defer.
+        // No org role + `deferOrgResolution` + an empty list writes NO
+        // ceiling: the OIDC instance token (CLI as the full user) picks its org
+        // via `X-Org-Id` like a cookie session. A strategy meaning "nothing"
+        // must not defer.
         c.set("authMethod", resolution.authMethod);
         if (resolution.spaceId !== undefined) {
           c.set("spaceId", resolution.spaceId);
