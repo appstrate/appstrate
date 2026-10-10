@@ -320,6 +320,27 @@ describe("model resolution — a member's own credential first", () => {
     expect((thrown as ApiError).code).toBe("personal_credential_not_bindable");
   });
 
+  it("refuses an organization subscription as a model's binding", async () => {
+    const subscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Org subscription",
+    });
+
+    let thrown: unknown;
+    try {
+      await createOrgModel(ctx.orgId, "Subscription", TEST_OAUTH_MODEL_ID, ctx.user.id, {
+        credentialId: subscription.id,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(ApiError);
+    expect((thrown as ApiError).status).toBe(400);
+    expect((thrown as ApiError).code).toBe("personal_credential_not_bindable");
+  });
+
   it("accepts an unbound model named by its provider, listed with no credential", async () => {
     const id = await createOrgModel(ctx.orgId, "Claude", ANTHROPIC_A, ctx.user.id, {
       credentialId: null,
@@ -418,6 +439,49 @@ describe("model resolution — a member's own credential first", () => {
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
+  });
+
+  it("a run whose pinned credential is gone is never served by another credential", async () => {
+    const org = await orgAnthropicKey();
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: org.id,
+      providerId: "anthropic",
+      modelId: ANTHROPIC_A,
+      label: "Claude",
+    });
+    const alias = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: org.id,
+      providerId: "anthropic",
+      modelId: ANTHROPIC_A,
+      label: "Appstrate Medium",
+      aliased: true,
+    });
+    initSystemModelProviderKeys([
+      {
+        id: "sys-anthropic",
+        providerId: "anthropic",
+        apiKey: "sk-system",
+        models: [{ id: "sys-claude", modelId: ANTHROPIC_A }],
+      },
+    ]);
+    // The run launched on the member's personal key, which was then deleted: its pin is null.
+    await personalAnthropicKey(ctx.user.id, "sk-alice");
+    clearResolvedModelCache();
+
+    expect(
+      await loadPinnedModel(ctx.orgId, model.id, { credentialId: null, source: "org" }),
+    ).toBeNull();
+    expect(
+      await loadPinnedModel(ctx.orgId, "sys-claude", { credentialId: null, source: "org" }),
+    ).toBeNull();
+    expect(
+      await loadPinnedModel(ctx.orgId, "sys-claude", { credentialId: null, source: "system" }),
+    ).toMatchObject({ credentialSource: "system" });
+    expect(
+      await loadPinnedModel(ctx.orgId, alias.id, { credentialId: null, source: "org" }),
+    ).toMatchObject({ aliased: true });
   });
 
   it("a personal credential whose key is not in the keyring is skipped for the org key", async () => {

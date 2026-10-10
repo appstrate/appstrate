@@ -50,7 +50,10 @@ import {
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { listOrgModelProviderCredentials } from "../../../src/services/model-providers/credentials.ts";
-import { proxyLlmCall } from "../../../src/services/llm-proxy/core.ts";
+import {
+  LlmProxyUnsupportedModelError,
+  proxyLlmCall,
+} from "../../../src/services/llm-proxy/core.ts";
 import { openaiResponsesAdapter } from "../../../src/services/llm-proxy/openai-responses.ts";
 import type { LlmProxyPrincipal } from "../../../src/services/llm-proxy/types.ts";
 import {
@@ -1504,9 +1507,11 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     principal: LlmProxyPrincipal,
     presetId: string,
     payer: Pick<Parameters<typeof proxyLlmCall>[0], "payerUserId" | "pinned">,
+    onUpstream: () => void = () => {},
   ): Promise<{ status: number; authorization: string | null }> {
     let authorization: string | null = null;
     const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      onUpstream();
       authorization = new Headers(init?.headers as Record<string, string>).get("authorization");
       return new Response(
         JSON.stringify({ id: "resp_personal", usage: { input_tokens: 11, output_tokens: 3 } }),
@@ -1620,6 +1625,29 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
       { payerUserId: h.ctx.user.id },
     );
     expect(publicCall.authorization).toBe("Bearer sk-added-later");
+  });
+
+  it("a run whose pinned credential was deleted is refused, never re-routed", async () => {
+    const h = await buildPersonalHarness();
+    const run = { kind: "run", orgId: h.ctx.orgId } as const;
+    // The run launched on the payer's personal key; the deletion nulls its pin (ON DELETE SET NULL).
+    await db
+      .delete(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, h.personalCredentialId));
+
+    let upstreamCalls = 0;
+    await expect(
+      proxyAs(
+        run,
+        h.presetId,
+        { payerUserId: null, pinned: { credentialId: null, source: "org" } },
+        () => {
+          upstreamCalls++;
+        },
+      ),
+    ).rejects.toBeInstanceOf(LlmProxyUnsupportedModelError);
+    expect(upstreamCalls).toBe(0);
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
   });
 
   it("a public call is served by the org key when the payer's only personal credential is a subscription", async () => {

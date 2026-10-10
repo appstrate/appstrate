@@ -396,6 +396,20 @@ describe("personal model credentials — routes", () => {
       expect(adminRes.status).toBe(200);
       expect(((await adminRes.json()) as { error: string }).error).toBe("BLOCKED_URL");
     });
+
+    it("the inline test refuses a member a custom-endpoint provider", async () => {
+      const res = await app.request(`${CREDENTIALS}/test`, {
+        method: "POST",
+        headers: jsonHeaders(member),
+        body: JSON.stringify({
+          providerId: CUSTOM_ENDPOINT_PROVIDER,
+          base_url: "https://llm.example.test/v1",
+          api_key: "sk-member",
+        }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { param: string }).param).toBe("providerId");
+    });
   });
 
   describe("subscription pairings", () => {
