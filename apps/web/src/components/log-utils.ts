@@ -4,6 +4,8 @@
 // page and its viewer. Persisted `run_logs` stay append-only; this module owns
 // the richer, correlated shape the UI renders.
 
+import { jsonText } from "@appstrate/afps-shared/json-text";
+
 interface ExecutionEntryBase {
   /** Stable across live start -> result updates and historical replay. */
   id: string;
@@ -168,14 +170,13 @@ export interface RawLog {
 
 function formatToolArgs(args: unknown): string {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
-    const str = typeof args === "string" ? args : JSON.stringify(args);
-    return (str ?? "").slice(0, 200);
+    return jsonText(args).slice(0, 200);
   }
 
   const parts: string[] = [];
   for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
     if (value === undefined || value === null) continue;
-    const str = typeof value === "string" ? value : JSON.stringify(value);
+    const str = jsonText(value);
     parts.push(`${key}: ${str}`);
   }
   const joined = parts.join(", ");

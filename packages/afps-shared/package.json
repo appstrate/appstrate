@@ -56,7 +56,8 @@
     "./backoff": "./src/backoff.ts",
     "./mime": "./src/mime.ts",
     "./jsonpath": "./src/jsonpath.ts",
-    "./runtime-expression": "./src/runtime-expression.ts"
+    "./runtime-expression": "./src/runtime-expression.ts",
+    "./json-text": "./src/json-text.ts"
   },
   "dependencies": {
     "@types/semver": "^7.8.0",

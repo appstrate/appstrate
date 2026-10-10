@@ -31,10 +31,24 @@ export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, Cred
   ) as Record<string, CredentialFieldSchema>;
 }
 
-/** The declared fields verbatim; the auth type's canonical set only when none are declared. */
+/**
+ * The declared fields, required ones first in `required` order; the auth type's canonical set
+ * only when none are declared. The server returns `properties` in jsonb key order (shortest key
+ * first), not the manifest's, so the `required` array is the only author order that survives.
+ */
 export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
   const props = declared(auth);
-  if (props) return Object.keys(props);
+  if (props) {
+    const listed = (auth.credentials?.schema as { required?: unknown } | undefined)?.required;
+    const required = Array.isArray(listed)
+      ? listed.filter(
+          (f): f is string =>
+            typeof f === "string" && Object.prototype.hasOwnProperty.call(props, f),
+        )
+      : [];
+    const first = new Set(required);
+    return [...first, ...Object.keys(props).filter((f) => !first.has(f))];
+  }
   if (auth.type === "api_key") return ["api_key"];
   if (auth.type === "basic") return ["username", "password"];
   // AFPS §7.5 — an mtls schema SHOULD describe a client cert and private key.

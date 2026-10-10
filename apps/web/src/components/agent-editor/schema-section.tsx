@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Select,
@@ -30,36 +31,38 @@ import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { SectionCard } from "../section-card";
+import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
+import {
+  changeType,
+  fieldType,
+  fileKind,
+  isTextType,
+  itemsEnumText,
+  itemType,
+  listToText,
+  setFileKind,
+  setItemsEnum,
+  setKeyword,
+  textToList,
+  textToValue,
+  toKeywordNumber,
+  type NumericKeyword,
+  valueToText,
+  type TextValue,
+} from "./utils";
 
 export interface SchemaField {
   _id: string;
   key: string;
-  type: string;
-  description: string;
   required: boolean;
-  isFile?: boolean;
-  placeholder?: string;
-  default?: string;
-  enumValues?: string;
-  format?: string;
+  /** The JSON-Schema property itself: the single source of truth for every keyword. */
+  prop: JSONSchema7;
+  /** AFPS `file_constraints.accept` (file fields). */
   accept?: string;
-  maxSize?: string;
-  multiple?: boolean;
-  maxFiles?: string;
-  /** Minimum value for number/integer fields. */
-  minimum?: string;
-  /** Maximum value for number/integer fields. */
-  maximum?: string;
-  /** Step/multipleOf for number/integer fields. */
-  step?: string;
-  /** Minimum length for string fields. */
-  minLength?: string;
-  /** Maximum length for string fields. */
-  maxLength?: string;
-  /** Regex pattern for string fields. */
-  pattern?: string;
-  /** Comma-separated enum values for array items (multiselect). */
-  arrayEnumItems?: string;
+  /** AFPS `file_constraints.max_size` (file fields). */
+  maxSize?: number;
+  /** AFPS `ui_hints.placeholder` (non-file input fields). */
+  placeholder?: string;
 }
 
 type SchemaMode = "input" | "output";
@@ -71,7 +74,14 @@ interface SchemaSectionProps {
   onChange: (fields: SchemaField[]) => void;
 }
 
-const TYPE_OPTIONS = ["string", "number", "integer", "boolean", "array", "object"];
+const TYPE_OPTIONS: JSONSchema7TypeName[] = [
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "array",
+  "object",
+];
 
 const STRING_FORMAT_OPTIONS = [
   { value: "", label: "—" },
@@ -84,15 +94,104 @@ const STRING_FORMAT_OPTIONS = [
   { value: "uri", label: "URL" },
 ];
 
-function emptyField(mode: SchemaMode): SchemaField {
-  return {
-    _id: crypto.randomUUID(),
-    key: "",
-    type: "string",
-    description: "",
-    required: false,
-    ...(mode === "input" ? { placeholder: "", default: "", enumValues: "" } : {}),
+function emptyField(): SchemaField {
+  return { _id: crypto.randomUUID(), key: "", required: false, prop: { type: "string" } };
+}
+
+/**
+ * Text input for a value that is parsed into a typed keyword. The raw text lives
+ * in `draft` only while the user is typing (`null` = show the prop's text), so
+ * "a, " or "-" are never collapsed mid-keystroke and external changes show up
+ * without an effect. The parsed value is committed on blur and on Enter.
+ */
+function DraftInput({
+  text,
+  onCommit,
+  ...props
+}: { text: string; onCommit: (text: string) => void } & Omit<
+  React.ComponentProps<typeof Input>,
+  "value" | "onChange" | "onBlur" | "onKeyDown"
+>) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft !== text) onCommit(draft);
+    setDraft(null);
   };
+  return (
+    <Input
+      type="text"
+      {...props}
+      value={draft ?? text}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+      }}
+    />
+  );
+}
+
+/** A value editable as text, or its JSON read-only when it cannot round-trip through text. */
+function KeywordInput({
+  value,
+  onCommit,
+  placeholder,
+  className,
+}: {
+  value: TextValue;
+  onCommit: (text: string) => void;
+  placeholder: string;
+  className: string;
+}) {
+  const { t } = useTranslation("agents");
+  if (value.locked) {
+    return (
+      <Input
+        type="text"
+        placeholder={placeholder}
+        value={value.text}
+        disabled
+        readOnly
+        title={t("editor.fieldLockedJson")}
+        className={className}
+      />
+    );
+  }
+  return (
+    <DraftInput
+      text={value.text}
+      onCommit={onCommit}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+}
+
+function NumberKeywordInput({
+  prop,
+  keyword,
+  placeholder,
+  className,
+  onChange,
+}: {
+  prop: JSONSchema7;
+  keyword: NumericKeyword;
+  placeholder: string;
+  className: string;
+  onChange: (prop: JSONSchema7) => void;
+}) {
+  const current = prop[keyword];
+  return (
+    <DraftInput
+      text={typeof current === "number" ? String(current) : ""}
+      onCommit={(text) => onChange(setKeyword(prop, keyword, toKeywordNumber(keyword, text)))}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
 }
 
 function SortableFieldCard({
@@ -114,11 +213,18 @@ function SortableFieldCard({
   });
   const style = { transform: CSS.Transform.toString(transform), transition };
 
-  const isFile = mode === "input" && !!field.isFile;
+  const { prop } = field;
+  const setProp = (next: JSONSchema7) => onUpdate(index, { prop: next });
+  const type = fieldType(prop, mode);
+  const kind = fileKind(prop, mode);
+  const isFile = kind !== "none";
   const showDetails = mode === "input";
-  const isNumeric = field.type === "number" || field.type === "integer";
-  const isString = field.type === "string" && !isFile;
-  const isArray = field.type === "array";
+  const isNumeric = type === "number" || type === "integer";
+  const isString = type === "string" && !isFile;
+  const isArray = type === "array";
+  const defaultText = valueToText(prop.default, type);
+  const enumText = listToText(prop.enum, type);
+  const itemsEnum = itemsEnumText(prop);
 
   // Agent/tool input and output keys are slug-based (hyphen-based, URL-safe):
   // `live` while the user types, `final` on blur.
@@ -148,10 +254,11 @@ function SortableFieldCard({
           className="h-7 w-[120px] min-w-0 shrink-0 font-mono text-xs"
         />
         <Select
-          value={field.type}
-          onValueChange={(v) =>
-            onUpdate(index, { type: v, ...(v !== "string" ? { isFile: false } : {}) })
-          }
+          value={type}
+          onValueChange={(v) => {
+            const next = TYPE_OPTIONS.find((o) => o === v);
+            if (next) setProp(changeType(prop, next));
+          }}
         >
           <SelectTrigger className="h-7 w-[100px] text-xs">
             <SelectValue />
@@ -167,8 +274,8 @@ function SortableFieldCard({
         <Input
           type="text"
           placeholder={t("editor.fieldDesc")}
-          value={field.description}
-          onChange={(e) => onUpdate(index, { description: e.target.value })}
+          value={prop.description ?? ""}
+          onChange={(e) => setProp(setKeyword(prop, "description", e.target.value || undefined))}
           className="h-7 min-w-0 flex-1 text-xs"
         />
         <div className="flex items-center gap-1.5">
@@ -184,12 +291,12 @@ function SortableFieldCard({
             {t("editor.fieldReq")}
           </Label>
         </div>
-        {mode === "input" && field.type === "string" && (
+        {mode === "input" && type === "string" && (
           <div className="flex items-center gap-1.5">
             <Checkbox
               id={`field-file-${index}`}
-              checked={field.isFile ?? false}
-              onCheckedChange={(checked) => onUpdate(index, { isFile: Boolean(checked) })}
+              checked={isFile}
+              onCheckedChange={(checked) => setProp(setFileKind(prop, checked ? "single" : "none"))}
             />
             <Label
               htmlFor={`field-file-${index}`}
@@ -220,18 +327,19 @@ function SortableFieldCard({
                 onChange={(e) => onUpdate(index, { accept: e.target.value })}
                 className="h-7 min-w-[100px] flex-1 text-xs"
               />
-              <Input
-                type="text"
+              <DraftInput
                 placeholder={t("editor.fieldMaxSize")}
-                value={field.maxSize ?? ""}
-                onChange={(e) => onUpdate(index, { maxSize: e.target.value })} // canonical-casing-exempt: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
+                text={field.maxSize !== undefined ? String(field.maxSize) : ""}
+                onCommit={(text) => onUpdate(index, { maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
                 className="h-7 min-w-[100px] flex-1 text-xs"
               />
               <div className="flex items-center gap-1.5">
                 <Checkbox
                   id={`field-multiple-${index}`}
-                  checked={field.multiple ?? false}
-                  onCheckedChange={(checked) => onUpdate(index, { multiple: Boolean(checked) })}
+                  checked={kind === "multiple"}
+                  onCheckedChange={(checked) =>
+                    setProp(setFileKind(prop, checked ? "multiple" : "single"))
+                  }
                 />
                 <Label
                   htmlFor={`field-multiple-${index}`}
@@ -240,25 +348,26 @@ function SortableFieldCard({
                   {t("editor.fieldMultiple")}
                 </Label>
               </div>
-              {field.multiple && (
-                <Input
-                  type="text"
+              {kind === "multiple" && (
+                <NumberKeywordInput
+                  prop={prop}
+                  keyword="maxItems"
                   placeholder={t("editor.fieldMaxFiles")}
-                  value={field.maxFiles ?? ""}
-                  onChange={(e) => onUpdate(index, { maxFiles: e.target.value })}
                   className="h-7 min-w-[100px] flex-1 text-xs"
+                  onChange={setProp}
                 />
               )}
             </>
           ) : (
             <>
-              <Input
-                type="text"
-                placeholder={t("editor.fieldDefault")}
-                value={field.default ?? ""}
-                onChange={(e) => onUpdate(index, { default: e.target.value })}
-                className="h-7 min-w-[100px] flex-1 text-xs"
-              />
+              {(isTextType(type) || prop.default !== undefined) && (
+                <KeywordInput
+                  value={defaultText}
+                  onCommit={(text) => setProp(setKeyword(prop, "default", textToValue(text, type)))}
+                  placeholder={t("editor.fieldDefault")}
+                  className="h-7 min-w-[100px] flex-1 text-xs"
+                />
+              )}
               <Input
                 type="text"
                 placeholder={t("editor.fieldPlaceholder")}
@@ -266,18 +375,24 @@ function SortableFieldCard({
                 onChange={(e) => onUpdate(index, { placeholder: e.target.value })}
                 className="h-7 min-w-[100px] flex-1 text-xs"
               />
-              <Input
-                type="text"
-                placeholder={t("editor.fieldEnum")}
-                value={field.enumValues ?? ""}
-                onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
-                className="h-7 min-w-[100px] flex-1 text-xs"
-              />
+              {(isTextType(type) || prop.enum !== undefined) && (
+                <KeywordInput
+                  value={enumText}
+                  onCommit={(text) => {
+                    const values = textToList(text, type);
+                    setProp(setKeyword(prop, "enum", values.length > 0 ? values : undefined));
+                  }}
+                  placeholder={t("editor.fieldEnum")}
+                  className="h-7 min-w-[100px] flex-1 text-xs"
+                />
+              )}
               {/* String format dropdown */}
               {isString && (
                 <Select
-                  value={field.format ?? ""}
-                  onValueChange={(v) => onUpdate(index, { format: v || undefined })}
+                  value={prop.format ?? ""}
+                  onValueChange={(v) =>
+                    setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
+                  }
                 >
                   <SelectTrigger className="h-7 w-[110px] text-xs">
                     <SelectValue placeholder="Format" />
@@ -294,25 +409,27 @@ function SortableFieldCard({
               {/* String constraints */}
               {isString && (
                 <>
-                  <Input
-                    type="text"
+                  <NumberKeywordInput
+                    prop={prop}
+                    keyword="minLength"
                     placeholder="minLength"
-                    value={field.minLength ?? ""}
-                    onChange={(e) => onUpdate(index, { minLength: e.target.value })}
                     className="h-7 w-[90px] text-xs"
+                    onChange={setProp}
                   />
-                  <Input
-                    type="text"
+                  <NumberKeywordInput
+                    prop={prop}
+                    keyword="maxLength"
                     placeholder="maxLength"
-                    value={field.maxLength ?? ""}
-                    onChange={(e) => onUpdate(index, { maxLength: e.target.value })}
                     className="h-7 w-[90px] text-xs"
+                    onChange={setProp}
                   />
                   <Input
                     type="text"
                     placeholder="pattern"
-                    value={field.pattern ?? ""}
-                    onChange={(e) => onUpdate(index, { pattern: e.target.value })}
+                    value={prop.pattern ?? ""}
+                    onChange={(e) =>
+                      setProp(setKeyword(prop, "pattern", e.target.value || undefined))
+                    }
                     className="h-7 min-w-[100px] flex-1 font-mono text-xs"
                   />
                 </>
@@ -320,36 +437,35 @@ function SortableFieldCard({
               {/* Number/integer constraints */}
               {isNumeric && (
                 <>
-                  <Input
-                    type="text"
+                  <NumberKeywordInput
+                    prop={prop}
+                    keyword="minimum"
                     placeholder="min"
-                    value={field.minimum ?? ""}
-                    onChange={(e) => onUpdate(index, { minimum: e.target.value })}
                     className="h-7 w-[70px] text-xs"
+                    onChange={setProp}
                   />
-                  <Input
-                    type="text"
+                  <NumberKeywordInput
+                    prop={prop}
+                    keyword="maximum"
                     placeholder="max"
-                    value={field.maximum ?? ""}
-                    onChange={(e) => onUpdate(index, { maximum: e.target.value })}
                     className="h-7 w-[70px] text-xs"
+                    onChange={setProp}
                   />
-                  <Input
-                    type="text"
+                  <NumberKeywordInput
+                    prop={prop}
+                    keyword="multipleOf"
                     placeholder="step"
-                    value={field.step ?? ""}
-                    onChange={(e) => onUpdate(index, { step: e.target.value })}
                     className="h-7 w-[70px] text-xs"
+                    onChange={setProp}
                   />
                 </>
               )}
               {/* Array enum items (for multiselect) */}
-              {isArray && (
-                <Input
-                  type="text"
+              {isArray && (isTextType(itemType(prop)) || itemsEnum.locked) && (
+                <KeywordInput
+                  value={itemsEnum}
+                  onCommit={(text) => setProp(setItemsEnum(prop, textToList(text, itemType(prop))))}
                   placeholder="Enum items (a, b, c)"
-                  value={field.arrayEnumItems ?? ""}
-                  onChange={(e) => onUpdate(index, { arrayEnumItems: e.target.value })}
                   className="h-7 min-w-[150px] flex-1 text-xs"
                 />
               )}
@@ -363,7 +479,7 @@ function SortableFieldCard({
 
 export function SchemaSection({ title, mode, fields, onChange }: SchemaSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const add = () => onChange([...fields, emptyField(mode)]);
+  const add = () => onChange([...fields, emptyField()]);
 
   const update = (index: number, patch: Partial<SchemaField>) => {
     const next = fields.map((f, i) => (i === index ? { ...f, ...patch } : f));

@@ -39,6 +39,7 @@
 
 import { createDecipheriv, randomBytes } from "node:crypto";
 
+import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
 import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
@@ -109,23 +110,6 @@ function loginToolDiagnostic(msg: string): string | null {
   const clipped =
     detail.length > MAX_DIAGNOSTIC_CHARS ? `${detail.slice(0, MAX_DIAGNOSTIC_CHARS)}…` : detail;
   return /[.!?…]$/.test(clipped) ? clipped : `${clipped}.`;
-}
-
-/**
- * Coerce a credential bag's values to strings. The sidecar's MITM substitutes
- * `{{name}}` placeholders only on strings (a URL or header value template
- * has no notion of "substitute a number"), so non-string credential values
- * are JSON-stringified at this boundary. The route layer's
- * `importConnectionSchema` accepts JSON-typed credentials per JSON Schema
- * 2020-12 §7.5; this is where they get serialized for the wire-level
- * substitution contract.
- */
-function stringifyInputs(inputs: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(inputs)) {
-    out[k] = typeof v === "string" ? v : JSON.stringify(v);
-  }
-  return out;
 }
 
 /** How long to wait for the connect-run sidecar to mint the session before killing it. */
@@ -316,9 +300,10 @@ export async function buildConnectLoginSpec(
       authorizedUris: [...authorizedUris],
       deliveryHttp,
       variables: {},
-      // The sidecar's MITM substitutes `{{name}}` placeholders only on strings —
-      // JSON-stringify non-string credential values so they round-trip cleanly.
-      inputs: stringifyInputs(execution.inputs),
+      // Same projection as the run-start re-bootstrap reads back from storage
+      // (`decryptCredentialInputsToStringMap`), so a login input is never
+      // delivered on the first login and lost on the next (#1897).
+      inputs: toCredentialStringMap(execution.inputs),
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
     },
     // The login runner's MITM enforces the same allowlist as an agent run's.

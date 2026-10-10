@@ -344,7 +344,7 @@ export function normalizeContextFileUris(value: unknown): string[] {
     if (!isFileUri(entry)) {
       throw invalidRequest(
         "`context_files` entries must be appfile:// URIs (typically taken from a previous " +
-          `run's files result) — got '${String(entry)}'`,
+          `run's files result) — got ${JSON.stringify(entry)}`,
         "context_files",
       );
     }

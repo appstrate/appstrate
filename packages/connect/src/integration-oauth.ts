@@ -26,6 +26,7 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import type { Actor, OAuthClientResolver, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
@@ -97,7 +98,7 @@ interface InitiateIntegrationOAuthInput {
    * `access_type=offline` + `prompt=consent`). Merged last so a manifest
    * can override the dynamic `prompt`.
    */
-  authorizationParams?: Record<string, string>;
+  authorizationParams?: Record<string, unknown>;
   /** Platform redirect URI — same callback for all integration flows. */
   redirectUri: string;
   /** The registered client this flow uses; the callback re-resolves its credentials by it. */
@@ -241,11 +242,15 @@ export async function initiateIntegrationOAuth(
     // token request); harmless when accepted-but-ignored.
     ...(input.resource ? { resource: input.resource } : {}),
     ...(input.forceAccountSelect ? { prompt: "select_account" } : {}),
-    // Merged last: a manifest's authorization_params (e.g. Google's
-    // access_type=offline + prompt=consent) wins over the dynamic prompt
-    // so refresh-token issuance is never silently suppressed.
-    ...(input.authorizationParams ?? {}),
   });
+  // Set last: a manifest's authorization_params (e.g. Google's
+  // access_type=offline + prompt=consent) wins over the dynamic prompt
+  // so refresh-token issuance is never silently suppressed.
+  for (const [key, value] of Object.entries(input.authorizationParams ?? {})) {
+    if (value === undefined || value === null) continue;
+    // OIDC `claims` is JSON-in-a-parameter; JSON is the only unambiguous encoding of a non-string.
+    params.set(key, jsonText(value));
+  }
 
   const authUrl = `${endpoints.authorizationEndpoint}${endpoints.authorizationEndpoint.includes("?") ? "&" : "?"}${params.toString()}`;
   return { authUrl, state };

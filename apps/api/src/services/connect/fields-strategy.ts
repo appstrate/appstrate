@@ -10,6 +10,7 @@
  */
 
 import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/authorized-uris";
+import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
 
 import {
   extractIdentity,
@@ -52,10 +53,11 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       ctx.variables,
     );
     // #1627: an `authorized_uris` entry the submitted fields cannot render would refuse every
-    // later call, so the connection is refused now. Never echoes the value.
+    // later call, so the connection is refused now. Never echoes the value. Judged on the
+    // projection every read renders from, so a typed field (`port: 8443`) passes here as there.
     const unrenderable = unrenderableAuthorizedUriFields(
       auth.authorized_uris ?? [],
-      credentials,
+      toCredentialStringMap(credentials),
       variables ?? {},
     );
     if (unrenderable.length > 0) {

@@ -178,9 +178,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(auth.code_challenge_methods_supported
         ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
         : {}),
-      ...(auth.authorization_params
-        ? { authorizationParams: auth.authorization_params as Record<string, string> }
-        : {}),
+      ...(auth.authorization_params ? { authorizationParams: auth.authorization_params } : {}),
       redirectUri: effectiveRedirectUri,
       orgId: ctx.scope.orgId,
       spaceId: ctx.scope.spaceId,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-
 /** Form-state model of an end-user's `metadata`, shared by the create and edit forms. */
+
+import { jsonText } from "@appstrate/afps-shared/json-text";
 
 type MetadataValue = string | number | boolean | null;
 
@@ -19,7 +20,7 @@ export function metadataToEntries(metadata: Record<string, unknown> | null): Met
   if (!metadata) return [];
   return Object.entries(metadata).map(([key, value]) => ({
     key,
-    value: typeof value === "string" ? value : JSON.stringify(value),
+    value: jsonText(value),
     original: isMetadataValue(value) ? value : undefined,
   }));
 }
