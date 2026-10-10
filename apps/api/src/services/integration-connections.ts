@@ -3142,7 +3142,28 @@ export async function getIntegrationConnectionCredentialFields(
   return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
-/** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */
+/**
+ * Move the connections minted by `fromClientIds` onto `toClientId`, flagged `needs_reconnection`:
+ * their refresh token belongs to the registration they leave. Returns the ids moved.
+ */
+export async function repointConnectionsToClient(
+  tx: Tx,
+  fromClientIds: readonly string[],
+  toClientId: string,
+): Promise<string[]> {
+  if (fromClientIds.length === 0) return [];
+  const moved = await tx
+    .update(integrationConnections)
+    .set({ clientRef: toClientId, needsReconnection: true, updatedAt: new Date() })
+    .where(inArray(integrationConnections.clientRef, [...fromClientIds]))
+    .returning({ id: integrationConnections.id });
+  return moved.map((row) => row.id);
+}
+
+/**
+ * With {@link repointConnectionsToClient}, the only `needs_reconnection = true` write keeping the
+ * credentials; no-op once the row is gone.
+ */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
 ): Promise<void> {
@@ -3331,7 +3352,7 @@ export interface ConnectionListReader extends ConnectionReader {
 
 /**
  * The resolver's set ({@link usableInSpace}), each row projected for `reader`: the owner's own
- * session sees its shares, origin and the spaces it may share it into; everyone sees
+ * session sees its shares and origin, the owner the spaces it may share it into; everyone sees
  * `shared_here` and the actions they hold. `locked_by`: what a 409 would refuse — an own row's
  * delete (a lock anywhere), another's withdrawal from this space.
  */
@@ -3365,7 +3386,7 @@ export async function listIntegrationConnections(
     const rowShares = shares.get(row.id) ?? [];
     return {
       row,
-      ownerView,
+      owner,
       actions: connectionActions(row, reader, rowShares.includes(scope.spaceId)),
       summary: {
         ...serializeIntegrationConnection(row, {
@@ -3380,15 +3401,13 @@ export async function listIntegrationConnections(
     };
   });
   const shareableIds = projected
-    .filter((p) => p.ownerView && p.row.userId !== null && p.actions.includes("share"))
+    .filter((p) => p.owner && p.row.userId !== null && p.actions.includes("share"))
     .map((p) => p.row.id);
   const shareable = await shareableSpaces(shareableIds, reader.shareTargets);
-  return projected.map(({ row, ownerView, actions, summary }) => ({
+  return projected.map(({ row, owner, actions, summary }) => ({
     ...summary,
     allowed_actions: actions,
-    ...(ownerView && row.userId !== null
-      ? { shareable_space_ids: shareable.get(row.id) ?? [] }
-      : {}),
+    ...(owner && row.userId !== null ? { shareable_space_ids: shareable.get(row.id) ?? [] } : {}),
   }));
 }
 
@@ -3816,7 +3835,7 @@ export function connectionReach(
 ): ConnectionReach {
   return {
     scope: row.spaceId === null ? "org" : "space",
-    space_id: row.spaceId,
+    spaceId: row.spaceId,
     shared_here: view.here !== null && view.shares.includes(view.here),
     ...(view.ownerView
       ? { shared_space_ids: [...view.shares], origin_space_id: row.originSpaceId }

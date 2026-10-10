@@ -2,7 +2,7 @@
 
 /**
  * `0089_connection_shares.sql` on the whole journal: a share row goes with its space, its
- * connection and (as `shared_by`) its user; an org-scoped row's `origin_space_id` stays inside the
+ * connection and (as `shared_by`) its user, and names a space of its connection's org; an org-scoped row's `origin_space_id` stays inside the
  * row's org and is nulled alone when that space is deleted; pins and org defaults carry no
  * `created_by`.
  */
@@ -85,8 +85,8 @@ describe("0089 — connection shares", () => {
     const conn = await insertConnection();
     const space = await insertSpace();
     await pg.exec(
-      `INSERT INTO integration_connection_shares (connection_id, space_id, shared_by)
-       VALUES ('${conn}', '${space}', '${ALICE}')`,
+      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id, shared_by)
+       VALUES ('${conn}', '${space}', '${ORG_A}', '${ALICE}')`,
     );
     await pg.exec(`DELETE FROM spaces WHERE id = '${space}'`);
     expect(
@@ -99,7 +99,7 @@ describe("0089 — connection shares", () => {
   it("drops a share when its connection is deleted", async () => {
     const conn = await insertConnection();
     await pg.exec(
-      `INSERT INTO integration_connection_shares (connection_id, space_id) VALUES ('${conn}', '${A2}')`,
+      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id) VALUES ('${conn}', '${A2}', '${ORG_A}')`,
     );
     await pg.exec(`DELETE FROM integration_connections WHERE id = '${conn}'`);
     expect(
@@ -111,9 +111,19 @@ describe("0089 — connection shares", () => {
 
   it("refuses a duplicate (connection, space) share", async () => {
     const conn = await insertConnection();
-    const insert = `INSERT INTO integration_connection_shares (connection_id, space_id) VALUES ('${conn}', '${A2}')`;
+    const insert = `INSERT INTO integration_connection_shares (connection_id, space_id, org_id) VALUES ('${conn}', '${A2}', '${ORG_A}')`;
     expect(await errorCode(insert)).toBeNull();
     expect(await errorCode(insert)).toBe("23505");
+  });
+
+  it("refuses a share into a space of another org, whichever org the row names", async () => {
+    const conn = await insertConnection();
+    const share = (orgId: string) =>
+      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id) VALUES ('${conn}', '${B1}', '${orgId}')`;
+    // The space's org: the connection is not of that org.
+    expect(await errorCode(share(ORG_B))).toBe("23503");
+    // The connection's org: the space is not of that org.
+    expect(await errorCode(share(ORG_A))).toBe("23503");
   });
 
   it("refuses an origin space of another org", async () => {
@@ -155,8 +165,8 @@ describe("0089 — connection shares", () => {
   it("nulls shared_by when that user is deleted", async () => {
     const conn = await insertConnection();
     await pg.exec(
-      `INSERT INTO integration_connection_shares (connection_id, space_id, shared_by)
-       VALUES ('${conn}', '${A2}', '${BOB}')`,
+      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id, shared_by)
+       VALUES ('${conn}', '${A2}', '${ORG_A}', '${BOB}')`,
     );
     await pg.exec(`DELETE FROM "user" WHERE id = '${BOB}'`);
     const { rows } = await pg.query<{ shared_by: string | null }>(

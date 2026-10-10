@@ -53,7 +53,7 @@ export type ConnectionAction = (typeof CONNECTION_ACTIONS)[number];
 export interface ConnectionReach {
   scope: ConnectionScope;
   /** The one space a space-scoped connection lives in; null for an org-scoped one. */
-  space_id: string | null;
+  spaceId: string | null;
   /** Shared into the space the request is made from; false where none is (account surface, connect responses). */
   shared_here: boolean;
   /** The owner's own session only (absent otherwise): every space it is shared into. */
@@ -108,7 +108,7 @@ export interface IntegrationConnection extends ConnectionReach {
   variables: Record<string, string> | null;
   /** Actions the caller may take on this row. Present on the list surfaces only, like `owner_name`. */
   allowed_actions?: ConnectionAction[];
-  /** Spaces the owner may share this row into. Owner's own session only. */
+  /** Spaces the caller may share this row into. Owner only (its session or its credential). */
   shareable_space_ids?: string[];
   createdAt: string;
   updatedAt: string;

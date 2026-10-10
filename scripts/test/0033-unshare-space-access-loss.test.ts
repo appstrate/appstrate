@@ -40,7 +40,7 @@ async function seedSharedConnection(
       label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
-  await db.insert(integrationConnectionShares).values({ connectionId: row!.id, spaceId });
+  await db.insert(integrationConnectionShares).values({ connectionId: row!.id, spaceId, orgId });
   return row!.id;
 }
 

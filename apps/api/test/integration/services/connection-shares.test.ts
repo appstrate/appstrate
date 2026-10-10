@@ -3,13 +3,14 @@
 /**
  * `shareConnection` / `unshareConnection`: one `integration_connection_shares` row per
  * (connection, space). Only the owner shares; the owner or a governor of the request space
- * withdraws. The two invariants the table no longer holds (an end user's row is never shared, a
+ * withdraws. The two invariants the table does not enforce (an end user's row is never shared, a
  * space-scoped row only into its own space) are the service's, and pinned here.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -83,7 +84,7 @@ async function sharesOf(connectionId: string) {
 }
 
 async function seedShare(connectionId: string, spaceId: string): Promise<void> {
-  await db.insert(integrationConnectionShares).values({ connectionId, spaceId });
+  await seedShares(connectionId, [spaceId]);
 }
 
 describe("connection shares", () => {

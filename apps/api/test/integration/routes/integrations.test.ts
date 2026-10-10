@@ -1860,7 +1860,7 @@ describe("PATCH/PUT/DELETE /api/integrations/:packageId/connections/:connectionI
     expect(body.shared_space_ids).toEqual([ctx.defaultSpaceId]);
   });
 
-  it("refuses shared_space_ids on the PATCH: the share is a sub-resource now (400)", async () => {
+  it("refuses shared_space_ids on the PATCH: a share is its own sub-resource (400)", async () => {
     const id = await seedConn({ userId: ctx.user.id });
 
     const res = await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] });

@@ -8,20 +8,26 @@
  *     bun scripts/migration/0044-connection-shares.ts [--apply]
  *
  * Drizzle `0089` creates `integration_connection_shares` and leaves `shared_space_ids` in place,
- * read by nothing but this script. Each `(id, unnest(shared_space_ids))` becomes one share row
- * (`shared_by` NULL), `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs to
- * another organization is skipped and printed. Then, in each organization that gained a share, the
- * access-loss sweep (`unshareConnectionsOfOwnersWithoutAccess`) withdraws the shares whose owner no
- * longer reaches their space and disables other actors' schedules naming them, as a live access
- * loss does. Run FIRST after the deploy, app up, `pg_dump` first: until it runs, no existing share
- * is visible. Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One
- * transaction; dry run by default (rolled back), `--apply` commits. A second `--apply` copies only
- * the shares the sweep withdrew, and withdraws them again: net 0.
+ * read by nothing but this script. Each `(id, unnest(shared_space_ids))` becomes one share row in
+ * the connection's org (`shared_by` NULL), `ON CONFLICT DO NOTHING`; a target space that no longer
+ * exists or belongs to another organization is skipped and printed. The column is then emptied on
+ * every row that held one, and each connection that gained a share has its `updated_at` bumped (its
+ * owner's open pages refetch). Then, in each organization that gained a share, the access-loss sweep
+ * (`unshareConnectionsOfOwnersWithoutAccess`) withdraws the shares whose owner no longer reaches
+ * their space and disables other actors' schedules naming them, as a live access loss does. Each
+ * share added is audited `integration.connection.share_added`, each withdrawal `share_removed`
+ * (`reason: access_lost`), both by the `system` actor. The target spaces are locked `FOR KEY SHARE`
+ * in id order before any connection row, the order a space delete takes. Run FIRST after the
+ * deploy, app up, `pg_dump` first: until it runs, no existing share is visible. Refuses an empty
+ * `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry run by default
+ * (rolled back), `--apply` commits. A second `--apply` finds the column empty and inserts nothing,
+ * so a share withdrawn since the first stays withdrawn.
  */
 
 import { parseArgs } from "node:util";
 import { inArray, sql } from "drizzle-orm";
 import {
+  auditEvents,
   integrationConnections as c,
   integrationConnectionShares,
   spaces,
@@ -39,6 +45,8 @@ export interface SkippedShare {
 
 export interface ConnectionSharesCopy {
   inserted: number;
+  /** Rows whose `shared_space_ids` was emptied once copied. */
+  cleared: number;
   skipped: SkippedShare[];
   /** Shares whose owner no longer reaches the target space, removed after the copy. */
   withdrawn: Array<{ connectionId: string; spaceId: string }>;
@@ -68,6 +76,7 @@ export async function runConnectionShares(options: {
 
   const result: ConnectionSharesCopy = {
     inserted: 0,
+    cleared: 0,
     skipped: [],
     withdrawn: [],
     disabledScheduleIds: [],
@@ -76,6 +85,10 @@ export async function runConnectionShares(options: {
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL lock_timeout = '5s'");
       await tx.execute("SET LOCAL statement_timeout = '300s'");
+      // Spaces before connections, the order a space delete takes.
+      await tx.execute(sql`SELECT ${spaces.id} FROM ${spaces}
+        WHERE ${spaces.id} IN (SELECT unnest(${c.sharedSpaceIds}) FROM ${c})
+        ORDER BY ${spaces.id} FOR KEY SHARE`);
       const [counts] = toRows<{ pairs: number; to_copy: number }>(
         await tx.execute(sql`SELECT count(*)::int AS pairs,
             count(*) FILTER (WHERE ${spaces.orgId} = ${c.orgId} AND NOT EXISTS (
@@ -101,22 +114,45 @@ export async function runConnectionShares(options: {
         });
       }
 
-      const inserted = toRows<{ connection_id: string }>(
-        await tx.execute(sql`INSERT INTO ${integrationConnectionShares} (connection_id, space_id, shared_by)
-          SELECT ${c.id}, pair.space_id, NULL FROM ${PAIRS}
+      const inserted = toRows<{ connection_id: string; space_id: string; org_id: string }>(
+        await tx.execute(sql`INSERT INTO ${integrationConnectionShares} (connection_id, space_id, org_id, shared_by)
+          SELECT ${c.id}, pair.space_id, ${c.orgId}, NULL FROM ${PAIRS}
           WHERE ${spaces.orgId} = ${c.orgId}
           ORDER BY ${c.id}, pair.space_id
           ON CONFLICT DO NOTHING
-          RETURNING connection_id`),
+          RETURNING connection_id, space_id, org_id`),
       );
       result.inserted = inserted.length;
       out(`inserted: ${result.inserted}, skipped: ${result.skipped.length}`);
+      for (const share of inserted) {
+        await tx.insert(auditEvents).values({
+          orgId: share.org_id,
+          spaceId: share.space_id,
+          actorType: "system",
+          action: "integration.connection.share_added",
+          resourceType: "integration_connection",
+          resourceId: share.connection_id,
+          after: { spaceId: share.space_id },
+        });
+      }
+
+      const cleared = await tx
+        .update(c)
+        .set({ sharedSpaceIds: [] })
+        .where(sql`cardinality(${c.sharedSpaceIds}) > 0`)
+        .returning({ id: c.id });
+      result.cleared = cleared.length;
+      const gained = [...new Set(inserted.map((row) => row.connection_id))];
+      if (gained.length > 0) {
+        await tx.update(c).set({ updatedAt: new Date() }).where(inArray(c.id, gained));
+      }
+      out(`shared_space_ids emptied: ${result.cleared}`);
 
       // An owner who lost a target space after the deploy: withdrawn as a live access loss does.
       const orgs = await tx
         .selectDistinct({ orgId: c.orgId })
         .from(c)
-        .where(inArray(c.id, [...new Set(inserted.map((row) => row.connection_id))]))
+        .where(inArray(c.id, gained))
         .orderBy(c.orgId);
       for (const { orgId } of orgs) {
         const { shares, disabledScheduleIds } = await unshareConnectionsOfOwnersWithoutAccess(tx, {
@@ -124,6 +160,15 @@ export async function runConnectionShares(options: {
         });
         for (const share of shares) {
           out(`  withdrawn ${share.connectionId} → ${share.spaceId}: owner without access`);
+          await tx.insert(auditEvents).values({
+            orgId,
+            spaceId: share.spaceId,
+            actorType: "system",
+            action: "integration.connection.share_removed",
+            resourceType: "integration_connection",
+            resourceId: share.connectionId,
+            after: { spaceId: share.spaceId, reason: "access_lost" },
+          });
         }
         result.withdrawn.push(...shares);
         result.disabledScheduleIds.push(...disabledScheduleIds);

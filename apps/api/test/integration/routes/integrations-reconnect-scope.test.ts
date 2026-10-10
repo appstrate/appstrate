@@ -151,12 +151,37 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
     const refused = await reconnect(orgRow.id, bearer);
     expect(refused.status).toBe(403);
     expect(await ciphertextOf(orgRow.id)).toBe(orgRow.credentialsEncrypted);
-    for (const door of ["api/connect/session", "google/connect/oauth2"]) {
-      expect((await post(door, bearer, { connection_id: orgRow.id })).status).toBe(403);
+    // A reconnect targets a row of the door's own auth: each door gets one.
+    const googleOrgRow = await seedRow("google", null);
+    for (const [door, row] of [
+      ["api/connect/session", orgRow],
+      ["google/connect/oauth2", googleOrgRow],
+    ] as const) {
+      expect((await post(door, bearer, { connection_id: row.id })).status).toBe(403);
     }
 
     expect((await reconnect(orgRow.id, authHeaders(ctx))).status).toBe(200);
     expect(await ciphertextOf(orgRow.id)).not.toBe(orgRow.credentialsEncrypted);
+  });
+
+  it("lists, for an own org-scoped row, the share it may make: its own space only", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:read", "integrations:connect"],
+    });
+    const orgRow = await seedRow("api", null);
+    const res = await app.request(`/api/integrations/${INTEGRATION}/connections`, {
+      headers: { Authorization: `Bearer ${key.rawKey}` },
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { id: string; allowed_actions: string[]; shareable_space_ids?: string[] }[];
+    };
+    const row = data.find((entry) => entry.id === orgRow.id)!;
+    expect(row.allowed_actions).toContain("share");
+    expect(row.shareable_space_ids).toEqual([ctx.defaultSpaceId]);
   });
 
   it("renews a row scoped to its space", async () => {

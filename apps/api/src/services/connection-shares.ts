@@ -135,7 +135,12 @@ export async function shareConnection(
     const actor = viewer.principal.actor;
     await tx
       .insert(shares)
-      .values({ connectionId, spaceId, sharedBy: actor.type === "user" ? actor.id : null })
+      .values({
+        connectionId,
+        spaceId,
+        orgId: row.orgId,
+        sharedBy: actor.type === "user" ? actor.id : null,
+      })
       .onConflictDoNothing();
     const [connection] = await tx
       .update(c)
@@ -208,6 +213,8 @@ export async function shareTargetSpaces(input: {
   orgId: string;
   orgRole: OrgRole;
   userId: string;
+  /** A credential bound to a space shares into that space only. */
+  boundSpaceId: string | null;
   permissionsIn: (spaceId: string) => Promise<ReadonlySet<Permission>>;
 }): Promise<ShareTargets> {
   const visible = await listSpacesForPrincipal(
@@ -216,7 +223,9 @@ export async function shareTargetSpaces(input: {
     input.userId,
     input.userId,
   );
-  const ids = [...new Set(visible.map(({ space }) => space.id))];
+  const ids = [...new Set(visible.map(({ space }) => space.id))].filter(
+    (id) => input.boundSpaceId === null || id === input.boundSpaceId,
+  );
   const held = await Promise.all(ids.map((id) => input.permissionsIn(id)));
   const spaceIds: string[] = [];
   const configures = new Set<string>();

@@ -8,12 +8,15 @@
  *     bun scripts/migration/0043-promote-auto-clients-to-org.ts [--apply]
  *
  * An auto-provisioned client lives at the org tier, one per (integration, auth, issuer). Each such
- * key holding a space-tier client gets one winner: the org-tier client if it exists, else the
- * space-tier client with the most connections (then the oldest, then the smallest id), promoted by
- * the service a space admin's promotion runs (`moveClientToOrgTier`). Every other space-tier client of the key is merged into the winner:
- * its connections are re-pointed (`client_ref`) and flagged `needs_reconnection` (their refresh
- * token belongs to the merged registration), then it is deleted. The user-owned rows of the whole
- * key are widened to org scope (`widenConnectionsToOrgScope`); end users' rows stay in their space.
+ * key holding a space-tier client gets one winner among all its clients, org tier included: the one
+ * minting the most connections, a tie going to the org-tier client, then the oldest, then the
+ * smallest id. Every other client of the key is merged into the winner: its connections are
+ * re-pointed (`client_ref`) and flagged `needs_reconnection` (their refresh token belongs to the
+ * merged registration, `repointConnectionsToClient`), then it is deleted. A space-tier winner is
+ * then promoted by the service a space admin's promotion runs (`moveClientToOrgTier`), once the
+ * org-tier client it beat is gone (one auto client per key and tier). The user-owned rows of the
+ * whole key are widened to org scope (`widenConnectionsToOrgScope`); end users' rows stay in their
+ * space.
  *
  * Run after the deploy, app up, `pg_dump` first, after `0044` and `0041`. Refuses an empty
  * `DATABASE_URL` (the client would open `./data/pglite`). One transaction per organization; dry run
@@ -38,7 +41,7 @@ export interface OrgAutoClientReport {
   orgId: string;
   /** Space-tier clients moved to the org tier. */
   promoted: number;
-  /** Space-tier clients deleted after their connections moved to the winner. */
+  /** Clients (either tier) deleted after their connections moved to the winner. */
   merged: number;
   /** Connections re-pointed to a winner and flagged `needs_reconnection`. */
   repointed: number;
@@ -53,7 +56,7 @@ export async function runPromoteAutoClientsToOrg(options: {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
-  const { moveClientToOrgTier, widenConnectionsToOrgScope } =
+  const { moveClientToOrgTier, repointConnectionsToClient, widenConnectionsToOrgScope } =
     await import("../../apps/api/src/services/integration-connections.ts");
   const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
     await db.execute(
@@ -124,23 +127,30 @@ export async function runPromoteAutoClientsToOrg(options: {
           if (spaceClients.length === 0) continue;
           const ids = clients.map((client) => client.id);
 
-          let winner = clients.find((client) => client.spaceId === null);
-          if (!winner) {
-            const counts = await tx
-              .select({ clientRef: c.clientRef, n: sql<number>`count(*)::int` })
-              .from(c)
-              .where(inArray(c.clientRef, ids))
-              .groupBy(c.clientRef);
-            const countOf = (id: string) => counts.find((row) => row.clientRef === id)?.n ?? 0;
-            winner = [...spaceClients].sort(
-              (a, b) =>
-                countOf(b.id) - countOf(a.id) ||
-                a.createdAt.getTime() - b.createdAt.getTime() ||
-                a.id.localeCompare(b.id),
-            )[0]!;
+          const counts = await tx
+            .select({ clientRef: c.clientRef, n: sql<number>`count(*)::int` })
+            .from(c)
+            .where(inArray(c.clientRef, ids))
+            .groupBy(c.clientRef);
+          const countOf = (id: string) => counts.find((row) => row.clientRef === id)?.n ?? 0;
+          const winner = [...clients].sort(
+            (a, b) =>
+              countOf(b.id) - countOf(a.id) ||
+              Number(a.spaceId !== null) - Number(b.spaceId !== null) ||
+              a.createdAt.getTime() - b.createdAt.getTime() ||
+              a.id.localeCompare(b.id),
+          )[0]!;
+          const losers = clients.filter((client) => client.id !== winner.id).map((l) => l.id);
+          if (losers.length > 0) {
+            const repointed = await repointConnectionsToClient(tx, losers, winner.id);
+            report.repointed += repointed.length;
+            await tx.delete(ioc).where(inArray(ioc.id, losers));
+            report.merged += losers.length;
+          }
+          if (winner.spaceId !== null) {
             const promoted = await moveClientToOrgTier(
               tx,
-              { orgId, spaceId: winner.spaceId! },
+              { orgId, spaceId: winner.spaceId },
               group.integrationId,
               winner.id,
               true,
@@ -148,21 +158,9 @@ export async function runPromoteAutoClientsToOrg(options: {
             report.widened += promoted.widened.length;
             report.promoted++;
           }
-          const winnerId = winner.id;
-          const losers = spaceClients.filter((client) => client.id !== winnerId).map((l) => l.id);
 
-          const widened = await widenConnectionsToOrgScope(tx, inArray(c.clientRef, ids));
+          const widened = await widenConnectionsToOrgScope(tx, eq(c.clientRef, winner.id));
           report.widened += widened.length;
-          if (losers.length > 0) {
-            const repointed = await tx
-              .update(c)
-              .set({ clientRef: winnerId, needsReconnection: true, updatedAt: new Date() })
-              .where(inArray(c.clientRef, losers))
-              .returning({ id: c.id });
-            report.repointed += repointed.length;
-            await tx.delete(ioc).where(inArray(ioc.id, losers));
-            report.merged += losers.length;
-          }
         }
         out(
           `org ${orgId}: promoted ${report.promoted}, merged ${report.merged}, re-pointed ${report.repointed}, widened ${report.widened}`,

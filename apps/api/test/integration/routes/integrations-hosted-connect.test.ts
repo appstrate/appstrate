@@ -634,6 +634,22 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
     expect(again.status).toBe(500);
     expect(await again.text()).not.toContain("already been used");
   });
+
+  it("refuses with 404 a link whose connection is gone, sending nothing upstream", async () => {
+    const { connectUrl } = buildConnectUrl(
+      connectClaimsFor({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        packageId: "@myorg/gsuite",
+        authKey: "google",
+        connectionId: crypto.randomUUID(),
+      }),
+    );
+    const res = await startConnect(new URL(connectUrl).searchParams.get("token")!);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain("no longer exists");
+  });
 });
 
 /** The package id the provisioning table names — the only one it provisions. */

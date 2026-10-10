@@ -2,14 +2,21 @@
 
 /**
  * Migration `0044` against the test database: each space id in `shared_space_ids` becomes a share
- * row; a dry run writes nothing; a second `--apply` inserts nothing; a target space that no longer
- * exists or belongs to another organization is skipped and reported.
+ * row, audited by the `system` actor, and the column is emptied; a dry run writes nothing; a second
+ * `--apply` inserts nothing, so a share withdrawn in between stays withdrawn; a target space that no
+ * longer exists or belongs to another organization is skipped and reported.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationConnectionShares } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationConnectionShares,
+} from "@appstrate/db/schema";
 import { runConnectionShares } from "../migration/0044-connection-shares.ts";
+import { unshareConnection } from "../../apps/api/src/services/connection-shares.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import {
   addOrgMember,
@@ -41,6 +48,30 @@ async function seedOrgConnection(sharedSpaceIds: string[], userId = ctx.user.id)
     })
     .returning({ id: integrationConnections.id });
   return row!.id;
+}
+
+async function sharedSpaceIdsOf(id: string): Promise<string[]> {
+  const [row] = await db
+    .select({ sharedSpaceIds: integrationConnections.sharedSpaceIds })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, id));
+  return row!.sharedSpaceIds;
+}
+
+async function audits() {
+  const rows = await db
+    .select({
+      action: auditEvents.action,
+      actorType: auditEvents.actorType,
+      actorId: auditEvents.actorId,
+      spaceId: auditEvents.spaceId,
+      resourceId: auditEvents.resourceId,
+      after: auditEvents.after,
+    })
+    .from(auditEvents)
+    .where(eq(auditEvents.resourceType, "integration_connection"))
+    .orderBy(asc(auditEvents.action), asc(auditEvents.spaceId));
+  return rows;
 }
 
 async function shares() {
@@ -78,10 +109,47 @@ describe("0044 — connection shares copied into integration_connection_shares",
       .sort((a, b) => a.spaceId.localeCompare(b.spaceId));
     expect(await shares()).toEqual(expected);
 
+    expect(lines).toContain("shared_space_ids emptied: 1");
+    expect(await sharedSpaceIdsOf(id)).toEqual([]);
+    expect(await audits()).toEqual(
+      [s1, s2].sort().map((spaceId) => ({
+        action: "integration.connection.share_added",
+        actorType: "system",
+        actorId: null,
+        spaceId,
+        resourceId: id,
+        after: { spaceId },
+      })),
+    );
+
     lines.length = 0;
     expect((await run(true)).inserted).toBe(0);
-    expect(lines).toContain("shares in shared_space_ids: 2, to copy: 0");
+    expect(lines).toContain("shares in shared_space_ids: 0, to copy: 0");
     expect(await shares()).toEqual(expected);
+  });
+
+  it("keeps a share the owner withdrew between two --apply runs withdrawn", async () => {
+    const s2 = (await seedSpace({ orgId: ctx.orgId })).id;
+    const id = await seedOrgConnection([ctx.defaultSpaceId, s2]);
+    expect((await run(true)).inserted).toBe(2);
+
+    const { removed } = await unshareConnection({
+      connectionId: id,
+      spaceId: s2,
+      viewer: {
+        principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
+        spaceId: null,
+        integrationId: null,
+        governs: false,
+        permissionsIn: async () => new Set(),
+      },
+    });
+    expect(removed).toBe(true);
+
+    expect((await run(true)).inserted).toBe(0);
+    expect(await shares()).toEqual([
+      { connectionId: id, spaceId: ctx.defaultSpaceId, sharedBy: null },
+    ]);
   });
 
   it("skips and reports a deleted space and another organization's space", async () => {
@@ -121,6 +189,18 @@ describe("0044 — connection shares copied into integration_connection_shares",
     expect(lines).toContain("withdrawn (owner without access): 1, schedules disabled: 0");
     expect(await shares()).toEqual([
       { connectionId: id, spaceId: ctx.defaultSpaceId, sharedBy: null },
+    ]);
+    expect(
+      (await audits()).filter((a) => a.action === "integration.connection.share_removed"),
+    ).toEqual([
+      {
+        action: "integration.connection.share_removed",
+        actorType: "system",
+        actorId: null,
+        spaceId: closed.id,
+        resourceId: id,
+        after: { spaceId: closed.id, reason: "access_lost" },
+      },
     ]);
   });
 });

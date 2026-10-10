@@ -64,7 +64,7 @@ function candidate(id: string, label: string): Candidate {
     owner_name: "Moi",
     scopes_granted: [],
     scope: "org",
-    space_id: null,
+    spaceId: null,
     shared_here: false,
     shared_space_ids: [],
     origin_space_id: null,
@@ -741,7 +741,7 @@ describe("PickerMenu — where a candidate comes from", () => {
   it("names the owner to anyone else, and on a space-scoped row", () => {
     const foreign = { ...candidate(WEB, "web"), is_own: false, owner_name: "Alice" };
     expect(rowText(foreign)).toContain(t("connectedBy", { owner: "Alice" }));
-    const spaceScoped = { ...candidate(WEB, "web"), scope: "space" as const, space_id: ORIGIN };
+    const spaceScoped = { ...candidate(WEB, "web"), scope: "space" as const, spaceId: ORIGIN };
     expect(rowText(spaceScoped)).toContain(t("connectedBy", { owner: t("byYou") }));
   });
 

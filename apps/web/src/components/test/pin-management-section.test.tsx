@@ -28,7 +28,7 @@ const SHARED = {
   account_id: "team@acme.test",
   auth_key: "oauth",
   scope: "org" as const,
-  space_id: null,
+  spaceId: null,
   shared_here: true,
 };
 

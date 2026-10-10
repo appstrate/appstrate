@@ -31,7 +31,7 @@
  * id set that only this file writes is what makes the CLEANUP below exact.
  */
 
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
@@ -376,7 +376,30 @@ const SEED = `
      'myapplications:read  https://ex.test/applications:read', 'pending', now() + interval '10 minutes', now(), 5);
 `;
 
+/**
+ * The composite foreign keys into `spaces` (drizzle `0089`: a share's space and a connection's
+ * origin, each pinned to its org) postdate this script, which ran against a catalog holding none
+ * and refuses one by design. Dropped for this file, as the level CHECKs are, and re-added from
+ * their own definitions when it ends.
+ */
+let compositeSpaceFks: Array<{ tbl: string; conname: string; def: string }> = [];
+
 describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary become `space`", () => {
+  beforeAll(async () => {
+    compositeSpaceFks = await rows(`
+      SELECT conrelid::regclass::text AS tbl, conname, pg_get_constraintdef(oid) AS def
+        FROM pg_constraint
+       WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
+         AND array_length(conkey, 1) > 1
+       ORDER BY 1, 2
+    `);
+    await execScript(
+      compositeSpaceFks
+        .map((fk) => `ALTER TABLE ${fk.tbl} DROP CONSTRAINT "${fk.conname}";`)
+        .join("\n"),
+    );
+  });
+
   beforeEach(async () => {
     await execScript(CLEANUP);
     // The three CHECKs must never be left dropped, whatever the seed does.
@@ -396,6 +419,11 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       await execScript(CLEANUP);
       await execScript(DROP_LEVEL_CHECKS);
     }, READD_LEVEL_CHECKS_NOT_VALID);
+    await execScript(
+      compositeSpaceFks
+        .map((fk) => `ALTER TABLE ${fk.tbl} ADD CONSTRAINT "${fk.conname}" ${fk.def};`)
+        .join("\n"),
+    );
   });
 
   // ── The id re-mint ─────────────────────────────────────────────────────────
@@ -465,16 +493,15 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       SELECT 'audit_events.space_id',
              (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
-    // 22 FK columns + the constraint-less `audit_events.space_id`. Two of the
-    // 22 arrived with `0056_space_roles` (`space_members.space_id`,
+    // 21 single-column FK columns + the constraint-less `audit_events.space_id`.
+    // Two of the 21 arrived with `0056_space_roles` (`space_members.space_id`,
     // `chat_sessions.space_id`), and two more with the personal-spaces work:
     // `packages.home_space_id` (`0063_packages_home_space`) and
-    // `package_shares.space_id` (`0065_package_shares`); one more with
-    // `0086_connection_org_scope` (`integration_connections.origin_space_id`).
-    // 0003 derives the columns it rewrites FROM the FK set, so it covers them
-    // without an edit —
+    // `package_shares.space_id` (`0065_package_shares`). The composite keys of
+    // `0089` are dropped for this file (`compositeSpaceFks`). 0003 derives the
+    // columns it rewrites FROM the FK set, so it covers them without an edit —
     // which is exactly the property this count guards.
-    expect(survivors.length).toBe(23);
+    expect(survivors.length).toBe(22);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
@@ -485,7 +512,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(22);
+    expect(before.length).toBe(21);
 
     await replayScript();
 
@@ -496,9 +523,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        ORDER BY 1, 2
     `);
     // Byte-for-byte the same set, same names, same delete actions — twenty of
-    // the twenty-two `c` (cascade), exactly one `n` (set null):
-    // `integration_connections.origin_space_id`, a provenance pointer on an
-    // org-scoped row that outlives its origin space, and exactly one `r` (restrict):
+    // the twenty-one `c` (cascade), and exactly one `r` (restrict):
     // `packages.home_space_id`, from `0063_packages_home_space`, where SET NULL
     // would silently promote a package to the org catalogue on a space delete
     // and WIDEN who may write it. `audit_events` carries no such FK —
@@ -506,16 +531,11 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     // the space attribution of every historical audit row on each space
     // delete.
     //
-    // So the assertion names its two exceptions instead of allowing any
-    // non-cascade action: a second `n`, or a second `r`, means either 0055
-    // was reverted or the capture/restore invented an action of its own.
+    // So the assertion names its exception instead of allowing any
+    // non-cascade action: an `n`, or a second `r`, means either 0055 was
+    // reverted or the capture/restore invented an action of its own.
     expect(after).toEqual(before);
     expect(after.filter((r) => r.d !== "c")).toEqual([
-      {
-        child: "integration_connections",
-        conname: "integration_connections_origin_space_id_spaces_id_fk",
-        d: "n",
-      },
       { child: "packages", conname: "packages_home_space_id_spaces_id_fk", d: "r" },
     ]);
   });

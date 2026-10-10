@@ -1686,7 +1686,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can use for an integration
-         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `space_id` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.
+         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.
          */
         get: operations["listIntegrationConnections"];
         put?: never;
@@ -5905,7 +5905,7 @@ export interface components {
                  */
                 scope: "org" | "space";
                 /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                space_id: string | null;
+                spaceId: string | null;
                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                 shared_here: boolean;
                 /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -12857,7 +12857,7 @@ export interface operations {
                              */
                             scope: "org" | "space";
                             /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                            space_id: string | null;
+                            spaceId: string | null;
                             /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                             shared_here: boolean;
                             /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -12866,7 +12866,7 @@ export interface operations {
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                             allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                            /** @description Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only. */
+                            /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
                             shareable_space_ids?: string[];
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -13024,7 +13024,7 @@ export interface operations {
                                  */
                                 scope: "org" | "space";
                                 /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                                space_id: string | null;
+                                spaceId: string | null;
                                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                                 shared_here: boolean;
                                 /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -13033,7 +13033,7 @@ export interface operations {
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                                 allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                                /** @description Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only. */
+                                /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
                                 shareable_space_ids?: string[];
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
@@ -13219,7 +13219,7 @@ export interface operations {
                          */
                         scope: "org" | "space";
                         /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                        space_id: string | null;
+                        spaceId: string | null;
                         /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                         shared_here: boolean;
                         /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -13228,7 +13228,7 @@ export interface operations {
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                         allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only. */
+                        /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
                         shareable_space_ids?: string[];
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -13607,7 +13607,7 @@ export interface operations {
                              */
                             scope: "org" | "space";
                             /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                            space_id: string | null;
+                            spaceId: string | null;
                             /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                             shared_here: boolean;
                             /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -13616,7 +13616,7 @@ export interface operations {
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                             allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                            /** @description Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only. */
+                            /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
                             shareable_space_ids?: string[];
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
@@ -13701,7 +13701,7 @@ export interface operations {
                          */
                         scope: "org" | "space";
                         /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                        space_id: string | null;
+                        spaceId: string | null;
                         /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                         shared_here: boolean;
                         /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -13710,7 +13710,7 @@ export interface operations {
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                         allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only. */
+                        /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
                         shareable_space_ids?: string[];
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
@@ -14386,7 +14386,7 @@ export interface operations {
                                  */
                                 scope: "org" | "space";
                                 /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                                space_id: string | null;
+                                spaceId: string | null;
                                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                                 shared_here: boolean;
                                 /** @description Owner's own session only: the spaces whose members may use the connection by an explicit pick. Absent from every other read. */
@@ -14395,7 +14395,7 @@ export interface operations {
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                                 allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                                /** @description Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only. */
+                                /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
                                 shareable_space_ids?: string[];
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;

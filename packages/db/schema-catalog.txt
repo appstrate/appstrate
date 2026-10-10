@@ -113,6 +113,7 @@ column files.storage_key text not null
 column files.user_id text
 column integration_connection_shares.connection_id uuid not null
 column integration_connection_shares.created_at timestamp with time zone not null default now()
+column integration_connection_shares.org_id uuid not null
 column integration_connection_shares.shared_by text
 column integration_connection_shares.space_id text not null
 column integration_connections.account_id text not null
@@ -695,9 +696,9 @@ constraint files files_run_id_org_id_fk FOREIGN KEY (run_id, org_id) REFERENCES 
 constraint files files_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint files files_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint files files_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
-constraint integration_connection_shares ics_connection_id_fk FOREIGN KEY (connection_id) REFERENCES integration_connections(id) ON DELETE CASCADE
+constraint integration_connection_shares ics_connection_org_fk FOREIGN KEY (connection_id, org_id) REFERENCES integration_connections(id, org_id) ON DELETE CASCADE
 constraint integration_connection_shares ics_shared_by_fk FOREIGN KEY (shared_by) REFERENCES "user"(id) ON DELETE SET NULL
-constraint integration_connection_shares ics_space_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
+constraint integration_connection_shares ics_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
 constraint integration_connection_shares integration_connection_shares_pk PRIMARY KEY (connection_id, space_id)
 constraint integration_connections integration_conn_exactly_one_owner CHECK ((((user_id IS NOT NULL) AND (end_user_id IS NULL)) OR ((user_id IS NULL) AND (end_user_id IS NOT NULL))))
 constraint integration_connections integration_connections_auth_key_valid CHECK ((auth_key ~ '^[a-z][a-z0-9_]*$'::text))
@@ -1140,6 +1141,7 @@ index CREATE UNIQUE INDEX uq_chat_messages_session_message ON public.chat_messag
 index CREATE UNIQUE INDEX uq_chat_sessions_id_org_id ON public.chat_sessions USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_files_id_org_id ON public.files USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree (run_id, sha256, name) WHERE (purpose = 'agent_output'::file_purpose)
+index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)

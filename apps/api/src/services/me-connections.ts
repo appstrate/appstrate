@@ -131,8 +131,9 @@ async function spacesServedToOwner(
 }
 
 /**
- * Per owned row that may be shared, the spaces it may be shared into: one listing per org and one
- * query per org, never one per connection. Empty for a delegated credential (only a person shares).
+ * Per owned row that may be shared, the spaces it may be shared into, by the rule the share door
+ * enforces (a credential bound to a space: that space only): one listing per org and one query per
+ * org, never one per connection.
  */
 async function shareableSpacesByConnection(
   principal: ConnectionPrincipal,
@@ -147,7 +148,7 @@ async function shareableSpacesByConnection(
   orgRoles: ReadonlyMap<string, OrgRole>,
 ): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
-  if (principal.kind !== "person" || principal.actor.type !== "user") return out;
+  if (principal.actor.type !== "user") return out;
   const userId = principal.actor.id;
   const byOrg = new Map<string, string[]>();
   for (const row of rows) {
@@ -162,6 +163,7 @@ async function shareableSpacesByConnection(
         orgId,
         orgRole,
         userId,
+        boundSpaceId: boundSpaceOf(principal),
         permissionsIn: (spaceId) => reader.permissionsIn(spaceId, orgId),
       });
       if (targets.spaceIds.length === 0) return;

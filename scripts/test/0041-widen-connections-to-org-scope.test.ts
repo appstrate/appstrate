@@ -104,7 +104,7 @@ async function seedConnection(opts: {
   if (opts.shared) {
     await db
       .insert(integrationConnectionShares)
-      .values({ connectionId: row!.id, spaceId: opts.spaceId });
+      .values({ connectionId: row!.id, spaceId: opts.spaceId, orgId: opts.orgId ?? ctx.orgId });
   }
   return row!.id;
 }

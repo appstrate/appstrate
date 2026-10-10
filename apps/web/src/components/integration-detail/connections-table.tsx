@@ -332,7 +332,7 @@ function ConnectionTableRow({
             <ConnectionShareEditor
               connectionId={connection.id}
               scope={connection.scope}
-              rowSpaceId={connection.space_id}
+              rowSpaceId={connection.spaceId}
               hereSpaceId={spaceId}
               targets={shareTargets}
               sharedSpaceIds={connection.shared_space_ids ?? []}

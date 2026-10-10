@@ -5107,6 +5107,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "shared_by": {
           "name": "shared_by",
           "type": "text",
@@ -5139,21 +5145,21 @@
         }
       },
       "foreignKeys": {
-        "ics_connection_id_fk": {
-          "name": "ics_connection_id_fk",
+        "ics_connection_org_fk": {
+          "name": "ics_connection_org_fk",
           "tableFrom": "integration_connection_shares",
           "tableTo": "integration_connections",
-          "columnsFrom": ["connection_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": ["connection_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "ics_space_id_fk": {
-          "name": "ics_space_id_fk",
+        "ics_space_org_fk": {
+          "name": "ics_space_org_fk",
           "tableFrom": "integration_connection_shares",
           "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": ["space_id", "org_id"],
+          "columnsTo": ["id", "org_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -5454,6 +5460,27 @@
           "isUnique": false,
           "concurrently": false,
           "method": "gin",
+          "with": {}
+        },
+        "uq_integration_conn_id_org_id": {
+          "name": "uq_integration_conn_id_org_id",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
           "with": {}
         },
         "idx_integration_conn_owner_label": {

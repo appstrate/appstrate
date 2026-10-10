@@ -175,11 +175,11 @@ const connectionVariablesSchema = {
 } as const;
 
 // CASING: this connection wire shape mixes camelCase and snake_case by policy,
-// not by oversight. `id`, `expiresAt`, `createdAt`, `updatedAt` are the
+// not by oversight. `id`, `spaceId`, `expiresAt`, `createdAt`, `updatedAt` are the
 // universal DB-convention carve-outs (camelCase everywhere per
 // docs/CASING_CONVENTIONS.md); every other field (`integration_package_id`, `auth_key`, `account_id`,
 // `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
-// `owner_id`, `space_id`, `shared_here`, `client_ref`) is snake_case wire. Matches the
+// `owner_id`, `shared_here`, `client_ref`) is snake_case wire. Matches the
 // serializer output (spec==runtime) — do NOT normalize either way.
 export const connectionScopeSchema = {
   type: "string",
@@ -222,14 +222,14 @@ export const originSpaceIdSchema = {
 } as const;
 
 /** Owner's own session only (absent otherwise): the spaces the owner may share the connection into. */
-export const shareableSpaceIdsSchema = {
+const shareableSpaceIdsSchema = {
   type: "array",
   items: { type: "string" },
   description:
-    "Owner's own session only: the spaces the owner may share this connection into now. Present on the list surfaces only.",
+    "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only.",
 } as const;
 
-export const integrationConnectionSchema = {
+const integrationConnectionSchema = {
   type: "object",
   required: [
     "id",
@@ -244,7 +244,7 @@ export const integrationConnectionSchema = {
     "owner_id",
     "label",
     "scope",
-    "space_id",
+    "spaceId",
     "shared_here",
     "client_ref",
     "variables",
@@ -277,7 +277,7 @@ export const integrationConnectionSchema = {
         "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
     },
     scope: connectionScopeSchema,
-    space_id: spaceIdSchema,
+    spaceId: spaceIdSchema,
     shared_here: sharedHereSchema,
     shared_space_ids: sharedSpaceIdsSchema,
     origin_space_id: originSpaceIdSchema,
@@ -1469,7 +1469,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `space_id` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

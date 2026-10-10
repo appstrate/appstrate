@@ -76,8 +76,12 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { db } from "@appstrate/db/client";
-import { connectionPrincipal, type ConnectionPrincipal } from "../lib/connection-principal.ts";
-import { callerPermissionsInSpace } from "../lib/view-as.ts";
+import {
+  boundSpaceOf,
+  connectionPrincipal,
+  type ConnectionPrincipal,
+} from "../lib/connection-principal.ts";
+import { callerOrgRole, callerPermissionsInSpace } from "../lib/view-as.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
@@ -614,7 +618,7 @@ async function completeConnect(
       ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
     },
   ];
-  if (target && target.spaceId !== null && conn.space_id === null) {
+  if (target && target.spaceId !== null && conn.spaceId === null) {
     audits.push({
       action: "integration.connection.scope_widened",
       resourceType: "integration_connection",
@@ -666,6 +670,8 @@ type HostedOAuthBegin =
   | { redirectUrl: string }
   /** A client-side refusal; `reusable` when it provably preceded any egress. */
   | { refused: ApiError; reusable: boolean }
+  /** The connection named at the mint is gone or out of the actor's reach: 404, as the write is. */
+  | { connectionGone: true }
   /** Any other failure; retryable only when nothing was sent yet. */
   | { failed: true; beforeEgress: boolean };
 
@@ -697,6 +703,7 @@ async function beginHostedOAuth(
           connectionId: claims.connection_id,
         })
       : null;
+    if (claims.connection_id && !target) return { connectionGone: true };
     scopes = connectScopes(auth, claims.scopes, target);
     const strategy = resolveStrategy(auth);
     if (!strategy.begin) throw new Error(`auth type '${auth.type}' has no begin`);
@@ -1205,6 +1212,15 @@ export function createIntegrationsRouter() {
     if (auth.type === "oauth2" && getVariablesSchema(manifest) === null) {
       const begun = await beginHostedOAuth(claims, manifest, auth);
       if ("redirectUrl" in begun) return c.redirect(begun.redirectUrl);
+      if ("connectionGone" in begun) {
+        return c.html(
+          popupHtmlError(
+            "The connection this link reconnects no longer exists. Request a new connection link.",
+            completionDetail,
+          ),
+          404,
+        );
+      }
       if ("refused" in begun) {
         // Rendered generically, with the refusal's own status (#1263, #1345).
         if (begun.reusable) await releaseJti(claims.jti);
@@ -1298,6 +1314,10 @@ export function createIntegrationsRouter() {
         if ("redirectUrl" in begun) {
           clearConnectPageCookie(c);
           return c.json({ ok: true, redirect_url: begun.redirectUrl });
+        }
+        if ("connectionGone" in begun) {
+          clearConnectPageCookie(c);
+          throw notFound("Connection not found");
         }
         if ("refused" in begun && begun.refused.code === "validation_failed") {
           // A variable to fix, shown beside its field: the form may be submitted again.
@@ -1642,12 +1662,13 @@ function spaceConnectionViewer(c: Context<AppEnv>): ConnectionViewer {
 
 /**
  * The caller as a space's connection list projects it. Where the owner may share is resolved only
- * for a person's own session holding an org role, and only when the list holds a row it may share.
+ * for a member's credential holding an org role, by the rule the share door enforces (a credential
+ * bound to a space: that space only), and only when the list holds a row it may share.
  */
 function connectionReader(c: Context<AppEnv>): ConnectionListReader {
   const { orgId, spaceId } = getSpaceScope(c);
   const principal: ConnectionPrincipal = connectionPrincipal(c);
-  const orgRole = c.get("orgRole") as OrgRole | undefined;
+  const orgRole: OrgRole | undefined = callerOrgRole(c, orgId);
   const actor = principal.actor;
   return {
     principal,
@@ -1655,12 +1676,13 @@ function connectionReader(c: Context<AppEnv>): ConnectionListReader {
     canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
     governs: canConfigureIntegrations(c),
     shareTargets:
-      principal.kind === "person" && actor.type === "user" && orgRole
+      actor.type === "user" && orgRole
         ? () =>
             shareTargetSpaces({
               orgId,
               orgRole,
               userId: actor.id,
+              boundSpaceId: boundSpaceOf(principal),
               permissionsIn: (target) => callerPermissionsInSpace(c, target, orgId),
             })
         : null,

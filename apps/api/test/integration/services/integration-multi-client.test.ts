@@ -135,18 +135,31 @@ describe("integration multi-client", () => {
     return row!.clientRef;
   }
 
+  /** The insert response is not an owner view: the origin is read from the row. */
+  async function readOriginSpaceId(connectionId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ originSpaceId: integrationConnections.originSpaceId })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId))
+      .limit(1);
+    return row!.originSpaceId;
+  }
+
   describe("persist stamps client_ref", () => {
     it("stores the system client id on insert, at org scope", async () => {
       const created = await connect(SYSTEM_ID);
       expect(await readClientRef(created.id)).toBe("gmail-system");
-      expect(created).toMatchObject({ scope: "org", origin_space_id: ctx.defaultSpaceId });
+      expect(created).toMatchObject({ scope: "org", spaceId: null });
+      expect(created).not.toHaveProperty("origin_space_id");
+      expect(await readOriginSpaceId(created.id)).toBe(ctx.defaultSpaceId);
     });
 
     it("stores the custom client id on insert, scoped to the client's space", async () => {
       const customId = await seedCustomClient("org-client", "org-secret");
       const created = await connect(customId);
       expect(await readClientRef(created.id)).toBe(customId);
-      expect(created).toMatchObject({ scope: "space", origin_space_id: null });
+      expect(created).toMatchObject({ scope: "space", spaceId: ctx.defaultSpaceId });
+      expect(await readOriginSpaceId(created.id)).toBeNull();
     });
 
     it("leaves client_ref NULL when omitted (non-oauth2 callers), at org scope", async () => {

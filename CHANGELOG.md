@@ -91,9 +91,11 @@ shared_with_org;` tells whether the step applies; a non-zero result makes it
   (`set -a && . ./.env && set +a && bun scripts/migration/0044-connection-shares.ts`),
   which writes nothing and lists the shares it will insert and the target
   spaces it will skip (deleted, or owned by another organization), then the
-  same with `--apply`. It runs in one transaction and is idempotent: a second
-  `--apply` inserts nothing. The `shared_space_ids` column and its two CHECKs
-  are dropped in beta.68.
+  same with `--apply`. It runs in one transaction, empties `shared_space_ids`
+  once copied, and audits each share it adds (`share_added`, `system` actor):
+  a second `--apply` inserts nothing, so a share withdrawn in between stays
+  withdrawn. The `shared_space_ids` column and its two CHECKs are dropped in
+  beta.68.
 
 - **`pg_dump` the platform database BEFORE deploying, then after the deploy
   and after `0044`, run
@@ -161,9 +163,10 @@ shared_with_org;` tells whether the step applies; a non-zero result makes it
   promotes the auto-provisioned OAuth clients (RFC 7591 DCR, CIMD) that were
   registered at a space's tier to the organization tier, so one client per
   authorization server serves the organization. Where an organization holds
-  several space-tier clients for one issuer, the one with the most connections
-  wins and the others are deleted; their connections move to the winner and
-  are flagged `needs_reconnection`, so their owners reconnect them in the UI.
+  several clients for one issuer, the one with the most connections wins
+  (an organization-tier client wins a tie) and the others are deleted; their
+  connections move to the winner and are flagged `needs_reconnection`, so their
+  owners reconnect them in the UI.
   The dry run prints that number. A second `--apply` promotes nothing.
   Details: `scripts/migration/README.md`.
 
@@ -229,7 +232,7 @@ shared_with_org;` tells whether the step applies; a non-zero result makes it
   - `shared_with_org` is gone from the connection DTOs (connection list,
     accessible connections, pin candidates). Shares are rows of
     `integration_connection_shares` (#1910), one per connection and space.
-    The DTOs add `scope` (`"org"` | `"space"`), `space_id`, `shared_here`
+    The DTOs add `scope` (`"org"` | `"space"`), `spaceId`, `shared_here`
     (the connection is shared into the current space), `allowed_actions` and
     `origin_space_id` (owner only). The owner also gets `shared_space_ids`
     (the full target set) and `shareable_space_ids`.

@@ -2,10 +2,10 @@
 
 /**
  * Migration `0043` against the test database, one database across the cases: a dry run writes
- * nothing; without an org-tier auto client, the space-tier one with the most connections is
- * promoted and the others merged into it; with one, every space-tier client is merged into it; a
- * merged client's connections are re-pointed and flagged for reconnection; user-owned rows are
- * widened, end users' rows stay in their space; a second `--apply` finds nothing.
+ * nothing; the client of either tier minting the most connections wins, a tie going to the org-tier
+ * one; the others are merged into it, and a space-tier winner is promoted; a merged client's
+ * connections are re-pointed and flagged for reconnection; user-owned rows are widened, end users'
+ * rows stay in their space; a second `--apply` finds nothing.
  */
 
 import { beforeAll, describe, expect, it } from "bun:test";
@@ -19,6 +19,7 @@ import { seedEndUser, seedPackage, seedSpace } from "../../apps/api/test/helpers
 
 const DCR = "@mig0043/dcr";
 const WITH_ORG = "@mig0043/with-org";
+const BEATS_ORG = "@mig0043/beats-org";
 
 let ctx: TestContext;
 let s1: string;
@@ -51,7 +52,7 @@ async function seedAutoClient(
 
 async function seedConnection(
   integrationId: string,
-  spaceId: string,
+  spaceId: string | null,
   clientRef: string,
   endUserId?: string,
 ): Promise<string> {
@@ -96,17 +97,23 @@ describe("0043 — space-tier auto clients moved to the org tier", () => {
   let winnerRows: string[];
   let loserRow: string;
   let endUserRow: string;
-  // WITH_ORG: an org-tier client and two space-tier ones.
+  // WITH_ORG: an org-tier client and two space-tier ones, one connection each: the tie goes to the org.
   let orgClient: string;
+  let orgClientRow: string;
   let merged: string[];
   let mergedRows: string[];
+  // BEATS_ORG: an org-tier client with one connection, a space-tier one with two.
+  let beatenOrgClient: string;
+  let beatenOrgRow: string;
+  let spaceWinner: string;
+  let spaceWinnerRows: string[];
 
   beforeAll(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "mig0043" });
     s1 = ctx.defaultSpaceId;
     s2 = (await seedSpace({ orgId: ctx.orgId })).id;
-    for (const id of [DCR, WITH_ORG]) {
+    for (const id of [DCR, WITH_ORG, BEATS_ORG]) {
       await seedPackage({ id, orgId: ctx.orgId, type: "integration" });
     }
     const issuer = "https://mcp.example.com";
@@ -123,24 +130,43 @@ describe("0043 — space-tier auto clients moved to the org tier", () => {
     endUserRow = await seedConnection(DCR, s2, loser, endUser.id);
 
     orgClient = await seedAutoClient(WITH_ORG, null, null);
+    orgClientRow = await seedConnection(WITH_ORG, null, orgClient);
     merged = [await seedAutoClient(WITH_ORG, s1, null), await seedAutoClient(WITH_ORG, s2, null)];
     mergedRows = [
       await seedConnection(WITH_ORG, s1, merged[0]!),
       await seedConnection(WITH_ORG, s2, merged[1]!),
     ];
+
+    beatenOrgClient = await seedAutoClient(BEATS_ORG, null, null);
+    beatenOrgRow = await seedConnection(BEATS_ORG, null, beatenOrgClient);
+    spaceWinner = await seedAutoClient(BEATS_ORG, s1, null);
+    spaceWinnerRows = [
+      await seedConnection(BEATS_ORG, s1, spaceWinner),
+      await seedConnection(BEATS_ORG, s1, spaceWinner),
+    ];
   });
 
   it("(c) a dry run leaves the clients and connections as they are", async () => {
-    const before = [await clientsOf(DCR), await clientsOf(WITH_ORG)];
-    const all = [...winnerRows, loserRow, endUserRow, ...mergedRows];
+    const before = [await clientsOf(DCR), await clientsOf(WITH_ORG), await clientsOf(BEATS_ORG)];
+    const all = [
+      ...winnerRows,
+      loserRow,
+      endUserRow,
+      orgClientRow,
+      ...mergedRows,
+      beatenOrgRow,
+      ...spaceWinnerRows,
+    ];
     const rowsBefore = await connectionsOf(all);
 
     await run(false);
     expect(lines[0]).toStartWith("database: ");
-    expect(lines).toContain("to promote: 4");
-    expect(lines).toContain(`org ${ctx.orgId}: promoted 1, merged 3, re-pointed 4, widened 6`);
+    expect(lines).toContain("to promote: 5");
+    expect(lines).toContain(`org ${ctx.orgId}: promoted 2, merged 4, re-pointed 5, widened 8`);
     expect(lines.at(-1)).toContain("DRY RUN");
-    expect([await clientsOf(DCR), await clientsOf(WITH_ORG)]).toEqual(before);
+    expect([await clientsOf(DCR), await clientsOf(WITH_ORG), await clientsOf(BEATS_ORG)]).toEqual(
+      before,
+    );
     expect(await connectionsOf(all)).toEqual(rowsBefore);
   });
 
@@ -171,14 +197,30 @@ describe("0043 — space-tier auto clients moved to the org tier", () => {
     expect(rows.get(endUserRow)!.spaceId).toBe(s2);
   });
 
-  it("(b) merges every space client into the org-tier client that already exists", async () => {
+  it("(b) merges every space client into an org-tier client that ties them", async () => {
     const clients = await clientsOf(WITH_ORG);
     expect([...clients.keys()]).toEqual([orgClient]);
-    const rows = await connectionsOf(mergedRows);
+    const rows = await connectionsOf([orgClientRow, ...mergedRows]);
     for (const id of mergedRows) {
       expect(rows.get(id)!.clientRef).toBe(orgClient);
       expect(rows.get(id)!.needsReconnection).toBe(true);
       expect(rows.get(id)!.spaceId).toBeNull();
+    }
+    expect(rows.get(orgClientRow)!.needsReconnection).toBe(false);
+  });
+
+  it("(e) a space client minting more connections beats the org-tier one, which is merged into it", async () => {
+    const clients = await clientsOf(BEATS_ORG);
+    expect([...clients.keys()]).toEqual([spaceWinner]);
+    expect(clients.get(spaceWinner)!.spaceId).toBeNull();
+    const rows = await connectionsOf([beatenOrgRow, ...spaceWinnerRows]);
+    expect(rows.get(beatenOrgRow)!.clientRef).toBe(spaceWinner);
+    expect(rows.get(beatenOrgRow)!.needsReconnection).toBe(true);
+    for (const id of spaceWinnerRows) {
+      expect(rows.get(id)!.clientRef).toBe(spaceWinner);
+      expect(rows.get(id)!.needsReconnection).toBe(false);
+      expect(rows.get(id)!.spaceId).toBeNull();
+      expect(rows.get(id)!.originSpaceId).toBe(s1);
     }
   });
 

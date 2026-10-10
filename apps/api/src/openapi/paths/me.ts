@@ -30,7 +30,7 @@ const namedSpaceSchema = {
 } as const;
 
 /** One connection on the account surface, as the list (`GET /api/me/connections`) and the rename return it. */
-export const meConnectionEntrySchema = {
+const meConnectionEntrySchema = {
   type: "object",
   required: [
     "connection_id",

@@ -42,7 +42,7 @@ export function sharedInto(spaceId: string): SQL {
  * Of `spaceIds`, those where `predicate` holds for the row in scope, as a `text[]`. Every predicate
  * is nested in the array expression, so drizzle qualifies its columns in a select field too.
  */
-export function spacesWhere(
+function spacesWhere(
   spaceIds: readonly string[],
   predicate: (spaceId: string) => SQL,
 ): SQL<string[]> {

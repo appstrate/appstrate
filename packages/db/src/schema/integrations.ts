@@ -172,6 +172,8 @@ export const integrationConnections = pgTable(
       .where(sql`${table.endUserId} IS NOT NULL`),
     // Serves `shared_space_ids @> ARRAY[$space]` (drizzle `arrayContains`), not `= ANY`.
     index("idx_integration_conn_shared").using("gin", table.sharedSpaceIds),
+    // Referenced target of the shares' composite FK, which keeps a share in its connection's org.
+    uniqueIndex("uq_integration_conn_id_org_id").on(table.id, table.orgId),
     // `coalesce` stands in for NULLS NOT DISTINCT (drizzle cannot express it).
     uniqueIndex("idx_integration_conn_owner_label").on(
       table.orgId,
@@ -223,7 +225,8 @@ export const integrationConnections = pgTable(
 /**
  * One row per (connection, space) the owner shared it into: any actor of that space may bind it by
  * an explicit pick (member pin, launch override, admin pin, org default); the resolver's fallback
- * never binds a share. Deleting the space or the connection takes the share with it.
+ * never binds a share. Deleting the space or the connection takes the share with it. `org_id` is the
+ * connection's org, and both FKs are composite on it, so a share never names a space of another org.
  *
  * Two invariants are held by the service (`assertConnectionShareable` and the reach check), not by
  * the table: an end user's connection is never shared, and a space-scoped row is shared only into
@@ -234,6 +237,8 @@ export const integrationConnectionShares = pgTable(
   {
     connectionId: uuid("connection_id").notNull(),
     spaceId: text("space_id").notNull(),
+    /** The connection's org, and so the space's: both composite FKs below pin it. */
+    orgId: uuid("org_id").notNull(),
     /** Who shared it (always its owner today); NULL once that user is deleted. */
     sharedBy: text("shared_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -245,14 +250,14 @@ export const integrationConnectionShares = pgTable(
     }),
     index("idx_ics_space").on(table.spaceId),
     foreignKey({
-      name: "ics_connection_id_fk",
-      columns: [table.connectionId],
-      foreignColumns: [integrationConnections.id],
+      name: "ics_connection_org_fk",
+      columns: [table.connectionId, table.orgId],
+      foreignColumns: [integrationConnections.id, integrationConnections.orgId],
     }).onDelete("cascade"),
     foreignKey({
-      name: "ics_space_id_fk",
-      columns: [table.spaceId],
-      foreignColumns: [spaces.id],
+      name: "ics_space_org_fk",
+      columns: [table.spaceId, table.orgId],
+      foreignColumns: [spaces.id, spaces.orgId],
     }).onDelete("cascade"),
     foreignKey({
       name: "ics_shared_by_fk",
