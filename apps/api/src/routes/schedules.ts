@@ -45,6 +45,7 @@ import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import {
   assertExplicitModelExists,
+  requireBoundModel,
   resolveModel,
   validateGenerationOverride,
 } from "../services/org-models.ts";
@@ -493,6 +494,9 @@ export function createSchedulesRouter() {
         data.model_id_override,
         null,
       );
+      // A schedule spends organization credentials only: a model each member serves
+      // with their own credential would fail every fire.
+      if (explicitModel) requireBoundModel(explicitModel, null);
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
         const selectedModel =
@@ -707,6 +711,7 @@ export function createSchedulesRouter() {
       data.model_id_override,
       null,
     );
+    if (explicitModel) requireBoundModel(explicitModel, null);
     let generationConfigOverride = data.generation_config_override;
     if (
       (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||

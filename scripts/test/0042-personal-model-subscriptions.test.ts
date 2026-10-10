@@ -7,7 +7,10 @@
  * credential is left alone; a dry run writes nothing; a re-run is a no-op; the report names the
  * members who ran on a subscription they do not own; a blob that does not decrypt is reported and
  * kept, and fails `--apply` at the end; an aliased model or a pending/running run pinned to a
- * subscription makes `--apply` refuse its organization (the dry run reports both).
+ * subscription makes `--apply` refuse its organization (the dry run reports both), and so do a
+ * schedule overriding its model with a model it unbinds and two models it would unbind to one
+ * (provider, model) pair; a pending reconnect pairing minted by anyone but the new owner is
+ * deleted; the organization default and the agents on an unbound model are reported.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -17,6 +20,7 @@ import {
   modelProviderCredentials,
   modelProviderPairings,
   organizationMembers,
+  organizations,
   orgModels,
 } from "@appstrate/db/schema";
 import { runPersonalModelSubscriptions } from "../migration/0042-personal-model-subscriptions.ts";
@@ -34,6 +38,8 @@ import {
   seedOrgModelProviderOAuth,
   seedPackage,
   seedRun,
+  seedSchedule,
+  seedSpacePackage,
 } from "../../apps/api/test/helpers/seed.ts";
 
 const AGENT = "@mig0042/agent";
@@ -67,6 +73,20 @@ async function seedPairing(credentialId: string): Promise<string> {
     providerId: SUBSCRIPTION_PROVIDER,
     expiresAt: new Date(Date.now() + 3600_000),
     credentialId,
+  });
+  return id;
+}
+
+async function seedReconnectPairing(credentialId: string, userId: string): Promise<string> {
+  const id = `pair_${crypto.randomUUID().replace(/-/g, "")}`;
+  await db.insert(modelProviderPairings).values({
+    id,
+    tokenHash: crypto.randomUUID(),
+    userId,
+    orgId: ctx.orgId,
+    providerId: SUBSCRIPTION_PROVIDER,
+    expiresAt: new Date(Date.now() + 3600_000),
+    reconnectCredentialId: credentialId,
   });
   return id;
 }
@@ -372,6 +392,112 @@ describe("0042 — model subscriptions become personal", () => {
     expect(result.orgs[0]!.activeRuns).toEqual([]);
     expect(lines.at(-1)).toBe("0042: APPLIED — committed.");
     expect((await rowOf(owned.id))!.ownerUserId).toBe(ctx.user.id);
+    expect((await modelOf(model.id)).credentialId).toBeNull();
+  });
+
+  it("deletes a pending reconnect pairing minted by anyone but the subscription's new owner", async () => {
+    const admin = await createTestUser();
+    await addOrgMember(ctx.orgId, admin.id, "admin");
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const byAdmin = await seedReconnectPairing(owned.id, admin.id);
+    const byOwner = await seedReconnectPairing(owned.id, ctx.user.id);
+
+    const result = await run(true);
+
+    expect(result.orgs[0]!.pairingsDeleted).toBe(1);
+    expect(await pairingExists(byAdmin)).toBe(false);
+    expect(await pairingExists(byOwner)).toBe(true);
+  });
+
+  it("a schedule overriding its model with a model it unbinds: reported, apply refuses", async () => {
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: owned.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-scheduled",
+    });
+    const schedule = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      modelIdOverride: model.id,
+    });
+
+    const dry = await run(false);
+
+    expect(dry.orgs[0]!.scheduleOverrides).toEqual([{ id: schedule.id, modelId: model.id }]);
+    await expect(run(true)).rejects.toThrow(schedule.id);
+    expect((await rowOf(owned.id))!.ownerUserId).toBeNull();
+    expect((await modelOf(model.id)).credentialId).toBe(owned.id);
+  });
+
+  it("two models it would unbind to one provider and model id: reported, apply refuses", async () => {
+    const member = await createTestUser();
+    await addOrgMember(ctx.orgId, member.id, "member");
+    const mine = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const theirs = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: member.id,
+    });
+    await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: mine.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-twin",
+    });
+    const twin = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: theirs.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-twin",
+    });
+
+    const dry = await run(false);
+
+    expect(dry.orgs[0]!.duplicateUnbound.map((m) => m.id)).toEqual([twin.id]);
+    await expect(run(true)).rejects.toThrow(twin.id);
+    expect((await modelOf(twin.id)).credentialId).toBe(theirs.id);
+  });
+
+  it("reports the organization default and the agents left on a model it unbinds", async () => {
+    const owned = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: SUBSCRIPTION_PROVIDER,
+      createdBy: ctx.user.id,
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: owned.id,
+      providerId: SUBSCRIPTION_PROVIDER,
+      modelId: "m-default",
+    });
+    await db
+      .update(organizations)
+      .set({ defaultModelId: model.id })
+      .where(eq(organizations.id, ctx.orgId));
+    await seedSpacePackage(ctx.defaultSpaceId, AGENT, { modelId: model.id });
+
+    const result = await run(true);
+
+    expect(result.orgs[0]!.defaultModelUnbound).toBe(model.id);
+    expect(result.orgs[0]!.agentModels).toEqual([
+      { spaceId: ctx.defaultSpaceId, packageId: AGENT, modelId: model.id },
+    ]);
     expect((await modelOf(model.id)).credentialId).toBeNull();
   });
 });

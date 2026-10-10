@@ -3,7 +3,8 @@
 /**
  * `0087_personal_model_credentials.sql` on a database at `0086`: an org model bound to a credential
  * takes that credential's provider, a model may lose its credential (`credential_id` NULL) but
- * never its provider, and a credential may be owned by a user (cascading with the account).
+ * never its provider, a credential may be owned by a user (cascading with the account), and the
+ * ledger records the credential that served each call without a foreign key.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -124,5 +125,22 @@ describe("0087 — personal model credentials", () => {
       `SELECT id FROM model_provider_credentials ORDER BY id`,
     );
     expect(rows.map((row) => row.id)).toEqual([CRED_OPENAI, CRED_ANTHROPIC]);
+  });
+
+  it("records the serving credential on the ledger, without a foreign key", async () => {
+    const column = await pg.query<{ data_type: string; is_nullable: string }>(
+      `SELECT data_type, is_nullable FROM information_schema.columns
+        WHERE table_name = 'llm_usage' AND column_name = 'credential_id'`,
+    );
+    expect(column.rows).toEqual([{ data_type: "uuid", is_nullable: "YES" }]);
+    const foreignKeys = await pg.query(
+      `SELECT k.column_name
+         FROM information_schema.table_constraints t
+         JOIN information_schema.key_column_usage k
+           ON k.constraint_name = t.constraint_name AND k.table_schema = t.table_schema
+        WHERE t.table_name = 'llm_usage' AND t.constraint_type = 'FOREIGN KEY'
+          AND k.column_name = 'credential_id'`,
+    );
+    expect(foreignKeys.rows).toEqual([]);
   });
 });

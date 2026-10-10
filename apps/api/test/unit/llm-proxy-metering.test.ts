@@ -1054,3 +1054,46 @@ describe("drainProxyMetering", () => {
     expect(recorded.map((r) => r.usage)).toEqual([{ inputTokens: 5, outputTokens: 3 }]);
   });
 });
+
+/**
+ * Credential attribution on the proxy row (#1875): a call served by a personal
+ * key is customer-supplied spend (`org`) attributed to that key's row, and a
+ * platform-supplied call names no credential row.
+ */
+describe("recordProxyUsage — credential attribution", () => {
+  async function entryServedBy(resolved: Partial<BoundModel>): Promise<LlmUsageEntry> {
+    const written: LlmUsageEntry[] = [];
+    await recordProxyUsage(
+      {
+        principal: { kind: "jwt_user", userId: "u1", orgId: "org_attr" },
+        runId: null,
+        chatSessionId: null,
+        presetId: "preset_attr",
+        resolved: {
+          modelId: "gpt-4o",
+          apiShape: "openai-responses",
+          cost: null,
+          ...resolved,
+        } as BoundModel,
+        usage: { inputTokens: 10, outputTokens: 2 },
+        durationMs: 10,
+      },
+      async (entry) => {
+        written.push(entry);
+      },
+    );
+    return written[0]!;
+  }
+
+  it("attributes a personal-key call to that credential, as org-supplied spend", async () => {
+    const entry = await entryServedBy({ credentialSource: "org", credentialId: "cred_personal" });
+    expect(entry.credentialSource).toBe("org");
+    expect(entry.credentialId).toBe("cred_personal");
+  });
+
+  it("names no credential row for a platform-supplied call", async () => {
+    const entry = await entryServedBy({ credentialSource: "system" });
+    expect(entry.credentialSource).toBe("system");
+    expect(entry.credentialId).toBeNull();
+  });
+});

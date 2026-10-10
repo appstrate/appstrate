@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, getTableColumns } from "drizzle-orm";
+import { eq, getTableColumns, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, orgModels, type CredentialSource } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
@@ -629,9 +629,13 @@ async function asDuplicateBinding(
   binding: { credentialId: string | null; providerId: string },
   modelId: string,
 ): Promise<never> {
-  // Only a bound model can collide: each member's own credentials serve every
-  // unbound row, so their usage never splits by binding.
-  if (!isUniqueViolation(err) || binding.credentialId === null) throw err;
+  if (!isUniqueViolation(err)) throw err;
+  // One row per binding: an organization credential, or each member's own
+  // credential of a provider (`credential_id IS NULL`).
+  const sameBinding =
+    binding.credentialId === null
+      ? [isNull(orgModels.credentialId), eq(orgModels.providerId, binding.providerId)]
+      : [eq(orgModels.credentialId, binding.credentialId)];
   const [existing] = await db
     .select({ id: orgModels.id })
     .from(orgModels)
@@ -639,9 +643,9 @@ async function asDuplicateBinding(
       scopedWhere(orgModels, {
         orgId,
         extra: [
-          eq(orgModels.credentialId, binding.credentialId),
+          ...sameBinding,
           eq(orgModels.modelId, modelId),
-          // The index is partial on `aliased = false`; an alias sharing the
+          // The indexes are partial on `aliased = false`; an alias sharing the
           // binding is legal and is never the row that refused this write.
           eq(orgModels.aliased, false),
         ],
@@ -650,7 +654,9 @@ async function asDuplicateBinding(
     .limit(1);
   throw conflict(
     "model_already_added",
-    `Model '${modelId}' is already added for this credential`,
+    binding.credentialId === null
+      ? `Model '${modelId}' is already added for each member's own credential`
+      : `Model '${modelId}' is already added for this credential`,
     existing ? { existing_model_id: existing.id } : undefined,
   );
 }
@@ -1328,15 +1334,18 @@ export async function resolveModel(
 }
 
 /**
- * Refuse a model with no credential to spend: the caller has to add its own
- * credential, or an administrator has to bind an organization one.
+ * Refuse a model with no credential to spend. `payerUserId` words the fix: a
+ * payer adds their own credential; a door with no payer (schedule, API key, end
+ * user) spends organization credentials only, so it needs a bound model.
  */
-export function requireBoundModel(model: ResolvedModel): BoundModel {
+export function requireBoundModel(model: ResolvedModel, payerUserId: string | null): BoundModel {
   if (model.credentialSource === null) {
     const displayName = getModelProvider(model.providerId)?.displayName ?? model.providerId;
     throw conflict(
       "model_credential_required",
-      `Model '${model.label}' needs a ${displayName} credential of yours: add one under Preferences → Model credentials, or ask an administrator to bind an organization credential.`,
+      payerUserId
+        ? `Model '${model.label}' needs a ${displayName} credential of yours: add one under Preferences → Model credentials, or ask an administrator to bind an organization credential.`
+        : `Model '${model.label}' is served only by each member's own credential, and this launch spends organization credentials only (a schedule, an API key or an end user). Pick a model bound to an organization credential, or ask an administrator to bind one.`,
     );
   }
   return { ...model, credentialSource: model.credentialSource };
@@ -1986,7 +1995,7 @@ export async function testModelConnection(orgId: string, modelDbId: string): Pro
   }
 
   // The test spends the organization's binding: a model no credential serves cannot be tested.
-  requireBoundModel(model);
+  requireBoundModel(model, null);
 
   // An expired OAuth access token is not terminal while its refresh token may
   // still work. Saved models carry a credential id, so use the canonical

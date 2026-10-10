@@ -196,6 +196,7 @@ describe("persistRunEvent", () => {
       writeLedger: true,
       inferenceRoute: null,
       modelSource: "org",
+      modelCredentialId: null,
       modelCost: UPSERT_RATES,
     });
   }
@@ -328,6 +329,7 @@ describe("persistRunEvent", () => {
       return persist(e, {
         writeLedger: true,
         inferenceRoute: null,
+        modelCredentialId: null,
         ...opts,
       });
     }
@@ -443,6 +445,7 @@ describe("persistRunEvent", () => {
       return persist(e, {
         writeLedger: true,
         inferenceRoute: null,
+        modelCredentialId: null,
         ...opts,
       });
     }
@@ -525,6 +528,7 @@ describe("persistRunEvent", () => {
               ],
             },
             modelSource: "org",
+            modelCredentialId: null,
             inferenceRoute: null,
             modelCost: tiered,
           },
@@ -710,6 +714,7 @@ describe("persistRunEvent", () => {
               cost: 3,
               usage: { input_tokens: 300_000, output_tokens: 0 },
               modelSource: "org",
+              modelCredentialId: null,
               inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
@@ -741,6 +746,7 @@ describe("persistRunEvent", () => {
               cost: 0.3,
               usage: { input_tokens: 100_000, output_tokens: 0 },
               modelSource: "org",
+              modelCredentialId: null,
               inferenceRoute: null,
               modelCost: { input: 3, output: 15 },
             },
@@ -757,6 +763,7 @@ describe("persistRunEvent", () => {
               cost: 99,
               usage: { input_tokens: 500_000, output_tokens: 0 },
               modelSource: null,
+              modelCredentialId: null,
               inferenceRoute: null,
               modelCost: null,
             },

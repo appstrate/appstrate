@@ -233,6 +233,7 @@ describe("buildRunContext generation settings", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       modelCascade: await resolveModelCascade(ctx.orgId, agentId, modelId, null),
+      payerUserId: null,
       input: {},
       modelId,
       generationConfig: stored,

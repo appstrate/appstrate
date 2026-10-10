@@ -455,8 +455,11 @@ export async function recordProxyUsage(
     model: inputs.presetId,
     realModel: inputs.resolved.modelId,
     api: inputs.resolved.apiShape,
-    // Which credential set reached the provider (platform vs customer-supplied).
+    // Which credential set reached the provider (platform vs customer-supplied),
+    // and the credential row that served the call: a personal key is attributed
+    // to its owner's credential id, the platform's own key carries none.
     credentialSource: inputs.resolved.credentialSource,
+    credentialId: inputs.resolved.credentialId ?? null,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens ?? null,

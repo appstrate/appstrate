@@ -1221,6 +1221,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "uq_org_models_unbound": {
+          "name": "uq_org_models_unbound",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "model_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"org_models\".\"credential_id\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3107,6 +3135,12 @@
           "name": "credential_source",
           "type": "credential_source",
           "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "credential_id": {
+          "name": "credential_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },

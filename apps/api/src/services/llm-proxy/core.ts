@@ -447,7 +447,7 @@ async function resolvePresetForOrg(
   }
   // An unbound model names no credential to spend: a 409 `model_credential_required`
   // for the caller, not a fallback to some other credential.
-  return requireBoundModel(loaded);
+  return requireBoundModel(loaded, inputs.payerUserId);
 }
 
 function joinUpstreamUrl(base: string, path: string): string {

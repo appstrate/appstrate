@@ -15,22 +15,33 @@
  * kept), so each member now brings their own credential for them. Subscriptions are recognised by
  * decrypting the blob (`kind === "oauth"`), never through the provider registry: the subscription
  * modules are absent in production. A blob that does not decrypt is reported and left as it is.
+ * A pending pairing that would reconnect a subscription for anyone but its new owner is deleted.
+ * The members owning a subscription are locked first, in the order the organization exit takes
+ * them, so a member leaving during the run either loses the credential or is already gone (orphan).
  * Run after the deploy, app up, with the `pg_dump` taken before it (`0087` runs at boot).
  * Refuses an empty `DATABASE_URL`. One transaction
  * per organization; dry run by default (each rolled back), `--apply` commits. Idempotent.
  * `--apply` refuses, and the organization rolls back, while an aliased model is still bound to one
  * of its subscriptions (an alias needs an organization credential) or while a `pending`/`running`
- * run is pinned to one. It fails at the end while an unreadable org-owned blob is left.
+ * run is pinned to one, while a schedule overrides its model with a model it would unbind (a
+ * schedule spends organization credentials only), or while two models it would unbind share a
+ * provider and model id (one unbound row per pair). The organization default and the agents
+ * pointing at an unbound model are reported: they keep serving members, and a schedule, API key
+ * or end user using them is refused. It fails at the end while an unreadable org-owned blob is left.
  */
 
 import { parseArgs } from "node:util";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import {
   modelProviderCredentials as c,
   modelProviderPairings,
   organizationMembers,
   orgModels,
+  organizations,
   runs,
+  schedules,
+  spacePackages,
+  spaces,
   user,
 } from "@appstrate/db/schema";
 import { decryptCredentials } from "@appstrate/connect";
@@ -61,6 +72,14 @@ export interface OrgSubscriptionReport {
   aliasedModels: Array<{ id: string; label: string }>;
   /** Pending or running runs pinned to a subscription: `--apply` refuses until they finish. */
   activeRuns: Array<{ id: string }>;
+  /** Schedules overriding their model with one this script unbinds: `--apply` refuses. */
+  scheduleOverrides: Array<{ id: string; modelId: string }>;
+  /** Models to unbind that would repeat a `(provider, model)` pair already unbound: `--apply` refuses. */
+  duplicateUnbound: Array<{ id: string; label: string }>;
+  /** The organization default, when it names a model this script unbinds. */
+  defaultModelUnbound: string | null;
+  /** Agents (per space) whose model this script unbinds. */
+  agentModels: Array<{ spaceId: string; packageId: string; modelId: string }>;
   /** Members whose runs used a subscription they do not own (orphans count as not owned). */
   usersOnOthersSubscriptions: Array<{ id: string; email: string }>;
 }
@@ -128,6 +147,24 @@ export async function runPersonalModelSubscriptions(options: {
       await db.transaction(async (tx) => {
         await tx.execute("SET LOCAL lock_timeout = '5s'");
         await tx.execute("SET LOCAL statement_timeout = '300s'");
+        // The creators' memberships first, in the organization exit's order (member, then
+        // credentials): a creator leaving now waits, or has left and reads as an orphan.
+        const creators = [
+          ...new Set(candidates.map((r) => r.createdBy).filter((id): id is string => id !== null)),
+        ].sort();
+        if (creators.length) {
+          await tx
+            .select({ userId: organizationMembers.userId })
+            .from(organizationMembers)
+            .where(
+              and(
+                eq(organizationMembers.orgId, orgId),
+                inArray(organizationMembers.userId, creators),
+              ),
+            )
+            .orderBy(organizationMembers.userId)
+            .for("update");
+        }
         // Re-read under row locks: a subscription another writer re-homed since the scan is left alone.
         const live = await tx
           .select({
@@ -185,6 +222,82 @@ export async function runPersonalModelSubscriptions(options: {
                 ),
               )
           : [];
+        // The models this run unbinds, and what still points at them.
+        const toUnbind = liveIds.length
+          ? await tx
+              .select({
+                id: orgModels.id,
+                label: orgModels.label,
+                providerId: orgModels.providerId,
+                modelId: orgModels.modelId,
+              })
+              .from(orgModels)
+              .where(
+                and(
+                  eq(orgModels.orgId, orgId),
+                  eq(orgModels.aliased, false),
+                  inArray(orgModels.credentialId, liveIds),
+                ),
+              )
+          : [];
+        const toUnbindIds = toUnbind.map((m) => m.id);
+        const alreadyUnbound = toUnbind.length
+          ? await tx
+              .select({ providerId: orgModels.providerId, modelId: orgModels.modelId })
+              .from(orgModels)
+              .where(and(eq(orgModels.orgId, orgId), isNull(orgModels.credentialId)))
+          : [];
+        const seen = new Set(alreadyUnbound.map((m) => `${m.providerId}\u0000${m.modelId}`));
+        const duplicateUnbound: Array<{ id: string; label: string }> = [];
+        for (const m of toUnbind) {
+          const key = `${m.providerId}\u0000${m.modelId}`;
+          if (seen.has(key)) duplicateUnbound.push({ id: m.id, label: m.label });
+          seen.add(key);
+        }
+        const scheduleOverrides = toUnbindIds.length
+          ? await tx
+              .select({ id: schedules.id, modelId: schedules.modelIdOverride })
+              .from(schedules)
+              .where(
+                and(eq(schedules.orgId, orgId), inArray(schedules.modelIdOverride, toUnbindIds)),
+              )
+              .then((rows) => rows.map((r) => ({ id: r.id, modelId: r.modelId! })))
+          : [];
+        const [org] = await tx
+          .select({ defaultModelId: organizations.defaultModelId })
+          .from(organizations)
+          .where(eq(organizations.id, orgId));
+        const defaultModelUnbound =
+          org?.defaultModelId && toUnbindIds.includes(org.defaultModelId)
+            ? org.defaultModelId
+            : null;
+        const agentModels = toUnbindIds.length
+          ? await tx
+              .select({
+                spaceId: spacePackages.spaceId,
+                packageId: spacePackages.packageId,
+                modelId: spacePackages.modelId,
+              })
+              .from(spacePackages)
+              .innerJoin(spaces, eq(spaces.id, spacePackages.spaceId))
+              .where(and(eq(spaces.orgId, orgId), inArray(spacePackages.modelId, toUnbindIds)))
+              .then((rows) => rows.map((r) => ({ ...r, modelId: r.modelId! })))
+          : [];
+
+        if (apply && scheduleOverrides.length) {
+          const named = scheduleOverrides.map((r) => `${r.id} (model ${r.modelId})`).join(", ");
+          throw new Error(
+            `org ${orgId}: schedules override their model with a model this unbinds (a schedule spends organization credentials only), change their model: ${named}`,
+          );
+        }
+        if (apply && duplicateUnbound.length) {
+          const named = duplicateUnbound
+            .map((m) => `${m.id} ${JSON.stringify(m.label)}`)
+            .join(", ");
+          throw new Error(
+            `org ${orgId}: unbinding would repeat a provider and model already unbound, delete one of each pair: ${named}`,
+          );
+        }
         if (apply && aliasedModels.length) {
           const named = aliasedModels.map((m) => `${m.id} ${JSON.stringify(m.label)}`).join(", ");
           throw new Error(
@@ -222,29 +335,37 @@ export async function runPersonalModelSubscriptions(options: {
               ),
             );
         }
-        // Aliased rows are never unbound here: they refuse above.
-        const unboundModels = liveIds.length
-          ? await tx
-              .update(orgModels)
-              .set({ credentialId: null, updatedAt: sql`now()` })
-              .where(
-                and(
-                  eq(orgModels.orgId, orgId),
-                  eq(orgModels.aliased, false),
-                  inArray(orgModels.credentialId, liveIds),
-                ),
-              )
-              .returning({ id: orgModels.id, label: orgModels.label })
-          : [];
-        const pairings = orphanIds.length
+        // Aliased rows are never unbound here: they refuse above. A dry run that
+        // reports duplicates stops short of the update the unique index would refuse.
+        const unboundModels =
+          toUnbindIds.length && !duplicateUnbound.length
+            ? await tx
+                .update(orgModels)
+                .set({ credentialId: null, updatedAt: sql`now()` })
+                .where(inArray(orgModels.id, toUnbindIds))
+                .returning({ id: orgModels.id, label: orgModels.label })
+            : toUnbind.map(({ id, label }) => ({ id, label }));
+        // Every pairing of an orphan, and any pairing that would reconnect a now
+        // personal subscription for someone other than its owner (an owned row's
+        // creator is a member, so never null).
+        const pairingTargets = [
+          ...(orphanIds.length
+            ? [
+                inArray(modelProviderPairings.credentialId, orphanIds),
+                inArray(modelProviderPairings.reconnectCredentialId, orphanIds),
+              ]
+            : []),
+          ...owned.map((r) =>
+            and(
+              eq(modelProviderPairings.reconnectCredentialId, r.id),
+              ne(modelProviderPairings.userId, r.createdBy!),
+            ),
+          ),
+        ];
+        const pairings = pairingTargets.length
           ? await tx
               .delete(modelProviderPairings)
-              .where(
-                and(
-                  eq(modelProviderPairings.orgId, orgId),
-                  inArray(modelProviderPairings.credentialId, orphanIds),
-                ),
-              )
+              .where(and(eq(modelProviderPairings.orgId, orgId), or(...pairingTargets)))
               .returning({ id: modelProviderPairings.id })
           : [];
         if (orphanIds.length) await tx.delete(c).where(inArray(c.id, orphanIds));
@@ -257,6 +378,10 @@ export async function runPersonalModelSubscriptions(options: {
           unboundModels,
           aliasedModels,
           activeRuns,
+          scheduleOverrides,
+          duplicateUnbound,
+          defaultModelUnbound,
+          agentModels,
           usersOnOthersSubscriptions: usersOnOthers,
         };
         if (!apply) throw new DryRunRollback();
@@ -278,6 +403,19 @@ export async function runPersonalModelSubscriptions(options: {
     for (const m of done.aliasedModels)
       out(`  aliased model ${m.id} ${JSON.stringify(m.label)} blocks --apply`);
     for (const r of done.activeRuns) out(`  active run ${r.id} blocks --apply`);
+    for (const r of done.scheduleOverrides)
+      out(`  schedule ${r.id} overrides its model with ${r.modelId}: blocks --apply`);
+    for (const m of done.duplicateUnbound)
+      out(
+        `  model ${m.id} ${JSON.stringify(m.label)} would repeat an unbound pair: blocks --apply`,
+      );
+    if (done.defaultModelUnbound) {
+      out(
+        `  organization default ${done.defaultModelUnbound} becomes member-paid: schedules, API keys and end users using it are refused`,
+      );
+    }
+    for (const a of done.agentModels)
+      out(`  agent ${a.packageId} in space ${a.spaceId} runs on ${a.modelId}, now member-paid`);
     const others = done.usersOnOthersSubscriptions.map((u) => `${u.email} (${u.id})`);
     out(`  users on subscriptions they do not own: ${others.join(", ") || "none"}`);
   }
@@ -287,7 +425,7 @@ export async function runPersonalModelSubscriptions(options: {
     for (const u of org.usersOnOthersSubscriptions) distinctUsers.set(u.id, u.email);
   }
   out(
-    `summary: owned ${orgs.reduce((n, o) => n + o.owned.length, 0)}, orphans ${orgs.reduce((n, o) => n + o.orphans.length, 0)}, pairings ${orgs.reduce((n, o) => n + o.pairingsDeleted, 0)}, models unbound ${orgs.reduce((n, o) => n + o.unboundModels.length, 0)}, aliased models blocking ${orgs.reduce((n, o) => n + o.aliasedModels.length, 0)}, active runs blocking ${orgs.reduce((n, o) => n + o.activeRuns.length, 0)}, unreadable skipped ${scan.unreadable.length}, users on subscriptions they do not own ${distinctUsers.size}`,
+    `summary: owned ${orgs.reduce((n, o) => n + o.owned.length, 0)}, orphans ${orgs.reduce((n, o) => n + o.orphans.length, 0)}, pairings ${orgs.reduce((n, o) => n + o.pairingsDeleted, 0)}, models unbound ${orgs.reduce((n, o) => n + o.unboundModels.length, 0)}, aliased models blocking ${orgs.reduce((n, o) => n + o.aliasedModels.length, 0)}, active runs blocking ${orgs.reduce((n, o) => n + o.activeRuns.length, 0)}, schedule overrides blocking ${orgs.reduce((n, o) => n + o.scheduleOverrides.length, 0)}, duplicate unbound blocking ${orgs.reduce((n, o) => n + o.duplicateUnbound.length, 0)}, unreadable skipped ${scan.unreadable.length}, users on subscriptions they do not own ${distinctUsers.size}`,
   );
 
   if (!apply) {

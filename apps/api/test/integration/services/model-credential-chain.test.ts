@@ -194,7 +194,7 @@ describe("model resolution — a member's own credential first", () => {
 
     let thrown: unknown;
     try {
-      requireBoundModel(model!);
+      requireBoundModel(model!, bob.user.id);
     } catch (err) {
       thrown = err;
     }
@@ -204,7 +204,7 @@ describe("model resolution — a member's own credential first", () => {
 
     await personalAnthropicKey(bob.user.id, "sk-bob");
     const withKey = await loadModel(ctx.orgId, unbound, bob.user.id);
-    expect(requireBoundModel(withKey!).credentialSource).toBe("org");
+    expect(requireBoundModel(withKey!, bob.user.id).credentialSource).toBe("org");
   });
 
   it("ignores personal credentials while the organization has switched them off", async () => {

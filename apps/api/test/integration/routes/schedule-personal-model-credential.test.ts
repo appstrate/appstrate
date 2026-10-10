@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { orgModels, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
+import { authHeaders } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedOrgModelProviderKey, seedSchedule } from "../../helpers/seed.ts";
@@ -25,7 +26,7 @@ import { createOrgModel, setDefaultModel } from "../../../src/services/org-model
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
-getTestApp(); // boots the model and provider registries
+const app = getTestApp(); // boots the model and provider registries
 
 const AGENT_ID = "@schedpayer/scheduled-agent";
 
@@ -133,5 +134,36 @@ describe("schedule payer — organization credentials only", () => {
     expect(run.status).toBe("failed");
     expect(run.modelCredentialId).toBeNull();
     await waitForRunPipelineSettled();
+  });
+
+  it("refuses a schedule whose model override is served only by members' own credentials", async () => {
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        label: "Each member's GPT",
+        modelId: "gpt-5.5",
+        providerId: "openai",
+        credentialId: null,
+        aliased: false,
+        source: "custom",
+        createdBy: ctx.user.id,
+      })
+      .returning({ id: orgModels.id });
+
+    const res = await app.request(`/api/agents/${AGENT_ID}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cron_expression: "0 9 * * *",
+        version_override: "draft",
+        model_id_override: row!.id,
+      }),
+    });
+
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("model_credential_required");
+    expect(body.detail).toContain("organization credentials only");
   });
 });
