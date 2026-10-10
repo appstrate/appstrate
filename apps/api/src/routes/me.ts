@@ -29,7 +29,9 @@
  * named route here):
  *   - GET    /orgs                      — orgs the caller belongs to
  *   - GET    /connections               — the caller's integration connections
- *   - PATCH  /connections/:connectionId — rename it, set the spaces it is shared into
+ *   - PATCH  /connections/:connectionId — rename it
+ *   - PUT    /connections/:connectionId/shares/:spaceId — share it into a space
+ *   - DELETE /connections/:connectionId/shares/:spaceId — withdraw it from a space
  *   - DELETE /connections/:connectionId — destructive global credential delete
  *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
  *   - GET    /integration-pins          — member-self pins for an agent
@@ -48,17 +50,17 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   listMeConnections,
+  getMeConnection,
   getConnectionDeleteImpact,
   noConnectionDeleteImpact,
+  type MeConnectionReader,
 } from "../services/me-connections.ts";
-import {
-  meConnectionAuthorityFilter,
-  type MeConnectionAuthority,
-} from "../services/connection-reach.ts";
-import { actorFilter, getActor, type Actor } from "../lib/actor.ts";
+import { meConnectionAuthorityFilter } from "../services/connection-reach.ts";
+import { actorFilter, getActor } from "../lib/actor.ts";
+import { connectionPrincipal, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
-import { callerPermissions } from "../lib/permissions.ts";
+import { callerOrgRole, callerPermissionsInSpace, resolveListingViewAs } from "../lib/view-as.ts";
+import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
@@ -75,7 +77,14 @@ import {
   getIntegrationConnectionCredentialFields,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
-import { applyConnectionUpdate, updateConnectionSchema } from "./integrations.ts";
+import {
+  applyConnectionRename,
+  applyConnectionShare,
+  applyConnectionUnshare,
+  readShareSpaceId,
+  updateConnectionSchema,
+} from "./integrations.ts";
+import type { ConnectionViewer } from "../services/connection-shares.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -92,25 +101,12 @@ import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
 
-/**
- * Derive the authority boundary of the presented credential for the
- * `/me/connections` surface (list + delete).
- *
- * `user_global` is the `user` principal — the person themselves, by any
- * transport. Every other kind is `bound`: an API key (org + space), a
- * third-party OAuth client (org only), an end-user token (org + space). Each
- * authenticates as its issuer, but its bearer is a credential that may be held
- * by somebody else, so the cross-org dashboard view must never be reachable
- * with one — a leaked key could otherwise enumerate (and destructively delete)
- * the creator's connections in every org they belong to. On `main` an end-user
- * token took the global view. The org id is always pinned for a bound
- * credential; its absence is an auth-pipeline bug, so fail closed.
- */
-function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
-  if (isUserPrincipal(c)) return { kind: "user_global" };
-  const orgId = c.get("orgId");
-  if (!orgId) throw unauthorized("Credential is missing its organization binding");
-  return { kind: "bound", orgId, spaceId: c.get("spaceId") };
+/** What the `/me` connection projection asks of the caller's credential. */
+function meReader(c: Context<AppEnv>): MeConnectionReader {
+  return {
+    canConnect: ceilingAllows(c, "integrations:connect"),
+    permissionsIn: (spaceId, orgId) => callerPermissionsInSpace(c, spaceId, orgId),
+  };
 }
 
 /**
@@ -204,13 +200,11 @@ router.get("/orgs", async (c) => {
  * For every other kind: hard-scoped to its binding — its org, and its space
  * when it pins one. Such a credential authenticates as its issuer, but its
  * bearer must not be able to enumerate the issuer's connections elsewhere
- * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
+ * (see {@link connectionPrincipal}). Source-grouped (one group per
  * package) in both cases.
  */
 router.get("/connections", requireCeiling("integrations", "read"), async (c) => {
-  const actor = getActor(c);
-  const authority = getMeConnectionAuthority(c);
-  const groups = await listMeConnections(actor, authority);
+  const groups = await listMeConnections(connectionPrincipal(c), meReader(c));
   return c.json(listResponse(groups));
 });
 
@@ -227,11 +221,7 @@ router.get(
     const connectionId = c.req.param("connectionId")!;
     if (!z.uuid().safeParse(connectionId).success) return c.json(noConnectionDeleteImpact());
     return c.json(
-      await getConnectionDeleteImpact(
-        getActor(c),
-        connectionId.toLowerCase(),
-        getMeConnectionAuthority(c),
-      ),
+      await getConnectionDeleteImpact(connectionPrincipal(c), connectionId.toLowerCase()),
     );
   },
 );
@@ -344,9 +334,8 @@ router.delete(
 
 /** The org of the caller's connection within the credential's binding; `/me/*` has no org context. */
 async function ownConnectionOrg(
-  actor: Actor,
+  principal: ConnectionPrincipal,
   connectionId: string,
-  authority: MeConnectionAuthority,
 ): Promise<string | null> {
   const [row] = await db
     .select({ orgId: integrationConnections.orgId })
@@ -354,32 +343,71 @@ async function ownConnectionOrg(
     .where(
       and(
         eq(integrationConnections.id, connectionId),
-        actorFilter(actor, integrationConnections),
-        meConnectionAuthorityFilter(authority),
+        actorFilter(principal.actor, integrationConnections),
+        meConnectionAuthorityFilter(principal),
       ),
     )
     .limit(1);
   return row?.orgId ?? null;
 }
 
-router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
-  const connectionId = c.req.param("connectionId")!;
+/**
+ * The owner's edit doors on the account surface: ownership (inside the credential's binding) is
+ * proven here, so the services see no request space; a miss is a 404.
+ */
+async function ownConnectionViewer(
+  c: Context<AppEnv>,
+  connectionId: string,
+): Promise<{ orgId: string; viewer: ConnectionViewer }> {
   if (!z.uuid().safeParse(connectionId).success) {
     throw notFound(`Connection '${connectionId}' not found`);
   }
-  const actor = getActor(c);
-  const authority = getMeConnectionAuthority(c);
-  const orgId = await ownConnectionOrg(actor, connectionId, authority);
+  const principal = connectionPrincipal(c);
+  const orgId = await ownConnectionOrg(principal, connectionId);
   if (!orgId) throw notFound(`Connection '${connectionId}' not found`);
-  const body = await readJsonBody(c, updateConnectionSchema);
-  const viewer = {
-    actor,
-    spaceId: null,
-    governs: false,
-    boundSpaceId: authority.kind === "bound" ? (authority.spaceId ?? null) : null,
+  return {
+    orgId,
+    viewer: {
+      principal,
+      spaceId: null,
+      integrationId: null,
+      governs: false,
+      permissionsIn: (spaceId) => callerPermissionsInSpace(c, spaceId, orgId),
+    },
   };
-  return c.json(await applyConnectionUpdate(c, orgId, viewer, connectionId, body));
+}
+
+router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
+  const connectionId = c.req.param("connectionId")!;
+  const { viewer } = await ownConnectionViewer(c, connectionId);
+  const body = await readJsonBody(c, updateConnectionSchema);
+  await applyConnectionRename(c, viewer, connectionId, body.label);
+  return c.json(await getMeConnection(viewer.principal, connectionId, meReader(c)));
 });
+
+router.put(
+  "/connections/:connectionId/shares/:spaceId",
+  requireCeiling("integrations", "connect"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    const { viewer } = await ownConnectionViewer(c, connectionId);
+    const spaceId = readShareSpaceId(c);
+    await applyConnectionShare(c, viewer, connectionId, spaceId);
+    return c.body(null, 204);
+  },
+);
+
+router.delete(
+  "/connections/:connectionId/shares/:spaceId",
+  requireCeiling("integrations", "connect"),
+  async (c) => {
+    const connectionId = c.req.param("connectionId")!;
+    const { viewer } = await ownConnectionViewer(c, connectionId);
+    const spaceId = readShareSpaceId(c);
+    await applyConnectionUnshare(c, viewer, connectionId, spaceId);
+    return c.body(null, 204);
+  },
+);
 
 /**
  * `DELETE /api/me/connections/:connectionId` — destructive global delete.
@@ -402,14 +430,12 @@ router.delete(
   requireCeiling("integrations", "disconnect"),
   async (c) => {
     const connectionId = c.req.param("connectionId")!;
-    const actor = getActor(c);
-    const authority = getMeConnectionAuthority(c);
 
     // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface as a 500.
     if (!z.uuid().safeParse(connectionId).success) {
       return c.body(null, 204);
     }
-    const deleted = await deleteOwnConnection(actor, connectionId, authority);
+    const deleted = await deleteOwnConnection(connectionPrincipal(c), connectionId);
     if (!deleted) return c.body(null, 204);
     const { orgId, disabledScheduleIds } = deleted;
     await removeScheduleJobs(disabledScheduleIds);
@@ -438,8 +464,7 @@ router.get(
   requireCeiling("integrations", "disconnect"),
   async (c) => {
     const connectionId = c.req.param("connectionId")!;
-    const actor = getActor(c);
-    const authority = getMeConnectionAuthority(c);
+    const principal = connectionPrincipal(c);
     const empty = () => c.json(listResponse([]));
 
     if (!z.uuid().safeParse(connectionId).success) return empty();
@@ -455,8 +480,8 @@ router.get(
       .where(
         and(
           eq(integrationConnections.id, connectionId),
-          actorFilter(actor, integrationConnections),
-          meConnectionAuthorityFilter(authority),
+          actorFilter(principal.actor, integrationConnections),
+          meConnectionAuthorityFilter(principal),
         ),
       )
       .limit(1);

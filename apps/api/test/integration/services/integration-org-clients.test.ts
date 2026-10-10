@@ -13,7 +13,13 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedEndUser, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import {
+  integrationConnectionShares,
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+} from "@appstrate/db/schema";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
@@ -25,6 +31,7 @@ import {
   resolveIntegrationClientById,
   setDefaultIntegrationClient,
   updateIntegrationOAuthClient,
+  type ConnectionListReader,
 } from "../../../src/services/integration-connections.ts";
 import {
   initSystemIntegrations,
@@ -184,6 +191,17 @@ describe("org-level integration OAuth clients", () => {
     return resolveConnectClient(INTEGRATION, AUTH_KEY, manifest, OAUTH2_AUTH, resolved).clientId;
   }
 
+  /** The list reader of a member of the org acting from `spaceA` (a session, no governance). */
+  function memberReader(): ConnectionListReader {
+    return {
+      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      spaceId: spaceA.spaceId,
+      canConnect: true,
+      governs: false,
+      shareTargets: null,
+    };
+  }
+
   /** A connection row: `spaceId: null` = org scope. Returns its id. */
   async function seedConnection(opts: {
     spaceId: string | null;
@@ -207,11 +225,11 @@ describe("org-level integration OAuth clients", () => {
         originSpaceId: opts.originSpaceId ?? null,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
-        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         credentialsEncrypted: "enc",
         clientRef: opts.clientRef,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
     return row!.id;
   }
 
@@ -546,7 +564,7 @@ describe("org-level integration OAuth clients", () => {
         isDefault: true,
       });
       await seedConnection({ spaceId: spaceA.spaceId, userId: ctx.user.id, clientRef: id });
-      const promoted = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      const { client: promoted } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
       expect(promoted).toMatchObject({ id, spaceId: null, isDefault: true, client_id: "space-a" });
       for (const scope of [spaceA, spaceB]) {
         expect(
@@ -576,7 +594,8 @@ describe("org-level integration OAuth clients", () => {
         clientRef: id,
       });
 
-      await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      const { widened } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(widened.map((w) => w.id)).toContain(mine);
 
       const byId = new Map(
         (await db.select().from(integrationConnections)).map((row) => [row.id, row]),
@@ -584,9 +603,16 @@ describe("org-level integration OAuth clients", () => {
       expect(byId.get(mine)).toMatchObject({
         spaceId: null,
         originSpaceId: spaceA.spaceId,
-        sharedSpaceIds: [spaceA.spaceId],
         label: "Connexion 1 (2)",
       });
+      expect(
+        (
+          await db
+            .select({ spaceId: integrationConnectionShares.spaceId })
+            .from(integrationConnectionShares)
+            .where(eq(integrationConnectionShares.connectionId, mine))
+        ).map((row) => row.spaceId),
+      ).toEqual([spaceA.spaceId]);
       expect(byId.get(endUsers)).toMatchObject({
         spaceId: spaceA.spaceId,
         originSpaceId: null,
@@ -601,10 +627,8 @@ describe("org-level integration OAuth clients", () => {
         clientId: "space-a",
         isDefault: true,
       });
-      expect(await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).toMatchObject({
-        spaceId: null,
-        isDefault: false,
-      });
+      const { client } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(client).toMatchObject({ spaceId: null, isDefault: false });
       const clients = await listIntegrationClients(org, INTEGRATION, AUTH_KEY);
       expect(clients.find((c) => c.is_default)?.client_ref).toBe(orgDefault);
     });
@@ -636,7 +660,8 @@ describe("org-level integration OAuth clients", () => {
         userId: ctx.user.id,
         clientRef: id,
       });
-      expect(await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).toMatchObject({
+      const { client } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(client).toMatchObject({
         id,
         spaceId: null,
         autoProvisioned: true,
@@ -677,10 +702,7 @@ describe("org-level integration OAuth clients", () => {
 
   it("has_oauth_client is true when only an org client exists", async () => {
     await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, {
-      type: "user",
-      id: ctx.user.id,
-    });
+    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader());
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.has_oauth_client).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.has_oauth_client).toBe(false);
   });
@@ -693,10 +715,7 @@ describe("org-level integration OAuth clients", () => {
     manifest.auths[AUTH_KEY]!._meta = { "dev.appstrate/auth": { required: true } };
     await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
 
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, {
-      type: "user",
-      id: ctx.user.id,
-    });
+    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader());
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.required).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.required).toBe(false);
   });

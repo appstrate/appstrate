@@ -54,7 +54,7 @@ import {
 } from "./space-members.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
 import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
-import type { RevokedSpaceAssignment } from "./space-members.ts";
+import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
 import { getMcpOrgResourceUri } from "../lib/audiences.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
@@ -406,7 +406,7 @@ interface MemberActor {
 interface MemberExitResult {
   orphanedSpaceIds: string[];
   revokedApiKeyIds: string[];
-  unsharedConnectionIds: string[];
+  unsharedShares: ConnectionShare[];
 }
 
 /**
@@ -572,7 +572,7 @@ async function removeMemberInTx(
   return {
     orphanedSpaceIds,
     revokedApiKeyIds: revokedKeys.map((row) => row.id),
-    unsharedConnectionIds: unshared.connectionIds,
+    unsharedShares: unshared.shares,
     disabledScheduleIds: [...unshared.disabledScheduleIds, ...disabled.map((row) => row.id)],
   };
 }
@@ -634,7 +634,7 @@ export async function leaveOrganization(orgId: string, userId: string): Promise<
  * `role`, or owner is granted or taken outside a dashboard session.
  *
  * @returns the previous role, the space grants the promotion revoked and the
- *   connections the demotion unshared, for the audit.
+ *   connection shares the demotion withdrew, for the audit.
  */
 export async function updateMemberRole(
   orgId: string,
@@ -644,7 +644,7 @@ export async function updateMemberRole(
 ): Promise<{
   previousRole: OrgRole;
   revoked: RevokedSpaceAssignment[];
-  unsharedConnectionIds: string[];
+  unsharedShares: ConnectionShare[];
 }> {
   const { disabledScheduleIds, ...result } = await db.transaction(async (tx) => {
     await lockOrgOwnership(tx, orgId);
@@ -685,7 +685,7 @@ export async function updateMemberRole(
     return {
       previousRole: target.role,
       revoked,
-      unsharedConnectionIds: unshared.connectionIds,
+      unsharedShares: unshared.shares,
       disabledScheduleIds: unshared.disabledScheduleIds,
     };
   });

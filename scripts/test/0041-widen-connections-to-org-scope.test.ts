@@ -9,10 +9,11 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnections,
+  integrationConnectionShares,
   integrationOauthClients,
   integrationOrgDefaults,
   integrationPins,
@@ -98,9 +99,13 @@ async function seedConnection(opts: {
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
       clientRef: opts.clientRef ?? null,
       label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
-      sharedSpaceIds: opts.shared ? [opts.spaceId] : [],
     })
     .returning({ id: integrationConnections.id });
+  if (opts.shared) {
+    await db
+      .insert(integrationConnectionShares)
+      .values({ connectionId: row!.id, spaceId: opts.spaceId });
+  }
   return row!.id;
 }
 
@@ -130,10 +135,14 @@ async function rowsOf(ids: string[]) {
 
 async function scopeOf(id: string) {
   const [row] = await rowsOf([id]);
+  const shares = await db
+    .select({ spaceId: integrationConnectionShares.spaceId })
+    .from(integrationConnectionShares)
+    .where(eq(integrationConnectionShares.connectionId, id));
   return {
     spaceId: row!.spaceId,
     originSpaceId: row!.originSpaceId,
-    sharedSpaceIds: row!.sharedSpaceIds,
+    sharedSpaceIds: shares.map((share) => share.spaceId).sort(),
   };
 }
 

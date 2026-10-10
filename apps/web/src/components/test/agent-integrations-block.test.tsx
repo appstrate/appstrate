@@ -46,8 +46,10 @@ function candidate(isOwn: boolean): Candidate {
     owner_name: isOwn ? "Moi" : "Bob",
     scopes_granted: [],
     scope: "org",
-    // Another member's row lists only the current space, the one it is shared into here.
-    shared_space_ids: isOwn ? [] : ["spc_here"],
+    space_id: null,
+    // A colleague's row is read as shared (or not) into the space this request is made from.
+    shared_here: !isOwn,
+    ...(isOwn && { shared_space_ids: [] }),
     origin_space_id: null,
     needs_reconnection: false,
     missing_scopes: [],

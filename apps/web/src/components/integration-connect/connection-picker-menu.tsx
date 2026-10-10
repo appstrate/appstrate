@@ -25,11 +25,9 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useSpaces } from "../../hooks/use-spaces";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import { AMBER_TEXT } from "./connection-picker-states";
-import { isSharedInSpace } from "./connection-ownership";
 import { NoConnectionLabel } from "./no-connection-label";
 import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
@@ -66,7 +64,6 @@ export function PickerMenu({
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const navigate = useNavigate();
-  const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const {
     runBlocking,
@@ -234,7 +231,7 @@ export function PickerMenu({
                       {tl}
                     </Badge>
                   )}
-                  {isSharedInSpace(c, spaceId) && (
+                  {c.shared_here && (
                     <Badge variant="secondary" className="text-[0.6rem]">
                       {t("detail.integrationMemberPicker.sharedBadge")}
                     </Badge>

@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationConnectionShares } from "@appstrate/db/schema";
 import { runUnshareSpaceAccessLoss } from "../migration/0033-unshare-space-access-loss.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import {
@@ -37,20 +37,20 @@ async function seedSharedConnection(
       ...owner,
       credentialsEncrypted: "x",
       scopesGranted: [],
-      sharedSpaceIds: [spaceId],
       label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
+  await db.insert(integrationConnectionShares).values({ connectionId: row!.id, spaceId });
   return row!.id;
 }
 
 async function stillShared(ids: string[]): Promise<string[]> {
   const rows = await db
-    .select({ id: integrationConnections.id, shared: integrationConnections.sharedSpaceIds })
-    .from(integrationConnections);
+    .selectDistinct({ id: integrationConnectionShares.connectionId })
+    .from(integrationConnectionShares);
   return rows
-    .filter((r) => r.shared.length > 0 && ids.includes(r.id))
     .map((r) => r.id)
+    .filter((id) => ids.includes(id))
     .sort();
 }
 

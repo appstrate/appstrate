@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -82,10 +83,10 @@ describe("integration-org-defaults-service", () => {
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
-        sharedSpaceIds,
         label: label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, sharedSpaceIds);
     return row!.id;
   }
 
@@ -97,14 +98,12 @@ describe("integration-org-defaults-service", () => {
     const { orgDefault } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [sharedHere],
       enforce: false,
-      createdBy: ctx.user.id,
     });
     expect(orgDefault.connection_ids).toEqual([sharedHere]);
     await expect(
       upsertOrgDefault(scope, INTEGRATION_ID, {
         connectionIds: [sharedElsewhere],
         enforce: false,
-        createdBy: ctx.user.id,
       }),
     ).rejects.toMatchObject({ status: 404 });
   });
@@ -116,7 +115,6 @@ describe("integration-org-defaults-service", () => {
     const { previous, orgDefault: created } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connId],
       enforce: true,
-      createdBy: ctx.user.id,
     });
     expect(previous).toBeNull();
     expect(created.connection_ids).toEqual([connId]);
@@ -149,12 +147,10 @@ describe("integration-org-defaults-service", () => {
     await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connA],
       enforce: false,
-      createdBy: ctx.user.id,
     });
     const { previous, orgDefault: replaced } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connB],
       enforce: true,
-      createdBy: ctx.user.id,
     });
     expect(previous).toMatchObject({ connection_ids: [connA], enforce: false });
     expect(replaced.connection_ids).toEqual([connB]);
@@ -174,7 +170,6 @@ describe("integration-org-defaults-service", () => {
     const { orgDefault: created } = await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: expected,
       enforce: true,
-      createdBy: ctx.user.id,
     });
     expect(created.connection_ids).toEqual(expected);
     expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({
@@ -185,7 +180,6 @@ describe("integration-org-defaults-service", () => {
     await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [c],
       enforce: false,
-      createdBy: ctx.user.id,
     });
     const fetched = await getOrgDefault(scope, INTEGRATION_ID);
     expect(fetched!.connection_ids).toEqual([c]);
@@ -198,7 +192,6 @@ describe("integration-org-defaults-service", () => {
     await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [a, b],
       enforce: true,
-      createdBy: ctx.user.id,
     });
     await db.delete(integrationConnections).where(eq(integrationConnections.id, a));
     expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({
@@ -216,7 +209,6 @@ describe("integration-org-defaults-service", () => {
     await upsertOrgDefault(scope, INTEGRATION_ID, {
       connectionIds: [connId],
       enforce: true,
-      createdBy: ctx.user.id,
     });
 
     // A second org with its own space — must not see org 1's default.

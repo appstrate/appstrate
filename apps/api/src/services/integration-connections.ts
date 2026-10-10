@@ -42,6 +42,7 @@ import {
   spacePackages,
   packageShares,
   integrationConnections,
+  integrationConnectionShares,
   integrationOauthClients,
   integrationOrgDefaults,
   integrationPins,
@@ -106,11 +107,17 @@ import {
 import type { OrgScope, SpaceScope } from "../lib/scope.ts";
 import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.ts";
 import {
+  connectionActions,
   meConnectionAuthorityFilter,
   ownRowInSpace,
+  shareableIn,
+  sharedInto,
   usableInSpace,
-  type MeConnectionAuthority,
+  type ConnectionReader,
+  type ShareTargets,
 } from "./connection-reach.ts";
+import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { readReconnectTarget } from "./integration-scope-resolver.ts";
 import {
   getPackageDisplayName,
   notEphemeralFilter,
@@ -132,7 +139,7 @@ import {
   type ConnectionResolutionError,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   PLACEHOLDER_ACCOUNT_ID,
@@ -267,21 +274,28 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
   credentialRevision: string;
 }
 
+/** The connection a reconnect targets, read once at the door ({@link readReconnectTarget}). */
+export interface ReconnectTarget {
+  id: string;
+  /** `null`: the row serves its whole org, so its reconnect resolves no space client. */
+  spaceId: string | null;
+  label: string;
+  scopesGranted: string[];
+}
+
 // IDOR guard on a client-supplied reconnect target. Ownership, not usability:
 // `block_user_connections` never stops a renewal.
 export async function assertConnectionBelongsToActor(
   connectionId: string,
-  spaceId: string,
-  actor: Actor,
-  delegated: boolean,
-): Promise<void> {
-  const [owned] = await db
-    .select({ spaceId: integrationConnections.spaceId })
-    .from(integrationConnections)
-    .where(and(eq(integrationConnections.id, connectionId), ownRowInSpace(spaceId, actor)))
-    .limit(1);
-  if (!owned) throw notFound("Connection not found");
-  if (delegated && owned.spaceId !== spaceId) throw delegatedReconnectRefused();
+  input: { spaceId: string; integrationId: string; authKey: string },
+  principal: ConnectionPrincipal,
+): Promise<ReconnectTarget> {
+  const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
+  if (!target) throw notFound("Connection not found");
+  if (principal.kind === "delegated" && target.spaceId !== input.spaceId) {
+    throw delegatedReconnectRefused();
+  }
+  return target;
 }
 
 /** A delegated credential (API key, third-party token) acts from its space only. */
@@ -296,16 +310,6 @@ function scopeNarrowingRefused(remedy: string): ApiError {
     "connection_scope_narrowing",
     `This connection serves the whole organization, and the OAuth client that would reconnect it belongs to one space only. ${remedy}`,
   );
-}
-
-/** Whether `connectionId` serves its whole org: its reconnect resolves no space client. */
-export async function isOrgScopedConnection(connectionId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ spaceId: integrationConnections.spaceId })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  return row !== undefined && row.spaceId === null;
 }
 
 /**
@@ -1216,12 +1220,18 @@ export async function updateIntegrationOAuthClient(
   return { previous: projectClientWithSecret(existing), client: projectClientWithSecret(row) };
 }
 
+/** A promoted client, and the connections it minted that now serve the whole org. */
+interface PromotedClient {
+  client: IntegrationOAuthClientWithSecret;
+  widened: WidenedConnection[];
+}
+
 /** Move a space client to its org tier; same id, so pinned connections keep refreshing. */
 export async function promoteIntegrationOAuthClient(
   scope: SpaceScope,
   packageId: string,
   clientId: string,
-): Promise<IntegrationOAuthClientWithSecret> {
+): Promise<PromotedClient> {
   await assertSpaceInScope(scope);
   try {
     return await moveClientToOrg(scope, packageId, clientId, true);
@@ -1237,39 +1247,51 @@ function moveClientToOrg(
   packageId: string,
   clientId: string,
   mayDefault: boolean,
-): Promise<IntegrationOAuthClientWithSecret> {
-  return db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select()
-      .from(integrationOauthClients)
-      .where(clientByIdFilter(scope, packageId, clientId))
-      .limit(1);
-    if (!existing) {
-      throw notFound(`OAuth client '${clientId}' not found`);
-    }
-    if (existing.spaceId) await lockSpacesForKeyShare(tx, [existing.spaceId]);
-    if (
-      existing.autoProvisioned &&
-      (await getAutoProvisionedClient(scope, packageId, existing.authKey, existing.issuer, tx))
-    ) {
-      throw conflict(
-        "auto_client_exists_at_org",
-        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
-      );
-    }
-    // An auto client of a server chosen per connection is picked by its issuer, never the default.
-    const isDefault =
-      mayDefault &&
-      !(existing.autoProvisioned && existing.issuer !== null) &&
-      !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
-    const [row] = await tx
-      .update(integrationOauthClients)
-      .set({ spaceId: null, isDefault, updatedAt: new Date() })
-      .where(eq(integrationOauthClients.id, existing.id))
-      .returning();
-    await widenConnectionsToOrgScope(tx, eq(integrationConnections.clientRef, existing.id));
-    return projectClientWithSecret(row!);
-  });
+): Promise<PromotedClient> {
+  return db.transaction((tx) => moveClientToOrgTier(tx, scope, packageId, clientId, mayDefault));
+}
+
+/** {@link promoteIntegrationOAuthClient} in the caller's transaction; `mayDefault: false` lands it non-default. */
+export async function moveClientToOrgTier(
+  tx: Tx,
+  scope: SpaceScope,
+  packageId: string,
+  clientId: string,
+  mayDefault: boolean,
+): Promise<PromotedClient> {
+  const [existing] = await tx
+    .select()
+    .from(integrationOauthClients)
+    .where(clientByIdFilter(scope, packageId, clientId))
+    .limit(1);
+  if (!existing) {
+    throw notFound(`OAuth client '${clientId}' not found`);
+  }
+  if (existing.spaceId) await lockSpacesForKeyShare(tx, [existing.spaceId]);
+  if (
+    existing.autoProvisioned &&
+    (await getAutoProvisionedClient(scope, packageId, existing.authKey, existing.issuer, tx))
+  ) {
+    throw conflict(
+      "auto_client_exists_at_org",
+      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
+    );
+  }
+  // An auto client of a server chosen per connection is picked by its issuer, never the default.
+  const isDefault =
+    mayDefault &&
+    !(existing.autoProvisioned && existing.issuer !== null) &&
+    !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
+  const [row] = await tx
+    .update(integrationOauthClients)
+    .set({ spaceId: null, isDefault, updatedAt: new Date() })
+    .where(eq(integrationOauthClients.id, existing.id))
+    .returning();
+  const widened = await widenConnectionsToOrgScope(
+    tx,
+    eq(integrationConnections.clientRef, existing.id),
+  );
+  return { client: projectClientWithSecret(row!), widened };
 }
 
 /**
@@ -2762,11 +2784,17 @@ async function mintingClientSpace(
   return client.spaceId;
 }
 
+/** A row {@link widenConnectionsToOrgScope} moved to org scope, for its `scope_widened` audit. */
+export interface WidenedConnection {
+  id: string;
+  label: string;
+  previousLabel: string;
+  /** The space it served, now its `origin_space_id`. */
+  previousSpaceId: string;
+}
+
 /** `where` over the unaliased table; shares kept, `origin_space_id` the space left, a taken label ` (n)`. */
-export async function widenConnectionsToOrgScope(
-  tx: Tx,
-  where: SQL,
-): Promise<{ id: string; label: string; previousLabel: string }[]> {
+export async function widenConnectionsToOrgScope(tx: Tx, where: SQL): Promise<WidenedConnection[]> {
   const c = integrationConnections;
   const widenable = and(where, isNotNull(c.spaceId), isNotNull(c.userId));
   const keyOf = (
@@ -2807,7 +2835,7 @@ export async function widenConnectionsToOrgScope(
     .for("update");
 
   const taken = new Map<string, string[]>();
-  const widened: { id: string; label: string; previousLabel: string }[] = [];
+  const widened: WidenedConnection[] = [];
   for (const row of rows) {
     const key = keyOf(row, null);
     let labels = taken.get(labelLockKey(key));
@@ -2821,7 +2849,7 @@ export async function widenConnectionsToOrgScope(
       .update(c)
       .set({ spaceId: null, originSpaceId: row.spaceId, label, updatedAt: new Date() })
       .where(eq(c.id, row.id));
-    widened.push({ id: row.id, label, previousLabel: row.label });
+    widened.push({ id: row.id, label, previousLabel: row.label, previousSpaceId: row.spaceId! });
   }
   return widened;
 }
@@ -2922,7 +2950,12 @@ export async function persistCredentialBundle(
     if (!row) {
       throw new Error("persistCredentialBundle: insert returned no row");
     }
-    return serializeIntegrationConnection(row, { owner: true, within: target.scope.spaceId });
+    return serializeIntegrationConnection(row, {
+      owner: true,
+      ownerView: false,
+      here: target.scope.spaceId,
+      shares: [],
+    });
   }
 
   // UPDATE — shared column set; WHERE differs by target.
@@ -3040,17 +3073,24 @@ export async function persistCredentialBundle(
       if (widens && existing.spaceId !== null) {
         await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId));
       }
-      const updated = await tx
+      const [updated] = await tx
         .update(integrationConnections)
         .set(set)
         .where(eq(integrationConnections.id, target.connectionId))
         .returning();
-      return updated[0];
+      if (!updated) return undefined;
+      const shares = (await loadConnectionShares(tx, [updated.id])).get(updated.id) ?? [];
+      return { updated, shares };
     });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
-    return serializeIntegrationConnection(row, { owner: true, within: target.scope.spaceId });
+    return serializeIntegrationConnection(row.updated, {
+      owner: true,
+      ownerView: false,
+      here: target.scope.spaceId,
+      shares: row.shares,
+    });
   }
 
   // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
@@ -3072,7 +3112,9 @@ export async function persistCredentialBundle(
     clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
   );
   const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
-  return row ? serializeIntegrationConnection(row, { owner: true, within: null }) : null;
+  return row
+    ? serializeIntegrationConnection(row, { owner: true, ownerView: false, here: null, shares: [] })
+    : null;
 }
 
 /**
@@ -3281,18 +3323,25 @@ export async function saveIntegrationConnection(
   return summary!;
 }
 
+/** A {@link ConnectionReader} of a list; `shareTargets` resolves where the owner may share, if anywhere. */
+export interface ConnectionListReader extends ConnectionReader {
+  /** Called only when the list holds a row the reader owns and may share. */
+  shareTargets: (() => Promise<ShareTargets>) | null;
+}
+
 /**
- * The resolver's set ({@link usableInSpace}), projected for this space unless an owner reads with
- * `wholeReach`. `locked_by`: what a 409 would refuse — an own row's delete (a lock anywhere),
- * another's withdrawal from this space.
+ * The resolver's set ({@link usableInSpace}), each row projected for `reader`: the owner's own
+ * session sees its shares, origin and the spaces it may share it into; everyone sees
+ * `shared_here` and the actions they hold. `locked_by`: what a 409 would refuse — an own row's
+ * delete (a lock anywhere), another's withdrawal from this space.
  */
 export async function listIntegrationConnections(
   scope: SpaceScope,
   packageId: string,
-  actor: Actor,
-  wholeReach = false,
+  reader: ConnectionListReader,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
+  const actor = reader.principal.actor;
   const rows = await db
     .select()
     .from(integrationConnections)
@@ -3306,17 +3355,56 @@ export async function listIntegrationConnections(
     ...(await connectionLocks(db, own)),
     ...(await connectionLocks(db, others, scope.spaceId)),
   ]);
-  return rows.map((row) => {
+  const shares = await loadConnectionShares(
+    db,
+    rows.map((row) => row.id),
+  );
+  const projected = rows.map((row) => {
     const owner = actorOwns(actor, row);
+    const ownerView = owner && reader.principal.kind === "person";
+    const rowShares = shares.get(row.id) ?? [];
     return {
-      ...serializeIntegrationConnection(row, {
-        owner,
-        within: owner && wholeReach ? null : scope.spaceId,
-      }),
-      owner_name: ownerName(row),
-      locked_by: locks.get(row.id) ?? null,
+      row,
+      ownerView,
+      actions: connectionActions(row, reader, rowShares.includes(scope.spaceId)),
+      summary: {
+        ...serializeIntegrationConnection(row, {
+          owner,
+          ownerView,
+          here: scope.spaceId,
+          shares: rowShares,
+        }),
+        owner_name: ownerName(row),
+        locked_by: locks.get(row.id) ?? null,
+      },
     };
   });
+  const shareableIds = projected
+    .filter((p) => p.ownerView && p.row.userId !== null && p.actions.includes("share"))
+    .map((p) => p.row.id);
+  const shareable = await shareableSpaces(shareableIds, reader.shareTargets);
+  return projected.map(({ row, ownerView, actions, summary }) => ({
+    ...summary,
+    allowed_actions: actions,
+    ...(ownerView && row.userId !== null
+      ? { shareable_space_ids: shareable.get(row.id) ?? [] }
+      : {}),
+  }));
+}
+
+/** Per row of `ids`, the spaces of `targets` it may be shared into ({@link shareableIn}). */
+async function shareableSpaces(
+  ids: readonly string[],
+  targets: (() => Promise<ShareTargets>) | null,
+): Promise<Map<string, string[]>> {
+  if (ids.length === 0 || !targets) return new Map();
+  const resolved = await targets();
+  if (resolved.spaceIds.length === 0) return new Map();
+  const rows = await db
+    .select({ id: integrationConnections.id, spaceIds: shareableIn(resolved) })
+    .from(integrationConnections)
+    .where(inArray(integrationConnections.id, [...ids]));
+  return new Map(rows.map((row) => [row.id, row.spaceIds]));
 }
 
 /** One integration the actor could attach to an agent (own and/or shared into the space). */
@@ -3361,7 +3449,7 @@ export async function listUsableIntegrationsForActor(
       integrationId: integrationConnections.integrationId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
-      sharedSpaceIds: integrationConnections.sharedSpaceIds,
+      shared: sql<boolean>`${sharedInto(scope.spaceId)}`,
     })
     .from(integrationConnections)
     .where(usableInSpace(scope.spaceId, actor));
@@ -3373,7 +3461,7 @@ export async function listUsableIntegrationsForActor(
   for (const row of rows) {
     const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
     entry.own ||= actorOwns(actor, row);
-    entry.shared ||= row.sharedSpaceIds.includes(scope.spaceId);
+    entry.shared ||= row.shared;
     acc.set(row.integrationId, entry);
   }
 
@@ -3485,11 +3573,10 @@ export async function assertConnectionsUnpinned(
   }
 }
 
-/** Delete one own row within `authority` ({@link forgetDeletedConnection}); `null` when none. */
+/** Delete one own row `principal` reaches ({@link forgetDeletedConnection}); `null` when none. */
 export async function deleteOwnConnection(
-  actor: Actor,
+  principal: ConnectionPrincipal,
   connectionId: string,
-  authority: MeConnectionAuthority,
 ): Promise<{ orgId: string; disabledScheduleIds: string[] } | null> {
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -3502,13 +3589,13 @@ export async function deleteOwnConnection(
       .where(
         and(
           eq(integrationConnections.id, connectionId),
-          actorFilter(actor, integrationConnections),
-          meConnectionAuthorityFilter(authority),
+          actorFilter(principal.actor, integrationConnections),
+          meConnectionAuthorityFilter(principal),
         ),
       )
       .for("update");
     if (!row) return null;
-    if (authority.kind === "bound" && authority.spaceId && row.spaceId === null) {
+    if (principal.kind === "delegated" && principal.spaceId && row.spaceId === null) {
       throw forbidden(
         "A credential bound to a space cannot delete a connection serving the whole organization",
       );
@@ -3693,19 +3780,47 @@ function compareBinary(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** A row's scope, and its shares and origin `within` one space (`null`: all — the owner's session). */
-export function connectionReachView(
-  row: Pick<
-    typeof integrationConnections.$inferSelect,
-    "spaceId" | "sharedSpaceIds" | "originSpaceId"
-  >,
-  within: string | null,
-): { scope: "org" | "space"; shared_space_ids: string[]; origin_space_id: string | null } {
-  const seen = (id: string | null) => id !== null && (within === null || id === within);
+/** Each connection's shares, in `(connection_id, space_id)` order; an id with none is absent. */
+export async function loadConnectionShares(
+  executor: DbOrTx,
+  ids: readonly string[],
+): Promise<Map<string, string[]>> {
+  const shares = new Map<string, string[]>();
+  if (ids.length === 0) return shares;
+  const rows = await executor
+    .select({
+      connectionId: integrationConnectionShares.connectionId,
+      spaceId: integrationConnectionShares.spaceId,
+    })
+    .from(integrationConnectionShares)
+    .where(inArray(integrationConnectionShares.connectionId, [...ids]))
+    .orderBy(
+      asc(integrationConnectionShares.connectionId),
+      asc(integrationConnectionShares.spaceId),
+    );
+  for (const row of rows) {
+    const list = shares.get(row.connectionId);
+    if (list) list.push(row.spaceId);
+    else shares.set(row.connectionId, [row.spaceId]);
+  }
+  return shares;
+}
+
+/**
+ * Where a row reaches, as one reader sees it: `shared_here` against the request space (`here`,
+ * `null` where there is none); its shares and origin for the owner's own session only.
+ */
+export function connectionReach(
+  row: Pick<typeof integrationConnections.$inferSelect, "spaceId" | "originSpaceId">,
+  view: { ownerView: boolean; here: string | null; shares: readonly string[] },
+): ConnectionReach {
   return {
     scope: row.spaceId === null ? "org" : "space",
-    shared_space_ids: row.sharedSpaceIds.filter(seen),
-    origin_space_id: seen(row.originSpaceId) ? row.originSpaceId : null,
+    space_id: row.spaceId,
+    shared_here: view.here !== null && view.shares.includes(view.here),
+    ...(view.ownerView
+      ? { shared_space_ids: [...view.shares], origin_space_id: row.originSpaceId }
+      : {}),
   };
 }
 
@@ -3716,7 +3831,7 @@ export function connectionReachView(
  */
 export function serializeIntegrationConnection(
   row: typeof integrationConnections.$inferSelect,
-  view: { owner: boolean; within: string | null },
+  view: { owner: boolean; ownerView: boolean; here: string | null; shares: readonly string[] },
 ): IntegrationConnectionSummary {
   if (row.userId && row.endUserId) {
     // DB check constraint rules this out; guard against drift.
@@ -3736,7 +3851,7 @@ export function serializeIntegrationConnection(
     owner_type: row.userId ? "user" : "end_user",
     owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
-    ...connectionReachView(row, view.within),
+    ...connectionReach(row, view),
     // Which registered client minted this connection (system env id or custom
     // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
     // UI can show, per connection, exactly which client is in use.
@@ -3780,8 +3895,7 @@ export async function getIntegrationConnectionVariables(
 export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
   packageId: string,
-  actor: Actor,
-  wholeReach = false,
+  reader: ConnectionListReader,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
@@ -3866,7 +3980,7 @@ export async function getIntegrationAuthStatuses(
     mcpServerTools,
   });
 
-  const allConnections = await listIntegrationConnections(scope, packageId, actor, wholeReach);
+  const allConnections = await listIntegrationConnections(scope, packageId, reader);
   // Same precedence rule as the settings list endpoint, via the shared
   // resolver — env-backed SYSTEM integrations stay `active` here too.
   const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(

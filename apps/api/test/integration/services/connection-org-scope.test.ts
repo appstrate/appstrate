@@ -9,12 +9,17 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
+import {
+  integrationConnectionShares,
+  integrationConnections,
+  integrationOauthClients,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { provisionMember } from "../../../src/services/organizations.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
@@ -105,11 +110,11 @@ describe("org-scope connections across spaces", () => {
         userId: opts.owner.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "t" } }),
         scopesGranted: [],
-        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         needsReconnection: opts.needsReconnection ?? false,
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
     return row!.id;
   }
 
@@ -126,7 +131,12 @@ describe("org-scope connections across spaces", () => {
   }
 
   const listed = async (spaceId: string, actor = me) =>
-    (await listAccessibleConnections({ orgId: ctx.orgId, spaceId }, INTEGRATION, actor))
+    (
+      await listAccessibleConnections({ orgId: ctx.orgId, spaceId }, INTEGRATION, {
+        kind: "person",
+        actor,
+      })
+    )
       .map((c) => c.id)
       .sort();
 
@@ -299,13 +309,20 @@ describe("org-scope connections across spaces", () => {
       .select({
         id: integrationConnections.id,
         originSpaceId: integrationConnections.originSpaceId,
-        sharedSpaceIds: integrationConnections.sharedSpaceIds,
       })
       .from(integrationConnections)
-      .where(sql`${integrationConnections.id} IN (${fromB}, ${sharedIntoB})`);
-    expect(Object.fromEntries(rows.map((r) => [r.id, r]))).toEqual({
-      [fromB]: { id: fromB, originSpaceId: null, sharedSpaceIds: [a] },
-      [sharedIntoB]: { id: sharedIntoB, originSpaceId: a, sharedSpaceIds: [] },
+      .where(inArray(integrationConnections.id, [fromB, sharedIntoB]));
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.originSpaceId]))).toEqual({
+      [fromB]: null,
+      [sharedIntoB]: a,
     });
+    const shares = await db
+      .select({
+        connectionId: integrationConnectionShares.connectionId,
+        spaceId: integrationConnectionShares.spaceId,
+      })
+      .from(integrationConnectionShares)
+      .where(inArray(integrationConnectionShares.connectionId, [fromB, sharedIntoB]));
+    expect(shares).toEqual([{ connectionId: fromB, spaceId: a }]);
   });
 });

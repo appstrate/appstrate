@@ -599,7 +599,7 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
   /**
    * Mint a capability token straight from claims. The mint route validates
    * `connection_id` against the caller's rows, and this case needs claims it
-   * would refuse: a malformed id makes `getCurrentScopesGranted`'s row read
+   * would refuse: a malformed id makes `readReconnectTarget`'s row read
    * throw at the database the way a real fault there would. That read runs
    * after the jti is burned and before anything is sent upstream — the window
    * this test pins.

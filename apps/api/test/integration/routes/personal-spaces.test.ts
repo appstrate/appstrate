@@ -1463,7 +1463,6 @@ describe("personal spaces — offboarding", () => {
     expect(event.after).toEqual({
       orphanedSpaceIds: [personalId],
       revokedApiKeyIds: [],
-      unsharedConnectionIds: [],
     });
   });
 });

@@ -49,6 +49,7 @@ import {
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -111,10 +112,10 @@ describe("/api/integrations/:packageId admin surface", () => {
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
-        sharedSpaceIds: [ctx.defaultSpaceId],
         label: `Partagée ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, [ctx.defaultSpaceId]);
     return row!.id;
   }
 

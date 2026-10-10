@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, arrayContains, asc, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import {
   files,
   integrationConnections,
+  integrationConnectionShares,
   organizations,
   packages,
   runs,
@@ -25,7 +26,11 @@ import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
-import { nothingUnshared, unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
+import {
+  nothingUnshared,
+  unshareConnectionsOfOwnersWithoutAccess,
+  type ConnectionShare,
+} from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -234,8 +239,8 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
  * Update a space. Throws 404 if not found. `judged` is the row the request was
  * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
  * written only while the row still holds both, else 409 `space_access_changed`
- * (RBAC spec §4.4). Returns the connections a close unshared, for the audit, and the schedules
- * that disabled, whose jobs the caller removes.
+ * (RBAC spec §4.4). Returns the connection shares a close withdrew, for the audit, and the
+ * schedules that disabled, whose jobs the caller removes.
  */
 export async function updateSpace(
   orgId: string,
@@ -301,7 +306,7 @@ export async function updateSpace(
   if (space) {
     return {
       space,
-      unsharedConnectionIds: unshared.connectionIds,
+      unsharedShares: unshared.shares,
       disabledScheduleIds: unshared.disabledScheduleIds,
     };
   }
@@ -354,18 +359,17 @@ function spaceHasActiveRuns() {
  * so emptying and deleting are one atomic act. Every other caller omits it and
  * gets its own — a non-transactional handle would run the
  * enumerate-enqueue-delete sequence unatomically.
+ *
+ * Returns the connection shares the space held, which the cascade drops, for the caller's audit.
  */
 export async function deleteSpace(
   orgId: string,
   spaceId: string,
   actor: "request" | "sweeper" = "request",
   tx?: DbOrTx,
-) {
-  if (tx) {
-    await deleteSpaceInTx(tx, orgId, spaceId, actor);
-    return;
-  }
-  await db.transaction(async (inner) => deleteSpaceInTx(inner, orgId, spaceId, actor));
+): Promise<{ removedShares: ConnectionShare[] }> {
+  if (tx) return deleteSpaceInTx(tx, orgId, spaceId, actor);
+  return db.transaction(async (inner) => deleteSpaceInTx(inner, orgId, spaceId, actor));
 }
 
 async function deleteSpaceInTx(
@@ -373,7 +377,7 @@ async function deleteSpaceInTx(
   orgId: string,
   spaceId: string,
   actor: "request" | "sweeper",
-) {
+): Promise<{ removedShares: ConnectionShare[] }> {
   // Use the same org-first lock order as file/upload writes, then lock the
   // parent space before enumerating its children. The parent lock
   // prevents a concurrent FK insert from being cascade-deleted without a
@@ -469,25 +473,37 @@ async function deleteSpaceInTx(
   const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
   if (bytes > 0) await decrementOrgFileBytes(tx, orgId, bytes);
 
-  // No FK covers a share target; `origin_space_id` nulls by its own.
-  await tx
-    .update(integrationConnections)
-    .set({
-      sharedSpaceIds: sql`array_remove(${integrationConnections.sharedSpaceIds}, ${spaceId}::text)`,
-      updatedAt: new Date(),
+  // The shares are rows with an FK to this space, so the delete below cascades them. They are read
+  // first for the caller's audit, and their connections are bumped under the same id-ordered row
+  // locks an access loss takes, so the realtime refresh reaches the owners.
+  const removedShares = await tx
+    .select({
+      connectionId: integrationConnectionShares.connectionId,
+      spaceId: integrationConnectionShares.spaceId,
     })
-    .where(
-      and(
-        eq(integrationConnections.orgId, orgId),
-        arrayContains(integrationConnections.sharedSpaceIds, [spaceId]),
-      ),
-    );
+    .from(integrationConnectionShares)
+    .where(eq(integrationConnectionShares.spaceId, spaceId))
+    .orderBy(asc(integrationConnectionShares.connectionId));
+  if (removedShares.length > 0) {
+    const connectionIds = [...new Set(removedShares.map((share) => share.connectionId))];
+    await tx
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(inArray(integrationConnections.id, connectionIds))
+      .orderBy(asc(integrationConnections.id))
+      .for("update");
+    await tx
+      .update(integrationConnections)
+      .set({ updatedAt: new Date() })
+      .where(inArray(integrationConnections.id, connectionIds));
+  }
 
   const deleted = await tx
     .delete(spaces)
     .where(scopedWhere(spaces, { orgId, extra: [eq(spaces.id, spaceId)] }))
     .returning({ id: spaces.id });
   if (deleted.length === 0) throw notFound("Space not found");
+  return { removedShares };
 }
 
 // ─── Personal spaces: the two administrative acts and the sweeper ───────

@@ -141,7 +141,6 @@ function pin(connectionIds: string | string[], opts?: { userId?: string | null }
     integrationId: INTEG,
     userId: opts?.userId ?? null,
     connectionIds: typeof connectionIds === "string" ? [connectionIds] : connectionIds,
-    createdBy: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };

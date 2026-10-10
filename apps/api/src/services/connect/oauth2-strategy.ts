@@ -44,7 +44,6 @@ import {
   extractIdentity,
   getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
-  isOrgScopedConnection,
   resolveConnectClient,
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
@@ -145,7 +144,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       manifest,
       auth,
       resolved,
-      ctx.connectionId !== undefined && (await isOrgScopedConnection(ctx.connectionId)),
+      ctx.target?.spaceId === null,
     );
     const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the

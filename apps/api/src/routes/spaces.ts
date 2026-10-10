@@ -82,6 +82,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
+import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { listSpaceRoles } from "../services/space-roles.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
@@ -510,7 +511,7 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const { space, unsharedConnectionIds, disabledScheduleIds } = await updateSpace(
+        const { space, unsharedShares, disabledScheduleIds } = await updateSpace(
           orgId,
           spaceId,
           { ...rest, defaultRole: default_role },
@@ -526,9 +527,9 @@ export function createSpacesRouter() {
             settings: data.settings,
             visibility: data.visibility,
             defaultRole: default_role,
-            unsharedConnectionIds,
           },
         });
+        await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -551,12 +552,13 @@ export function createSpacesRouter() {
       // administrative acts decide it — a 409 on somebody else's LIVE personal
       // space would confirm that the id is one (RBAC spec §3.6).
       assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "delete");
-      await deleteSpace(orgId, spaceId);
+      const { removedShares } = await deleteSpace(orgId, spaceId);
       await recordAuditFromContext(c, {
         action: "space.deleted",
         resourceType: "space",
         resourceId: spaceId,
       });
+      await recordSharesRemoved(c, orgId, removedShares, "space_deleted");
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -744,21 +746,20 @@ export function createSpacesRouter() {
     // a concurrent promotion can move between the read and the DELETE (#1439),
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
-    const { removed, accessAfter, unsharedConnectionIds, disabledScheduleIds } =
-      await removeSpaceMember({
-        orgId: c.get("orgId"),
-        space,
-        userId,
-        actorPermissions: c.get("permissions"),
-      });
+    const { removed, accessAfter, unsharedShares, disabledScheduleIds } = await removeSpaceMember({
+      orgId: c.get("orgId"),
+      space,
+      userId,
+      actorPermissions: c.get("permissions"),
+    });
     if (!removed) throw notFound("Space member not found");
     await removeScheduleJobs(disabledScheduleIds);
     await recordAuditFromContext(c, {
       action: "space.member_removed",
       resourceType: "space_member",
       resourceId: `${space.id}:${userId}`,
-      after: { unsharedConnectionIds },
     });
+    await recordSharesRemoved(c, c.get("orgId"), unsharedShares, "access_lost");
 
     return c.json({ access_after: accessAfter ? "implicit" : "none" });
   });

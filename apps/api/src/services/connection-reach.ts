@@ -10,25 +10,18 @@
  * Every predicate is over the unaliased `integration_connections` table.
  */
 
+import { and, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import type { ConnectionAction } from "@appstrate/shared-types";
 import {
-  and,
-  arrayContains,
-  eq,
-  isNull,
-  not,
-  or,
-  sql,
-  type SQL,
-  type SQLWrapper,
-} from "drizzle-orm";
-import {
+  integrationConnectionShares as shares,
   integrationConnections as c,
   packageShares,
   packages,
   spacePackages,
   spaces,
 } from "@appstrate/db/schema";
-import { actorFilter, type Actor } from "../lib/actor.ts";
+import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
+import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 function orgOf(spaceId: string): SQL {
@@ -40,8 +33,25 @@ export function connectionInSpace(spaceId: string): SQL {
   return and(eq(c.orgId, orgOf(spaceId)), or(eq(c.spaceId, spaceId), isNull(c.spaceId)))!;
 }
 
-function sharedInto(spaceId: string): SQL {
-  return arrayContains(c.sharedSpaceIds, [spaceId]);
+/** The row is shared into `spaceId`. */
+export function sharedInto(spaceId: string): SQL {
+  return sql`EXISTS (SELECT 1 FROM ${shares} WHERE ${shares.connectionId} = ${c.id} AND ${shares.spaceId} = ${spaceId})`;
+}
+
+/**
+ * Of `spaceIds`, those where `predicate` holds for the row in scope, as a `text[]`. Every predicate
+ * is nested in the array expression, so drizzle qualifies its columns in a select field too.
+ */
+export function spacesWhere(
+  spaceIds: readonly string[],
+  predicate: (spaceId: string) => SQL,
+): SQL<string[]> {
+  if (spaceIds.length === 0) return sql<string[]>`ARRAY[]::text[]`;
+  const cases = sql.join(
+    spaceIds.map((spaceId) => sql`CASE WHEN ${predicate(spaceId)} THEN ${spaceId}::text END`),
+    sql`, `,
+  );
+  return sql<string[]>`array_remove(ARRAY[${cases}], NULL)`;
 }
 
 /** Read off a PLACEMENT row only: an orphan `space_packages` row is nobody's decision here. */
@@ -82,14 +92,65 @@ export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
 }
 
-export type MeConnectionAuthority =
-  { kind: "user_global" } | { kind: "bound"; orgId: string; spaceId?: string };
-
-/** In the SQL, so a bound credential only ever SELECTs rows inside its org (and space). */
-export function meConnectionAuthorityFilter(authority: MeConnectionAuthority): SQL | undefined {
-  if (authority.kind !== "bound") return undefined;
+/** In the SQL, so a delegated credential only ever SELECTs rows inside its org (and space). */
+export function meConnectionAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
+  if (principal.kind !== "delegated") return undefined;
   return and(
-    eq(c.orgId, authority.orgId),
-    authority.spaceId ? connectionInSpace(authority.spaceId) : undefined,
+    eq(c.orgId, principal.orgId),
+    principal.spaceId ? connectionInSpace(principal.spaceId) : undefined,
   );
+}
+
+/** Who reads a connection list, and what they hold in the request space (`null`: none). */
+export interface ConnectionReader {
+  principal: ConnectionPrincipal;
+  spaceId: string | null;
+  /** Holds `integrations:connect`. */
+  canConnect: boolean;
+  /** Holds `integrations:configure` in `spaceId`. */
+  governs: boolean;
+}
+
+/** Where the owner may share: `integrations:connect` there; `configures` also holds `configure`. */
+export interface ShareTargets {
+  spaceIds: string[];
+  configures: ReadonlySet<string>;
+}
+
+/**
+ * Of `t.spaceIds`, those the row may be shared into: it reaches the space, and personal connections
+ * of its integration are not blocked there unless the owner also configures it.
+ */
+export function shareableIn(t: ShareTargets): SQL<string[]> {
+  return spacesWhere(t.spaceIds, (spaceId) =>
+    and(
+      connectionInSpace(spaceId),
+      t.configures.has(spaceId) ? sql`TRUE` : not(userConnectionsBlocked(spaceId, c.integrationId)),
+    )!,
+  );
+}
+
+/**
+ * The write actions `reader` holds on `row`, as the share and rename services enforce them. The
+ * owner renames (a credential bound to a space: rows scoped to it only) and shares a member's row;
+ * a governor of the request space renames a colleague's row scoped to it and withdraws one shared
+ * into it. Sharing is the owner's consent: a governor never shares.
+ */
+export function connectionActions(
+  row: { userId: string | null; endUserId: string | null; spaceId: string | null },
+  reader: ConnectionReader,
+  sharedHere: boolean,
+): ConnectionAction[] {
+  if (!reader.canConnect) return [];
+  const actions: ConnectionAction[] = [];
+  if (actorOwns(reader.principal.actor, row)) {
+    const bound = boundSpaceOf(reader.principal);
+    if (bound === null || row.spaceId === bound) actions.push("rename");
+    if (row.userId !== null) actions.push("share");
+    return actions;
+  }
+  if (!reader.governs || reader.spaceId === null) return actions;
+  if (row.spaceId === reader.spaceId) actions.push("rename");
+  if (sharedHere) actions.push("unshare_here");
+  return actions;
 }

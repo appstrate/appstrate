@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -22,9 +22,7 @@ import { ConnectionVariablesLine } from "../integration-connect/connection-varia
 import { InlineConnectButton } from "../integration-connect/inline-connect-button";
 import {
   connectionLockHintKey,
-  connectionRowGrants,
   isConnectionOwnedBy,
-  isSharedInSpace,
 } from "../integration-connect/connection-ownership";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
 import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
@@ -32,8 +30,11 @@ import { ConnectionShareEditor } from "../integration-connect/connection-share-e
 import { ScopeSummaryText } from "../integration-connect/scope-summary-text";
 import { isQueryInFlight } from "../../lib/query-state";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useOrgSpaces } from "../../hooks/use-spaces";
 import {
-  useUpdateIntegrationConnection,
+  useRenameIntegrationConnection,
+  useShareConnection,
+  useUnshareConnection,
   type IntegrationAuthType,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -121,7 +122,9 @@ function ConnectionTableRow({
   canRenew: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const updateConnection = useUpdateIntegrationConnection();
+  const renameConnection = useRenameIntegrationConnection();
+  const shareConnection = useShareConnection();
+  const unshareConnection = useUnshareConnection();
   const disconnect = useDisconnectIntegrationConnection();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -134,21 +137,29 @@ function ConnectionTableRow({
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connection.label;
-  const isShared = isSharedInSpace(connection, spaceId);
-  // The list holds connections other members share into the space: every control is gated on
-  // the rule the API enforces (`connectionRowGrants`), and delete on ownership alone
+  // The list holds connections other members share into the space: every write control is gated
+  // on the row's `allowed_actions`, which the API computes. Delete stays on ownership alone
   // (`DELETE /api/me/connections/:id` has no admin escape hatch by design).
   const isOwn = isConnectionOwnedBy(connection, user?.id);
-  // Rename, share and reconnect all write the connection, which guards on
-  // `integrations:connect` whoever owns it.
+  const actions = connection.allowed_actions ?? [];
+  const canRename = actions.includes("rename");
+  const canShare = actions.includes("share");
+  const canUnshareHere = actions.includes("unshare_here");
+  // Reconnect writes the connection, which guards on `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  const { canRename, canEditShares, canUnshareHere } = connectionRowGrants({
-    isOwn,
-    isShared,
-    scope: connection.scope,
-    canConnect,
-    canConfigure: can("integrations:configure"),
-  });
+  // Share targets: the spaces the owner may share into, plus those it is already shared into,
+  // named by the org's spaces. Only the owner's session carries either list.
+  const { data: orgSpaces } = useOrgSpaces(canShare ? orgId : null);
+  const shareTargets = useMemo(() => {
+    const names = new Map((orgSpaces ?? []).map((s) => [s.id, s.name]));
+    const ids = [
+      ...new Set([
+        ...(connection.shareable_space_ids ?? []),
+        ...(connection.shared_space_ids ?? []),
+      ]),
+    ];
+    return ids.map((id) => ({ id, name: names.get(id) ?? id }));
+  }, [orgSpaces, connection.shareable_space_ids, connection.shared_space_ids]);
   // A pin or default names the row (in any space, for its owner): delete answers 409.
   const lockKey = connectionLockHintKey(connection.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
@@ -168,7 +179,7 @@ function ConnectionTableRow({
       setEditing(false);
       return;
     }
-    updateConnection.mutate(
+    renameConnection.mutate(
       {
         params: { path: { packageId, connectionId: connection.id } },
         body: { label: next },
@@ -204,7 +215,7 @@ function ConnectionTableRow({
                 variant="ghost"
                 className="size-7"
                 onClick={submitLabel}
-                disabled={updateConnection.isPending}
+                disabled={renameConnection.isPending}
                 title={t("integration.connection.labelSave")}
                 data-testid={`label-save-${connection.id}`}
               >
@@ -215,7 +226,7 @@ function ConnectionTableRow({
                 variant="ghost"
                 className="size-7"
                 onClick={cancelEdit}
-                disabled={updateConnection.isPending}
+                disabled={renameConnection.isPending}
                 title={t("integration.connection.labelCancel")}
               >
                 <X className="size-3.5" />
@@ -320,19 +331,28 @@ function ConnectionTableRow({
             />
             <ConnectionShareEditor
               connectionId={connection.id}
-              orgId={orgId}
               scope={connection.scope}
-              sharedSpaceIds={connection.shared_space_ids}
-              ownSpaceId={connection.scope === "space" ? spaceId : null}
+              rowSpaceId={connection.space_id}
               hereSpaceId={spaceId}
-              canEditShares={canEditShares}
+              targets={shareTargets}
+              sharedSpaceIds={connection.shared_space_ids ?? []}
+              sharedHere={connection.shared_here}
+              canShare={canShare}
               canUnshareHere={canUnshareHere}
               lockHint={lockHint}
-              pending={updateConnection.isPending}
-              onChange={(sharedSpaceIds) =>
-                updateConnection.mutate({
-                  params: { path: { packageId, connectionId: connection.id } },
-                  body: { shared_space_ids: sharedSpaceIds },
+              pending={shareConnection.isPending || unshareConnection.isPending}
+              onShare={(targetSpaceId) =>
+                shareConnection.mutate({
+                  params: {
+                    path: { packageId, connectionId: connection.id, spaceId: targetSpaceId },
+                  },
+                })
+              }
+              onUnshare={(targetSpaceId) =>
+                unshareConnection.mutate({
+                  params: {
+                    path: { packageId, connectionId: connection.id, spaceId: targetSpaceId },
+                  },
                 })
               }
             />

@@ -111,7 +111,9 @@ describe("connection scope = minting client tier", () => {
     expect(await scopeViolations()).toEqual([]);
 
     const reconnected = await connect(spaceA, member, SYSTEM_ID, spaceRow.id);
-    expect(reconnected).toMatchObject({ scope: "org", origin_space_id: spaceA.spaceId });
+    expect(reconnected).toMatchObject({ scope: "org", space_id: null });
+    const [reconnectedRow] = await db.select().from(ic).where(eq(ic.id, reconnected.id));
+    expect(reconnectedRow).toMatchObject({ originSpaceId: spaceA.spaceId });
     expect(await scopeViolations()).toEqual([]);
   });
 
