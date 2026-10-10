@@ -383,9 +383,15 @@ function itemsOf(prop: JSONSchema7): JSONSchema7 | undefined {
     : undefined;
 }
 
+/** Editor field type: the `type`, or the first non-"null" entry of a type array. */
+function primaryType(prop: JSONSchema7): string {
+  const t = Array.isArray(prop.type) ? prop.type.find((x) => x !== "null") : prop.type;
+  return t ?? "string";
+}
+
 function itemType(prop: JSONSchema7): string {
-  const t = itemsOf(prop)?.type;
-  return typeof t === "string" ? t : "string";
+  const items = itemsOf(prop);
+  return items ? primaryType(items) : "string";
 }
 
 type EditableKeyword = "default" | "enum" | "items.enum";
@@ -410,7 +416,13 @@ function reusableSource(f: SchemaField, mode: "input" | "output"): JSONSchema7 |
   const s = f.source;
   if (!s || f.isFile) return undefined;
   if (mode === "input" && isFileField(s)) return undefined;
-  return (typeof s.type === "string" ? s.type : "string") === f.type ? s : undefined;
+  return primaryType(s) === f.type ? s : undefined;
+}
+
+/** Same idea for file fields: reusable while still a file field of the same single/multiple kind. */
+function reusableFileSource(f: SchemaField): JSONSchema7 | undefined {
+  const s = f.source;
+  return s && isFileField(s) && isMultipleFileField(s) === !!f.multiple ? s : undefined;
 }
 
 /** JSON shown read-only in place of a text input when the value cannot be edited as text. */
@@ -456,7 +468,7 @@ export function schemaToFields(
     const isInputFile = mode === "input" && fileField;
     const constraints = wrapper?.file_constraints?.[key];
     const hint = wrapper?.ui_hints?.[key];
-    const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
+    const type = isInputFile ? "string" : primaryType(prop);
 
     // Extract array enum items
     let arrayEnumItems = "";
@@ -550,25 +562,21 @@ export function fieldsToSchema(
   for (const f of filtered) {
     const key = f.key.trim();
     if (mode === "input" && f.isFile) {
-      // Generate standard JSON Schema for file fields
+      // Standard JSON Schema for file fields; start from the original when its shape is unchanged
       const fileItemProp: JSONSchema7 = {
         type: "string",
         format: "uri",
         contentMediaType: "application/octet-stream",
       };
-      if (f.multiple) {
-        const prop: JSONSchema7 = { type: "array", items: fileItemProp };
-        if (f.description) prop.description = f.description;
-        if (f.maxFiles) {
-          const n = Number(f.maxFiles);
-          if (!isNaN(n)) prop.maxItems = n;
-        }
-        properties[key] = prop;
-      } else {
-        const prop: JSONSchema7 = { ...fileItemProp };
-        if (f.description) prop.description = f.description;
-        properties[key] = prop;
-      }
+      const fileSrc = reusableFileSource(f);
+      const prop: JSONSchema7 = fileSrc
+        ? { ...fileSrc }
+        : f.multiple
+          ? { type: "array", items: fileItemProp }
+          : { ...fileItemProp };
+      assign(prop, "description", f.description || undefined);
+      if (f.multiple) assign(prop, "maxItems", numberOrUndefined(f.maxFiles));
+      properties[key] = prop;
       // Build file_constraints (canonical AFPS snake_case)
       const constraint: FileConstraint = {};
       if (f.accept) constraint.accept = f.accept;

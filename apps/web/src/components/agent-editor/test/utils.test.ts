@@ -1023,4 +1023,54 @@ describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
     fields[1] = { ...fields[1]!, required: false };
     expect("required" in fieldsToSchema(fields, "input", schema)!.schema).toBe(false);
   });
+
+  it("keeps a single file field's contentMediaType and title across an unrelated edit", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf", title: "Doc" },
+        n: { type: "string" },
+      },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[1] = { ...fields[1]!, description: "x" };
+    const out = fieldsToSchema(fields, "input")!.schema;
+    expect(out.properties.doc).toEqual(schema.properties.doc);
+  });
+
+  it("keeps a multiple file field's minItems and items keywords", () => {
+    const doc = {
+      type: "array" as const,
+      minItems: 1,
+      maxItems: 3,
+      items: {
+        type: "string" as const,
+        format: "uri",
+        contentMediaType: "application/pdf",
+        title: "Page",
+      },
+    };
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { doc, n: { type: "string" } },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[1] = { ...fields[1]!, description: "x" };
+    expect(fieldsToSchema(fields, "input")!.schema.properties.doc).toEqual(doc);
+  });
+
+  it("round-trips a union type and writes a typed default", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { n: { type: ["integer", "null"] } },
+    };
+    const fields = schemaToFields(schema, "input");
+    expect(fields[0]!.type).toBe("integer");
+    expect(fieldsToSchema(fields, "input")!.schema).toEqual(schema);
+    fields[0] = { ...fields[0]!, default: "5" };
+    expect(fieldsToSchema(fields, "input")!.schema.properties.n).toEqual({
+      type: ["integer", "null"],
+      default: 5,
+    });
+  });
 });
