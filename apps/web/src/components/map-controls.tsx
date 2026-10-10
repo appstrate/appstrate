@@ -3,12 +3,7 @@ import { useEffect } from "react";
 import { Controls, Panel, useStore, useReactFlow } from "@xyflow/react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 
 const FIT_VIEW_OPTIONS = { padding: 0.06, maxZoom: 1 } as const;
 
@@ -33,25 +28,23 @@ export function MapControls({ expanded, onToggle }: { expanded: boolean; onToggl
     <>
       <Controls position="top-right" showInteractive={false} style={{ top: 34 }} />
       <Panel position="top-right">
-        <TooltipProvider delayDuration={250}>
-          <Tooltip>
-            <div className="react-flow__controls">
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  className="react-flow__controls-button"
-                  onClick={onToggle}
-                  aria-label={expanded ? t("agent-map:collapse") : t("agent-map:expand")}
-                >
-                  {expanded ? <Minimize2 /> : <Maximize2 />}
-                </button>
-              </TooltipTrigger>
-            </div>
-            <TooltipContent side="left">
-              {expanded ? t("agent-map:collapse") : t("agent-map:expand")}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        <Tooltip>
+          <div className="react-flow__controls">
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="react-flow__controls-button"
+                onClick={onToggle}
+                aria-label={expanded ? t("agent-map:collapse") : t("agent-map:expand")}
+              >
+                {expanded ? <Minimize2 /> : <Maximize2 />}
+              </button>
+            </TooltipTrigger>
+          </div>
+          <TooltipContent side="left">
+            {expanded ? t("agent-map:collapse") : t("agent-map:expand")}
+          </TooltipContent>
+        </Tooltip>
       </Panel>
       <FitOnCanvasResize />
     </>

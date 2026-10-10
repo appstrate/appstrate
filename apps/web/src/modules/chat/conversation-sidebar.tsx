@@ -14,12 +14,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { $api } from "../../api/client";
 import { Badge } from "../../components/status-badge";
 import { FileArtifact } from "../../components/file-artifact";
@@ -75,33 +70,29 @@ export function ConversationContextActions({
   const { tabs, activeTab } = useConversationTabs(state.activeTab);
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tabs
-        value={state.expanded ? activeTab.id : ""}
-        onValueChange={(tab) =>
-          dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })
-        }
-      >
-        <TabsList className="h-8" aria-label={t("context.label")}>
-          {tabs.map(({ id, Icon, label }) => (
-            <Tooltip key={id}>
-              <TooltipTrigger asChild>
-                <TabsTrigger
-                  id={`conversation-context-${id}-tab`}
-                  value={id}
-                  className="aria-selected:bg-background aria-selected:text-foreground size-7 p-0 aria-selected:shadow"
-                  aria-label={label}
-                  aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
-                >
-                  <Icon className="size-4" />
-                </TabsTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{label}</TooltipContent>
-            </Tooltip>
-          ))}
-        </TabsList>
-      </Tabs>
-    </TooltipProvider>
+    <Tabs
+      value={state.expanded ? activeTab.id : ""}
+      onValueChange={(tab) => dispatch({ type: "select-tab", tab: tab as ConversationSidebarTab })}
+    >
+      <TabsList className="h-8" aria-label={t("context.label")}>
+        {tabs.map(({ id, Icon, label }) => (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <TabsTrigger
+                id={`conversation-context-${id}-tab`}
+                value={id}
+                className="aria-selected:bg-background aria-selected:text-foreground size-7 p-0 aria-selected:shadow"
+                aria-label={label}
+                aria-controls={CONVERSATION_CONTEXT_PANEL_ID}
+              >
+                <Icon className="size-4" />
+              </TabsTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+          </Tooltip>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 

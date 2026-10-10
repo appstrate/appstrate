@@ -58,7 +58,9 @@ export function useSpaceColumns({
       header: t("applications.nameLabel"),
       width: "minmax(160px,1.6fr)",
       cell: (app) => (
-        <span className="block truncate text-sm font-medium">{spaceLabel(app, t)}</span>
+        <span className="block truncate text-sm font-medium" title={spaceLabel(app, t)}>
+          {spaceLabel(app, t)}
+        </span>
       ),
     },
     {

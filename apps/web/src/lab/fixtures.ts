@@ -781,6 +781,14 @@ export const runs: Run[] = [
       },
     },
     file_counts: { input: 1, output: 2 },
+    // A green run that still lost something on the way: the overview says it
+    // (`RunWarnings`), no banner does.
+    metadata: { degraded_integrations: ["@appstrate/gmail"] },
+    artifacts: {
+      status: "partial",
+      published: 2,
+      failed: [{ name: "outputs/grand-livre.csv", code: "file_too_large" }],
+    },
     proxy_label: "Sortie Europe",
     runner_name: "Runner Appstrate Montréal",
     runner_kind: "docker",

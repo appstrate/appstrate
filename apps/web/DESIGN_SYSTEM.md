@@ -74,21 +74,29 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    to Actions.
 2. **The Actions menu** is one trigger at every width, labelled « Actions »,
    outline `sm` with a chevron (`TOOLBAR_ACTION` from `lib/toolbar-button.ts`).
-   List and settings pages use `PageActionsMenu`
-   (`components/page-actions-menu.tsx`), settings pages place it with
-   `SettingsPageActions`. A page with no deed has no trigger. Search, filters,
+   List, settings and detail pages use `PageActionsMenu`
+   (`components/page-actions-menu.tsx`; `disabled` keeps the trigger in place
+   behind a `DisabledReasonTooltip`, `contentClassName` widens the menu), settings
+   pages place it with `SettingsPageActions`. The package menu
+   (`PackageActionsDropdown`) and a schedule's are items inside it, never a
+   hand-built trigger. A page with no deed has no trigger. Search, filters,
    columns and view changes are list controls, they never enter this menu.
 3. **The band** between the header and the tabs, for a **present state that
    blocks and asks for an act** only: a model missing, an agent switched off
    here (`AgentInactiveAlert`), a schedule the platform disabled. An `Alert`
    (`packages/ui`; variants `destructive`, `warning`, `info`, `success`), its
    icon on the first line of text; a button inside it sits on that first line
-   (`-my-1.5`). What _happened_ (a run's failure) is never a band.
+   (`-my-1.5`). What _happened_ (a run's failure, an integration that lost its
+   connection mid-run, files not saved) is never a band: it opens the run's
+   overview as a `HealthCard` (`components/run-detail/run-warnings.tsx`).
 4. **Tabs**: `DetailTabsList` / `DetailTabsTrigger`
    (`components/agent-detail/agent-local-tabs.tsx`), the tab kept in the URL hash
    (`useTabWithHash`, `hooks/use-tab-with-hash.ts`; it keeps the query string).
-   **The same tabs for every role**: what a role may not do is said inside the
-   tab (`RoleLimitNotice`), never by removing it. The agent's tab ids are in
+   When the list is wider than its container (a phone) it scrolls sideways and a
+   fade marks each edge that hides tabs, nothing when they all fit. **The same
+   tabs for every role** (a package's « Utilisé par » included): what a role may
+   not do is said inside the tab (`RoleLimitNotice`), never by removing it. A tab
+   a type of package has no use for is not offered to that type, whatever the role. The agent's tab ids are in
    `lib/agent-detail-tabs.ts`.
 5. **Vue d'ensemble**: a grid of `DetailSectionCard`
    (`components/detail-section-card.tsx`), each with an icon, a title and, when
@@ -122,10 +130,17 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - **Several values valid only together** are assembled in a modal that commits
   once (model, proxy, OAuth client, webhook). **A list of independently valid
   values** commits each entry on its own.
-- Show the outcome of a self-saving agent or schedule setting with
-  `SaveFeedback` (Enregistrement… / Enregistré / error; in
-  `components/package-detail/agent-configuration-tab.tsx`). A failure is always a
-  toast too, and the field keeps what was typed.
+- **One return of a write, everywhere** (agent, schedule, organisation,
+  workspace, preferences, integration rules): `SaveFeedback`
+  (`components/settings/save-feedback.tsx`: Enregistrement… / Enregistré / Erreur
+  d'enregistrement). It sits with the control: in the `status` of its
+  `SettingRow` (under a field, beside a switch), or at the foot of a section
+  whose controls share one write. When one mutation writes several rows, each
+  row reports only the write that carried its own key. A spinner or silence is
+  not a return; a failure is also a toast, and the field keeps what was typed.
+  The one exception is a write whose answer is not « saved » (an email change
+  that sends a confirmation): its toast says so and the row shows only the
+  pending line.
 - The one exception to the no-Save rule is a write the server cannot take in
   parts (a schedule's new actor that must name its connections in the same
   write): then the extra fields appear under the control with one explicit
@@ -134,7 +149,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - **Under a field: a note on the left, a control on the right.** A note is text
   (where the value comes from, why it is locked, with its `Lock` icon); a
   control acts (Verrouiller). `InputFieldRow`
-  (`components/package-detail/agent-configuration-tab.tsx`). A note is shown
+  (`components/settings/input-field-row.tsx`). A note is shown
   only when it adds something (the agent's value only when the schedule
   replaces it).
 - A linked object (a schedule's agent) is shown as its preview card (identity
@@ -146,18 +161,18 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
 ## 5. Choosing a value
 
-| Need                                                                 | Component                                                                                                                                          |
-| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A handful of options                                                 | `Select`                                                                                                                                           |
-| Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                    |
-| Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                             |
-| On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                 |
-| Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut) |
-| Several connections of one integration                               | `ConnectionSetChecklist` (`integration-detail/connection-set-checklist.tsx`, checkboxes capped at the integration's maximum)                       |
-| A time                                                               | the native time field in `Input type="time"`, its clock icon hidden (shadcn's date-and-time block)                                                 |
-| A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                            |
-| A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                     |
-| A secret shown once                                                  | `RevealedSecret` / `SecretRevealModal`                                                                                                             |
+| Need                                                                 | Component                                                                                                                                                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A handful of options                                                 | `Select`                                                                                                                                                                                                           |
+| Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                                                                                    |
+| Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                             |
+| On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                 |
+| Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                 |
+| Several connections of one integration                               | `ConnectionSetChecklist` (`integration-detail/connection-set-checklist.tsx`, checkboxes capped at the integration's maximum)                                                                                       |
+| A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's |
+| A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                            |
+| A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                     |
+| A secret shown once                                                  | `RevealedSecret` / `SecretRevealModal`                                                                                                                                                                             |
 
 A `Select` never holds hundreds of entries.
 
@@ -191,7 +206,9 @@ A `Select` never holds hundreds of entries.
   on narrow screens (`components/test/column-tiers.test.tsx` checks the
   arithmetic of every column set, add yours to it). Grid tracks are
   `minmax(<floor>px,1fr)`, never `minmax(0,…)`. A header that truncates at 1440
-  px is a column too narrow, fix the width. `columnMode="scroll"` makes the
+  px is a column too narrow, fix the width. Text a cell truncates carries its
+  full value in `title` (a name, an email, a list); a column that holds a name
+  has a floor that fits a usual one. `columnMode="scroll"` makes the
   reader's selected columns authoritative and scrolls them sideways instead of
   dropping tiers.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
@@ -204,6 +221,11 @@ A `Select` never holds hundreds of entries.
   adjusts the view (filters, columns), `TOOLBAR_ACTION` acts on the data.
   `CollectionTabs` splits one collection into parts at the head of the bar; it is
   not a detail page's tabs.
+- **Runs** (`components/runs-table.tsx`): the Résultat column is what ended the run
+  (`runErrorText`), else one readable line of its structured output
+  (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
+  truncated with a tooltip. Déclencheur names who or what launched it, and a dash
+  when nothing is recorded: no column is left blank.
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
@@ -232,10 +254,14 @@ A `Select` never holds hundreds of entries.
   `packages/ui` `Badge`: `ScheduleStatusBadge`, `ModelUnavailableBadge`,
   `HealthIssueBadge`. `MetaBadge` (same file) is the outline badge that says WHAT
   a row is (Inline, Supprimé), not how it ended. A version is a `secondary` badge
-  with `font-mono`; a disabled reason hangs on `DisabledReasonTooltip`.
+  with `font-mono`; an agent whose working copy differs from its last published
+  version (or has none) wears « Brouillon » in its place, and only then; a
+  disabled reason hangs on `DisabledReasonTooltip`.
 - **Identity**: `AgentIdentityTile` (`components/agent-identity.tsx`),
   `IntegrationIcon`, `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
-  member or end-user a schedule runs as).
+  member or end-user a schedule runs as). An end-user's initials sit in one of
+  eight person colours hashed from their id (`--avatar-1..8` in `styles.css`),
+  never a raw Tailwind colour.
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
@@ -289,7 +315,9 @@ A `Select` never holds hundreds of entries.
   - **A pairing in progress** (`?connectProvider=<providerId>` in the
     onboarding) is a place too: its token lives in memory, so a reload reopens
     the modal and mints a new pairing instead of resuming the old one (which
-    expires on its own).
+    expires on its own). A link to the pairing of a provider that is already
+    connected has nothing to pair: the modal closes. This is judged once, when it
+    opens; a connection that arrives during the pairing is `onConnected`'s to finish.
   - **Without a URL, and only these**: (1) the confirmation of an act
     (`ConfirmModal`, the re-authentication that confirms one, the activation
     closure, the deletion of a chat thread): reopening « Supprimer X » from a
@@ -344,8 +372,11 @@ A `Select` never holds hundreds of entries.
   stored value and is toasted, with no inline error under it (`ActorSelect` in a
   schedule's identity).
 - **Tooltips** explain an icon or a disabled control, never carry the only copy
-  of information. They are shadcn `Tooltip` wrapped in a `TooltipProvider`
-  (`delayDuration` 250 or 300). A disabled control gets its reason through
+  of information. They are shadcn `Tooltip`s under the one `TooltipProvider` at
+  the app's root (`main.tsx`; `test/render.tsx` mounts it for the no-DOM tests),
+  with one delay, 300 ms, set as the provider's default in `packages/ui`. A
+  component never mounts its own provider; only the collapsed sidebar's labels
+  are instant (`delayDuration={0}` on their own `Tooltip`). A disabled control gets its reason through
   `DisabledReasonTooltip`.
 
 ## 11. Roles and permissions
@@ -368,7 +399,11 @@ A `Select` never holds hundreds of entries.
 - A choice lists only what the caller may pick (an actor who can run agents, a
   connection the actor can reach).
 - Who reaches a route is declared once in `lib/route-access.ts` and enforced by
-  `RouteGate`; read permissions with `usePermissions().can(...)`. The « view as »
+  `RouteGate`; read permissions with `usePermissions().can(...)`. A route the
+  caller may not open says so (`NoAccessState`, in a small dialog when it
+  is the catalogue, which has no pane to sit in); a route that does not exist here (module not
+  loaded, team-space page in a personal space, an address that matches nothing)
+  says so too (`UnavailableState`, `NotFoundPage`). Never a silent redirect. The « view as »
   preview (`components/view-as-banner.tsx`) cannot be dismissed.
 
 ## 12. Files, editors and content
@@ -383,6 +418,10 @@ A `Select` never holds hundreds of entries.
   (`components/package-files/`: `FileTree` is a virtualised WAI-ARIA tree,
   `PackageFilesView` the editor). Edits stay in the package draft until the save
   bar sends them in one write; `useUnsavedChanges` blocks navigation while dirty.
+- **An agent's input and output schemas** are edited one way: `SchemaFieldList`
+  (`components/agent-editor/schema-field-list.tsx`, a table and a modal at
+  `?field-input=` / `?field-output=`), in Paramètres › Schémas, on the creation page
+  and in the agent map.
 - **Code and JSON editors** are Monaco, only through the lazy facade
   `components/monaco/index.tsx` (`MonacoEditor`, `MonacoDiffEditor`; self-hosted,
   never import `monaco-editor` elsewhere). `JsonEditor` for a JSON value,

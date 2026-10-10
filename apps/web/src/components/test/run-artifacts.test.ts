@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the run-detail "partial deliverables" banner logic
- * (`run-artifacts-banner.tsx`). The web test runner has no DOM, so we exercise
- * the pure helpers that decide WHETHER the banner renders and WHICH failed
- * names + code labels it shows, plus a source scan that the component maps the
- * failed list through them.
+ * Unit tests for the run overview's "partial deliverables" card logic
+ * (`run-detail/run-warnings.tsx`). The web test runner has no DOM, so we exercise
+ * the pure helpers that decide WHETHER the card renders and WHICH failed names
+ * + code labels it shows.
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { partialArtifactFailures, artifactFailureCodeKey } from "../run-artifacts.ts";
 
 describe("partialArtifactFailures", () => {
@@ -54,24 +51,5 @@ describe("artifactFailureCodeKey", () => {
 
   it("falls back to the `unknown` key for an unrecognised code (never a raw key)", () => {
     expect(artifactFailureCodeKey("something_new")).toBe("run.artifacts.code.unknown");
-  });
-});
-
-describe("RunArtifactsBanner source", () => {
-  const source = readFileSync(
-    fileURLToPath(new URL("../run-artifacts-banner.tsx", import.meta.url)),
-    "utf-8",
-  );
-
-  it("renders each failed name and its code label through the helpers", () => {
-    expect(source).toContain("partialArtifactFailures(artifacts)");
-    expect(source).toContain("failures.map");
-    expect(source).toContain("t(artifactFailureCodeKey(f.code))");
-  });
-
-  it("uses the agents i18n namespace and the partial title/message keys", () => {
-    expect(source).toContain('useTranslation("agents")');
-    expect(source).toContain('t("run.artifacts.partial.title")');
-    expect(source).toContain('t("run.artifacts.partial.message")');
   });
 });

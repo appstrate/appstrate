@@ -34,6 +34,31 @@ import { RunDuration } from "./run-duration";
 import { EmptyState } from "./page-states";
 import { formatDateField } from "../lib/format-date";
 import { runErrorText } from "../lib/run-error";
+import { summarizeRunOutput } from "../lib/run-output-summary";
+
+/** What a run ended with: its error, else a readable line of its output, else a dash. */
+function RunResult({ run }: { run: EnrichedRun }) {
+  const { t } = useTranslation(["agents"]);
+  if (run.error) {
+    return (
+      <span
+        className="text-destructive relative z-10 truncate font-mono text-xs"
+        title={runErrorText(run, t)}
+      >
+        {runErrorText(run, t)}
+      </span>
+    );
+  }
+  const summary = summarizeRunOutput(run.result);
+  if (!summary) return <span className="text-muted-foreground/50">—</span>;
+  const text =
+    summary.kind === "text" ? summary.text : t("runs.resultFields", { count: summary.count });
+  return (
+    <span className="relative z-10 truncate text-xs" title={text}>
+      {text}
+    </span>
+  );
+}
 
 function DocumentCounts({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation(["agents"]);
@@ -148,17 +173,7 @@ export function useRunColumns({
       header: t("runs.column.result"),
       width: "minmax(120px,1.5fr)",
       tier: 3,
-      cell: (run) =>
-        run.error ? (
-          <span
-            className="text-destructive relative z-10 truncate font-mono text-xs"
-            title={runErrorText(run, t)}
-          >
-            {runErrorText(run, t)}
-          </span>
-        ) : (
-          <span className="text-muted-foreground/50">—</span>
-        ),
+      cell: (run) => <RunResult run={run} />,
     },
     {
       id: "docs",

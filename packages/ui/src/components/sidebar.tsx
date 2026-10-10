@@ -15,7 +15,7 @@ import { SidebarContext, type SidebarContextProps, useSidebar } from "./sidebar-
 import { Separator } from "./separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./sheet";
 import { Skeleton } from "./skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 import { useUiLabels } from "./ui-labels.ts";
 
 const SIDEBAR_WIDTH = "16rem";
@@ -108,25 +108,23 @@ const SidebarProvider = React.forwardRef<
 
     return (
       <SidebarContext.Provider value={contextValue}>
-        <TooltipProvider delayDuration={0}>
-          <div
-            style={
-              {
-                "--sidebar-width": SIDEBAR_WIDTH,
-                "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-                ...style,
-              } as React.CSSProperties
-            }
-            className={cn(
-              "group/sidebar-wrapper has-[[data-variant=inset]]:bg-sidebar flex min-h-svh w-full",
-              className,
-            )}
-            ref={ref}
-            {...props}
-          >
-            {children}
-          </div>
-        </TooltipProvider>
+        <div
+          style={
+            {
+              "--sidebar-width": SIDEBAR_WIDTH,
+              "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+              ...style,
+            } as React.CSSProperties
+          }
+          className={cn(
+            "group/sidebar-wrapper has-[[data-variant=inset]]:bg-sidebar flex min-h-svh w-full",
+            className,
+          )}
+          ref={ref}
+          {...props}
+        >
+          {children}
+        </div>
       </SidebarContext.Provider>
     );
   },
@@ -622,7 +620,7 @@ const SidebarMenuButton = React.forwardRef<
     }
 
     return (
-      <Tooltip>
+      <Tooltip delayDuration={0}>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
         <TooltipContent
           side="right"

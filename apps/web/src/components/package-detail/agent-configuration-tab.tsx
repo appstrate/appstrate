@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
 import { Globe } from "lucide-react";
@@ -14,7 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { LazySchemaForm as SchemaForm } from "../lazy-schema-form";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
 import { getModelIcon } from "../icons";
@@ -34,13 +33,15 @@ import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
-import { formatInputValue, hasInputFields, subsetWrapper } from "../../lib/agent-input";
+import { formatInputValue, hasInputFields } from "../../lib/agent-input";
 import {
   reconcileModelGenerationSettings,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { JsonView } from "../json-view";
 import { SettingRow } from "../settings/setting-row";
+import { SaveFeedback } from "../settings/save-feedback";
+import { InputFieldRow } from "../settings/input-field-row";
 import { GenerationSettingRows } from "../model-generation-rows";
 
 // ─── Input Settings Section ─────────────────────────────────────────
@@ -201,62 +202,6 @@ function InputSettingRow({
         </div>
       }
     />
-  );
-}
-
-/**
- * One input as a settings row: its field, then under it what the value is
- * (left) and what can be done to it (right): a note is text, a control acts. The agent's Entrées (with
- * "Verrouiller") and a schedule's Entrées share it.
- */
-export function InputFieldRow({
-  fieldKey,
-  wrapper,
-  value,
-  disabled,
-  labels,
-  upload,
-  onValueChange,
-  hint,
-  control,
-}: {
-  fieldKey: string;
-  wrapper: SchemaWrapper;
-  value: unknown;
-  disabled?: boolean;
-  labels: ReturnType<typeof useSchemaFormLabels>;
-  upload: ReturnType<typeof useUploadClient>;
-  onValueChange: (next: unknown) => void;
-  hint?: ReactNode;
-  control?: ReactNode;
-}) {
-  const subset = subsetWrapper(wrapper, [fieldKey]);
-  if (!subset) return null;
-  // `required` is dropped exactly as the server drops it: an empty value here
-  // means "not decided — ask at launch", not "invalid".
-  const fieldSchema = { ...subset.schema };
-  delete fieldSchema.required;
-  const fieldWrapper: SchemaWrapper = { ...subset, schema: fieldSchema };
-
-  return (
-    <div className="space-y-1.5" data-testid={`input-setting-${fieldKey}`}>
-      <SchemaForm
-        wrapper={fieldWrapper}
-        formData={value === undefined ? {} : { [fieldKey]: value }}
-        upload={upload}
-        labels={labels}
-        disabled={disabled}
-        onChange={(e) => onValueChange((e.formData as Record<string, unknown>)[fieldKey])}
-      />
-      <div className="flex items-center justify-between gap-3">
-        {hint ? (
-          <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">{hint}</p>
-        ) : (
-          <span />
-        )}
-        {control}
-      </div>
-    </div>
   );
 }
 
@@ -464,29 +409,6 @@ export function ProxySection({ packageId }: { packageId: string }) {
         error={setAgentProxy.isError}
       />
     </>
-  );
-}
-
-export function SaveFeedback({
-  pending,
-  success,
-  error,
-}: {
-  pending: boolean;
-  success: boolean;
-  error: boolean;
-}) {
-  const { t } = useTranslation("agents");
-  return (
-    <p className="text-muted-foreground min-h-5 text-xs" aria-live="polite">
-      {pending
-        ? t("detail.configuration.saving")
-        : error
-          ? t("detail.configuration.saveError")
-          : success
-            ? t("detail.configuration.saved")
-            : ""}
-    </p>
   );
 }
 

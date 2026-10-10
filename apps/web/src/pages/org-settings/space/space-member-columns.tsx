@@ -54,13 +54,21 @@ export function useSpaceMemberColumns({
 }): DataColumn<SpaceMemberObject>[] {
   const { t } = useTranslation(["settings", "common"]);
 
+  /** What a role the caller cannot change reads as. */
+  const fixedRole = (member: SpaceMemberObject) =>
+    member.source === "org_role"
+      ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(member.org_role)) })
+      : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"));
+
   return [
     {
       id: "member",
       header: t("spaceMembers.colMember"),
       width: "minmax(100px,1.4fr)",
       cell: (member) => (
-        <span className="block truncate text-sm font-medium">{memberLabel(member)}</span>
+        <span className="block truncate text-sm font-medium" title={memberLabel(member)}>
+          {memberLabel(member)}
+        </span>
       ),
     },
     {
@@ -69,7 +77,12 @@ export function useSpaceMemberColumns({
       width: "minmax(100px,1.3fr)",
       tier: 2,
       cell: (member) => (
-        <span className="text-muted-foreground block truncate text-xs">{member.email ?? "—"}</span>
+        <span
+          className="text-muted-foreground block truncate text-xs"
+          title={member.email ?? undefined}
+        >
+          {member.email ?? "—"}
+        </span>
       ),
     },
     {
@@ -101,10 +114,8 @@ export function useSpaceMemberColumns({
             onValueChange={(value) => onChangeRole(member, value)}
           />
         ) : (
-          <span className="text-muted-foreground block truncate text-xs">
-            {member.source === "org_role"
-              ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(member.org_role)) })
-              : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"))}
+          <span className="text-muted-foreground block truncate text-xs" title={fixedRole(member)}>
+            {fixedRole(member)}
           </span>
         ),
     },

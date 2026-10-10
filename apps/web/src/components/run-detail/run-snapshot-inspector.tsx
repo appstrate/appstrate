@@ -33,6 +33,7 @@ import { RunDuration } from "../run-duration";
 import { DetailSectionCard as RunDetailCard } from "../detail-section-card";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { useModalParam } from "../../hooks/use-modal-param";
+import { RunWarnings } from "./run-warnings";
 
 export function RunSnapshotInspector({
   run,
@@ -97,8 +98,8 @@ export function RunSnapshotInspector({
       (entry.kind === "tool" && ["failed", "interrupted"].includes(entry.status)),
   ).length;
   const structuredFieldCount = Object.keys(structuredOutput ?? {}).length;
-  // What ended the run is part of its story, so it is told here, not in a
-  // banner over every tab: a failure or a timeout opens the overview as its
+  // What ended the run, and what it lost on the way (`RunWarnings`), is part of
+  // its story, so it is told here, not in a banner over every tab: a failure or a timeout opens the overview as its
   // problem card (the agent page's Diagnostic card); a cancellation is no
   // problem and says who stopped it among the execution facts.
   const problem = run.error && (run.status === "failed" || run.status === "timeout");
@@ -132,6 +133,7 @@ export function RunSnapshotInspector({
             </HealthCard>
           </div>
         )}
+        <RunWarnings run={run} cardHeaders={cardHeaders} />
         <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
           <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
             <RunDetailCard

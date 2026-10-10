@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatPage } from "../src/ui/index.tsx";
 import { sessionQueryKey } from "../src/ui/sessions.ts";
@@ -34,16 +35,18 @@ function render(history: unknown, can: (permission: string) => boolean): string 
   qc.setQueryData(sessionQueryKey("spc_a", "chs_gone"), history);
   return renderToString(
     <QueryClientProvider client={qc}>
-      <ChatPage
-        getHeaders={getHeaders}
-        conversationId="chs_gone"
-        onConversationChange={() => {}}
-        downloadFile={() => {}}
-        useFileImageSrc={() => null}
-        uploadFile={async () => "upload://upl_1"}
-        t={(key) => key}
-        can={can}
-      />
+      <TooltipProvider>
+        <ChatPage
+          getHeaders={getHeaders}
+          conversationId="chs_gone"
+          onConversationChange={() => {}}
+          downloadFile={() => {}}
+          useFileImageSrc={() => null}
+          uploadFile={async () => "upload://upl_1"}
+          t={(key) => key}
+          can={can}
+        />
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -72,16 +75,18 @@ describe("a conversation URL the caller has no conversation for", () => {
     qc.setQueryDefaults(["chat", "session"], { initialData: null });
     const html = renderToString(
       <QueryClientProvider client={qc}>
-        <ChatPage
-          getHeaders={getHeaders}
-          conversationId={null}
-          onConversationChange={() => {}}
-          downloadFile={() => {}}
-          useFileImageSrc={() => null}
-          uploadFile={async () => "upload://upl_1"}
-          t={(key) => key}
-          can={() => true}
-        />
+        <TooltipProvider>
+          <ChatPage
+            getHeaders={getHeaders}
+            conversationId={null}
+            onConversationChange={() => {}}
+            downloadFile={() => {}}
+            useFileImageSrc={() => null}
+            uploadFile={async () => "upload://upl_1"}
+            t={(key) => key}
+            can={() => true}
+          />
+        </TooltipProvider>
       </QueryClientProvider>,
     );
     expect(html).not.toContain("conversation.notFound.title");

@@ -11,7 +11,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { cn } from "../cn.ts";
 import { Button } from "./button.tsx";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip.tsx";
 
 /** A produced thing (a file, a result) shown with its header and actions. */
 const Artifact = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
@@ -66,26 +66,24 @@ function ArtifactAction({
   ...props
 }: Omit<React.ComponentProps<typeof Button>, "children"> & { label: string; icon: LucideIcon }) {
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className={cn("text-muted-foreground hover:text-foreground size-8", className)}
-            aria-label={label}
-            onFocus={(event) => {
-              if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();
-            }}
-            {...props}
-          >
-            <Icon className="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn("text-muted-foreground hover:text-foreground size-8", className)}
+          aria-label={label}
+          onFocus={(event) => {
+            if (!event.currentTarget.matches(":focus-visible")) event.preventDefault();
+          }}
+          {...props}
+        >
+          <Icon className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 

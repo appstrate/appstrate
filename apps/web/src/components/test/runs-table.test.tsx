@@ -83,6 +83,31 @@ describe("the result column", () => {
   it("says nothing rather than inventing a result on a run that worked", () => {
     expect(table()).toContain("—");
   });
+
+  it("reads a structured output as a line, never as JSON", () => {
+    const html = table([makeRun({ result: { output: { resume: "Trois points", n: 3 } } })]);
+    expect(html).toContain("Trois points");
+    expect(html).toContain('title="Trois points"');
+    expect(html).not.toContain("{&quot;");
+  });
+
+  it("counts the fields of an output that holds no text", () => {
+    const html = table([makeRun({ result: { output: { a: 1, b: 2 } } })]);
+    expect(html).toContain("2 champs");
+  });
+});
+
+describe("the trigger column", () => {
+  it("says the kind of launch when nothing names who made it", () => {
+    const html = table([makeRun({ user_name: null, apiKeyId: "key_1" })]);
+    expect(html).toContain("API");
+  });
+
+  it("is a dash, not a blank, when nothing is recorded", () => {
+    const html = table([makeRun({ user_name: null, proxy_label: null })]);
+    expect(html).not.toContain("Alice");
+    expect(html).toContain("text-muted-foreground/50");
+  });
 });
 
 describe("what a surface subtracts", () => {

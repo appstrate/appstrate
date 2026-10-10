@@ -25,7 +25,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { NoAccessState } from "../../components/route-gate";
 
 /**
  * The proxy column set. A proxy has no page of its own, so the row is static
@@ -218,7 +218,7 @@ export function OrgSettingsProxiesPage() {
 
   // Every hook first, THEN the guard: the column set is a hook now, and a
   // return above it makes the call conditional.
-  if (!can("proxies:read")) return <NavigateKeepingState to="/org-settings/general" />;
+  if (!can("proxies:read")) return <NoAccessState />;
 
   return (
     <>

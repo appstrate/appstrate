@@ -9,10 +9,10 @@ import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settin
 import { useOrg } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { UnavailableState } from "../../components/route-gate";
 import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
-import { Spinner } from "../../components/spinner";
+import { SaveFeedback } from "../../components/settings/save-feedback";
 
 const OAuthClientsTab = lazy(() =>
   import("../../modules/oidc/components/oauth-clients-tab").then((m) => ({
@@ -29,7 +29,7 @@ export function OrgSettingsOAuthPage() {
   // Switching collaborator SSO is `org:settings`, as the API requires; reading
   // the clients below stays open to whoever reached the page.
   const { can } = usePermissions();
-  if (!features.oidc) return <NavigateKeepingState to="/org-settings/general" />;
+  if (!features.oidc) return <UnavailableState />;
 
   if (failureReason) return <ErrorState error={failureReason} />;
   if (isLoading) return <LoadingState />;
@@ -45,7 +45,13 @@ export function OrgSettingsOAuthPage() {
             </Label>
           }
           description={t("orgSettings.dashboardSsoDesc")}
-          status={updateSettingsMutation.isPending && <Spinner />}
+          status={
+            <SaveFeedback
+              pending={updateSettingsMutation.isPending}
+              success={updateSettingsMutation.isSuccess}
+              error={updateSettingsMutation.isError}
+            />
+          }
         >
           <Switch
             id="dashboard-sso"

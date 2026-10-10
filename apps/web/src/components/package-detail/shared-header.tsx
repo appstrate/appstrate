@@ -4,12 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck, Wrench, Plug, Blocks } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
 import { PageHeader } from "../page-header";
@@ -132,46 +127,49 @@ export function SharedHeader({
               <Badge variant="secondary">{t("version.readOnly")}</Badge>
             )}
             {detail.type === "agent" && detail.source === "system" && (
-              <TooltipProvider delayDuration={250}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span tabIndex={0}>
-                      <Badge variant="secondary" className="gap-1.5">
-                        <ShieldCheck className="size-3" aria-hidden />
-                        <span className="hidden sm:inline">{t("ownership.systemAgent")}</span>
-                      </Badge>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-80">
-                    {t("ownership.systemAgentTooltip")}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0}>
+                    <Badge variant="secondary" className="gap-1.5">
+                      <ShieldCheck className="size-3" aria-hidden />
+                      <span className="hidden sm:inline">{t("ownership.systemAgent")}</span>
+                    </Badge>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-80">
+                  {t("ownership.systemAgentTooltip")}
+                </TooltipContent>
+              </Tooltip>
             )}
             {detail.type === "agent" && detail.readsPublished && !isHistoricalVersion && (
               <Badge variant="secondary" className="font-mono">
                 v{detail.version}
               </Badge>
             )}
+            {/* A draft that says what the last published version already says is not worth a
+                badge of its own: the version is. "Draft" means it differs, or nothing is published. */}
             {detail.type === "agent" &&
               detail.source !== "system" &&
               !detail.readsPublished &&
-              !isHistoricalVersion && (
-                <TooltipProvider delayDuration={250}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0}>
-                        <Badge variant="secondary">{t("version.draft")}</Badge>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-80">
-                      {latestPublishedVersion
-                        ? t("version.draftTooltip", { version: latestPublishedVersion })
-                        : t("version.draftTooltipNoVersion")}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
+              !isHistoricalVersion &&
+              (hasUnarchivedChanges || !detail.version ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Badge variant="secondary">{t("version.draft")}</Badge>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-80">
+                    {latestPublishedVersion
+                      ? t("version.draftTooltip", { version: latestPublishedVersion })
+                      : t("version.draftTooltipNoVersion")}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <Badge variant="secondary" className="font-mono">
+                  v{detail.version}
+                </Badge>
+              ))}
             {detail.type === "agent" && isHistoricalVersion && detail.version && (
               <Badge variant="secondary" className="font-mono">
                 v{detail.version} · <span className="font-sans">{t("version.readOnly")}</span>

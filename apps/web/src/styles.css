@@ -61,6 +61,18 @@
      need to be told apart at a glance. */
   --color-primary-soft: var(--primary-soft);
   --color-spark-soft: var(--spark-soft);
+  /* Person palette — the colour an end-user's initials sit in, hashed from
+     their id so the same person is always the same colour. Eight hues that
+     tell people apart in a list; never a status, which is what success,
+     warning and destructive say. */
+  --color-avatar-1: var(--avatar-1);
+  --color-avatar-2: var(--avatar-2);
+  --color-avatar-3: var(--avatar-3);
+  --color-avatar-4: var(--avatar-4);
+  --color-avatar-5: var(--avatar-5);
+  --color-avatar-6: var(--avatar-6);
+  --color-avatar-7: var(--avatar-7);
+  --color-avatar-8: var(--avatar-8);
   /* Page frame — the redesign's `--droit-gutter` and its 1300px column. The
      header shares the gutter and not the column: it runs edge to edge, so its
      trail lines up with the content's left edge until the page is wider than
@@ -123,6 +135,14 @@
   --spark-foreground: oklch(1 0 0);
   --primary-soft: oklch(0.957 0.019 263); /* #EAF1FE */
   --spark-soft: oklch(0.956 0.021 51.5); /* #FDEDE4 */
+  --avatar-1: oklch(0.546 0.215 263);
+  --avatar-2: oklch(0.596 0.145 163);
+  --avatar-3: oklch(0.541 0.281 293);
+  --avatar-4: oklch(0.666 0.179 58);
+  --avatar-5: oklch(0.586 0.253 18);
+  --avatar-6: oklch(0.609 0.126 222);
+  --avatar-7: oklch(0.591 0.293 323);
+  --avatar-8: oklch(0.646 0.222 41);
   --sidebar: oklch(0.985 0 0); /* #FAFAFA — merges with the canvas, split only by its border */
   --sidebar-foreground: oklch(0.21 0.006 285.9);
   /* Stays near-black, not the brand blue: the redesign gives org avatars a
@@ -167,6 +187,14 @@
   --spark-foreground: oklch(0.145 0.004 286);
   --primary-soft: oklch(0.3 0.06 262);
   --spark-soft: oklch(0.3 0.06 38);
+  --avatar-1: oklch(0.707 0.165 255);
+  --avatar-2: oklch(0.765 0.177 163);
+  --avatar-3: oklch(0.702 0.183 294);
+  --avatar-4: oklch(0.828 0.189 84);
+  --avatar-5: oklch(0.712 0.194 13);
+  --avatar-6: oklch(0.789 0.154 212);
+  --avatar-7: oklch(0.74 0.238 322);
+  --avatar-8: oklch(0.75 0.183 56);
   --sidebar: oklch(0.145 0.004 286);
   --sidebar-foreground: oklch(0.96 0.002 286);
   /* Mirrors the light theme's org-avatar contrast (dark chip / light text)

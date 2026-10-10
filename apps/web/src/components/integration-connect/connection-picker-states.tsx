@@ -16,12 +16,13 @@ import { NoConnectionLabel } from "./no-connection-label";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import type { ConnectionPicker } from "./use-connection-picker";
 
-export const AMBER_TEXT = "text-amber-600 dark:text-amber-400";
+/** The warning tone of a picker line (the constant keeps the name its callers import). */
+export const AMBER_TEXT = "text-warning";
 
 export function PickerWarning({ testId, children }: { testId: string; children: ReactNode }) {
   return (
     <div
-      className="mt-1.5 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+      className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex items-center gap-1.5 rounded-md border p-2 text-[0.7rem]"
       data-testid={testId}
     >
       <AlertTriangle className="size-3 shrink-0" />
@@ -70,7 +71,7 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
           variant="outline"
           size="sm"
           disabled
-          className="h-7 justify-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+          className="text-warning h-7 justify-start gap-1.5 text-xs"
           data-testid={`member-pick-reconfigure-${integrationId}`}
         >
           <AlertTriangle className="size-3" />
@@ -260,7 +261,7 @@ export function UnderScopedWarning({
   const canUpgrade = canConnect && conn.is_own && auths[conn.auth_key]?.type === "oauth2";
   return (
     <div
-      className="mt-1.5 flex flex-col gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
+      className="border-warning/40 bg-warning/10 text-warning mt-1.5 flex flex-col gap-1.5 rounded-md border p-2 text-[0.7rem]"
       data-testid={`member-pick-scope-warning-${conn.id}`}
     >
       <div className="flex items-center gap-1.5">

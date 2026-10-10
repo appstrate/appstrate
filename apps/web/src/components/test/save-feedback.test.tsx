@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "bun:test";
+import { SaveFeedback } from "../settings/save-feedback.tsx";
+import { render } from "./run-fixture.tsx";
+
+describe("SaveFeedback", () => {
+  it("says what the write did, one line at a time", () => {
+    expect(render(<SaveFeedback pending success={false} error={false} />)).toContain(
+      "Enregistrement…",
+    );
+    expect(render(<SaveFeedback pending={false} success error={false} />)).toContain("Enregistré");
+    expect(render(<SaveFeedback pending={false} success={false} error />)).toContain(
+      "Erreur d’enregistrement",
+    );
+  });
+
+  it("keeps its height when it has nothing to say, so the page does not jump", () => {
+    const html = render(<SaveFeedback pending={false} success={false} error={false} />);
+    expect(html).toContain("min-h-5");
+    expect(html).not.toContain("Enregistr");
+  });
+});

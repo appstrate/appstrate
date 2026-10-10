@@ -27,6 +27,7 @@ import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { NoAccessState } from "../../components/route-gate";
 import { cn } from "@appstrate/ui/cn";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -270,9 +271,7 @@ export function UnifiedSettingsLayout() {
 
   // Workspace settings were admin-only before the shells were unified. A cold
   // or bookmarked workspace URL must keep that permission contract.
-  if (activeScope === "workspace" && !can("org:read")) {
-    return <NavigateKeepingState to="/org-settings/general" />;
-  }
+  if (activeScope === "workspace" && !can("org:read")) return <NoAccessState />;
 
   const organizationSelector = (
     <ContextSelector

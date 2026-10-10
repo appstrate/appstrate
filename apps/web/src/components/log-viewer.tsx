@@ -8,7 +8,6 @@ import {
   Copy,
   Check,
   CheckCircle2,
-  ChevronDown,
   Clock,
   ArrowDown,
   Info,
@@ -29,13 +28,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { PageActionsMenu } from "./page-actions-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
@@ -83,7 +77,7 @@ function ExecutionEntryIcon({ entry }: { entry: ExecutionEntry }) {
 const toolStatusConfig = {
   running: {
     icon: Loader2,
-    className: "text-blue-400 animate-spin",
+    className: "text-primary animate-spin",
     labelKey: "log.toolStatus.running",
   },
   success: {
@@ -98,7 +92,7 @@ const toolStatusConfig = {
   },
   interrupted: {
     icon: CircleSlash2,
-    className: "text-amber-400",
+    className: "text-warning",
     labelKey: "log.toolStatus.interrupted",
   },
   unknown: {
@@ -521,31 +515,23 @@ export function LogViewer({
           actions={
             <div className="flex items-center gap-2">
               {headerActions}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="h-8 bg-transparent shadow-none">
-                    {t("common:pageActions.label")}
-                    <ChevronDown />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={handleCopy}>
-                    {copied ? <Check /> : <Copy />}
-                    {copied ? t("log.copied") : t("log.copyLogs")}
-                  </DropdownMenuItem>
-                  <DropdownMenuCheckboxItem
-                    checked={autoScroll}
-                    onCheckedChange={(checked) => {
-                      setAutoScroll(checked);
-                      if (checked && visibleEntries.length > 0) {
-                        virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
-                      }
-                    }}
-                  >
-                    {t("log.autoScroll")}
-                  </DropdownMenuCheckboxItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <PageActionsMenu>
+                <DropdownMenuItem onSelect={handleCopy}>
+                  {copied ? <Check /> : <Copy />}
+                  {copied ? t("log.copied") : t("log.copyLogs")}
+                </DropdownMenuItem>
+                <DropdownMenuCheckboxItem
+                  checked={autoScroll}
+                  onCheckedChange={(checked) => {
+                    setAutoScroll(checked);
+                    if (checked && visibleEntries.length > 0) {
+                      virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
+                    }
+                  }}
+                >
+                  {t("log.autoScroll")}
+                </DropdownMenuCheckboxItem>
+              </PageActionsMenu>
             </div>
           }
         />

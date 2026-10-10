@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Navigate, useLocation } from "react-router-dom";
-import { NavigateKeepingState } from "./navigate-keeping-state";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Lock } from "lucide-react";
+import { Lock, SearchX } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAppConfig } from "../hooks/use-app-config";
 import { routeVerdict, type RoutePath } from "../lib/route-access";
@@ -17,8 +17,8 @@ import { ViewAsBanner } from "./view-as-banner";
  * it refuses to MOUNT the page, so its queries never fire a row of 403s behind
  * a blank panel. Not a security boundary — the server's guards are. A route
  * that does not exist here (module not loaded, team-space page in a personal
- * space) falls back to the workspace's settings or the dashboard. Asked of the
- * page the URL lands on too: a layout mounts before its child's gate.
+ * space) says so, never a silent redirect. Asked of the page the URL lands on
+ * too: a layout mounts before its child's gate.
  */
 export function RouteGate({ path, children }: { path: RoutePath; children: ReactNode }) {
   const { can, ready, inPersonalSpace } = usePermissions();
@@ -33,13 +33,7 @@ export function RouteGate({ path, children }: { path: RoutePath; children: React
         : null;
 
   if (absent) {
-    // A workspace settings page falls back to the rail's first entry, inside
-    // the same overlay (its index picks it, and the state keeps the overlay).
-    return absent.startsWith("/workspace-settings/") ? (
-      <NavigateKeepingState to="/workspace-settings" />
-    ) : (
-      <Navigate to="/" replace />
-    );
+    return <UnavailableState />;
   }
   if (verdict === "granted") return <>{children}</>;
   // An unloaded permission set answers `false` for everything.
@@ -65,4 +59,26 @@ export function RouteGate({ path, children }: { path: RoutePath; children: React
 export function NoAccessState() {
   const { t } = useTranslation("common");
   return <EmptyState message={t("access.denied")} hint={t("access.deniedHint")} icon={Lock} />;
+}
+
+/** "This page does not exist here": a typo, a module the instance does not load, a team-space page in a personal space. */
+export function UnavailableState({ children }: { children?: ReactNode }) {
+  const { t } = useTranslation("common");
+  return (
+    <EmptyState message={t("access.unavailable")} hint={t("access.unavailableHint")} icon={SearchX}>
+      {children}
+    </EmptyState>
+  );
+}
+
+/** The address matches no route: said, with the way back, instead of landing on the dashboard unexplained. */
+export function NotFoundPage() {
+  const { t } = useTranslation("common");
+  return (
+    <UnavailableState>
+      <Button asChild variant="outline" size="sm">
+        <Link to="/">{t("nav.dashboard")}</Link>
+      </Button>
+    </UnavailableState>
+  );
 }

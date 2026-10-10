@@ -20,6 +20,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { I18nextProvider } from "react-i18next";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import i18n, { i18nReady } from "../../i18n.ts";
 
@@ -36,7 +37,9 @@ export function render(node: ReactElement): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <I18nextProvider i18n={i18n}>
-        <MemoryRouter>{node}</MemoryRouter>
+        <TooltipProvider>
+          <MemoryRouter>{node}</MemoryRouter>
+        </TooltipProvider>
       </I18nextProvider>
     </QueryClientProvider>,
   );

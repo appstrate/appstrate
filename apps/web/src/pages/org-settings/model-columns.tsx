@@ -72,14 +72,16 @@ export function useModelColumns({
     {
       id: "model",
       header: t("models.col.model"),
-      width: "minmax(80px,1.4fr)",
+      width: "minmax(140px,1.4fr)",
       cell: (m) => {
         const ProviderIcon = getModelIcon(m, registry ?? []);
         return (
           <div className="flex min-w-0 items-center gap-2">
             {ProviderIcon && <ProviderIcon className="size-4 shrink-0" />}
             <div className="min-w-0">
-              <span className="block truncate text-sm font-medium">{m.label}</span>
+              <span className="block truncate text-sm font-medium" title={m.label}>
+                {m.label}
+              </span>
               {testResults[m.id] && (
                 <div className="@xl/table:hidden">
                   <TestResultSpan
@@ -97,18 +99,24 @@ export function useModelColumns({
     {
       id: "provider",
       header: t("models.col.provider"),
-      width: "minmax(48px,0.9fr)",
+      width: "minmax(88px,0.9fr)",
       tier: 2,
-      cell: (m) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {m.provider_name ?? m.providerId ?? m.apiShape}
-        </span>
-      ),
+      cell: (m) => {
+        const provider = m.provider_name ?? m.providerId ?? m.apiShape;
+        return (
+          <span
+            className="text-muted-foreground block truncate text-xs"
+            title={provider ?? undefined}
+          >
+            {provider}
+          </span>
+        );
+      },
     },
     {
       id: "type",
       header: t("models.col.type"),
-      width: "88px",
+      width: "76px",
       tier: 2,
       cell: (m) => (
         <span className="text-muted-foreground block truncate text-xs">
@@ -123,7 +131,7 @@ export function useModelColumns({
     {
       id: "credential",
       header: t("models.col.credential"),
-      width: "minmax(84px,1fr)",
+      width: "minmax(80px,1fr)",
       tier: 3,
       cell: (m) => (
         <span className="text-muted-foreground block truncate text-xs" title={credentialText(m)}>
@@ -134,7 +142,7 @@ export function useModelColumns({
     {
       id: "status",
       header: t("models.col.status"),
-      width: "minmax(96px,1fr)",
+      width: "minmax(92px,1fr)",
       tier: 2,
       cell: (m) => (
         <div className="relative z-10 min-w-0">
@@ -163,7 +171,7 @@ export function useModelColumns({
     {
       id: "default",
       header: t("models.col.default"),
-      width: "96px",
+      width: "88px",
       tier: 3,
       cell: (m) =>
         m.is_default ? (
@@ -305,7 +313,10 @@ export function useCredentialColumns({
             width: "minmax(72px,0.8fr)" as const,
             tier: 3 as const,
             cell: (pk: ModelProviderCredentialInfo) => (
-              <span className="text-muted-foreground block truncate text-xs">
+              <span
+                className="text-muted-foreground block truncate text-xs"
+                title={pk.owner_name ?? undefined}
+              >
                 {pk.owner_type === "org" ? t("source.org") : (pk.owner_name ?? "—")}
               </span>
             ),
@@ -318,7 +329,10 @@ export function useCredentialColumns({
       width: "minmax(84px,1.1fr)",
       tier: 2,
       cell: (pk) => (
-        <span className="text-muted-foreground block truncate text-xs">
+        <span
+          className="text-muted-foreground block truncate text-xs"
+          title={pk.oauth_email ?? undefined}
+        >
           {pk.oauth_email ?? "—"}
         </span>
       ),

@@ -2,15 +2,16 @@
 
 import type { EndUserInfo } from "../hooks/use-end-users";
 
+// The person palette (`--avatar-*` in `styles.css`), spelled out whole for Tailwind.
 const COLORS = [
-  "bg-blue-500/20 text-blue-600 dark:text-blue-400",
-  "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
-  "bg-violet-500/20 text-violet-600 dark:text-violet-400",
-  "bg-amber-500/20 text-amber-600 dark:text-amber-400",
-  "bg-rose-500/20 text-rose-600 dark:text-rose-400",
-  "bg-cyan-500/20 text-cyan-600 dark:text-cyan-400",
-  "bg-fuchsia-500/20 text-fuchsia-600 dark:text-fuchsia-400",
-  "bg-orange-500/20 text-orange-600 dark:text-orange-400",
+  "bg-avatar-1/20 text-avatar-1",
+  "bg-avatar-2/20 text-avatar-2",
+  "bg-avatar-3/20 text-avatar-3",
+  "bg-avatar-4/20 text-avatar-4",
+  "bg-avatar-5/20 text-avatar-5",
+  "bg-avatar-6/20 text-avatar-6",
+  "bg-avatar-7/20 text-avatar-7",
+  "bg-avatar-8/20 text-avatar-8",
 ];
 
 function hashCode(value: string): number {

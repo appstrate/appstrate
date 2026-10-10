@@ -26,7 +26,8 @@ import { Spinner } from "../../components/spinner";
 import { ResourceSection } from "../../components/agent-editor/resource-section";
 import { ContentEditor } from "../../components/package-editor/content-editor";
 import { RuntimeToolsGroup } from "../../components/agent-editor/runtime-tools-group";
-import { SchemaSection, type SchemaField } from "../../components/agent-editor/schema-section";
+import { SchemaFieldList } from "../../components/agent-editor/schema-field-list";
+import type { SchemaField } from "../../components/agent-editor/types";
 import {
   caretRange,
   fieldsToSchema,
@@ -254,7 +255,7 @@ function MapEditForm({
         ) : kind === "runtime_tools" ? (
           <RuntimeToolsGroup selected={runtimeTools} onChange={setRuntimeTools} />
         ) : isSchemaKind(kind) ? (
-          <SchemaSection
+          <SchemaFieldList
             title={t(`agent-map:${kind}`)}
             mode={kind}
             fields={schemaFields}

@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
 import type { RunTurnRow } from "./log-utils";
 import { formatCompactTokens, formatWindowPercent, readRunContext } from "./run-context";
@@ -108,26 +103,24 @@ export function ContextGaugeReadout({ turns, status }: ContextGaugeReadoutProps)
       {isActive ? (
         <span className="text-foreground font-medium">{counts}</span>
       ) : (
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            {/* Focusable trigger, wrapping the COUNTS rather than the pill: the
+        <Tooltip>
+          {/* Focusable trigger, wrapping the COUNTS rather than the pill: the
                 counts are the ambiguous part, and making the pill the trigger
                 would nest the progressbar's own focus stop inside it. Same
                 dotted-underline shape as `RunTokensReadout`, so the two readouts
                 in this header teach one affordance rather than two. */}
-            <TooltipTrigger asChild>
-              <span
-                tabIndex={0}
-                className="text-foreground cursor-default font-medium underline decoration-dotted"
-              >
-                {counts}
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs">
-              <ContextGaugePeakHint />
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+          <TooltipTrigger asChild>
+            <span
+              tabIndex={0}
+              className="text-foreground cursor-default font-medium underline decoration-dotted"
+            >
+              {counts}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <ContextGaugePeakHint />
+          </TooltipContent>
+        </Tooltip>
       )}
       {isActive && (
         <span className="hidden sm:inline">· {formatWindowPercent(fraction, i18n.language)}</span>

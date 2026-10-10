@@ -17,6 +17,7 @@ import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import agentsFr from "../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { RunTurnRow } from "../log-utils.ts";
@@ -49,7 +50,11 @@ function windowlessTurn(index: number, contextTokens: number): RunTurnRow {
 const TURNS = [turn(0, 40_000), turn(1, 187_000), turn(2, 128_000)];
 
 function render(node: ReactElement): string {
-  return renderToStaticMarkup(<I18nextProvider i18n={i18n}>{node}</I18nextProvider>);
+  return renderToStaticMarkup(
+    <I18nextProvider i18n={i18n}>
+      <TooltipProvider>{node}</TooltipProvider>
+    </I18nextProvider>,
+  );
 }
 
 /**

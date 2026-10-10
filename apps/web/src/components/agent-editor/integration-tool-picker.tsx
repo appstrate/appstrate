@@ -352,7 +352,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
           className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+          <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
             <label
               className="flex cursor-pointer items-start gap-2"
               data-testid={`integ-wildcard-${packageId}`}
@@ -395,10 +395,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
       {/* Sits above the pickers because it applies to the whole integration,
           not to the native slice alone. */}
       {selectsNothing && (
-        <p
-          className="text-[11px] text-amber-600 dark:text-amber-500"
-          data-testid={`integ-no-tools-${packageId}`}
-        >
+        <p className="text-warning text-[11px]" data-testid={`integ-no-tools-${packageId}`}>
           {t("agentEditor.integrations.tools.noneNotice")}
         </p>
       )}
@@ -425,7 +422,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
         </div>
       )}
       {wildcardEnabled && (
-        <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
+        <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
           <label
             className="flex cursor-pointer items-start gap-2"
             data-testid={`integ-wildcard-${packageId}`}

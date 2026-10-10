@@ -62,7 +62,7 @@ import { toLiveSlug, toSlug } from "../../lib/strings";
 import { Modal } from "../modal";
 import { EmptyState } from "../page-states";
 import { TableRowActions } from "../table-row-actions";
-import type { SchemaField } from "./schema-section";
+import type { SchemaField } from "./types";
 import { DraftInput, KeywordInput, NumberKeywordInput } from "./keyword-inputs";
 import {
   changeType,
@@ -144,13 +144,14 @@ export function SchemaFieldList({
       ) : (
         <div className="border-border overflow-hidden rounded-lg border">
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-            <Table>
+            {/* Fixed layout: the input and output tables stack on one page and their columns line up. */}
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8" />
-                  <TableHead>{t("editor.fieldKeyLabel")}</TableHead>
-                  <TableHead>{t("editor.fieldTypeLabel")}</TableHead>
-                  <TableHead>{t("editor.fieldRequired")}</TableHead>
+                  <TableHead className="w-[26%]">{t("editor.fieldKeyLabel")}</TableHead>
+                  <TableHead className="w-[16%]">{t("editor.fieldTypeLabel")}</TableHead>
+                  <TableHead className="w-[12%]">{t("editor.fieldRequired")}</TableHead>
                   <TableHead>{t("editor.fieldDescLabel")}</TableHead>
                   <TableHead className="w-12" />
                 </TableRow>

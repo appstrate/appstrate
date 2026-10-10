@@ -53,7 +53,7 @@ export function OnboardingDoneStep() {
         {/* Summary cards */}
         <div className="border-border bg-card rounded-lg border p-4">
           <div className="flex items-center gap-3">
-            <CheckCircle2 size={20} className="shrink-0 text-green-500" />
+            <CheckCircle2 size={20} className="text-success shrink-0" />
             <div className="flex-1">
               <h3 className="text-sm font-semibold">{t("onboarding.summaryOrg")}</h3>
               <span className="text-muted-foreground text-sm">{currentOrg?.name}</span>
@@ -64,7 +64,7 @@ export function OnboardingDoneStep() {
         {features.billing && billing && (
           <div className="border-border bg-card rounded-lg border p-4">
             <div className="flex items-center gap-3">
-              <CheckCircle2 size={20} className="shrink-0 text-green-500" />
+              <CheckCircle2 size={20} className="text-success shrink-0" />
               <div className="flex-1">
                 <h3 className="text-sm font-semibold">{t("onboarding.summaryPlan")}</h3>
                 <span className="text-muted-foreground text-sm">{billing.plan.name}</span>
@@ -77,7 +77,7 @@ export function OnboardingDoneStep() {
           <div className="flex items-center gap-3">
             <CheckCircle2
               size={20}
-              className={modelReady ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"}
+              className={modelReady ? "text-success shrink-0" : "text-muted-foreground shrink-0"}
             />
             <div className="flex-1">
               <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
@@ -94,7 +94,7 @@ export function OnboardingDoneStep() {
             <CheckCircle2
               size={20}
               className={
-                invitationCount > 0 ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"
+                invitationCount > 0 ? "text-success shrink-0" : "text-muted-foreground shrink-0"
               }
             />
             <div className="flex-1">

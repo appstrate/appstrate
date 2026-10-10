@@ -5,6 +5,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 import { App } from "./app";
 import { TranslatedUiLabels } from "./components/translated-ui-labels";
 import { queryClient } from "./lib/query-client";
@@ -100,7 +101,9 @@ void i18nReady
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
             <TranslatedUiLabels>
-              <App />
+              <TooltipProvider>
+                <App />
+              </TooltipProvider>
             </TranslatedUiLabels>
           </BrowserRouter>
         </QueryClientProvider>

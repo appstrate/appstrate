@@ -38,7 +38,9 @@ export function useCliSessionColumns({
       cell: (session) => (
         <div className="flex min-w-0 items-center gap-2">
           <CliSessionIcon userAgent={session.userAgent} />
-          <span className="block truncate text-sm font-medium">{deriveLabel(session, t)}</span>
+          <span className="block truncate text-sm font-medium" title={deriveLabel(session, t)}>
+            {deriveLabel(session, t)}
+          </span>
         </div>
       ),
     },
@@ -48,7 +50,9 @@ export function useCliSessionColumns({
       width: "minmax(60px,1fr)",
       tier: 2,
       cell: (session) => (
-        <span className="text-muted-foreground block truncate text-xs">{memberLabel(session)}</span>
+        <span className="text-muted-foreground block truncate text-xs" title={memberLabel(session)}>
+          {memberLabel(session)}
+        </span>
       ),
     },
     {

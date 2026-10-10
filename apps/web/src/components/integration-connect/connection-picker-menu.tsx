@@ -282,7 +282,7 @@ export function PickerMenu({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="ml-1 h-6 gap-1 px-2 text-[0.65rem] text-amber-600 hover:text-amber-700 dark:text-amber-400"
+                  className="text-warning hover:text-warning ml-1 h-6 gap-1 px-2 text-[0.65rem]"
                   disabled={oauthPending}
                   onClick={(e) => {
                     // Block the DropdownMenuItem's onSelect so the renew

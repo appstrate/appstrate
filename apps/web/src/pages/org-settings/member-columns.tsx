@@ -66,26 +66,34 @@ export function useMemberColumns({
     {
       id: "member",
       header: t("orgSettings.memberColumn"),
-      width: "minmax(100px,1.4fr)",
-      cell: (member) => (
-        <span className="block truncate text-sm font-medium">
-          {member.displayName || member.email || member.userId}
-        </span>
-      ),
+      width: "minmax(130px,1.4fr)",
+      cell: (member) => {
+        const name = member.displayName || member.email || member.userId;
+        return (
+          <span className="block truncate text-sm font-medium" title={name}>
+            {name}
+          </span>
+        );
+      },
     },
     {
       id: "email",
       header: t("orgSettings.emailColumn"),
-      width: "minmax(100px,1.3fr)",
+      width: "minmax(150px,1.3fr)",
       tier: 2,
       cell: (member) => (
-        <span className="text-muted-foreground block truncate text-xs">{member.email ?? "—"}</span>
+        <span
+          className="text-muted-foreground block truncate text-xs"
+          title={member.email ?? undefined}
+        >
+          {member.email ?? "—"}
+        </span>
       ),
     },
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "minmax(100px,1fr)",
+      width: "minmax(140px,1fr)",
       tier: 2,
       cell: (member) => {
         const roles = assignableRoles(member);
@@ -126,7 +134,7 @@ export function useMemberColumns({
             id: "spaces",
             header: t("orgSettings.spacesColumn"),
             width: "minmax(100px,1.2fr)" as const,
-            tier: 2 as const,
+            tier: 3 as const,
             cell: (member: OrgMember) => {
               const names = spaces(member);
               if (names.length === 0)
@@ -149,9 +157,6 @@ export function useMemberColumns({
       header: t("orgSettings.joinedColumn"),
       width: "92px",
       align: "end",
-      // Tier 3, which in this dialog means "not shown": the spaces a person
-      // reaches took the room, and it answers a question asked far more often
-      // than the date they joined.
       tier: 3,
       cell: (member) => (
         <span className="text-muted-foreground text-xs">

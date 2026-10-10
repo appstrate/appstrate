@@ -11,6 +11,7 @@ import {
 import { useTheme } from "../../stores/theme-store";
 import { useUpdateLanguage } from "../../hooks/use-profile";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
+import { SaveFeedback } from "../../components/settings/save-feedback";
 
 export function PreferencesAppearancePage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
@@ -32,7 +33,17 @@ export function PreferencesAppearancePage() {
         </Select>
       </SettingRow>
 
-      <SettingRow variant="field" label={t("preferences.language")}>
+      <SettingRow
+        variant="field"
+        label={t("preferences.language")}
+        status={
+          <SaveFeedback
+            pending={updateLanguage.isPending}
+            success={updateLanguage.isSuccess}
+            error={updateLanguage.isError}
+          />
+        }
+      >
         <Select
           value={i18n.language}
           onValueChange={(lng) => updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })}

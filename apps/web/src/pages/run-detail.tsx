@@ -21,8 +21,6 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ResourceErrorState } from "../components/page-states";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-files";
-import { RunDegradedBanner } from "../components/run-degraded-banner";
-import { RunArtifactsBanner } from "../components/run-artifacts-banner";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
@@ -403,12 +401,6 @@ export function RunDetailPage() {
                         <ArrowRight className="size-3.5" />
                       </Button>
                     ) : undefined
-                  }
-                  notices={
-                    <>
-                      <RunDegradedBanner metadata={run.metadata} />
-                      <RunArtifactsBanner artifacts={run.artifacts} />
-                    </>
                   }
                 />
               </TabsContent>

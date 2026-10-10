@@ -188,7 +188,7 @@ describe("IntegrationConnectionPicker — a stored member is gone", () => {
       onChange: () => {},
     });
     expect(html).toContain(WARNING);
-    expect(html).toContain("text-amber-600");
+    expect(html).toContain("text-warning");
   });
 });
 
@@ -305,7 +305,7 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).not.toContain(GONE);
     expect(html).toContain(t("unavailableCount", { count: 1 }));
     expect(html).toContain(WARNING);
-    expect(html).toContain("text-amber-600");
+    expect(html).toContain("text-warning");
   });
 
   it("offers to clear an override stored under a lock, the server's only way out of it", () => {
@@ -583,9 +583,9 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     const none: Persistence = { mode: "override", value: [], onChange: () => {} };
     const html = renderPicker(resolution({}), false, none, true);
     expect(html).toContain(t("none"));
-    expect(html).toContain("text-amber-600");
+    expect(html).toContain("text-warning");
     // Control: the same override on an integration the agent does not require is a choice.
-    expect(renderPicker(resolution({}), false, none)).not.toContain("text-amber-600");
+    expect(renderPicker(resolution({}), false, none)).not.toContain("text-warning");
   });
 
   it("an admin pin to none locks the picker on 'no connection'", () => {

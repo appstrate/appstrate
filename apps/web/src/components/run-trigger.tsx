@@ -100,5 +100,9 @@ export function RunTrigger({ run }: { run: EnrichedRun }) {
       </span>
     );
   }
-  return null;
+  // Nothing names who launched it (a deleted member or key, a runner with no label): say the
+  // kind of launch when the run records one, a dash when it does not.
+  const type = getRunTriggerType(run);
+  if (type === "manual") return <span className="text-muted-foreground/50">—</span>;
+  return <span className="text-muted-foreground text-xs">{t(`run.triggerType.${type}`)}</span>;
 }

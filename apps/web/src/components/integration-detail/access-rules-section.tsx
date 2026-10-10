@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { SettingsHeading } from "../settings/settings-heading";
+import { SaveFeedback } from "../settings/save-feedback";
 import {
   useIntegrationOrgDefault,
   useUpdateIntegrationSettings,
@@ -87,6 +88,13 @@ function BlockUserConnectionsToggle({
             ))}
           </SelectContent>
         </Select>
+        <div className="mt-1.5">
+          <SaveFeedback
+            pending={updateSettings.isPending}
+            success={updateSettings.isSuccess}
+            error={updateSettings.isError}
+          />
+        </div>
         {forced && (
           <p className="text-muted-foreground mt-2 text-sm">
             {t("integration.admin.creation.forced")}

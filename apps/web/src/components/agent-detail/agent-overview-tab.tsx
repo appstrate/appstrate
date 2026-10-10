@@ -22,12 +22,7 @@ import {
 import { useAppConfig } from "../../hooks/use-app-config";
 import { cn } from "@appstrate/ui/cn";
 import { Badge as StatusPill } from "@appstrate/ui/components/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { agentModelBlocker } from "../../hooks/use-agent-readiness";
 import { findMissingDependencies, isPromptEmpty } from "@appstrate/core/validation";
@@ -633,269 +628,267 @@ export function AgentOverviewTab({
     };
 
     return (
-      <TooltipProvider>
-        <div
-          className={cn(
-            "space-y-8",
-            !contained && "pt-8 pb-4 md:pb-6",
-            !cardHeaders && !contained && "px-4 md:px-6",
-          )}
-          data-agent-operational-overview
-        >
-          <AgentHealthSection packageId={packageId} version={version} cardHeaders={cardHeaders} />
+      <div
+        className={cn(
+          "space-y-8",
+          !contained && "pt-8 pb-4 md:pb-6",
+          !cardHeaders && !contained && "px-4 md:px-6",
+        )}
+        data-agent-operational-overview
+      >
+        <AgentHealthSection packageId={packageId} version={version} cardHeaders={cardHeaders} />
 
-          <div className="grid gap-6 xl:grid-cols-3">
-            <section
+        <div className="grid gap-6 xl:grid-cols-3">
+          <section
+            className={cn(
+              "flex min-w-0 flex-col",
+              cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+            )}
+            aria-labelledby="agent-executions-heading"
+          >
+            <OverviewSectionHeading
+              id="agent-executions-heading"
+              icon={PlayCircle}
+              title={t("detail.overview.executions")}
+              embedded={cardHeaders}
+            />
+            <div
               className={cn(
-                "flex min-w-0 flex-col",
-                cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+                "border-border bg-card grid h-full divide-y overflow-hidden rounded-lg border",
+                cardHeaders && "rounded-t-lg border-x-0 border-b-0",
               )}
-              aria-labelledby="agent-executions-heading"
             >
-              <OverviewSectionHeading
-                id="agent-executions-heading"
-                icon={PlayCircle}
-                title={t("detail.overview.executions")}
-                embedded={cardHeaders}
-              />
-              <div
-                className={cn(
-                  "border-border bg-card grid h-full divide-y overflow-hidden rounded-lg border",
-                  cardHeaders && "rounded-t-lg border-x-0 border-b-0",
-                )}
-              >
-                <div className="flex min-w-0 flex-col">
-                  {detail.last_run ? (
-                    <Link
-                      to={`/agents/${packageId}/runs/${detail.last_run.id}`}
-                      className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-muted-foreground text-xs font-medium">
-                            {t("detail.overview.lastRun")}
-                          </p>
-                          <Badge status={detail.last_run.status} compact />
-                        </div>
-                        <p className="text-foreground mt-3 text-sm">
-                          {formatDateField(detail.last_run.started_at, "datetime")}
+              <div className="flex min-w-0 flex-col">
+                {detail.last_run ? (
+                  <Link
+                    to={`/agents/${packageId}/runs/${detail.last_run.id}`}
+                    className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-muted-foreground text-xs font-medium">
+                          {t("detail.overview.lastRun")}
                         </p>
+                        <Badge status={detail.last_run.status} compact />
                       </div>
-                      <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
-                    </Link>
-                  ) : (
-                    <div className="p-4">
-                      <p className="text-muted-foreground text-xs font-medium">
-                        {t("detail.overview.lastRun")}
-                      </p>
-                      <p className="text-muted-foreground mt-3 text-sm">
-                        {t("detail.overview.noRuns")}
+                      <p className="text-foreground mt-3 text-sm">
+                        {formatDateField(detail.last_run.started_at, "datetime")}
                       </p>
                     </div>
-                  )}
-                </div>
-                <div className="flex min-w-0 flex-col">
-                  {nextSchedule?.next_run_at ? (
-                    <Link
-                      to={settingsHref("schedules")}
-                      className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-muted-foreground text-xs font-medium">
-                          {t("detail.overview.nextExecution")}
-                        </p>
-                        <p className="text-foreground mt-3 truncate text-sm">
-                          {formatDateField(nextSchedule.next_run_at, "datetime")}
-                        </p>
-                      </div>
-                      <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
-                    </Link>
-                  ) : (
-                    <div className="p-4">
+                    <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
+                  </Link>
+                ) : (
+                  <div className="p-4">
+                    <p className="text-muted-foreground text-xs font-medium">
+                      {t("detail.overview.lastRun")}
+                    </p>
+                    <p className="text-muted-foreground mt-3 text-sm">
+                      {t("detail.overview.noRuns")}
+                    </p>
+                  </div>
+                )}
+              </div>
+              <div className="flex min-w-0 flex-col">
+                {nextSchedule?.next_run_at ? (
+                  <Link
+                    to={settingsHref("schedules")}
+                    className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
+                  >
+                    <div className="min-w-0">
                       <p className="text-muted-foreground text-xs font-medium">
                         {t("detail.overview.nextExecution")}
                       </p>
-                      {schedulesError ? (
-                        <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>
-                      ) : (
-                        <p className="text-muted-foreground mt-3 text-sm">
-                          {t("detail.overview.noSchedule")}
-                        </p>
-                      )}
+                      <p className="text-foreground mt-3 truncate text-sm">
+                        {formatDateField(nextSchedule.next_run_at, "datetime")}
+                      </p>
                     </div>
-                  )}
-                </div>
+                    <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
+                  </Link>
+                ) : (
+                  <div className="p-4">
+                    <p className="text-muted-foreground text-xs font-medium">
+                      {t("detail.overview.nextExecution")}
+                    </p>
+                    {schedulesError ? (
+                      <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>
+                    ) : (
+                      <p className="text-muted-foreground mt-3 text-sm">
+                        {t("detail.overview.noSchedule")}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
-            </section>
+            </div>
+          </section>
 
-            <section
+          <section
+            className={cn(
+              "flex min-w-0 flex-col",
+              cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+            )}
+            aria-labelledby="agent-activity-heading"
+          >
+            <OverviewSectionHeading
+              id="agent-activity-heading"
+              icon={ChartNoAxesCombined}
+              title={t("detail.overview.activity")}
+              embedded={cardHeaders}
+              trailing={
+                <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
+                  {t("detail.overview.lastThirtyDays")}
+                </span>
+              }
+              to={activity && activity.total > 0 ? destination("#runs") : undefined}
+              actionLabel={t("detail.overview.openRuns")}
+            />
+            <dl
               className={cn(
-                "flex min-w-0 flex-col",
-                cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+                "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0",
+                cardHeaders && "rounded-t-lg border-x-0 border-b-0",
               )}
-              aria-labelledby="agent-activity-heading"
             >
-              <OverviewSectionHeading
-                id="agent-activity-heading"
-                icon={ChartNoAxesCombined}
-                title={t("detail.overview.activity")}
-                embedded={cardHeaders}
-                trailing={
-                  <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
-                    {t("detail.overview.lastThirtyDays")}
-                  </span>
+              <OperationalStat
+                className="xl:border-border xl:border-r xl:border-b"
+                label={t("detail.overview.totalRuns")}
+                value={
+                  runActivity.isLoading
+                    ? "…"
+                    : runActivity.isError || !activity
+                      ? unknown
+                      : String(activity.total)
                 }
                 to={activity && activity.total > 0 ? destination("#runs") : undefined}
-                actionLabel={t("detail.overview.openRuns")}
               />
-              <dl
-                className={cn(
-                  "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0",
-                  cardHeaders && "rounded-t-lg border-x-0 border-b-0",
-                )}
-              >
-                <OperationalStat
-                  className="xl:border-border xl:border-r xl:border-b"
-                  label={t("detail.overview.totalRuns")}
-                  value={
-                    runActivity.isLoading
-                      ? "…"
-                      : runActivity.isError || !activity
-                        ? unknown
-                        : String(activity.total)
-                  }
-                  to={activity && activity.total > 0 ? destination("#runs") : undefined}
-                />
-                <OperationalStat
-                  className="xl:border-border xl:border-b"
-                  label={t("detail.overview.successRate")}
-                  value={
-                    runActivity.isLoading ? (
-                      "…"
-                    ) : runActivity.isError || !activity ? (
-                      unknown
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            tabIndex={0}
-                            className="focus-visible:ring-ring cursor-help border-b border-dotted outline-none focus-visible:ring-2"
-                          >
-                            {successRateLabel}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{t("detail.overview.successRateHelp")}</TooltipContent>
-                      </Tooltip>
-                    )
-                  }
-                />
-                <OperationalStat
-                  className="xl:border-border xl:border-r xl:border-b"
-                  label={t("detail.overview.failedRuns")}
-                  value={
-                    runActivity.isLoading
-                      ? "…"
-                      : runActivity.isError || failedRunCount === undefined
-                        ? unknown
-                        : String(failedRunCount)
-                  }
-                  to={
-                    failedRunCount && failedRunCount > 0
-                      ? destination("#runs", "agentRunStatus", "failed,timeout")
-                      : undefined
-                  }
-                />
-                <OperationalStat
-                  className="xl:border-border xl:border-b"
-                  label={t("detail.overview.runningRuns")}
-                  value={String(detail.running_runs)}
-                  to={
-                    detail.running_runs > 0
-                      ? destination("#runs", "agentRunStatus", "running")
-                      : undefined
-                  }
-                />
-                <OperationalStat
-                  className="xl:col-span-2"
-                  label={t("detail.overview.activeSchedules")}
-                  value={
-                    schedulesLoading
-                      ? "…"
-                      : schedulesError || !schedulesSuccess
-                        ? unknown
-                        : String(activeScheduleCount)
-                  }
-                  to={
-                    activeScheduleCount && activeScheduleCount > 0
-                      ? settingsHref("schedules")
-                      : undefined
-                  }
-                />
-              </dl>
-            </section>
-
-            <section
-              className={cn(
-                "flex min-w-0 flex-col",
-                cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
-              )}
-              aria-labelledby="agent-memory-heading"
-            >
-              <OverviewSectionHeading
-                id="agent-memory-heading"
-                icon={Database}
-                title={t("detail.overview.memoryActivity")}
-                embedded={cardHeaders}
+              <OperationalStat
+                className="xl:border-border xl:border-b"
+                label={t("detail.overview.successRate")}
+                value={
+                  runActivity.isLoading ? (
+                    "…"
+                  ) : runActivity.isError || !activity ? (
+                    unknown
+                  ) : (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          tabIndex={0}
+                          className="focus-visible:ring-ring cursor-help border-b border-dotted outline-none focus-visible:ring-2"
+                        >
+                          {successRateLabel}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("detail.overview.successRateHelp")}</TooltipContent>
+                    </Tooltip>
+                  )
+                }
+              />
+              <OperationalStat
+                className="xl:border-border xl:border-r xl:border-b"
+                label={t("detail.overview.failedRuns")}
+                value={
+                  runActivity.isLoading
+                    ? "…"
+                    : runActivity.isError || failedRunCount === undefined
+                      ? unknown
+                      : String(failedRunCount)
+                }
                 to={
-                  (pinned?.length ?? 0) + (memories?.length ?? 0) > 0
-                    ? destination("#memory")
+                  failedRunCount && failedRunCount > 0
+                    ? destination("#runs", "agentRunStatus", "failed,timeout")
                     : undefined
                 }
-                actionLabel={t("detail.overview.openMemory")}
               />
-              <dl
-                className={cn(
-                  "border-border bg-card grid h-full grid-cols-1 divide-y overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y",
-                  cardHeaders && "rounded-t-lg border-x-0 border-b-0",
-                )}
-              >
-                <OperationalStat
-                  label={t("detail.overview.pinnedItems")}
-                  value={pinnedLoading ? "…" : pinnedError ? unknown : String(pinned?.length ?? 0)}
-                  to={
-                    pinned && pinned.length > 0
-                      ? destination("#memory", "agentMemory", "pinned")
-                      : undefined
-                  }
-                />
-                <OperationalStat
-                  label={t("detail.overview.archivedItems")}
-                  value={
-                    memoriesLoading ? "…" : memoriesError ? unknown : String(memories?.length ?? 0)
-                  }
-                  to={
-                    memories && memories.length > 0
-                      ? destination("#memory", "agentMemory", "archive")
-                      : undefined
-                  }
-                />
-                <OperationalStat
-                  label={t("detail.overview.lastUpdated")}
-                  value={
-                    pinnedLoading || memoriesLoading
-                      ? "…"
-                      : pinnedError || memoriesError
-                        ? unknown
-                        : latestMemoryDate
-                          ? formatDateField(latestMemoryDate, "datetime")
-                          : "—"
-                  }
-                />
-              </dl>
-            </section>
-          </div>
+              <OperationalStat
+                className="xl:border-border xl:border-b"
+                label={t("detail.overview.runningRuns")}
+                value={String(detail.running_runs)}
+                to={
+                  detail.running_runs > 0
+                    ? destination("#runs", "agentRunStatus", "running")
+                    : undefined
+                }
+              />
+              <OperationalStat
+                className="xl:col-span-2"
+                label={t("detail.overview.activeSchedules")}
+                value={
+                  schedulesLoading
+                    ? "…"
+                    : schedulesError || !schedulesSuccess
+                      ? unknown
+                      : String(activeScheduleCount)
+                }
+                to={
+                  activeScheduleCount && activeScheduleCount > 0
+                    ? settingsHref("schedules")
+                    : undefined
+                }
+              />
+            </dl>
+          </section>
+
+          <section
+            className={cn(
+              "flex min-w-0 flex-col",
+              cardHeaders && "border-border bg-muted/35 overflow-hidden rounded-lg border",
+            )}
+            aria-labelledby="agent-memory-heading"
+          >
+            <OverviewSectionHeading
+              id="agent-memory-heading"
+              icon={Database}
+              title={t("detail.overview.memoryActivity")}
+              embedded={cardHeaders}
+              to={
+                (pinned?.length ?? 0) + (memories?.length ?? 0) > 0
+                  ? destination("#memory")
+                  : undefined
+              }
+              actionLabel={t("detail.overview.openMemory")}
+            />
+            <dl
+              className={cn(
+                "border-border bg-card grid h-full grid-cols-1 divide-y overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y",
+                cardHeaders && "rounded-t-lg border-x-0 border-b-0",
+              )}
+            >
+              <OperationalStat
+                label={t("detail.overview.pinnedItems")}
+                value={pinnedLoading ? "…" : pinnedError ? unknown : String(pinned?.length ?? 0)}
+                to={
+                  pinned && pinned.length > 0
+                    ? destination("#memory", "agentMemory", "pinned")
+                    : undefined
+                }
+              />
+              <OperationalStat
+                label={t("detail.overview.archivedItems")}
+                value={
+                  memoriesLoading ? "…" : memoriesError ? unknown : String(memories?.length ?? 0)
+                }
+                to={
+                  memories && memories.length > 0
+                    ? destination("#memory", "agentMemory", "archive")
+                    : undefined
+                }
+              />
+              <OperationalStat
+                label={t("detail.overview.lastUpdated")}
+                value={
+                  pinnedLoading || memoriesLoading
+                    ? "…"
+                    : pinnedError || memoriesError
+                      ? unknown
+                      : latestMemoryDate
+                        ? formatDateField(latestMemoryDate, "datetime")
+                        : "—"
+                }
+              />
+            </dl>
+          </section>
         </div>
-      </TooltipProvider>
+      </div>
     );
   }
 

@@ -31,7 +31,7 @@ import {
   setRuntimeTools,
   withOutputTool,
 } from "../utils";
-import type { SchemaField } from "../schema-section";
+import type { SchemaField } from "../types";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";

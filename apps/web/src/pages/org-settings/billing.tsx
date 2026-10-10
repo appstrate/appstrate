@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { CreditCard } from "lucide-react";
+import { AlertTriangle, CreditCard } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "../../lib/format-bytes";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { UnavailableState } from "../../components/route-gate";
 import type { components } from "../../api/client";
 import {
   useBilling,
@@ -67,7 +68,7 @@ export function OrgSettingsBillingPage() {
   // Reachable by URL even when the module is absent: redirect rather than
   // render a page whose API answers 404. Below every hook on purpose — an
   // early return above them changes the hook order between renders.
-  if (!features.billing) return <NavigateKeepingState to="/org-settings/general" />;
+  if (!features.billing) return <UnavailableState />;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
@@ -229,20 +230,22 @@ export function OrgSettingsBillingPage() {
       </div>
 
       {billing.status === "past_due" && (
-        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
-          <p className="font-medium text-yellow-600 dark:text-yellow-400">
-            {t("billing.pastDueWarning")}
-          </p>
-          <p className="text-muted-foreground mt-1">{t("billing.pastDueDescription")}</p>
-        </div>
+        <Alert variant="warning" className="mb-4">
+          <AlertTriangle />
+          <AlertTitle>{t("billing.pastDueWarning")}</AlertTitle>
+          <AlertDescription className="text-muted-foreground">
+            {t("billing.pastDueDescription")}
+          </AlertDescription>
+        </Alert>
       )}
 
       {billing.status === "canceling" && billing.period_end && (
-        <div className="mb-4 rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-sm">
-          <p className="font-medium text-yellow-600 dark:text-yellow-400">
+        <Alert variant="warning" className="mb-4">
+          <AlertTriangle />
+          <AlertTitle>
             {t("billing.cancelingWarning", { date: formatDateField(billing.period_end, "date") })}
-          </p>
-        </div>
+          </AlertTitle>
+        </Alert>
       )}
 
       {billing.plans.length > 0 && (

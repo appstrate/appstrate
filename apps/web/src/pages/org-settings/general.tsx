@@ -21,7 +21,7 @@ import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settin
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { Spinner } from "../../components/spinner";
+import { SaveFeedback } from "../../components/settings/save-feedback";
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
@@ -58,6 +58,31 @@ async function normalizeOrganizationLogo(file: File): Promise<string> {
   }
 
   throw new Error("logo_processing");
+}
+
+/**
+ * One mutation writes several settings: a row reports only the write that
+ * carried its own key, so a second toggle does not say « Enregistré » for the
+ * first.
+ */
+function writeFeedback(
+  mutation: {
+    isPending: boolean;
+    isSuccess: boolean;
+    isError: boolean;
+    variables?: { body?: object };
+  },
+  key: string,
+  extraPending = false,
+) {
+  const mine = !!mutation.variables?.body && key in mutation.variables.body;
+  return (
+    <SaveFeedback
+      pending={(mine && mutation.isPending) || extraPending}
+      success={mine && mutation.isSuccess}
+      error={mine && mutation.isError}
+    />
+  );
 }
 
 export function OrgSettingsGeneralPage() {
@@ -140,7 +165,7 @@ export function OrgSettingsGeneralPage() {
           variant="field"
           label={t("orgSettings.logoLabel")}
           description={t("orgSettings.logoDescription")}
-          status={(updateNameMutation.isPending || processingLogo) && <Spinner />}
+          status={writeFeedback(updateNameMutation, "logo", processingLogo)}
         >
           <div className="flex items-center gap-3">
             <OrganizationAvatar
@@ -243,7 +268,7 @@ export function OrgSettingsGeneralPage() {
           variant="field"
           label={t("orgSettings.nameLabel")}
           description={currentOrg.slug}
-          status={updateNameMutation.isPending && <Spinner />}
+          status={writeFeedback(updateNameMutation, "name")}
         >
           <InlineTextSetting
             value={currentOrg.name}
@@ -323,7 +348,7 @@ export function OrgSettingsGeneralPage() {
             </Label>
           }
           description={t("orgSettings.restrictCopyDesc")}
-          status={updateSettingsMutation.isPending && <Spinner />}
+          status={writeFeedback(updateSettingsMutation, "restrict_package_copy")}
         >
           <Switch
             id="restrict-package-copy"
@@ -350,7 +375,7 @@ export function OrgSettingsGeneralPage() {
             </Label>
           }
           description={t("orgSettings.personalModelCredentialsDesc")}
-          status={updateSettingsMutation.isPending && <Spinner />}
+          status={writeFeedback(updateSettingsMutation, "personal_model_credentials")}
         >
           <Switch
             id="personal-model-credentials"

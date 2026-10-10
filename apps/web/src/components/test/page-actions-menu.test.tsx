@@ -17,4 +17,12 @@ describe("PageActionsMenu", () => {
     expect(html).toContain("Actions");
     expect(html).not.toContain("hidden sm:inline");
   });
+
+  it("keeps the trigger in place, disabled, when the caller may not act", () => {
+    const html = render(<PageActionsMenu disabled />);
+
+    expect(html.match(/data-page-actions-trigger/g)).toHaveLength(1);
+    expect(html).toContain("disabled");
+    expect(html).toContain("Actions");
+  });
 });

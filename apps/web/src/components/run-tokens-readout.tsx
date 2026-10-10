@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
 
 /**
@@ -36,34 +31,31 @@ export function RunTokensReadout({ usage }: { usage: TokenUsage | null | undefin
   const total = totalTokens(usage);
 
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        {/* Focusable trigger: the readout is otherwise plain text, so keyboard
+    <Tooltip>
+      {/* Focusable trigger: the readout is otherwise plain text, so keyboard
             users would have no way to reach the breakdown. */}
-        <TooltipTrigger asChild>
-          <span tabIndex={0} className="cursor-default tabular-nums underline decoration-dotted">
-            {total.toLocaleString()}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-xs">
-          <span className="block text-xs">
-            {t("run.usageInputTokens")}: {(usage.input_tokens ?? 0).toLocaleString()}
-          </span>
-          <span className="block text-xs">
-            {t("run.usageOutputTokens")}: {(usage.output_tokens ?? 0).toLocaleString()}
-          </span>
-          <span className="block text-xs">
-            {t("run.usageCacheRead")}: {(usage.cache_read_input_tokens ?? 0).toLocaleString()}
-          </span>
-          <span className="block text-xs">
-            {t("run.usageCacheCreation")}:{" "}
-            {(usage.cache_creation_input_tokens ?? 0).toLocaleString()}
-          </span>
-          <span className="text-muted-foreground mt-1 block text-xs">
-            {t("run.usageTokensCumulative")}
-          </span>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="cursor-default tabular-nums underline decoration-dotted">
+          {total.toLocaleString()}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">
+        <span className="block text-xs">
+          {t("run.usageInputTokens")}: {(usage.input_tokens ?? 0).toLocaleString()}
+        </span>
+        <span className="block text-xs">
+          {t("run.usageOutputTokens")}: {(usage.output_tokens ?? 0).toLocaleString()}
+        </span>
+        <span className="block text-xs">
+          {t("run.usageCacheRead")}: {(usage.cache_read_input_tokens ?? 0).toLocaleString()}
+        </span>
+        <span className="block text-xs">
+          {t("run.usageCacheCreation")}: {(usage.cache_creation_input_tokens ?? 0).toLocaleString()}
+        </span>
+        <span className="text-muted-foreground mt-1 block text-xs">
+          {t("run.usageTokensCumulative")}
+        </span>
+      </TooltipContent>
+    </Tooltip>
   );
 }

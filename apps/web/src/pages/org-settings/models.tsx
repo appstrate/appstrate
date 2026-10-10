@@ -23,7 +23,7 @@ import {
   deduplicateLabel,
 } from "../../hooks/use-model-provider-credentials";
 import { useConnectionTest } from "../../hooks/use-connection-test";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
+import { NoAccessState } from "../../components/route-gate";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
@@ -166,7 +166,7 @@ export function OrgSettingsModelsPage() {
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
 
-  if (!can("models:read")) return <NavigateKeepingState to="/org-settings/general" />;
+  if (!can("models:read")) return <NoAccessState />;
 
   return (
     <>

@@ -170,7 +170,6 @@ export function AgentActions({
           })
         }
         onRunWithOptions={() => runOptions.open()}
-        labelledTrigger
         {...(runBlockedReason ? { runBlockedReason } : {})}
       />
       <RunWithOptionsModal

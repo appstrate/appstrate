@@ -259,6 +259,21 @@ const SETS = {
         isAdmin: true,
       }),
     ),
+  // The integration page's table, which mixes authentications and so draws the
+  // method column too: the widest of the two.
+  connectionsWithMethod: () =>
+    columnsFrom(() =>
+      useConnectionColumns({
+        packageId: "@appstrate/google-drive",
+        authKey: "",
+        authType: "custom",
+        canRenew: false,
+        manifest: {} as IntegrationManifestView,
+        userId: "user_1",
+        isAdmin: true,
+        methodLabel: () => "OAuth",
+      }),
+    ),
   oauthClients: () =>
     columnsFrom(() =>
       useOAuthClientColumns({

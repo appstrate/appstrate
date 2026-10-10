@@ -31,13 +31,22 @@ export function useUserSpaceColumns({
   onChangeRole: (membership: SpaceMembership, value: string) => void;
 }): DataColumn<SpaceMembership>[] {
   const { t } = useTranslation(["settings", "common"]);
+  /** What a role the caller cannot change reads as. */
+  const fixedRole = ({ member }: SpaceMembership) =>
+    member.source === "org_role"
+      ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(member.org_role)) })
+      : (spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole"));
 
   return [
     {
       id: "space",
       header: t("userDetail.colSpace"),
       width: "minmax(120px,1.4fr)",
-      cell: ({ space }) => <span className="block truncate text-sm font-medium">{space.name}</span>,
+      cell: ({ space }) => (
+        <span className="block truncate text-sm font-medium" title={space.name}>
+          {space.name}
+        </span>
+      ),
     },
     {
       id: "access",
@@ -67,10 +76,11 @@ export function useUserSpaceColumns({
             onValueChange={(value) => onChangeRole(membership, value)}
           />
         ) : (
-          <span className="text-muted-foreground block truncate text-xs">
-            {membership.member.source === "org_role"
-              ? t("spaceMembers.orgRoleOf", { role: t(roleI18nKey(membership.member.org_role)) })
-              : (spaceRoleLabel(membership.member.role, t) ?? t("spaceMembers.noRole"))}
+          <span
+            className="text-muted-foreground block truncate text-xs"
+            title={fixedRole(membership)}
+          >
+            {fixedRole(membership)}
           </span>
         ),
     },

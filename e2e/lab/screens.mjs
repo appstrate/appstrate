@@ -75,7 +75,7 @@ export const SCREENS = [
     path: "/integrations/@appstrate/google-drive#configuration",
     name: "integration-detail-config",
   },
-  { path: "/documents", name: "documents" },
+  { path: "/files", name: "files" },
   // The two detail pages that host the compact lists: an agent's Connexions
   // and Mémoire tabs, and a run's Documents and Mémoire tabs. They are here
   // because the third body of a collection lives on them and nowhere else.

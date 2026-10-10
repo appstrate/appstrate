@@ -11,6 +11,7 @@ import { renderToString } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { SidebarProvider } from "@appstrate/ui/components/sidebar";
+import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { ChatConversationList } from "../src/ui/thread-list.tsx";
 import { ChatHeadersProvider } from "../src/ui/runtime-context.ts";
@@ -36,15 +37,17 @@ function render(granted: string[]): string {
   });
   return renderToString(
     <QueryClientProvider client={qc}>
-      <SidebarProvider>
-        <ChatHeadersProvider value={getHeaders}>
-          <ChatConversationList
-            activeId={null}
-            t={(key) => key}
-            can={(permission) => granted.includes(permission)}
-          />
-        </ChatHeadersProvider>
-      </SidebarProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <ChatHeadersProvider value={getHeaders}>
+            <ChatConversationList
+              activeId={null}
+              t={(key) => key}
+              can={(permission) => granted.includes(permission)}
+            />
+          </ChatHeadersProvider>
+        </SidebarProvider>
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }

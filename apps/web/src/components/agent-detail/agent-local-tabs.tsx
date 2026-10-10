@@ -4,13 +4,50 @@ import * as React from "react";
 import { TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 
-/** Stock shadcn tabs, tighter on a phone, with horizontal overflow when they still do not fit. */
+/** The fade is drawn on the edge that hides tabs, nothing when they all fit. */
+const FADE_EDGE = {
+  none: "",
+  start: "[mask-image:linear-gradient(to_right,transparent,#000_2rem)]",
+  end: "[mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]",
+  both: "[mask-image:linear-gradient(to_right,transparent,#000_2rem,#000_calc(100%-2rem),transparent)]",
+} as const;
+
+function useScrollEdges() {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [edge, setEdge] = React.useState<keyof typeof FADE_EDGE>("none");
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const hiddenStart = el.scrollLeft > 1;
+      const hiddenEnd = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+      setEdge(
+        hiddenStart && hiddenEnd ? "both" : hiddenStart ? "start" : hiddenEnd ? "end" : "none",
+      );
+    };
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", measure);
+      observer.disconnect();
+    };
+  }, []);
+
+  return { ref, edge };
+}
+
+/** Stock shadcn tabs, tighter on a phone; when they still do not fit they scroll, with a fade on the hidden edge. */
 export function DetailTabsList({
   className,
   ...props
 }: React.ComponentPropsWithoutRef<typeof TabsList>) {
+  const { ref, edge } = useScrollEdges();
   return (
-    <div className="max-w-full overflow-x-auto">
+    <div ref={ref} className={cn("max-w-full overflow-x-auto", FADE_EDGE[edge])}>
       <TabsList className={cn("w-max justify-start", className)} {...props} />
     </div>
   );

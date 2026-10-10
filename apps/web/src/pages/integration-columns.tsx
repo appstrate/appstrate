@@ -233,8 +233,12 @@ export function useIntegrationClientColumns({
  * drawn for a row the caller does not own is a button that answers 403.
  *
  * Tier one is the account and its action end. Status and the scope with
- * its share editor wait for 36rem; the owner, the granted scopes and the expiry wait for 56rem
- * because they are the longest and least often read facts.
+ * its share editor wait for 36rem; the method (a table that mixes several
+ * authentications asks for it with `methodLabel`), the owner, the granted
+ * scopes and the expiry wait for 56rem because they are the longest and least
+ * often read facts. The floors are written so that the whole set, method
+ * included, holds in 56rem (`column-tiers.test.tsx`) and a 1440px page needs no
+ * sideways scroll.
  */
 export function useConnectionColumns({
   packageId,
@@ -245,6 +249,7 @@ export function useConnectionColumns({
   userId,
   isAdmin,
   authForConnection,
+  methodLabel,
 }: {
   packageId: string;
   authKey: string;
@@ -258,37 +263,57 @@ export function useConnectionColumns({
   isAdmin: boolean;
   /** Mixed-method tables resolve renew against the row's own authentication. */
   authForConnection?: (connection: IntegrationConnection) => ConnectionAuthContext;
+  /** Mixed-method tables name each row's authentication in a column of its own. */
+  methodLabel?: (connection: IntegrationConnection) => string;
 }): DataColumn<IntegrationConnection>[] {
   const { t } = useTranslation("settings");
   return [
     {
       id: "account",
       header: t("integration.connection.col.account"),
-      width: "minmax(124px,1.5fr)",
+      width: "minmax(100px,1.5fr)",
       cell: (c) => <AccountCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },
+    ...(methodLabel
+      ? [
+          {
+            id: "method",
+            header: t("integration.presentation.method"),
+            width: "minmax(84px,1fr)" as const,
+            tier: 3 as const,
+            cell: (c: IntegrationConnection) => (
+              <span className="text-muted-foreground block truncate text-xs" title={methodLabel(c)}>
+                {methodLabel(c)}
+              </span>
+            ),
+          },
+        ]
+      : []),
     {
       id: "status",
       header: t("integration.connection.col.status"),
-      width: "minmax(128px,1fr)",
+      width: "minmax(104px,1fr)",
       tier: 2,
       cell: (c) => <StatusCell connection={c} />,
     },
     {
       id: "owner",
       header: t("integration.connection.col.owner"),
-      width: "minmax(80px,1fr)",
+      width: "minmax(88px,1fr)",
       tier: 3,
-      cell: (c) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {c.owner_name ?? t("integration.connection.ownerUnknown")}
-        </span>
-      ),
+      cell: (c) => {
+        const owner = c.owner_name ?? t("integration.connection.ownerUnknown");
+        return (
+          <span className="text-muted-foreground block truncate text-xs" title={owner}>
+            {owner}
+          </span>
+        );
+      },
     },
     {
       id: "scopes",
       header: t("integration.connection.col.scopes"),
-      width: "minmax(140px,1.5fr)",
+      width: "minmax(80px,1.5fr)",
       tier: 3,
       cell: (c) =>
         c.scopes_granted.length > 0 ? (
@@ -305,7 +330,7 @@ export function useConnectionColumns({
     {
       id: "expires",
       header: t("integration.connection.col.expires"),
-      width: "100px",
+      width: "84px",
       tier: 3,
       cell: (c) => (
         <span className="text-muted-foreground block truncate text-xs">
@@ -316,7 +341,7 @@ export function useConnectionColumns({
     {
       id: "shared",
       header: t("integration.connection.col.shared"),
-      width: "minmax(112px,1fr)",
+      width: "minmax(128px,1fr)",
       tier: 2,
       cell: (c) => <ScopeCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
     },

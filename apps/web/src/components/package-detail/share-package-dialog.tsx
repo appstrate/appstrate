@@ -317,7 +317,7 @@ export function SharePackageDialog({
           {needsVersion && (
             <div
               data-testid="share-needs-version"
-              className="mt-4 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+              className="border-warning/40 bg-warning/10 mt-4 space-y-2 rounded-md border p-3 text-sm"
             >
               <p>{t("packages.shareNeedsVersion")}</p>
               {canPublish ? (

@@ -12,13 +12,11 @@ export function RunExecutionView({
   run,
   logs,
   headerActions,
-  notices,
   initialFilter,
 }: {
   run: EnrichedRun;
   logs: ExecutionEntry[];
   headerActions?: ReactNode;
-  notices?: ReactNode;
   initialFilter?: JournalOverviewFilter;
 }) {
   const { t } = useTranslation("agents");
@@ -34,7 +32,6 @@ export function RunExecutionView({
     >
       <section className="min-w-0">
         <div className="p-4 md:p-6">
-          {notices && <div className="mb-4 space-y-3 empty:hidden [&>*]:mb-0">{notices}</div>}
           <LogViewer
             entries={logs}
             focusError={run.status === "failed"}

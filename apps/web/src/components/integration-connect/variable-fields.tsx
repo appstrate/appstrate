@@ -72,7 +72,7 @@ export function VariableFields({
             {error && (
               <p
                 id={`${id}-error`}
-                className="text-xs text-red-400"
+                className="text-destructive text-xs"
                 data-testid={`variable-error-${field.name}`}
               >
                 {error}

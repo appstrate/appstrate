@@ -5,7 +5,7 @@ import { usePermissions } from "../../../hooks/use-permissions";
 import { useAppConfig } from "../../../hooks/use-app-config";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState } from "../../../components/page-states";
-import { NavigateKeepingState } from "../../../components/navigate-keeping-state";
+import { NoAccessState, UnavailableState } from "../../../components/route-gate";
 
 const SpaceAuthTab = lazy(() =>
   import("../../../modules/oidc/components/space-auth-tab").then((m) => ({
@@ -18,9 +18,8 @@ export function OrgSettingsAppAuthPage() {
   const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!can("space-settings:write") || !spaceId || !features.oidc) {
-    return <NavigateKeepingState to="/workspace-settings/general" />;
-  }
+  if (!spaceId || !features.oidc) return <UnavailableState />;
+  if (!can("space-settings:write")) return <NoAccessState />;
 
   return (
     <Suspense fallback={<LoadingState />}>

@@ -7,7 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/al
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { TriangleAlert } from "lucide-react";
+import { Info, TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
@@ -267,14 +267,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     type === "agent"
       ? AGENT_DETAIL_TABS.filter(agentTabVisible)
       : // `content` stays valid only to redirect old links to Paramètres.
-        [
-          "overview",
-          "versions",
-          "diff",
-          "settings",
-          "content",
-          ...(tabReads.usedBy ? (["usedBy"] as const) : []),
-        ];
+        ["overview", "versions", "diff", "settings", "content", "usedBy"];
   // Every detail has a useful summary; explicit file/version deep links still win.
   const defaultTab: DetailTab = "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
@@ -446,7 +439,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
     { id: "settings", label: t("detail.tabSettings") },
-    ...(tabReads.usedBy ? [{ id: "usedBy" as DetailTab, label: t("packages.usedBy") }] : []),
+    { id: "usedBy", label: t("packages.usedBy") },
   ];
 
   const tabDefs = type === "agent" ? agentTabs : pkgTabs;
@@ -470,9 +463,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       <SharedHeader
         detail={unifiedForHeader}
         isHistoricalVersion={isHistoricalVersion}
-        // The server's own flag, as for the publish dialog below. Authoring
-        // state: only whoever can publish the draft has a use for it.
-        hasUnarchivedChanges={hasTimestampChanges && !!homeWritable}
+        // The server's own flag, as for the publish dialog below. For a
+        // package it is authoring state, only whoever can publish the draft has
+        // a use for it; an agent's header names its draft to whoever reads it,
+        // and only when it differs from the last published version.
+        hasUnarchivedChanges={
+          type === "agent" ? hasArchivableChanges : hasTimestampChanges && !!homeWritable
+        }
         latestPublishedVersion={versionInfo?.latest_published_version}
         activeSubpage={{
           label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
@@ -510,7 +507,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           ) : (
             <div className="flex items-center gap-2">
               <PackageActionsDropdown
-                labelledTrigger
                 packageId={packageId}
                 type={type}
                 isOwned={isOwned}
@@ -592,29 +588,29 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       )}
 
       {!isOwned && type !== "agent" && (
-        <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
-          <span className="text-blue-400">{t("ownership.readOnly")}</span>
-          {forkedFrom && (
-            <span className="text-muted-foreground">
-              {t("ownership.forkedFrom")}
-              <Link
-                to={packageDetailPath(type, forkedFrom)}
-                className="text-blue-400 hover:underline"
-              >
-                {forkedFrom}
-              </Link>
-            </span>
-          )}
-        </div>
+        <Alert variant="info" className="mb-4">
+          <Info />
+          <AlertDescription className="flex flex-wrap items-center gap-x-3">
+            <span>{t("ownership.readOnly")}</span>
+            {forkedFrom && (
+              <span className="text-muted-foreground">
+                {t("ownership.forkedFrom")}
+                <Link
+                  to={packageDetailPath(type, forkedFrom)}
+                  className="text-primary hover:underline"
+                >
+                  {forkedFrom}
+                </Link>
+              </span>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
       {isOwned && forkedFrom && (
         <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
           <span className="text-muted-foreground">
             {t("ownership.forkedFrom")}
-            <Link
-              to={packageDetailPath(type, forkedFrom)}
-              className="text-blue-400 hover:underline"
-            >
+            <Link to={packageDetailPath(type, forkedFrom)} className="text-primary hover:underline">
               {forkedFrom}
             </Link>
           </span>
@@ -749,7 +745,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           )}
 
           <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-            {pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />}
+            {!tabReads.usedBy ? (
+              <RoleLimitNotice>{t("detail.roleLimit.usedBy")}</RoleLimitNotice>
+            ) : (
+              pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
+            )}
           </TabsContent>
         </Tabs>
       )}

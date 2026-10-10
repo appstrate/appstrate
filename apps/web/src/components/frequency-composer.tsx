@@ -35,6 +35,7 @@ import {
   toCron,
 } from "../lib/cron-frequency";
 import { TimezoneSelect } from "./timezone-select";
+import { TimeField } from "./time-field";
 
 /** The rhythms offered, in the order of the select, with their labels. */
 const KIND_LABELS: Record<FrequencyKind, string> = {
@@ -74,7 +75,7 @@ function isComplete(frequency: Frequency): boolean {
   return frequency.kind !== "weekly" || frequency.days.length > 0;
 }
 
-/** `09:30` ↔ the native time input. */
+/** `09:30` ↔ the time field. */
 const timeValue = (at: TimeOfDay) =>
   `${String(at.hour).padStart(2, "0")}:${String(at.minute).padStart(2, "0")}`;
 function parseTime(value: string): TimeOfDay | null {
@@ -297,14 +298,7 @@ export function FrequencyComposer({
         <Field>
           <Label htmlFor="frequency-at">{t("schedule.frequency.at")}</Label>
           <div>
-            <Input
-              id="frequency-at"
-              type="time"
-              // shadcn's date-and-time block: the native field, its clock icon hidden.
-              className="w-36 appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
-              value={timeValue(frequency.at)}
-              onChange={(e) => setAt(e.target.value)}
-            />
+            <TimeField id="frequency-at" value={timeValue(frequency.at)} onChange={setAt} />
           </div>
         </Field>
       )}

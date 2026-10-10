@@ -45,8 +45,10 @@ import {
   FileArchive,
   IdCard,
   Server,
+  Info,
 } from "lucide-react";
 import { authMethodLabel } from "../lib/integration-presentation";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
@@ -632,7 +634,6 @@ export function IntegrationDetailPage() {
               </Button>
             )}
             <PackageActionsDropdown
-              labelledTrigger
               packageId={packageId}
               type="integration"
               isOwned={isOwned}
@@ -658,9 +659,10 @@ export function IntegrationDetailPage() {
       />
 
       {isBuiltIn && (
-        <div className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-400">
-          {t("ownership.readOnly", { ns: "agents" })}
-        </div>
+        <Alert variant="info" className="mb-4">
+          <Info />
+          <AlertDescription>{t("ownership.readOnly", { ns: "agents" })}</AlertDescription>
+        </Alert>
       )}
 
       <Tabs

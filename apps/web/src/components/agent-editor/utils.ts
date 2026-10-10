@@ -3,7 +3,7 @@
 import type { ResourceEntry } from "./types";
 import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
-import type { SchemaField } from "./schema-section";
+import type { SchemaField } from "./types";
 import {
   getOrderedKeys,
   isFileField,

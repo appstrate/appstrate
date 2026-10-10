@@ -14,13 +14,9 @@ import { DetailSectionCard } from "../components/detail-section-card";
 import { FactGrid } from "../components/package-manifest/manifest-fact";
 import { ListToolbar } from "../components/list-toolbar";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
+import { RoleLimitNotice } from "../components/role-limit-notice";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
@@ -39,18 +35,10 @@ import { canReadRuns } from "@appstrate/core/permissions";
 import { ScheduleSettings } from "../components/schedule-settings";
 import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
-import {
-  ChevronDown,
-  Trash2,
-  Play,
-  Pause,
-  Clock,
-  CalendarClock,
-  FileInput,
-  CirclePlay,
-} from "lucide-react";
+import { Trash2, Play, Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
 
 type ScheduleTab = "details" | "runs" | "settings";
+const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
 
 export function ScheduleDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
@@ -65,11 +53,9 @@ export function ScheduleDetailPage() {
   const mayWrite = useCanWriteSchedule(schedule);
 
   // A schedule's runs are runs: `schedules:read` alone does not list them.
+  // The tab stays for every role; without the permission its content says so.
   const readsRuns = canReadRuns(can);
-  const tabs: readonly ScheduleTab[] = readsRuns
-    ? ["details", "runs", "settings"]
-    : ["details", "settings"];
-  const [activeTab, setActiveTab] = useTabWithHash(tabs, "details");
+  const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
@@ -117,40 +103,29 @@ export function ScheduleDetailPage() {
                   and says why. */}
               {can("schedules:write") && !mayWrite && (
                 <DisabledReasonTooltip reason={t("schedule.memberGoverned")}>
-                  <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5" disabled>
-                    {t("pageActions.label", { ns: "common" })}
-                    <ChevronDown size={16} />
-                  </Button>
+                  <PageActionsMenu disabled />
                 </DisabledReasonTooltip>
               )}
               {can("schedules:write") && mayWrite && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5">
-                      {t("pageActions.label", { ns: "common" })}
-                      <ChevronDown size={16} />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
-                      {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
-                      {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-                    </DropdownMenuItem>
-                    {can("schedules:delete") && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onSelect={() => setConfirmOpen(true)}
-                          disabled={deleteSchedule.isPending}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 size={14} />
-                          {t("schedule.delete")}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <PageActionsMenu>
+                  <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
+                    {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
+                    {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+                  </DropdownMenuItem>
+                  {can("schedules:delete") && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => setConfirmOpen(true)}
+                        disabled={deleteSchedule.isPending}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 size={14} />
+                        {t("schedule.delete")}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </PageActionsMenu>
               )}
             </>
           }
@@ -179,15 +154,17 @@ export function ScheduleDetailPage() {
         )}
         <DetailTabsList className="mt-6 mb-3">
           <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
-          {readsRuns && <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>}
+          <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>
           <DetailTabsTrigger value="settings">{t("schedule.tabSettings")}</DetailTabsTrigger>
         </DetailTabsList>
 
-        {readsRuns && (
-          <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <TabsContent value="runs" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+          {readsRuns ? (
             <ScheduleHistory schedule={schedule} />
-          </TabsContent>
-        )}
+          ) : (
+            <RoleLimitNotice>{t("schedule.roleLimit.runs")}</RoleLimitNotice>
+          )}
+        </TabsContent>
 
         <TabsContent value="details" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
           <ScheduleParams schedule={schedule} />

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useMemo } from "react";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { usePackageDetail, type Versioned } from "../hooks/use-packages";
@@ -22,7 +22,7 @@ import { FormField } from "../components/form-field";
 // Agent editor components
 import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { AgentAppearanceFields } from "../components/agent-editor/agent-appearance-fields";
-import { SchemaSection } from "../components/agent-editor/schema-section";
+import { SchemaFieldList } from "../components/agent-editor/schema-field-list";
 import { ResourceSection } from "../components/agent-editor/resource-section";
 import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
 import { JsonEditor } from "../components/json-editor";
@@ -35,6 +35,7 @@ import { ToolsPolicySection } from "../components/integration-editor/tools-polic
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 import { Spinner } from "../components/spinner";
 import { NoAccessState } from "../components/route-gate";
+import { ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/errors";
 import { isQueryInFlight } from "../lib/query-state";
 import { EditorShell } from "../components/editor-shell";
@@ -59,7 +60,7 @@ import {
   toResourceEntry,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
-import type { SchemaField } from "../components/agent-editor/schema-section";
+import type { SchemaField } from "../components/agent-editor/types";
 import {
   agentSchema,
   skillSchema,
@@ -365,7 +366,7 @@ function AgentEditorInner({
                 with a higher ceiling). We only tell the author what this
                 deployment will actually enforce — never clamp the input. */}
             {timeoutCeilingSeconds !== undefined && (
-              <p className="text-sm text-amber-400">
+              <p className="text-warning text-sm">
                 {t("editor.execTimeoutCapped", { seconds: timeoutCeilingSeconds })}
               </p>
             )}
@@ -380,22 +381,20 @@ function AgentEditorInner({
         />
       )}
       {activeTab === "schema" && (
-        <>
-          <SchemaSection
+        <div className="space-y-6">
+          <SchemaFieldList
             title={t("editor.inputTitle")}
             mode="input"
             fields={getSchemaFields("input")}
             onChange={onSchemaChange("input")}
-            surface={embedded ? "settings" : "card"}
           />
-          <SchemaSection
+          <SchemaFieldList
             title={t("editor.outputTitle")}
             mode="output"
             fields={getSchemaFields("output")}
             onChange={onSchemaChange("output")}
-            surface={embedded ? "settings" : "card"}
           />
-        </>
+        </div>
       )}
       {activeTab === "skills" && (
         <ResourceSection
@@ -963,7 +962,7 @@ export function PackageEditorPage({ type }: { type: PackageType }) {
     // the same refusal as the `home_writable` verdict below, so the same page.
     const loadError = type === "agent" ? agentQuery.error : pkgQuery.error;
     if (loadError instanceof ApiError && loadError.status === 403) return <NoAccessState />;
-    return <Navigate to={packageListPath(type)} replace />;
+    return <ResourceErrorState error={loadError} />;
   }
 
   // Write authority is the package's HOME space, not the space this request

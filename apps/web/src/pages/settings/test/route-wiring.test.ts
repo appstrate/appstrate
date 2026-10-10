@@ -34,15 +34,16 @@ describe("unified settings route wiring", () => {
     // 2026-08-20); it is reached from the settings rail like every other
     // org surface, which `navigation.ts` wires and the rail opens as an
     // overlay on its own.
+    // A page whose module is off says so instead of sending the caller elsewhere.
     const oauth = read("../../org-settings/oauth.tsx");
-    expect(oauth).toContain('<NavigateKeepingState to="/org-settings/general" />');
+    expect(oauth).toContain("<UnavailableState />");
 
     const agentTabs = read("../../../components/package-detail/agent-tabs.tsx");
     expect(agentTabs).toContain('to="/workspace-settings/api-keys"');
     expect(agentTabs).toContain("state={openAsModal(location)}");
   });
 
-  it("preserves the modal background through every settings guard", () => {
+  it("answers a settings guard with a refusal state, never a silent redirect", () => {
     // `library-page.tsx` left this list when the org-wide gate gave way to a
     // per-space one: the page now renders for everyone and each install
     // checkbox carries its own permission, so there is no redirect to preserve.
@@ -58,7 +59,8 @@ describe("unified settings route wiring", () => {
     for (const page of guardedPages) {
       const source = read(page);
       expect(source).not.toContain("<Navigate ");
-      expect(source).toContain("<NavigateKeepingState ");
+      expect(source).not.toContain("<NavigateKeepingState ");
+      expect(source).toMatch(/<(NoAccessState|UnavailableState) \/>/);
     }
   });
 

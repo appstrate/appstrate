@@ -31,7 +31,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RouteGate } from "./components/route-gate";
+import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { NavigateKeepingState } from "./components/navigate-keeping-state";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
@@ -915,7 +915,7 @@ export function App() {
           >
             {flatPaths("main").map(pageRoute)}
             {redirectRoutes(PAGE_REDIRECTS)}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
         {/* Overlay tree — the ONLY home of the routed modals. The tree above

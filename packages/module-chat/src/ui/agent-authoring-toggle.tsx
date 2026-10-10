@@ -13,12 +13,7 @@
 import { BotIcon, BotOffIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { setAgentAuthoringEnabled, useAgentAuthoringEnabled } from "./agent-authoring-store.ts";
 import { useChatHost } from "./runtime-context.ts";
 
@@ -26,33 +21,31 @@ export function AgentAuthoringToggle() {
   const { t } = useChatHost();
   const enabled = useAgentAuthoringEnabled();
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-pressed={enabled}
-            aria-label={t("agentAuthoring.label")}
-            onClick={() => setAgentAuthoringEnabled(!enabled)}
-            className={cn(
-              "size-8 shrink-0 rounded-lg",
-              enabled ? "text-primary hover:text-primary" : "text-muted-foreground",
-            )}
-          >
-            {enabled ? <BotIcon /> : <BotOffIcon />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-72 text-xs">
-          <p className="font-medium">
-            {t(enabled ? "agentAuthoring.onTitle" : "agentAuthoring.offTitle")}
-          </p>
-          <p className="text-muted-foreground mt-0.5">
-            {t(enabled ? "agentAuthoring.onHint" : "agentAuthoring.offHint")}
-          </p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-pressed={enabled}
+          aria-label={t("agentAuthoring.label")}
+          onClick={() => setAgentAuthoringEnabled(!enabled)}
+          className={cn(
+            "size-8 shrink-0 rounded-lg",
+            enabled ? "text-primary hover:text-primary" : "text-muted-foreground",
+          )}
+        >
+          {enabled ? <BotIcon /> : <BotOffIcon />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-72 text-xs">
+        <p className="font-medium">
+          {t(enabled ? "agentAuthoring.onTitle" : "agentAuthoring.offTitle")}
+        </p>
+        <p className="text-muted-foreground mt-0.5">
+          {t(enabled ? "agentAuthoring.onHint" : "agentAuthoring.offHint")}
+        </p>
+      </TooltipContent>
+    </Tooltip>
   );
 }

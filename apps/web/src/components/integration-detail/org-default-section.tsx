@@ -19,6 +19,7 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
+import { SaveFeedback } from "../settings/save-feedback";
 import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
@@ -54,10 +55,12 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const enforce = pendingValue?.enforce ?? orgDefault?.enforce ?? false;
   const hasDefault = pendingValue ? pendingValue.connection_ids.length > 0 : !!orgDefault;
   const [draftMode, setDraftMode] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<"success" | "error" | null>(null);
   const mode = draftMode ?? (hasDefault ? (enforce ? "forced" : "default") : "choice");
   /** An empty set removes the default; `keepMode` holds the mode while the list is empty. */
   const save = async (nextIds: string[], nextEnforce: boolean, keepMode: string | null = null) => {
     setPendingValue({ connection_ids: nextIds, enforce: nextEnforce });
+    setOutcome(null);
     if (nextIds.length === 0) setDraftMode(keepMode);
     try {
       if (nextIds.length > 0)
@@ -67,8 +70,10 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
         });
       else await remove.mutateAsync({ params: { path: { packageId } } });
       await refetch();
+      setOutcome("success");
     } catch {
       // The mutation's own `onError` has already said why.
+      setOutcome("error");
     } finally {
       setPendingValue(null);
       if (nextIds.length > 0) setDraftMode(null);
@@ -165,6 +170,11 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
           </div>
         ) : null}
       </div>
+      <SaveFeedback
+        pending={pendingValue !== null}
+        success={outcome === "success"}
+        error={outcome === "error"}
+      />
     </div>
   );
 }

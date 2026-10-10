@@ -5,7 +5,19 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 
 import { cn } from "../cn.ts";
 
-const TooltipProvider = TooltipPrimitive.Provider;
+/**
+ * The one hover delay of the product. A provider is mounted once at the app's
+ * root (and in the no-DOM test harness); a surface that wants another delay
+ * says so on its own `Tooltip` (the collapsed sidebar's labels are instant).
+ * Never a provider of a surface's own: it would override the root's for
+ * everything inside it.
+ */
+const TooltipProvider = ({
+  delayDuration = 300,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Provider>) => (
+  <TooltipPrimitive.Provider delayDuration={delayDuration} {...props} />
+);
 
 const Tooltip = TooltipPrimitive.Root;
 

@@ -11,8 +11,6 @@ interface PageHeaderProps {
   /** Level-one collection pages use a larger destination title. */
   variant?: "default" | "collection";
   titleClassName?: string;
-  /** Status or other compact metadata that semantically qualifies the title. */
-  titleTrailing?: ReactNode;
   emoji?: string;
   /** Custom leading icon node; takes precedence over `emoji` when provided. */
   icon?: ReactNode;
@@ -27,7 +25,6 @@ export function PageHeader({
   title,
   variant = "default",
   titleClassName,
-  titleTrailing,
   emoji,
   icon,
   breadcrumbs,
@@ -65,7 +62,6 @@ export function PageHeader({
         >
           {icon ?? (emoji && <span>{emoji}</span>)}
           {title}
-          {titleTrailing}
         </h2>
         {actions && (
           <div

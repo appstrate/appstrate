@@ -17,7 +17,7 @@
  * accidentally create extra rows.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useModalTarget } from "../hooks/use-modal-param";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
@@ -178,16 +178,35 @@ export function OnboardingQuickConnect() {
     (entry) => entry.providerId,
   );
 
+  const isConnected = (providerId: string) =>
+    credentialsQuery.data?.some(
+      (k) => k.authMode === "oauth2" && k.providerId === providerId && !k.needs_reconnection,
+    ) ?? false;
+
+  // A link to a pairing for a provider that is already connected has nothing
+  // to pair: the modal closes. Judged ONCE, when the modal opens and the
+  // credentials are known: a connection that arrives DURING the pairing is
+  // `onConnected`'s to finish (it seeds the models), not this effect's to cut.
+  const judged = useRef<string | null>(null);
+  const { value: connectValue, target: connectTarget, close: closeConnect } = connect;
+  const credentialsKnown = credentialsQuery.data !== undefined;
+  const connectedAtOpen = connectTarget ? isConnected(connectTarget.providerId) : false;
+  useEffect(() => {
+    if (connectValue === null) {
+      judged.current = null;
+      return;
+    }
+    if (!connectTarget || !credentialsKnown || judged.current === connectValue) return;
+    judged.current = connectValue;
+    if (connectedAtOpen) closeConnect();
+  }, [connectValue, connectTarget, credentialsKnown, connectedAtOpen, closeConnect]);
+
   if (entries.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2">
       {entries.map((entry) => {
-        const alreadyConnected =
-          credentialsQuery.data?.some(
-            (k) =>
-              k.authMode === "oauth2" && k.providerId === entry.providerId && !k.needs_reconnection,
-          ) ?? false;
+        const alreadyConnected = isConnected(entry.providerId);
         return (
           <QuickConnectCard
             key={entry.providerId}

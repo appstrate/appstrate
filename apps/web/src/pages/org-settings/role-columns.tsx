@@ -40,10 +40,16 @@ export function useRoleColumns({
       width: "minmax(160px,2fr)",
       cell: (role) => (
         <span className="block min-w-0">
-          <span className="block truncate text-sm font-medium">
+          <span
+            className="block truncate text-sm font-medium"
+            title={spaceRoleLabel(role, t) ?? role.name}
+          >
             {spaceRoleLabel(role, t) ?? role.name}
           </span>
-          <span className="text-muted-foreground block truncate text-xs">
+          <span
+            className="text-muted-foreground block truncate text-xs"
+            title={spaceRoleDescription(role, t) ?? role.key}
+          >
             {spaceRoleDescription(role, t) ?? role.key}
           </span>
         </span>

@@ -8,12 +8,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useModalParam } from "../hooks/use-modal-param";
 import { Modal } from "./modal";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 
 const PREVIEW_ROW_COUNT = 3;
 
@@ -77,21 +72,19 @@ function ConceptTitle({
   const explanation = t("agent-map:explain", { concept: title });
   return (
     <>
-      <TooltipProvider delayDuration={250}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={() => param.open(cardKey)}
-              aria-label={explanation}
-              className={`${ACTION_CLASS} block min-w-0 flex-1 truncate text-left text-[10px] font-semibold tracking-wide whitespace-nowrap uppercase`}
-            >
-              {children}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{explanation}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => param.open(cardKey)}
+            aria-label={explanation}
+            className={`${ACTION_CLASS} block min-w-0 flex-1 truncate text-left text-[10px] font-semibold tracking-wide whitespace-nowrap uppercase`}
+          >
+            {children}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top">{explanation}</TooltipContent>
+      </Tooltip>
       <Modal open={param.value === cardKey} onClose={param.close} title={title}>
         <div className="space-y-3 text-sm leading-relaxed">
           {body.split("\n\n").map((paragraph) => (
@@ -437,20 +430,18 @@ export function BoundaryNode({ data }: NodeProps) {
         <div className="flex items-center gap-1.5">
           <h3 className="text-[11px] font-semibold tracking-wide uppercase">{boundary.label}</h3>
           {boundary.tooltip && (
-            <TooltipProvider delayDuration={250}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={boundary.tooltip}
-                    className={`${ACTION_CLASS} nodrag nopan`}
-                  >
-                    <Info className="size-3" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">{boundary.tooltip}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={boundary.tooltip}
+                  className={`${ACTION_CLASS} nodrag nopan`}
+                >
+                  <Info className="size-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{boundary.tooltip}</TooltipContent>
+            </Tooltip>
           )}
         </div>
         <p className="text-muted-foreground mt-0.5 text-[10px] leading-relaxed">

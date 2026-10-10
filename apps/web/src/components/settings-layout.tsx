@@ -30,6 +30,7 @@ import { SettingsHeading } from "./settings/settings-heading";
 import { openAsModal, useBackgroundLocation } from "../lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
 import { activeSettingsItem } from "../lib/settings-nav";
+import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import {
   Select,
   SelectContent,
@@ -107,6 +108,12 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
 
   const allItems = visibleSections.flatMap((s) => s.items);
   const activeItem = activeSettingsItem(allItems, location.pathname);
+
+  useOverlayBreadcrumb(
+    activeItem && allItems[0]
+      ? [{ label: title, href: allItems[0].to }, { label: activeItem.label }]
+      : null,
+  );
 
   // Keep the same screen underneath while moving between sections; without it
   // every rail click would close the overlay and navigate for real.

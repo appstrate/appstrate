@@ -27,6 +27,17 @@ describe("RouteGate on a layout", () => {
     expect(layoutAt("/org-settings/billing")).not.toContain("layout");
   });
 
+  it("says the page does not exist here instead of redirecting", () => {
+    const html = render(
+      <RouteGate path="/chat">
+        <p>chat</p>
+      </RouteGate>,
+      { initialEntries: ["/chat"] },
+    );
+    expect(html).not.toContain("chat</p>");
+    expect(html).toContain("Cette page n'existe pas ici.");
+  });
+
   it("mounts it for a page that exists, whatever that page's own gate decides", () => {
     expect(layoutAt("/org-settings/general")).toContain("layout");
     expect(layoutAt("/org-settings")).toContain("layout");

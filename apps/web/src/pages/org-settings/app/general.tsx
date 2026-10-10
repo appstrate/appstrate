@@ -11,7 +11,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
-import { Spinner } from "../../../components/spinner";
+import { SaveFeedback } from "../../../components/settings/save-feedback";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Label } from "@appstrate/ui/components/label";
 import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
@@ -68,8 +68,17 @@ function GeneralForm({
   const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [saving, setSaving] = useState<"name" | "domains" | "visibility" | "defaultRole" | null>(
-    null,
+  // The last write and how it went: each row reports its own field only.
+  const [write, setWrite] = useState<{
+    field: "name" | "domains" | "visibility" | "defaultRole";
+    state: "pending" | "success" | "error";
+  } | null>(null);
+  const feedback = (field: "name" | "domains" | "visibility" | "defaultRole") => (
+    <SaveFeedback
+      pending={write?.field === field && write.state === "pending"}
+      success={write?.field === field && write.state === "success"}
+      error={write?.field === field && write.state === "error"}
+    />
   );
   const activeDomains = editedDomains ?? domains;
   const activeVisibility = editedVisibility ?? application.visibility;
@@ -101,7 +110,7 @@ function GeneralForm({
     },
     field: "name" | "domains" | "visibility" | "defaultRole",
   ) => {
-    setSaving(field);
+    setWrite({ field, state: "pending" });
     updateMutation.mutate(
       {
         params: { path: { id: spaceId } },
@@ -113,8 +122,11 @@ function GeneralForm({
         },
       },
       {
-        onError: (error) => toastError(error),
-        onSettled: () => setSaving(null),
+        onSuccess: () => setWrite({ field, state: "success" }),
+        onError: (error) => {
+          setWrite({ field, state: "error" });
+          toastError(error);
+        },
       },
     );
   };
@@ -140,11 +152,7 @@ function GeneralForm({
   return (
     <>
       <SettingsGroup title={t("applications.settingsTitle")}>
-        <SettingRow
-          variant="field"
-          label={t("applications.nameLabel")}
-          status={saving === "name" && <Spinner />}
-        >
+        <SettingRow variant="field" label={t("applications.nameLabel")} status={feedback("name")}>
           <InlineTextSetting
             value={application.name}
             disabled={updateMutation.isPending}
@@ -158,7 +166,7 @@ function GeneralForm({
           variant="field"
           label={t("applications.redirectDomains")}
           description={t("applications.redirectDomainsHint")}
-          status={saving === "domains" && <Spinner />}
+          status={feedback("domains")}
         >
           <div className="flex w-full flex-col gap-2">
             {activeDomains.map((domain, index) => (
@@ -222,7 +230,7 @@ function GeneralForm({
           variant="field"
           label={t("spaces.visibilityLabel")}
           description={t("spaces.visibilityHint")}
-          status={saving === "visibility" && <Spinner />}
+          status={feedback("visibility")}
         >
           <div className="flex w-full flex-col gap-3">
             <RadioGroup
@@ -272,7 +280,7 @@ function GeneralForm({
             variant="field"
             label={t("spaces.defaultRoleLabel")}
             description={t("spaces.defaultRoleHint")}
-            status={saving === "defaultRole" && <Spinner />}
+            status={feedback("defaultRole")}
           >
             <div className="flex w-full flex-col gap-2">
               <SpaceRoleSelect

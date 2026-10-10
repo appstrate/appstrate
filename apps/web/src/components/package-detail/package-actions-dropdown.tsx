@@ -3,8 +3,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
-  MoreHorizontal,
-  ChevronDown,
   Download,
   Package,
   GitBranchPlus,
@@ -17,15 +15,12 @@ import {
   FolderInput,
   Share2,
 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@appstrate/ui/components/dropdown-menu";
+import { PageActionsMenu } from "../page-actions-menu";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageEditPath } from "../../lib/package-paths";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -129,8 +124,6 @@ interface PackageActionsDropdownProps {
   onDeactivate?: () => void;
   /** One mutation drives both directions, so one pending flag covers both. */
   activationPending?: boolean;
-  /** Integration-detail prototype: use the same labelled page-action trigger as collections. */
-  labelledTrigger?: boolean;
 }
 
 /** A disabled menu item takes no focus or pointer event: its reason is shown, not titled. */
@@ -181,7 +174,6 @@ export function PackageActionsDropdown({
   canDeactivate,
   onDeactivate,
   activationPending,
-  labelledTrigger = false,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
@@ -254,245 +246,226 @@ export function PackageActionsDropdown({
   // by downloading the `.afps`, so that page mounts the explorer as well.
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size={labelledTrigger ? "sm" : "icon"}
-            className={labelledTrigger ? "h-8 gap-1.5 px-2.5" : undefined}
-            aria-label={labelledTrigger ? undefined : t("package.actions")}
-          >
-            {labelledTrigger ? (
+      <PageActionsMenu contentClassName={isAgent ? "min-w-64" : undefined}>
+        {isAgent ? (
+          <>
+            {hasAgentBuildActions && (
               <>
-                {t("pageActions.label", { ns: "common" })}
-                <ChevronDown size={16} />
+                <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
+                {isMutable && showEdit && (
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      onEdit ? onEdit() : navigate(packageEditPath(type, packageId))
+                    }
+                  >
+                    <Pencil size={14} />
+                    {editLabel ?? t("btn.edit")}
+                  </DropdownMenuItem>
+                )}
+                {isMutable && onCreateVersion && (
+                  <DropdownMenuItem onSelect={onCreateVersion}>
+                    <GitBranchPlus size={14} />
+                    {t("version.createVersion")}
+                  </DropdownMenuItem>
+                )}
+                {showFork && (
+                  <DropdownMenuItem onSelect={onFork}>
+                    <GitFork size={14} />
+                    {t("fork.button")}
+                  </DropdownMenuItem>
+                )}
               </>
-            ) : (
-              <MoreHorizontal size={16} />
             )}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className={isAgent ? "min-w-64" : undefined}>
-          {isAgent ? (
-            <>
-              {hasAgentBuildActions && (
-                <>
-                  <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
-                  {isMutable && showEdit && (
-                    <DropdownMenuItem
-                      onSelect={() =>
-                        onEdit ? onEdit() : navigate(packageEditPath(type, packageId))
-                      }
-                    >
-                      <Pencil size={14} />
-                      {editLabel ?? t("btn.edit")}
-                    </DropdownMenuItem>
-                  )}
-                  {isMutable && onCreateVersion && (
-                    <DropdownMenuItem onSelect={onCreateVersion}>
-                      <GitBranchPlus size={14} />
-                      {t("version.createVersion")}
-                    </DropdownMenuItem>
-                  )}
-                  {showFork && (
-                    <DropdownMenuItem onSelect={onFork}>
-                      <GitFork size={14} />
-                      {t("fork.button")}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
 
-              {hasAgentExecutionActions && (
-                <>
-                  {hasAgentBuildActions && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel>{t("detail.actions.execution")}</DropdownMenuLabel>
-                  {can("agents:run") && onRunWithOptions && (
-                    <DropdownMenuItem
-                      onSelect={() => !runBlockedReason && onRunWithOptions()}
-                      disabled={!!runBlockedReason}
-                    >
-                      <SlidersHorizontal size={14} />
-                      <DisabledItemLabel
-                        label={t("run.options.menuItem")}
-                        reason={runBlockedReason}
-                      />
-                    </DropdownMenuItem>
-                  )}
-                  {can("schedules:write") && !hasFileInput && onAddSchedule && (
-                    <DropdownMenuItem onSelect={onAddSchedule}>
-                      <CalendarPlus size={14} />
-                      {t("schedule.titleNew")}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
+            {hasAgentExecutionActions && (
+              <>
+                {hasAgentBuildActions && <DropdownMenuSeparator />}
+                <DropdownMenuLabel>{t("detail.actions.execution")}</DropdownMenuLabel>
+                {can("agents:run") && onRunWithOptions && (
+                  <DropdownMenuItem
+                    onSelect={() => !runBlockedReason && onRunWithOptions()}
+                    disabled={!!runBlockedReason}
+                  >
+                    <SlidersHorizontal size={14} />
+                    <DisabledItemLabel
+                      label={t("run.options.menuItem")}
+                      reason={runBlockedReason}
+                    />
+                  </DropdownMenuItem>
+                )}
+                {can("schedules:write") && !hasFileInput && onAddSchedule && (
+                  <DropdownMenuItem onSelect={onAddSchedule}>
+                    <CalendarPlus size={14} />
+                    {t("schedule.titleNew")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
 
-              {hasAgentExportActions && (
-                <>
-                  {(hasAgentBuildActions || hasAgentExecutionActions) && <DropdownMenuSeparator />}
-                  <DropdownMenuLabel>{t("detail.actions.export")}</DropdownMenuLabel>
-                  {downloadVersion && onDownload && (
-                    <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-                      <Download size={14} />
-                      {t("btn.download", { ns: "common" })}
-                    </DropdownMenuItem>
-                  )}
-                  {isActiveHere && onDownloadBundle && (
-                    <DropdownMenuItem
-                      onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
-                      disabled={!hasPublishedVersion}
-                    >
-                      <Package size={14} />
-                      <DisabledItemLabel
-                        label={t("bundle.download")}
-                        reason={hasPublishedVersion ? undefined : t("bundle.requiresVersion")}
-                      />
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
+            {hasAgentExportActions && (
+              <>
+                {(hasAgentBuildActions || hasAgentExecutionActions) && <DropdownMenuSeparator />}
+                <DropdownMenuLabel>{t("detail.actions.export")}</DropdownMenuLabel>
+                {downloadVersion && onDownload && (
+                  <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
+                    <Download size={14} />
+                    {t("btn.download", { ns: "common" })}
+                  </DropdownMenuItem>
+                )}
+                {isActiveHere && onDownloadBundle && (
+                  <DropdownMenuItem
+                    onSelect={() => hasPublishedVersion && onDownloadBundle(downloadVersion)}
+                    disabled={!hasPublishedVersion}
+                  >
+                    <Package size={14} />
+                    <DisabledItemLabel
+                      label={t("bundle.download")}
+                      reason={hasPublishedVersion ? undefined : t("bundle.requiresVersion")}
+                    />
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
 
-              {hasAgentAdministrationActions && (
-                <>
-                  {(hasAgentBuildActions || hasAgentExecutionActions || hasAgentExportActions) && (
-                    <DropdownMenuSeparator />
-                  )}
-                  <DropdownMenuLabel>{t("detail.actions.administration")}</DropdownMenuLabel>
-                  {showDeleteRuns && (
-                    <DropdownMenuItem
-                      onSelect={onDeleteRuns}
-                      disabled={runningRuns > 0}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("detail.clearRuns")}
-                    </DropdownMenuItem>
-                  )}
-                  {showDeleteMemories && (
-                    <DropdownMenuItem
-                      onSelect={onDeleteMemories}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("detail.clearMemories")}
-                    </DropdownMenuItem>
-                  )}
-                  {showActivate && onActivate && (
-                    <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
-                      <PackagePlus size={14} />
-                      {t("packages.activate", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {showDeactivate && onDeactivate && (
-                    <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
-                      <PackagePlus size={14} className="rotate-180" />
-                      {t("packages.deactivate", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {/* Moving the home is the same authority as editing, since it is
-                    the home that grants that authority; sharing is a verb of
-                    its own on that same space (RBAC spec §6.10). Both act on
-                    WHERE the package lives, so both belong in this group. */}
-                  {isMutable && (
-                    <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
-                      <FolderInput size={14} />
-                      {t("packages.moveHome", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {canShare && (
-                    <DropdownMenuItem onSelect={() => share.open(packageId)}>
-                      <Share2 size={14} />
-                      {t("packages.share", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {showDelete && onDeleteAgent && (
-                    <DropdownMenuItem
-                      onSelect={onDeleteAgent}
-                      disabled={runningRuns > 0}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("btn.delete")}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              {canRead && downloadVersion && onDownload && (
-                <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
-                  <Download size={14} />
-                  {t("btn.download", { ns: "common" })}
-                </DropdownMenuItem>
-              )}
-              {isMutable && onCreateVersion && (
-                <DropdownMenuItem onSelect={onCreateVersion}>
-                  <GitBranchPlus size={14} />
-                  {t("version.createVersion")}
-                </DropdownMenuItem>
-              )}
-              {isMutable && showEdit && (
-                <DropdownMenuItem
-                  onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
-                >
-                  <Pencil size={14} />
-                  {editLabel ?? t("btn.edit")}
-                </DropdownMenuItem>
-              )}
-              {showFork && (
-                <DropdownMenuItem onSelect={onFork}>
-                  <GitFork size={14} />
-                  {t("fork.button")}
-                </DropdownMenuItem>
-              )}
-              {(showActivate || showDeactivate || isMutable || canShare || showDelete) && (
-                <>
+            {hasAgentAdministrationActions && (
+              <>
+                {(hasAgentBuildActions || hasAgentExecutionActions || hasAgentExportActions) && (
                   <DropdownMenuSeparator />
-                  {showActivate && onActivate && (
-                    <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
-                      <PackagePlus size={14} />
-                      {t("packages.activate", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {showDeactivate && onDeactivate && (
-                    <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
-                      <PackagePlus size={14} className="rotate-180" />
-                      {t("packages.deactivate", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {/* Moving the home is the same authority as editing, since it is
+                )}
+                <DropdownMenuLabel>{t("detail.actions.administration")}</DropdownMenuLabel>
+                {showDeleteRuns && (
+                  <DropdownMenuItem
+                    onSelect={onDeleteRuns}
+                    disabled={runningRuns > 0}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("detail.clearRuns")}
+                  </DropdownMenuItem>
+                )}
+                {showDeleteMemories && (
+                  <DropdownMenuItem
+                    onSelect={onDeleteMemories}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("detail.clearMemories")}
+                  </DropdownMenuItem>
+                )}
+                {showActivate && onActivate && (
+                  <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
+                    <PackagePlus size={14} />
+                    {t("packages.activate", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {showDeactivate && onDeactivate && (
+                  <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
+                    <PackagePlus size={14} className="rotate-180" />
+                    {t("packages.deactivate", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {/* Moving the home is the same authority as editing, since it is
                     the home that grants that authority; sharing is a verb of
                     its own on that same space (RBAC spec §6.10). Both act on
                     WHERE the package lives, so both belong in this group. */}
-                  {isMutable && (
-                    <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
-                      <FolderInput size={14} />
-                      {t("packages.moveHome", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {canShare && (
-                    <DropdownMenuItem onSelect={() => share.open(packageId)}>
-                      <Share2 size={14} />
-                      {t("packages.share", { ns: "settings" })}
-                    </DropdownMenuItem>
-                  )}
-                  {showDelete && canDeletePackage && onDeletePackage && (
-                    <DropdownMenuItem
-                      onSelect={onDeletePackage}
-                      className="text-destructive focus:text-destructive"
-                    >
-                      <Trash2 size={14} />
-                      {t("btn.delete")}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+                {isMutable && (
+                  <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
+                    <FolderInput size={14} />
+                    {t("packages.moveHome", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {canShare && (
+                  <DropdownMenuItem onSelect={() => share.open(packageId)}>
+                    <Share2 size={14} />
+                    {t("packages.share", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {showDelete && onDeleteAgent && (
+                  <DropdownMenuItem
+                    onSelect={onDeleteAgent}
+                    disabled={runningRuns > 0}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("btn.delete")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {canRead && downloadVersion && onDownload && (
+              <DropdownMenuItem onSelect={() => onDownload(downloadVersion)}>
+                <Download size={14} />
+                {t("btn.download", { ns: "common" })}
+              </DropdownMenuItem>
+            )}
+            {isMutable && onCreateVersion && (
+              <DropdownMenuItem onSelect={onCreateVersion}>
+                <GitBranchPlus size={14} />
+                {t("version.createVersion")}
+              </DropdownMenuItem>
+            )}
+            {isMutable && showEdit && (
+              <DropdownMenuItem
+                onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
+              >
+                <Pencil size={14} />
+                {editLabel ?? t("btn.edit")}
+              </DropdownMenuItem>
+            )}
+            {showFork && (
+              <DropdownMenuItem onSelect={onFork}>
+                <GitFork size={14} />
+                {t("fork.button")}
+              </DropdownMenuItem>
+            )}
+            {(showActivate || showDeactivate || isMutable || canShare || showDelete) && (
+              <>
+                <DropdownMenuSeparator />
+                {showActivate && onActivate && (
+                  <DropdownMenuItem disabled={activationPending} onSelect={onActivate}>
+                    <PackagePlus size={14} />
+                    {t("packages.activate", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {showDeactivate && onDeactivate && (
+                  <DropdownMenuItem disabled={activationPending} onSelect={onDeactivate}>
+                    <PackagePlus size={14} className="rotate-180" />
+                    {t("packages.deactivate", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {/* Moving the home is the same authority as editing, since it is
+                    the home that grants that authority; sharing is a verb of
+                    its own on that same space (RBAC spec §6.10). Both act on
+                    WHERE the package lives, so both belong in this group. */}
+                {isMutable && (
+                  <DropdownMenuItem onSelect={() => moveHome.open(packageId)}>
+                    <FolderInput size={14} />
+                    {t("packages.moveHome", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {canShare && (
+                  <DropdownMenuItem onSelect={() => share.open(packageId)}>
+                    <Share2 size={14} />
+                    {t("packages.share", { ns: "settings" })}
+                  </DropdownMenuItem>
+                )}
+                {showDelete && canDeletePackage && onDeletePackage && (
+                  <DropdownMenuItem
+                    onSelect={onDeletePackage}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 size={14} />
+                    {t("btn.delete")}
+                  </DropdownMenuItem>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </PageActionsMenu>
 
       {/* Mounted only while open: any way of closing a form modal abandons its input. */}
       {moveHome.value === packageId && (

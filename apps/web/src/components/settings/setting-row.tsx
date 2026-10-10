@@ -86,7 +86,7 @@ export function SettingRow({
   details?: ReactNode;
   /** The control. Its kind decides the row's shape. */
   children: ReactNode;
-  /** Transient state rendered beside the control, such as a saving spinner. */
+  /** What the write says about itself: a `SaveFeedback`, under a field, beside a toggle or an action. */
   status?: ReactNode;
   className?: string;
 }) {
@@ -102,12 +102,15 @@ export function SettingRow({
 
   if (variant === "field") {
     return (
-      <div data-slot="setting-row" data-variant="field" className={cn("pb-8 last:pb-0", className)}>
+      <div
+        data-slot="setting-row"
+        data-variant="field"
+        // The write's line takes part of the gap to the next row.
+        className={cn(status ? "pb-5" : "pb-8", "last:pb-0", className)}
+      >
         {copy}
-        <div className="mt-3 flex w-full items-center gap-2">
-          {children}
-          {status}
-        </div>
+        <div className="mt-3 flex w-full items-center gap-2">{children}</div>
+        {status && <div className="mt-1.5">{status}</div>}
       </div>
     );
   }

@@ -61,6 +61,8 @@ export function ConnectionsTable({
   );
   const labelFor = (auth: IntegrationAuthStatus) =>
     authMethodLabel(auth, detail.auths, t(`integration.auth.type.${auth.type}`));
+  const authOf = (connection: IntegrationConnection) =>
+    detail.auths.find((item) => item.auth_key === connection.auth_key);
   const columns = useConnectionColumns({
     packageId,
     authKey: "",
@@ -69,8 +71,12 @@ export function ConnectionsTable({
     manifest: detail.manifest,
     userId: user?.id,
     isAdmin: canConfigure,
+    methodLabel: (connection) => {
+      const auth = authOf(connection);
+      return auth ? labelFor(auth) : connection.auth_key;
+    },
     authForConnection: (connection) => {
-      const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
+      const auth = authOf(connection);
       return {
         authKey: connection.auth_key,
         authType: auth?.type ?? "custom",
@@ -78,25 +84,8 @@ export function ConnectionsTable({
       };
     },
   });
-  const displayColumns = [
-    columns[0]!,
-    {
-      id: "method",
-      header: t("integration.presentation.method"),
-      width: "minmax(150px,1fr)" as const,
-      cell: (connection: IntegrationConnection) => {
-        const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
-        return (
-          <span className="text-muted-foreground text-xs">
-            {auth ? labelFor(auth) : connection.auth_key}
-          </span>
-        );
-      },
-    },
-    ...columns.slice(1),
-  ];
   const rows = connections.filter((connection) => {
-    const auth = detail.auths.find((item) => item.auth_key === connection.auth_key);
+    const auth = authOf(connection);
     return (
       `${connectionOptionLabel(connection)} ${connection.owner_name ?? ""} ${auth ? labelFor(auth) : ""}`
         .toLocaleLowerCase()
@@ -162,9 +151,8 @@ export function ConnectionsTable({
       />
       <DataTable
         surface="integrated"
-        columnMode="scroll"
         label={t("integration.connection.tableLabel")}
-        columns={displayColumns}
+        columns={columns}
         rows={rows}
         rowKey={(connection) => connection.id}
         empty={

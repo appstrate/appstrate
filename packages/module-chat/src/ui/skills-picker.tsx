@@ -13,12 +13,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { cn } from "@appstrate/ui/cn";
 import { injectsSkills, MAX_PINNED_SKILLS, type ChatSkillSelection } from "../skills.ts";
 import {
@@ -82,46 +77,44 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <TooltipProvider delayDuration={300}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                data-testid="skills-picker-trigger"
-                // The badge count is painted; a screen reader gets it here.
-                aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
-                className={cn(
-                  "relative size-8 shrink-0 rounded-lg",
-                  choosing || enforced.length > 0
-                    ? "text-primary hover:text-primary"
-                    : "text-muted-foreground",
-                )}
-              >
-                <BookOpenIcon />
-                {inUse > 0 && (
-                  <span
-                    aria-hidden="true"
-                    className="bg-primary text-primary-foreground absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-4 font-medium"
-                  >
-                    {inUse}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-72 text-xs">
-            <p className="font-medium">{t("skills.title")}</p>
-            <p className="text-muted-foreground mt-0.5">
-              {t(MODE_COPY[selection.skillMode].label)}
-              {enforced.length > 0 && ` · ${t("skills.enforcedCount", { n: enforced.length })}`}
-              {choosing && pinned.length > 0 && ` · ${t("skills.chosen", { n: pinned.length })}`}
-            </p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              data-testid="skills-picker-trigger"
+              // The badge count is painted; a screen reader gets it here.
+              aria-label={inUse > 0 ? t("skills.labelCount", { n: inUse }) : t("skills.label")}
+              className={cn(
+                "relative size-8 shrink-0 rounded-lg",
+                choosing || enforced.length > 0
+                  ? "text-primary hover:text-primary"
+                  : "text-muted-foreground",
+              )}
+            >
+              <BookOpenIcon />
+              {inUse > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="bg-primary text-primary-foreground absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-4 font-medium"
+                >
+                  {inUse}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-72 text-xs">
+          <p className="font-medium">{t("skills.title")}</p>
+          <p className="text-muted-foreground mt-0.5">
+            {t(MODE_COPY[selection.skillMode].label)}
+            {enforced.length > 0 && ` · ${t("skills.enforcedCount", { n: enforced.length })}`}
+            {choosing && pinned.length > 0 && ` · ${t("skills.chosen", { n: pinned.length })}`}
+          </p>
+        </TooltipContent>
+      </Tooltip>
 
       <PopoverContent
         side="top"

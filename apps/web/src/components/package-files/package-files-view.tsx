@@ -52,12 +52,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { PackageType } from "@appstrate/core/validation";
 import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
@@ -965,32 +960,30 @@ function DependencyStatusCluster({
   const isResolved = Boolean(resolvedVersion ?? requestedVersion);
 
   return (
-    <TooltipProvider delayDuration={250}>
-      <div className="flex items-center gap-1.5">
-        {isResolved && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" className="cursor-help rounded-full focus-visible:outline-2">
-                <Badge variant="secondary">{t("detail.files.status.resolved")}</Badge>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="max-w-xs">
-              {t("detail.files.tooltip.resolved")}
-            </TooltipContent>
-          </Tooltip>
-        )}
+    <div className="flex items-center gap-1.5">
+      {isResolved && (
         <Tooltip>
           <TooltipTrigger asChild>
             <button type="button" className="cursor-help rounded-full focus-visible:outline-2">
-              <Badge variant="outline">{t("detail.files.readOnly")}</Badge>
+              <Badge variant="secondary">{t("detail.files.status.resolved")}</Badge>
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="max-w-xs">
-            {t("detail.files.tooltip.readOnly")}
+            {t("detail.files.tooltip.resolved")}
           </TooltipContent>
         </Tooltip>
-      </div>
-    </TooltipProvider>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" className="cursor-help rounded-full focus-visible:outline-2">
+            <Badge variant="outline">{t("detail.files.readOnly")}</Badge>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs">
+          {t("detail.files.tooltip.readOnly")}
+        </TooltipContent>
+      </Tooltip>
+    </div>
   );
 }
 
@@ -1017,21 +1010,19 @@ function DependencyVersion({
     : t("detail.files.tooltip.versionSame", { version: resolved ?? requested ?? "—" });
 
   return (
-    <TooltipProvider delayDuration={250}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className="text-muted-foreground cursor-help rounded-sm font-mono text-xs whitespace-nowrap focus-visible:outline-2"
-          >
-            {label}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-xs">
-          {tooltip}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="text-muted-foreground cursor-help rounded-sm font-mono text-xs whitespace-nowrap focus-visible:outline-2"
+        >
+          {label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

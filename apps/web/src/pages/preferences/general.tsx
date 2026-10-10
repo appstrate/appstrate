@@ -8,7 +8,7 @@ import { useAuth, EmailChangeError } from "../../hooks/use-auth";
 import { emailChangeLanding } from "../../lib/auth-flow";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
-import { Spinner } from "../../components/spinner";
+import { SaveFeedback } from "../../components/settings/save-feedback";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { toast } from "sonner";
@@ -24,7 +24,7 @@ function EmailVerificationBadge() {
 
   if (user.emailVerified) {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+      <div className="text-success flex items-center gap-1.5 text-xs">
         <CheckCircle2 size={14} />
         <span>{t("preferences.emailVerified")}</span>
       </div>
@@ -44,7 +44,7 @@ function EmailVerificationBadge() {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+      <div className="text-warning flex items-center gap-1.5 text-xs">
         <AlertCircle size={14} />
         <span>{t("preferences.emailNotVerified")}</span>
       </div>
@@ -134,7 +134,7 @@ function EmailRow() {
           )}
         </>
       }
-      status={isChanging && <Spinner />}
+      status={<SaveFeedback pending={isChanging} success={false} error={false} />}
     >
       <InlineTextSetting
         key={resetVersion}
@@ -164,7 +164,13 @@ function DisplayNameRow() {
     <SettingRow
       variant="field"
       label={t("preferences.displayName")}
-      status={updateDisplayName.isPending && <Spinner />}
+      status={
+        <SaveFeedback
+          pending={updateDisplayName.isPending}
+          success={updateDisplayName.isSuccess}
+          error={updateDisplayName.isError}
+        />
+      }
     >
       <InlineTextSetting
         value={profile?.displayName ?? ""}

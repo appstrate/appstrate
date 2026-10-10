@@ -4,7 +4,7 @@ import { lazy, Suspense } from "react";
 import { useAppConfig } from "../../../hooks/use-app-config";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState } from "../../../components/page-states";
-import { NavigateKeepingState } from "../../../components/navigate-keeping-state";
+import { UnavailableState } from "../../../components/route-gate";
 
 const OAuthClientsTab = lazy(() =>
   import("../../../modules/oidc/components/oauth-clients-tab").then((m) => ({
@@ -16,9 +16,7 @@ export function OrgSettingsSpaceOauthPage() {
   const { features } = useAppConfig();
   const spaceId = useCurrentSpaceId();
 
-  if (!spaceId || !features.oidc) {
-    return <NavigateKeepingState to="/workspace-settings/general" />;
-  }
+  if (!spaceId || !features.oidc) return <UnavailableState />;
 
   return (
     <Suspense fallback={<LoadingState />}>
