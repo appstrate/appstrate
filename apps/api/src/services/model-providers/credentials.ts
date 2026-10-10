@@ -606,9 +606,23 @@ export async function loadCredentialBinding(
 
 /**
  * The probe rule, shared by every door that spends a stored credential's key to
- * test it. An organization credential is probed by `readsOrg`; a personal one by
- * its owner alone, and by nobody while the organization has them off (403).
- * `false`: the caller cannot see it, so it reads as absent.
+ * test it and by the `test` action the list serializes. An organization
+ * credential is probed by `readsOrg`; a personal one by its owner alone, holding
+ * `readsOrg` or `connects`, while `personalAllowed` (the organization's policy).
+ */
+function mayProbe(
+  caller: ModelCredentialCaller,
+  ownerUserId: string | null,
+  personalAllowed: boolean,
+): boolean {
+  if (ownerUserId === null) return caller.readsOrg;
+  return ownerUserId === caller.userId && personalAllowed && (caller.readsOrg || caller.connects);
+}
+
+/**
+ * {@link mayProbe} for a stored credential. The owner of a personal one is
+ * refused (403) while the organization has them off. `false`: the caller cannot
+ * see it, so it reads as absent.
  */
 export async function mayProbeCredential(
   caller: ModelCredentialCaller,
@@ -616,10 +630,10 @@ export async function mayProbeCredential(
 ): Promise<boolean> {
   const row = await loadCredentialBinding(caller.orgId, id);
   if (!row) return false;
-  if (row.ownerUserId === null) return caller.readsOrg;
-  if (row.ownerUserId !== caller.userId) return false;
-  await assertPersonalModelCredentialsAllowed(caller.orgId);
-  return true;
+  if (row.ownerUserId !== null && row.ownerUserId === caller.userId) {
+    await assertPersonalModelCredentialsAllowed(caller.orgId);
+  }
+  return mayProbe(caller, row.ownerUserId, true);
 }
 
 /**
@@ -659,13 +673,7 @@ export function credentialActions(
   const actions: ModelProviderCredentialAction[] = [];
   if (mayManageCredential(caller, credential.ownerUserId, "edit")) actions.push("edit");
   if (mayManageCredential(caller, credential.ownerUserId, "delete")) actions.push("delete");
-  if (
-    credential.ownerUserId === null
-      ? caller.readsOrg
-      : own && personalAllowed && (caller.readsOrg || caller.connects)
-  ) {
-    actions.push("test");
-  }
+  if (mayProbe(caller, credential.ownerUserId, personalAllowed)) actions.push("test");
   if (
     credential.authMode === "oauth2" &&
     credential.needsReconnection &&

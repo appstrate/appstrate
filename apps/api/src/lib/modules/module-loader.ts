@@ -214,14 +214,12 @@ export async function _coreRangeFromPackageJson(specifier: string): Promise<stri
  * Boot guard on the module→platform direction of the contract (#973).
  *
  * `tsc` cannot see an out-of-tree module, and the platform's `PlatformServices`
- * surface changes shape between majors: `checkUsageAllowed` gained a REQUIRED
- * `subscription` flag in core 6.0.0, and a 5.x-era caller that omits it does
- * not error — it silently reports a subscription turn as platform-funded.
+ * surface changes shape between majors: a caller built against an older core
+ * can pass arguments the platform no longer reads, or omit ones it now
+ * requires, without any error at the call site.
  *
  * A declared-but-unsatisfied range is fatal by default and downgraded to a log
- * line under `MODULE_CONTRACT_ENFORCE=warn` — booting anyway stays a defensible
- * operator choice because the mispricing that actually matters is already
- * blocked fail-closed inside `checkUsageAllowed`.
+ * line under `MODULE_CONTRACT_ENFORCE=warn`, the operator's choice to boot anyway.
  *
  * KNOWN LIMITATION, documented rather than worked around: were `CORE_VERSION`
  * ever a prerelease (`7.0.0-beta.1`), every module declaring the recommended

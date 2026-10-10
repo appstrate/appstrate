@@ -104,6 +104,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ChatUsageRecord.credentialId`** (`@appstrate/core/chat-contract`), both
   required: the credential a subscription turn spends, recorded in
   `llm_usage.credential_id` (`null` in a usage record with none).
+- **BREAKING: `SubscriptionChatModel.credentialSource` / `payerUserId` and
+  `ChatUsageRecord.credentialSource` / `payerUserId`**
+  (`@appstrate/core/chat-contract`), all required: who pays the credential a
+  subscription turn spends, as the platform resolved it, recorded in
+  `llm_usage.credential_source` / `payer_user_id` (`null` in a usage record
+  with no credential).
+- **BREAKING: `PlatformServices.checkUsageAllowed` takes no `subscription`
+  flag** (`@appstrate/core/module`): the platform derives the turn's
+  `credentialSource` from the model it resolves for the session user. A caller
+  still passing `subscription` fails to typecheck.
 - **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
   (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
   manifest declares them, which the sidecar's runner egress listeners read to

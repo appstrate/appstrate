@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useQueryClient, type MutationMeta } from "@tanstack/react-query";
+import { useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
-import { $api, client, type components, type paths } from "../api/client";
-import { collectAllPages } from "../lib/collect-pages";
+import { $api, type components, type paths } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 
@@ -53,7 +52,6 @@ function useCredentialsScope() {
   };
 }
 
-// The list is served whole (no pagination), so its reader takes `data` as is.
 export function useModelProviderCredentials() {
   const scope = useCredentialsScope();
   return $api.useQuery(
@@ -64,35 +62,20 @@ export function useModelProviderCredentials() {
   );
 }
 
-/**
- * The registry is paginated on the wire (default and max page 100), so every
- * page is followed here. The key stays the typed client's `[method, path, init]`
- * shape, so cache seeds keep matching.
- */
 export function useProvidersRegistry() {
   const scope = useCredentialsScope();
-  return useQuery({
-    queryKey: [
-      "get",
-      "/api/model-provider-credentials/registry",
-      { params: { header: scope.header } },
-    ],
-    queryFn: async () => ({
-      data: await collectAllPages(
-        async (offset) =>
-          (
-            await client.GET("/api/model-provider-credentials/registry", {
-              params: { header: scope.header, query: { limit: 100, offset } },
-            })
-          ).data!,
-      ),
-    }),
-    enabled: scope.enabled,
-    staleTime: 5 * 60 * 1000,
-    // This hook never sends `?fields=`, so the server returns full entries —
-    // narrow the projection-loosened wire type to the full catalog shape.
-    select: (e) => e.data as ProviderRegistryEntry[],
-  });
+  return $api.useQuery(
+    "get",
+    "/api/model-provider-credentials/registry",
+    { params: { header: scope.header } },
+    {
+      enabled: scope.enabled,
+      staleTime: 5 * 60 * 1000,
+      // This hook never sends `?fields=`, so the server returns full entries —
+      // narrow the projection-loosened wire type to the full catalog shape.
+      select: (e) => e.data as ProviderRegistryEntry[],
+    },
+  );
 }
 
 /**

@@ -15,7 +15,13 @@ import { getTestApp } from "../../helpers/app.ts";
 import { authHeaders } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedOrgModelProviderKey, seedSchedule } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedOrgModelProviderKey,
+  seedSchedule,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import {
   createFakeOrchestrator,
@@ -438,6 +444,30 @@ describe("schedule payer — organization credentials only", () => {
     it("sets a member-paid model on the space placement when its schedules are disabled", async () => {
       const memberPaid = await seedMemberPaidModel("Space GPT");
       await seedAgentSchedule({ enabled: false });
+
+      const res = await send("PATCH", `/api/spaces/${ctx.defaultSpaceId}/packages/${AGENT_ID}`, {
+        modelId: memberPaid,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await placementModelId()).toBe(memberPaid);
+    });
+
+    it("sets a member-paid model on the space placement whatever another space's schedules run", async () => {
+      const memberPaid = await seedMemberPaidModel("Space GPT");
+      // Written directly: another space already running the model, through its
+      // own placement and through an override.
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+      await seedSpacePackage(other.id, AGENT_ID, { modelId: memberPaid });
+      for (const modelIdOverride of [undefined, memberPaid]) {
+        await seedSchedule({
+          packageId: AGENT_ID,
+          orgId: ctx.orgId,
+          spaceId: other.id,
+          userId: ctx.user.id,
+          ...(modelIdOverride ? { modelIdOverride } : {}),
+        });
+      }
 
       const res = await send("PATCH", `/api/spaces/${ctx.defaultSpaceId}/packages/${AGENT_ID}`, {
         modelId: memberPaid,

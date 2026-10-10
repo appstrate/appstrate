@@ -31,7 +31,6 @@ import { cumulativeCostUsd } from "./token-cost.ts";
 import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { userPayer } from "./model-providers/payer.ts";
-import { loadCredentialBinding } from "./model-providers/credentials.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
@@ -98,7 +97,7 @@ export async function resolveChatModel(
   ) {
     return { subscription: true, needsReconnection: true };
   }
-  const { credentialId } = requireBoundModel(resolved, payer);
+  const { credentialId, credentialSource, payerUserId } = requireBoundModel(resolved, payer);
   if (!credentialId) {
     return { subscription: true, needsReconnection: true };
   }
@@ -126,21 +125,11 @@ export async function resolveChatModel(
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
       credentialId,
+      credentialSource,
+      payerUserId: payerUserId ?? null,
       accessToken: token.accessToken,
     },
   };
-}
-
-/** Who paid a turn served by `credentialId`: its owner's, as `buildResolvedModel` stamps a resolution. */
-async function servingPayer(
-  orgId: string,
-  credentialId: string | null,
-): Promise<{ credentialSource: ModelPayer | null; payerUserId: string | null }> {
-  const binding = credentialId === null ? null : await loadCredentialBinding(orgId, credentialId);
-  if (!binding) return { credentialSource: null, payerUserId: null };
-  return binding.ownerUserId === null
-    ? { credentialSource: "org", payerUserId: null }
-    : { credentialSource: "user", payerUserId: binding.ownerUserId };
 }
 
 /**
@@ -150,9 +139,10 @@ async function servingPayer(
  * `recordProxyUsage`.
  *
  * The in-process engine serves subscriptions only (oauth2 claude-code/codex).
- * The row's payer is the owner of the credential that served the turn: a
- * member's own subscription stamps `credentialSource="user"` with that member
- * as `payerUserId`, an organization subscription `"org"` with no payer. Cost is derived here from the token counts + the
+ * The row's payer is the one `resolveChatModel` resolved for the turn, the owner
+ * of the credential that served it: a member's own subscription stamps
+ * `credentialSource="user"` with that member as `payerUserId`, an organization
+ * subscription `"org"` with no payer. Cost is derived here from the token counts + the
  * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
  * Its tier bands (`record.tiers`) price each model call at its tier.
  *
@@ -225,8 +215,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         model: record.presetId,
         realModel: record.modelId,
         api: record.apiShape,
-        ...(await servingPayer(record.orgId, record.credentialId)),
         credentialId: record.credentialId,
+        credentialSource: record.credentialSource,
+        payerUserId: record.payerUserId,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -268,10 +259,9 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     platform-supplied inference quotes that turn at zero and admits it — same
  *     outcome as the old early return, but decided by the module.
  *   - a turn on the session user's own credential (key or subscription)
- *     reports `"user"`. A SUBSCRIPTION turn (`args.subscription`) dispatches
- *     like any other: it runs inline in the platform's process, so the
- *     platform funds its compute and a module gating on subscription status
- *     must be able to refuse it.
+ *     reports `"user"`. A subscription turn dispatches like any other: it runs
+ *     inline in the platform's process, so the platform funds its compute and
+ *     a module gating on subscription status must be able to refuse it.
  *
  * A turn on an unbound model (no credential the session user can spend) is
  * refused with `model_credential_required` before dispatch. A model that
@@ -285,7 +275,6 @@ export async function checkUsageAllowed(args: {
   orgId: string;
   presetId: string;
   sessionId: string | null;
-  subscription: boolean;
   userId: string;
 }): Promise<UsageRejection | null> {
   // Returned, not thrown: this seam renders a rejection as the problem response.
@@ -311,23 +300,6 @@ export async function checkUsageAllowed(args: {
   }
 
   if (!hasHook("beforeUsage")) return null;
-  // Fail-closed on a caller that omits `subscription` — the flag became
-  // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
-  // against an older core can reach here without it (in-tree callers are
-  // typechecked). Denying the turn beats defaulting: a missing flag would fall
-  // through as `false`, reading a subscription turn as platform-funded — silent
-  // mispricing with no error and no log. A thrown turn is visible and
-  // recoverable; a mispriced one is neither.
-  //
-  // BELOW the early return, not above it: the guard exists to stop a fabricated
-  // fact from reaching an admission hook, so it only has to fire when there IS
-  // a hook. In OSS mode nothing prices a turn, and a stale caller must keep
-  // getting the `null` it always got.
-  if (typeof args.subscription !== "boolean") {
-    throw new Error(
-      "checkUsageAllowed: `subscription` is required (boolean) — caller built against @appstrate/core < 6.0.0",
-    );
-  }
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,
     context: "chat",

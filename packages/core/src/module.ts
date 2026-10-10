@@ -1529,35 +1529,21 @@ export interface PlatformServices {
    * 9457 problem response with the hook's status — 402 flows through), or null
    * to allow.
    *
-   * The platform still resolves whether the chosen model is system-provided or
-   * organization-owned — keeping that resolution server-side is what keeps the
-   * chat module dumb, since it has no model-registry access — but it now
-   * REPORTS that resolution as the `credentialSource` fact instead of using it
-   * to pre-filter. A turn on the organization's own credential reports
-   * `credentialSource: "org"` and is dispatched all the same, because a chat
-   * turn always executes in the platform's own process: the platform supplies
-   * the compute even when it supplies no credential. `executionPlane` is
-   * consequently always `"platform"` on this surface.
-   *
-   * A module that only accounts for platform-supplied inference treats such a
-   * turn as contributing nothing and admits it — the same outcome the platform
-   * used to assume on the module's behalf, now decided by the module that owns
-   * the policy.
-   *
-   * `subscription` is the one fact the caller owns and the platform cannot
-   * derive: the turn runs on a provider subscription authorized over OAuth
-   * (claude-code, codex), the organization's or the member's own, driven in-process rather than
-   * through the inference gateway. Its `credentialSource` is the owner of the
-   * credential it spends, like any turn, and it is dispatched like any other — it
-   * still occupies the platform's own process. Splitting the responsibility
-   * this way keeps the seam DRY: the caller reports what it knows, the platform
-   * derives the rest from the model registry.
+   * The platform resolves the chosen model for the session user server-side —
+   * the chat module has no model-registry access — and reports who pays it as
+   * the `credentialSource` fact: the owner of the credential the turn spends,
+   * `"user"` for the member's own, `"org"` for the organization's. Every turn
+   * is dispatched, because a chat turn always executes in the platform's own
+   * process: the platform supplies the compute even when it supplies no
+   * credential. `executionPlane` is consequently always `"platform"` on this
+   * surface. A module that only accounts for platform-supplied inference
+   * treats a turn on a non-platform credential as contributing nothing and
+   * admits it.
    */
   checkUsageAllowed(args: {
     orgId: string;
     presetId: string;
     sessionId: string | null;
-    subscription: boolean;
     /** The session user: the payer whose personal credentials the turn may spend. */
     userId: string;
   }): Promise<UsageRejection | null>;

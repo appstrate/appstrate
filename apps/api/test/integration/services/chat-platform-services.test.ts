@@ -113,6 +113,8 @@ describe("resolveChatModel", () => {
       expect(resolution.model.modelId).toBe(TEST_OAUTH_MODEL_ID);
       expect(resolution.model.credentialId).toBe(credentialId);
       expect(resolution.model.accessToken).toBe("test-access");
+      expect(resolution.model.credentialSource).toBe("user");
+      expect(resolution.model.payerUserId).toBe(ctx.user.id);
       // The binding reads the row's Pi key from the listing, not its Appstrate id.
       const row = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === presetId);
       expect(row?.pi_provider).toBe("openai");
@@ -236,6 +238,7 @@ describe("recordChatUsage — pricing provenance", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    seedTestModelProviders();
     ctx = await createTestContext({ orgSlug: "chatpricing" });
   });
 
@@ -258,6 +261,8 @@ describe("recordChatUsage — pricing provenance", () => {
       outputTokens: 500,
       cost: { input: 3, output: 15, cacheRead: 0.3 },
       credentialId: null,
+      credentialSource: null,
+      payerUserId: null,
       durationMs: 42,
       ...overrides,
     };
@@ -301,12 +306,38 @@ describe("recordChatUsage — pricing provenance", () => {
     return row.id;
   }
 
+  /** Meter a turn on `credentialId`'s model with the payer `resolveChatModel` resolved for it. */
+  async function meterResolvedTurn(sessionId: string, credentialId: string | null): Promise<void> {
+    // Inserted directly: creation refuses to bind a subscription, which an existing row may hold.
+    const [model] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        credentialId,
+        label: "Sub",
+        modelId: TEST_OAUTH_MODEL_ID,
+        enabled: true,
+      })
+      .returning();
+    const resolution = await resolveChatModel(ctx.orgId, model!.id, ctx.user.id);
+    if (!resolution.subscription || !("model" in resolution)) {
+      throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
+    }
+    const { credentialId: served, credentialSource, payerUserId } = resolution.model;
+    await recordChatUsage(
+      record({ chatSessionId: sessionId, credentialId: served, credentialSource, payerUserId }),
+    );
+  }
+
   it("records a turn on a member's own subscription as that member's spend", async () => {
     const sessionId = await seedSession("chs_user_payer");
     const credentialId = await seedSubscription(ctx.user.id);
-    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+    // Unbound: the member's own subscription serves it.
+    await meterResolvedTurn(sessionId, null);
 
     const row = await storedRow(sessionId);
+    expect(row!.credentialId).toBe(credentialId);
     expect(row!.credentialSource).toBe("user");
     expect(row!.payerUserId).toBe(ctx.user.id);
   });
@@ -314,9 +345,10 @@ describe("recordChatUsage — pricing provenance", () => {
   it("records a turn on an organization subscription as the organization's spend, with no payer", async () => {
     const sessionId = await seedSession("chs_org_payer");
     const credentialId = await seedSubscription(null);
-    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+    await meterResolvedTurn(sessionId, credentialId);
 
     const row = await storedRow(sessionId);
+    expect(row!.credentialId).toBe(credentialId);
     expect(row!.credentialSource).toBe("org");
     expect(row!.payerUserId).toBeNull();
   });

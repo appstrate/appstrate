@@ -15,9 +15,9 @@
  *   - no metering module → null (OSS allows all);
  *   - a metering module's rejection flows straight back (a 402 the route turns
  *     into problem+json);
- *   - a subscription turn (`subscription: true`, the one fact the chat module
- *     owns) reports the owner of the credential its preset resolves to, and is
- *     dispatched like any other — it runs inline in the platform's own process;
+ *   - a turn reports the owner of the credential its preset resolves to, and a
+ *     subscription turn is dispatched like any other — it runs inline in the
+ *     platform's own process;
  *   - a preset that resolves to nothing reports nothing: no hook, no spend;
  *   - an organization whose deletion is reserved is refused before any of that,
  *     hook or no hook: its usage rows would be cascade-deleted unaccounted for.
@@ -160,7 +160,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId,
       sessionId: "chs_unbound",
-      subscription: false,
       userId: USER_ID,
     };
     // A platform rule, not an admission decision: OSS refuses it too.
@@ -192,7 +191,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId: "00000000-0000-4000-a000-0000000000d9",
       sessionId: "chs_missing",
-      subscription: false,
       userId: USER_ID,
     });
 
@@ -218,7 +216,6 @@ describe("checkUsageAllowed", () => {
         orgId: reservedOrgId,
         presetId: SYSTEM_PRESET,
         sessionId: "chs_reserved",
-        subscription: false,
         userId: USER_ID,
       });
 
@@ -239,7 +236,6 @@ describe("checkUsageAllowed", () => {
           orgId: reservedOrgId,
           presetId: SYSTEM_PRESET,
           sessionId: "chs_reserved",
-          subscription: false,
           userId: USER_ID,
         }),
       ).toBeNull();
@@ -257,7 +253,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId: orgPresetId,
       sessionId: "chs_1",
-      subscription: false,
       userId: USER_ID,
     });
 
@@ -290,7 +285,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId: orgPresetId,
       sessionId: "chs_1",
-      subscription: false,
       userId: USER_ID,
     });
 
@@ -304,7 +298,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: "chs_1",
-      subscription: false,
       userId: USER_ID,
     });
     expect(result).toBeNull();
@@ -321,7 +314,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: "chs_42",
-      subscription: false,
       userId: USER_ID,
     });
 
@@ -346,7 +338,6 @@ describe("checkUsageAllowed", () => {
       orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: null,
-      subscription: false,
       userId: USER_ID,
     });
 
@@ -355,91 +346,6 @@ describe("checkUsageAllowed", () => {
     // An ephemeral (unpersisted) turn dispatches a null session id.
     expect(calls[0]!.context).toBe("chat");
     expect((calls[0] as { sessionId: string | null }).sessionId).toBeNull();
-  });
-
-  it("reports a subscription turn by the credential its preset resolves to", async () => {
-    // The payer is the owner of the credential the turn spends, not the
-    // credential mode the caller reported: a system preset is the platform's.
-    const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
-
-    const result = await checkUsageAllowed({
-      orgId: ORG_ID,
-      presetId: SYSTEM_PRESET,
-      sessionId: "chs_sub",
-      subscription: true,
-      userId: USER_ID,
-    });
-
-    expect(result).toBeNull();
-    expect(calls).toEqual([
-      {
-        orgId: ORG_ID,
-        context: "chat",
-        sessionId: "chs_sub",
-        credentialSource: "system",
-        // The in-process Pi engine still runs inside the platform's process.
-        executionPlane: "platform",
-      },
-    ]);
-  });
-
-  it("lets a metering module reject a subscription turn (platform compute is platform-funded)", async () => {
-    // The reversal that closes the escape: a subscription turn used to skip
-    // admission entirely, so a suspended organization could keep driving the
-    // platform's own process indefinitely.
-    const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances(
-      [gateModule({ code: "subscription_suspended", message: "Suspended", status: 402 }, calls)],
-      fakeInitCtx(),
-    );
-
-    const result = await checkUsageAllowed({
-      orgId: ORG_ID,
-      presetId: orgPresetId,
-      sessionId: "chs_sub",
-      subscription: true,
-      userId: USER_ID,
-    });
-
-    expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });
-    expect(calls).toHaveLength(1);
-    // An organization-bound preset is the organization's spend, subscription or not.
-    expect(calls[0]!.credentialSource).toBe("org");
-  });
-
-  it("rejects a caller that omits `subscription` (module built against core < 6.0.0)", async () => {
-    // Fail-closed: the flag became required in core 6.0.0. Defaulting it would
-    // read a subscription turn as platform-funded — silent mispricing. Only an
-    // out-of-tree stale module can reach this (in-tree callers are typechecked,
-    // hence the cast).
-    const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
-
-    await expect(
-      checkUsageAllowed({
-        orgId: ORG_ID,
-        presetId: SYSTEM_PRESET,
-        sessionId: "chs_stale",
-      } as never),
-    ).rejects.toThrow("`subscription` is required");
-    // The turn is denied BEFORE the admission hook sees a fabricated fact.
-    expect(calls).toHaveLength(0);
-  });
-
-  it("still returns null for a stale caller in OSS mode (no hook prices the turn)", async () => {
-    // The guard above exists to keep a fabricated fact out of an admission
-    // hook — so with no hook loaded there is nothing to protect, and a stale
-    // caller must keep getting the `null` OSS always gave it rather than a 500.
-    await loadModulesFromInstances([], fakeInitCtx());
-
-    await expect(
-      checkUsageAllowed({
-        orgId: ORG_ID,
-        presetId: SYSTEM_PRESET,
-        sessionId: "chs_oss",
-      } as never),
-    ).resolves.toBeNull();
   });
 
   it("admits a turn on an unbound model the session user holds a personal key for, reporting credentialSource 'user'", async () => {
@@ -460,7 +366,6 @@ describe("checkUsageAllowed", () => {
         orgId: ORG_ID,
         presetId,
         sessionId: "chs_personal",
-        subscription: false,
         userId: USER_ID,
       }),
     ).toBeNull();

@@ -925,18 +925,13 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
       "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
     );
   }
-  if (row && row.credentialId === null && modelDbId !== null) {
-    refuseScheduledModel(
-      await enabledSchedulesRunningModel(orgId, modelDbId, { orgDefaultId: modelDbId }),
-    );
-  }
   await db.transaction(async (tx) => {
     // `resolveModel` skips a switched-off row. `enabled` is read under the row
     // lock `updateOrgModel` takes before checking the pointer, so a concurrent
     // disable is either seen here or sees this pointer.
     if (row && modelDbId !== null) {
       const [locked] = await tx
-        .select({ enabled: orgModels.enabled })
+        .select({ enabled: orgModels.enabled, credentialId: orgModels.credentialId })
         .from(orgModels)
         .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
         .for("update");
@@ -944,6 +939,11 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
         throw conflict(
           "model_disabled",
           "A disabled model cannot be the default model. Enable it, or pick another model.",
+        );
+      }
+      if (locked && locked.credentialId === null) {
+        refuseScheduledModel(
+          await enabledSchedulesRunningModel(orgId, modelDbId, { orgDefaultId: modelDbId }, tx),
         );
       }
     }
@@ -1526,10 +1526,13 @@ async function loadModelBinding(
 }
 
 /** A pending write {@link enabledSchedulesRunningModel} evaluates the schedules under. */
-export interface ScheduledModelAssumption {
+interface ScheduledModelAssumption {
   /** The org default pointer as the write leaves it. */
   orgDefaultId?: string | null;
-  /** An agent's model in one space as the write leaves it. */
+  /**
+   * An agent's model in one space as the write leaves it: only that agent's
+   * schedules in that space with no override are evaluated, the ones it moves.
+   */
   placement?: { spaceId: string; packageId: string; modelId: string | null };
 }
 
@@ -1544,6 +1547,7 @@ async function enabledSchedulesRunningModel(
   assume: ScheduledModelAssumption = {},
   executor: DbOrTx = db,
 ): Promise<string[]> {
+  const { placement } = assume;
   const rows = await executor
     .select({
       id: schedules.id,
@@ -1556,25 +1560,31 @@ async function enabledSchedulesRunningModel(
       and(
         eq(schedules.orgId, orgId),
         eq(schedules.enabled, true),
-        or(isNull(schedules.modelIdOverride), eq(schedules.modelIdOverride, modelDbId)),
+        ...(placement
+          ? [
+              eq(schedules.spaceId, placement.spaceId),
+              eq(schedules.packageId, placement.packageId),
+              isNull(schedules.modelIdOverride),
+            ]
+          : [or(isNull(schedules.modelIdOverride), eq(schedules.modelIdOverride, modelDbId))]),
       ),
     );
   if (rows.length === 0) return [];
-  const placementModels = await placementModelIds(
-    rows.filter((r) => r.override === null),
-    executor,
-  );
+  const placementModels = placement
+    ? null
+    : await placementModelIds(
+        rows.filter((r) => r.override === null),
+        executor,
+      );
   const orgDefaultId =
     assume.orgDefaultId !== undefined
       ? assume.orgDefaultId
       : await defaultModel.getDefaultId(orgId, executor);
-  const { placement } = assume;
   return rows
     .filter((r) => {
-      const agentModelId =
-        placement && placement.spaceId === r.spaceId && placement.packageId === r.packageId
-          ? placement.modelId
-          : (placementModels.get(`${r.spaceId}:${r.packageId}`) ?? null);
+      const agentModelId = placement
+        ? placement.modelId
+        : (placementModels?.get(`${r.spaceId}:${r.packageId}`) ?? null);
       return (r.override ?? agentModelId ?? orgDefaultId) === modelDbId;
     })
     .map((r) => r.id);
