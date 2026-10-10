@@ -10809,6 +10809,9 @@
               }
             }
           },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
           }
@@ -10820,7 +10823,7 @@
         "operationId": "testModelProviderCredentialInline",
         "tags": ["Model Provider Credentials"],
         "summary": "Test model provider credential configuration inline",
-        "description": "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
+        "description": "Test a model provider credential configuration without saving it first. If editing an existing credential, pass its `credentialId`: its provider, API shape and base URL are used, and its stored API key when `api_key` is omitted. `base_url` must then equal the credential's, unless `api_key` is supplied for a provider accepting a base URL override; a built-in (system) credential is refused with 403. Without a stored credential, the provider's own API shape is used and `base_url` must be its default unless it accepts an override; a provider accepting one is refused with 400 to a caller without `model-provider-credentials:write`. The test follows the provider's definition: a provider whose model listing is unauthenticated is tested with one minimal chat completion instead of `GET <base_url>/models`. **Permission:** `model-provider-credentials:read` or `:connect`; a `credentialId` the caller may not use answers `404`. Rate limited to 5 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
