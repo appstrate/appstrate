@@ -58,6 +58,28 @@ describe("CredentialFields — the served schema, verbatim", () => {
     }
   });
 
+  it("orders required fields by `required`, whatever order `properties` arrives in", () => {
+    // jsonb hands `properties` back shortest key first: `auth_token` before `account_sid`.
+    const twilio = {
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["account_sid", "auth_token"],
+          properties: { auth_token: { type: "string" }, account_sid: { type: "string" } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth;
+    const markup = html(twilio);
+    expect(markup.indexOf("field-input-account_sid")).toBeGreaterThan(-1);
+    expect(markup.indexOf("field-input-account_sid")).toBeLessThan(
+      markup.indexOf("field-input-auth_token"),
+    );
+    // Optional fields follow the required ones.
+    const ssh = html(SSH_AUTH);
+    expect(ssh.indexOf("field-input-host_key")).toBeLessThan(ssh.indexOf("field-input-port"));
+  });
+
   it("renders no input for an auth whose declared properties are empty", () => {
     // Every field minted server-side leaves `properties: {}` — not a cue to
     // fall back on the auth type's default fields.
