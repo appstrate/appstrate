@@ -35,7 +35,10 @@ import { db } from "@appstrate/db/client";
 import { organizations, orgModels } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
-import { admittedChatTurnPin } from "../../../src/services/system-proxy-admission.ts";
+import {
+  admittedChatTurnPin,
+  recordChatTurnAdmission,
+} from "../../../src/services/system-proxy-admission.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -162,6 +165,7 @@ describe("checkUsageAllowed", () => {
       presetId: await seedUnboundModel(),
       sessionId: "chs_unbound",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -176,6 +180,7 @@ describe("checkUsageAllowed", () => {
       presetId: await seedUnboundModel(),
       sessionId: "chs_unbound",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -196,6 +201,7 @@ describe("checkUsageAllowed", () => {
       presetId: "00000000-0000-4000-a000-0000000000d9",
       sessionId: "chs_missing",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -230,6 +236,7 @@ describe("checkUsageAllowed", () => {
         presetId: SYSTEM_PRESET,
         sessionId: "chs_reserved",
         subscription: false,
+        turnId: "turn_test",
         userId: USER_ID,
       });
 
@@ -251,6 +258,7 @@ describe("checkUsageAllowed", () => {
           presetId: SYSTEM_PRESET,
           sessionId: "chs_reserved",
           subscription: false,
+          turnId: "turn_test",
           userId: USER_ID,
         }),
       ).toBeNull();
@@ -269,6 +277,7 @@ describe("checkUsageAllowed", () => {
       presetId: orgPresetId,
       sessionId: "chs_1",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -302,6 +311,7 @@ describe("checkUsageAllowed", () => {
       presetId: orgPresetId,
       sessionId: "chs_1",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -316,6 +326,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_1",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
     expect(result).toBeNull();
@@ -333,6 +344,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_42",
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -358,6 +370,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: null,
       subscription: false,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -381,6 +394,7 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_sub",
       subscription: true,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -412,6 +426,7 @@ describe("checkUsageAllowed", () => {
       presetId: orgPresetId,
       sessionId: "chs_sub",
       subscription: true,
+      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -453,7 +468,7 @@ describe("checkUsageAllowed", () => {
     ).resolves.toBeNull();
   });
 
-  it("pins an admitted chat turn to the credential that admitted it, for its session, preset and user", async () => {
+  it("pins an admitted chat turn to the credential that admitted it, for its turn id, preset and user", async () => {
     // A system preset of a provider whose catalog serves its model, so a personal key of
     // that family can serve it: the member's own key is the credential the turn is admitted on.
     initSystemModelProviderKeys([
@@ -473,51 +488,101 @@ describe("checkUsageAllowed", () => {
       apiKey: "sk-mine",
     });
     const admitted = { credentialId: personal.id, source: "org" as const };
-    const sessionId = "chs_pin";
+    const turnId = "turn_pin";
     expect(
       await checkUsageAllowed({
         orgId: ORG_ID,
         presetId: OPENAI_PRESET,
-        sessionId,
+        sessionId: "chs_pin",
         subscription: false,
+        turnId,
         userId: USER_ID,
       }),
     ).toBeNull();
 
     // The turn's calls are held to the personal key it was admitted on.
-    expect(
-      admittedChatTurnPin({ orgId: ORG_ID, userId: USER_ID, sessionId, presetId: OPENAI_PRESET }),
-    ).toEqual(admitted);
+    expect(admittedChatTurnPin({ orgId: ORG_ID, userId: USER_ID, turnId }, OPENAI_PRESET)).toEqual(
+      admitted,
+    );
 
     // A turn with no session is admitted and pinned the same way.
+    const ephemeralTurnId = "turn_pin_ephemeral";
     expect(
       await checkUsageAllowed({
         orgId: ORG_ID,
         presetId: OPENAI_PRESET,
         sessionId: null,
         subscription: false,
+        turnId: ephemeralTurnId,
         userId: USER_ID,
       }),
     ).toBeNull();
     expect(
-      admittedChatTurnPin({
-        orgId: ORG_ID,
-        userId: USER_ID,
-        sessionId: null,
-        presetId: OPENAI_PRESET,
-      }),
+      admittedChatTurnPin(
+        { orgId: ORG_ID, userId: USER_ID, turnId: ephemeralTurnId },
+        OPENAI_PRESET,
+      ),
     ).toEqual(admitted);
 
-    // No admission covers another preset or another user: refused, never re-routed.
+    // No admission covers another turn, another preset or another user, nor a
+    // call that carries no turn id: each is refused, never re-routed.
     const otherUserId = "00000000-0000-4000-a000-0000000000e1";
-    for (const turn of [
-      { orgId: ORG_ID, userId: USER_ID, sessionId, presetId: SYSTEM_PRESET },
-      { orgId: ORG_ID, userId: otherUserId, sessionId, presetId: OPENAI_PRESET },
-    ]) {
-      const refusal = thrownBy(() => admittedChatTurnPin(turn));
+    const refused: Array<[Parameters<typeof admittedChatTurnPin>[0], string]> = [
+      [{ orgId: ORG_ID, userId: USER_ID, turnId: "turn_unknown" }, OPENAI_PRESET],
+      [{ orgId: ORG_ID, userId: USER_ID, turnId }, SYSTEM_PRESET],
+      [{ orgId: ORG_ID, userId: otherUserId, turnId }, OPENAI_PRESET],
+      [{ orgId: ORG_ID, userId: USER_ID, turnId: null }, OPENAI_PRESET],
+    ];
+    for (const [turn, presetId] of refused) {
+      const refusal = thrownBy(() => admittedChatTurnPin(turn, presetId));
       expect(refusal).toBeInstanceOf(ApiError);
       expect((refusal as ApiError).status).toBe(409);
       expect((refusal as ApiError).code).toBe("model_credential_changed");
     }
+  });
+
+  it("keeps the pins of two concurrent turns of one user, session and preset apart", async () => {
+    initSystemModelProviderKeys([
+      {
+        id: "sys-key-openai",
+        providerId: "openai",
+        apiKey: "sk-system-openai",
+        models: [{ id: OPENAI_PRESET, modelId: "gpt-5.5" }],
+      },
+    ]);
+    const orgKey = await seedOrgModelProviderKey({
+      orgId: ORG_ID,
+      label: "Org shared key",
+      providerId: "openai",
+      apiKey: "sk-org-shared",
+    });
+    const personal = await seedOrgModelProviderKey({
+      orgId: ORG_ID,
+      createdBy: USER_ID,
+      ownerUserId: USER_ID,
+      label: "Mine, later",
+      providerId: "openai",
+      apiKey: "sk-mine-later",
+    });
+    const turnA = { orgId: ORG_ID, userId: USER_ID, turnId: "turn_A" };
+    const turnB = { orgId: ORG_ID, userId: USER_ID, turnId: "turn_B" };
+
+    // Turn A is admitted on the org key; turn B, same user, session and preset,
+    // is admitted afterwards on the member's personal key.
+    recordChatTurnAdmission(turnA, OPENAI_PRESET, { credentialId: orgKey.id, source: "org" });
+    recordChatTurnAdmission(turnB, OPENAI_PRESET, {
+      credentialId: personal.id,
+      source: "org",
+    });
+
+    // Each turn still spends the credential it was admitted on.
+    expect(admittedChatTurnPin(turnA, OPENAI_PRESET)).toEqual({
+      credentialId: orgKey.id,
+      source: "org",
+    });
+    expect(admittedChatTurnPin(turnB, OPENAI_PRESET)).toEqual({
+      credentialId: personal.id,
+      source: "org",
+    });
   });
 });

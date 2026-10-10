@@ -423,16 +423,12 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         orgId: h.ctx.orgId,
         orgRole: "owner",
       },
-      { chatSessionId: "chs_loopback" },
+      { chatSessionId: "chs_loopback", turnId: "turn_loopback" },
     );
     // The turn was admitted at its start (`checkUsageAllowed`) on the system preset.
     recordChatTurnAdmission(
-      {
-        orgId: h.ctx.orgId,
-        userId: h.ctx.user.id,
-        sessionId: "chs_loopback",
-        presetId: SYSTEM_PRESET,
-      },
+      { orgId: h.ctx.orgId, userId: h.ctx.user.id, turnId: "turn_loopback" },
+      SYSTEM_PRESET,
       { credentialId: null, source: "system" },
     );
 
@@ -593,16 +589,12 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         orgId: h.ctx.orgId,
         orgRole: "owner",
       },
-      { chatSessionId: "chs_reserved" },
+      { chatSessionId: "chs_reserved", turnId: "turn_reserved" },
     );
     // The turn was admitted at its start (`checkUsageAllowed`) on the system preset.
     recordChatTurnAdmission(
-      {
-        orgId: h.ctx.orgId,
-        userId: h.ctx.user.id,
-        sessionId: "chs_reserved",
-        presetId: SYSTEM_PRESET,
-      },
+      { orgId: h.ctx.orgId, userId: h.ctx.user.id, turnId: "turn_reserved" },
+      SYSTEM_PRESET,
       { credentialId: null, source: "system" },
     );
     const chatHeaders = {

@@ -103,7 +103,7 @@ describe("resolveChatModel", () => {
   });
 
   it("resolves an unbound subscription model through the payer's own subscription, on the Pi chat engine binding", async () => {
-    const credentialId = await seedOauthCredential();
+    await seedOauthCredential();
     const presetId = await createSubscriptionModel("Subscribed");
 
     const resolution = await resolveChatModel(ctx.orgId, presetId, ctx.user.id);
@@ -111,7 +111,6 @@ describe("resolveChatModel", () => {
     if (resolution.subscription && "model" in resolution) {
       expect(resolution.model.modelId).toBe(TEST_OAUTH_MODEL_ID);
       expect(resolution.model.accessToken).toBe("test-access");
-      expect(resolution.model.credentialId).toBe(credentialId);
       // The binding reads the row's Pi key from the listing, not its Appstrate id.
       const row = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === presetId);
       expect(row?.pi_provider).toBe("openai");
@@ -178,23 +177,20 @@ describe("resolveChatModel", () => {
 
   it("serves a member-held model from that member's own subscription, never another's", async () => {
     const other = await createTestUser({ email: `member-${crypto.randomUUID()}@example.test` });
-    const [row] = await db
-      .insert(modelProviderCredentials)
-      .values({
-        orgId: ctx.orgId,
-        ownerUserId: other.id,
-        label: "Other's subscription",
-        providerId: TEST_OAUTH_PROVIDER_ID,
-        credentialsEncrypted: encryptCredentials({
-          kind: "oauth",
-          accessToken: "other-token",
-          refreshToken: "other-refresh",
-          expiresAt: Date.now() + 3_600_000,
-          needsReconnection: false,
-        }),
-        createdBy: other.id,
-      })
-      .returning();
+    await db.insert(modelProviderCredentials).values({
+      orgId: ctx.orgId,
+      ownerUserId: other.id,
+      label: "Other's subscription",
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      credentialsEncrypted: encryptCredentials({
+        kind: "oauth",
+        accessToken: "other-token",
+        refreshToken: "other-refresh",
+        expiresAt: Date.now() + 3_600_000,
+        needsReconnection: false,
+      }),
+      createdBy: other.id,
+    });
     // Unbound: no org credential, each member brings their own subscription.
     const [model] = await db
       .insert(orgModels)
@@ -216,7 +212,7 @@ describe("resolveChatModel", () => {
     });
     expect(await resolveChatModel(ctx.orgId, model!.id, other.id)).toMatchObject({
       subscription: true,
-      model: { accessToken: "other-token", credentialId: row!.id },
+      model: { accessToken: "other-token" },
     });
   });
 
@@ -259,7 +255,6 @@ describe("recordChatUsage — pricing provenance", () => {
       inputTokens: 1_000,
       outputTokens: 500,
       cost: { input: 3, output: 15, cacheRead: 0.3 },
-      credentialId: null,
       durationMs: 42,
       ...overrides,
     };

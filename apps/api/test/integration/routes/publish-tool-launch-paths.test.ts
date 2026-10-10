@@ -44,6 +44,7 @@ import { resolveAgentRunVersion } from "../../../src/services/agent-version-reso
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { buildRunContext } from "../../../src/services/run-context-builder.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
+import { resolveModelCascade } from "../../../src/services/org-models.ts";
 import { validateInlineManifest } from "../../../src/services/inline-manifest-validation.ts";
 import { getInlineRunLimits } from "../../../src/services/run-limits.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../../../src/services/inline-run.ts";
@@ -134,7 +135,7 @@ describe("publish_file across every launch path", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      payerUserId: null,
+      modelCascade: await resolveModelCascade(ctx.orgId, agent.id, null, null),
       input: {},
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
     });

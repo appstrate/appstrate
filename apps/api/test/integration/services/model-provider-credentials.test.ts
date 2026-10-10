@@ -37,6 +37,7 @@ import {
 import { ApiError } from "../../../src/lib/errors.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import {
+  assertCredentialEditable,
   canSeeCredential,
   createApiKeyCredential,
   createOAuthCredential,
@@ -67,6 +68,7 @@ const adminCaller = (orgId: string): ModelCredentialCaller => ({
   userId: "org-admin",
   readsOrg: true,
   writesOrg: true,
+  deletesOrg: true,
 });
 
 describe("model-provider-credentials service — api_key path", () => {
@@ -842,6 +844,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       userId: member.user.id,
       readsOrg: false,
       writesOrg: false,
+      deletesOrg: false,
     };
     const readerCaller: ModelCredentialCaller = {
       ...memberCaller,
@@ -859,6 +862,49 @@ describe("model-provider-credentials service — visibility and the personal-cre
     expect(await canSeeCredential({ ...readerCaller, orgId: otherOrg.orgId }, personalId)).toBe(
       false,
     );
+  });
+
+  it("assertCredentialEditable: deleting takes delete, editing takes write, on org and member rows", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-editable" });
+    const member = await memberContext(ctx, "member");
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiKey: "sk-org",
+    });
+    const personalId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: member.user.id,
+      label: "Member subscription",
+      providerId: "test-oauth",
+      accessToken: "at-member",
+      refreshToken: "rt-member",
+    });
+    const base: ModelCredentialCaller = {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      readsOrg: true,
+      writesOrg: false,
+      deletesOrg: false,
+    };
+    const writer = { ...base, writesOrg: true };
+    const deleter = { ...base, deletesOrg: true };
+    const refused = (caller: ModelCredentialCaller, id: string, action: "edit" | "delete") =>
+      assertCredentialEditable(caller, id, action).then(
+        () => false,
+        (err: unknown) => err instanceof ApiError && err.status === 404,
+      );
+
+    expect(await refused(writer, orgCredentialId, "edit")).toBe(false);
+    expect(await refused(writer, orgCredentialId, "delete")).toBe(true);
+    expect(await refused(deleter, orgCredentialId, "delete")).toBe(false);
+    expect(await refused(deleter, orgCredentialId, "edit")).toBe(true);
+    // Break-glass on a member's own credential: delete only, and only with `delete`.
+    expect(await refused(writer, personalId, "delete")).toBe(true);
+    expect(await refused(deleter, personalId, "delete")).toBe(false);
+    expect(await refused(deleter, personalId, "edit")).toBe(true);
   });
 
   it("createOAuthCredential refuses a subscription while the org policy is off", async () => {

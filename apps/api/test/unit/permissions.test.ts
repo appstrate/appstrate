@@ -167,8 +167,9 @@ describe("orgPermissions", () => {
     expect(orgPermissions("owner").has("model-provider-credentials:connect")).toBe(true);
   });
 
-  it("keeps connect out of the end-user OIDC vocabulary", () => {
-    expect(OIDC_ALLOWED_SCOPES.has("model-provider-credentials:connect" as never)).toBe(false);
+  it("keeps connect out of every delegate vocabulary: API keys and end-user OIDC", () => {
+    expect(API_KEY_ALLOWED_SCOPES.has("model-provider-credentials:connect")).toBe(false);
+    expect(OIDC_ALLOWED_SCOPES.has("model-provider-credentials:connect")).toBe(false);
   });
 });
 

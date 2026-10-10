@@ -102,7 +102,8 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
     // the session id signed INTO the claims (never a header).
     // The turn was admitted at its start (`checkUsageAllowed`) on the org key.
     recordChatTurnAdmission(
-      { orgId: ctx.orgId, userId: ctx.user.id, sessionId: "chs_attr_1", presetId },
+      { orgId: ctx.orgId, userId: ctx.user.id, turnId: "turn_attr_1" },
+      presetId,
       { credentialId, source: "org" },
     );
     const token = mintLoopbackToken(
@@ -113,7 +114,7 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
         orgId: ctx.orgId,
         orgRole: "member",
       },
-      { chatSessionId: "chs_attr_1" },
+      { chatSessionId: "chs_attr_1", turnId: "turn_attr_1" },
     );
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
@@ -156,16 +157,20 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
     // metered, but attributed to no context.
     // The turn was admitted at its start (`checkUsageAllowed`) on the org key.
     recordChatTurnAdmission(
-      { orgId: ctx.orgId, userId: ctx.user.id, sessionId: null, presetId },
+      { orgId: ctx.orgId, userId: ctx.user.id, turnId: "turn_attr_2" },
+      presetId,
       { credentialId, source: "org" },
     );
-    const token = mintLoopbackToken({
-      userId: ctx.user.id,
-      email: ctx.user.email,
-      name: ctx.user.name,
-      orgId: ctx.orgId,
-      orgRole: "member",
-    });
+    const token = mintLoopbackToken(
+      {
+        userId: ctx.user.id,
+        email: ctx.user.email,
+        name: ctx.user.name,
+        orgId: ctx.orgId,
+        orgRole: "member",
+      },
+      { turnId: "turn_attr_2" },
+    );
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",

@@ -11,7 +11,6 @@
 
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { encryptCredentials } from "@appstrate/connect";
 import { listPiModels } from "@appstrate/runner-pi/pi-model";
 import { modelProviderCredentials, organizations } from "@appstrate/db/schema";
 import type { OrgModelInfo } from "@appstrate/shared-types";
@@ -108,19 +107,16 @@ describe("model resolution — a member's own credential first", () => {
   }
 
   async function personalKey(userId: string, providerId: string, apiKey: string) {
-    const [row] = await db
-      .insert(modelProviderCredentials)
-      .values({
-        orgId: ctx.orgId,
-        label: `Personal ${apiKey}`,
-        providerId,
-        credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey }),
-        ownerUserId: userId,
-      })
-      .returning();
-    // The direct insert bypasses the credential service, which clears the cache on every personal mutation.
+    const row = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      label: `Personal ${apiKey}`,
+      providerId,
+      apiKey,
+      ownerUserId: userId,
+    });
+    // The seed bypasses the credential service, which clears the cache on every personal mutation.
     clearResolvedModelCache();
-    return row!;
+    return row;
   }
 
   const personalAnthropicKey = (userId: string, apiKey: string) =>

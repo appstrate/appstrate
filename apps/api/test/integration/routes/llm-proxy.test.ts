@@ -486,6 +486,7 @@ describe("POST /api/llm-proxy/openai-completions/v1/chat/completions", () => {
       userId: h.ctx.user.id,
       readsOrg: true,
       writesOrg: true,
+      deletesOrg: true,
     });
     expect(listed.find((c) => c.id === h.credentialId)!.needs_reconnection).toBe(true);
     expect((await call()).status).not.toBe(401);
@@ -1537,7 +1538,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     return { status: response.status, authorization };
   }
 
-  it("a jwt_user with a personal key is served by it, and the ledger names that key", async () => {
+  it("a jwt_user with a personal key is served by it, and the ledger reads it as org spend", async () => {
     const h = await buildPersonalHarness();
 
     const result = await proxyAs(
@@ -1549,7 +1550,6 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     expect(result.status).toBe(200);
     expect(result.authorization).toBe("Bearer sk-personal");
     const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
-    expect(row!.credentialId).toBe(h.personalCredentialId);
     // A personal key is customer-supplied, so the row reads as the org's own spend.
     expect(row!.credentialSource).toBe("org");
   });
@@ -1575,8 +1575,6 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     );
 
     expect(result.authorization).toBe("Bearer sk-org");
-    const [row] = await db.select().from(llmUsage).where(eq(llmUsage.orgId, h.ctx.orgId));
-    expect(row!.credentialId).toBe(h.orgCredentialId);
   });
 
   it("a run serves the credential frozen at launch, the pinned personal key or the org credential", async () => {
@@ -1655,9 +1653,10 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
   it("a chat turn's calls are served on the credential it was admitted on", async () => {
     const h = await buildPersonalHarness();
     const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
-    const chatTurn = { userId: h.ctx.user.id, sessionId: null };
+    const chatTurn = { userId: h.ctx.user.id, turnId: "turn_admitted" };
     recordChatTurnAdmission(
-      { orgId: h.ctx.orgId, userId: h.ctx.user.id, sessionId: null, presetId: h.presetId },
+      { orgId: h.ctx.orgId, userId: h.ctx.user.id, turnId: "turn_admitted" },
+      h.presetId,
       { credentialId: h.personalCredentialId, source: "org" },
     );
     // The payer adds another personal key after the turn was admitted. The chain
@@ -1691,7 +1690,8 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const h = await buildPersonalHarness();
     const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
     recordChatTurnAdmission(
-      { orgId: h.ctx.orgId, userId: h.ctx.user.id, sessionId: null, presetId: h.presetId },
+      { orgId: h.ctx.orgId, userId: h.ctx.user.id, turnId: "turn_deleted" },
+      h.presetId,
       { credentialId: h.personalCredentialId, source: "org" },
     );
     // The payer deletes the personal key the turn was admitted on.
@@ -1705,7 +1705,10 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
       proxyAs(
         principal,
         h.presetId,
-        { payerUserId: h.ctx.user.id, chatTurn: { userId: h.ctx.user.id, sessionId: null } },
+        {
+          payerUserId: h.ctx.user.id,
+          chatTurn: { userId: h.ctx.user.id, turnId: "turn_deleted" },
+        },
         () => {
           upstreamCalls++;
         },
@@ -1719,16 +1722,24 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const h = await buildPersonalHarness();
     const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
 
+    // A call whose bearer carries no turn id (`turnId: null`) is covered by no admission.
     let upstreamCalls = 0;
     await expect(
       proxyAs(
         principal,
         h.presetId,
-        { payerUserId: h.ctx.user.id, chatTurn: { userId: h.ctx.user.id, sessionId: null } },
+        { payerUserId: h.ctx.user.id, chatTurn: { userId: h.ctx.user.id, turnId: null } },
         () => {
           upstreamCalls++;
         },
       ),
+    ).rejects.toMatchObject({ status: 409, code: "model_credential_changed" });
+    // So is a turn id nothing was admitted under.
+    await expect(
+      proxyAs(principal, h.presetId, {
+        payerUserId: h.ctx.user.id,
+        chatTurn: { userId: h.ctx.user.id, turnId: "turn_never_admitted" },
+      }),
     ).rejects.toMatchObject({ status: 409, code: "model_credential_changed" });
     expect(upstreamCalls).toBe(0);
     expect(await db.select().from(llmUsage)).toHaveLength(0);

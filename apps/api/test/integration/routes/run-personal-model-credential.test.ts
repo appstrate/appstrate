@@ -38,7 +38,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
-import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
+import { createOrgModel, loadModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
@@ -409,44 +409,22 @@ describe("run admission — the credential a run spends is the one admitted", ()
     await restoreDiscoveredModules();
   });
 
-  it("refuses a run whose personal credential is removed by the admission gate, and spends no system key", async () => {
-    const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances(
-      [
-        gateModule(async () => {
-          await db
-            .delete(modelProviderCredentials)
-            .where(eq(modelProviderCredentials.id, personalId));
-          clearResolvedModelCache();
-        }, calls),
-      ],
-      fakeInitCtx(),
-    );
-
-    const res = await launchAsMember();
-
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("model_credential_changed");
-    // The gate quoted the member's own key; the run was refused before any row existed.
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ credentialSource: "org" });
-    expect(await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId))).toEqual(
-      [],
-    );
-  });
-
-  it("refuses an org-model run whose personal credential is removed by the admission gate, and spends no org key", async () => {
-    // The old check compared the credential SOURCE only: the org key is also "org",
-    // so the launch went through on it.
+  it("spends the credential resolved once and admitted, even when the gate changes what a second resolution would pick", async () => {
+    // The org model is bound to the org key; the member's personal key serves it first.
     const orgModelId = await seedOrgBoundModel();
+    const [orgModel] = await db
+      .select({ credentialId: orgModels.credentialId })
+      .from(orgModels)
+      .where(eq(orgModels.id, orgModelId));
+    const orgCredentialId = orgModel?.credentialId;
+    if (!orgCredentialId) throw new Error("the org model is not bound to a credential");
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances(
       [
         gateModule(async () => {
-          await db
-            .delete(modelProviderCredentials)
-            .where(eq(modelProviderCredentials.id, personalId));
-          clearResolvedModelCache();
+          // Personal credentials are switched off org-wide while the gate runs. A
+          // second resolution after this point would skip the personal key and pick the org key.
+          await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
         }, calls),
       ],
       fakeInitCtx(),
@@ -454,13 +432,19 @@ describe("run admission — the credential a run spends is the one admitted", ()
 
     const res = await launchAsMember(orgModelId);
 
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("model_credential_changed");
+    expect(res.status).toBe(201);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ credentialSource: "org" });
-    expect(await db.select({ id: runs.id }).from(runs).where(eq(runs.orgId, ctx.orgId))).toEqual(
-      [],
-    );
+    // The run spends the personal key admitted at the gate, not the org key.
+    const stamped = await db
+      .select({ modelCredentialId: runs.modelCredentialId })
+      .from(runs)
+      .where(eq(runs.orgId, ctx.orgId));
+    expect(stamped).toEqual([{ modelCredentialId: personalId }]);
+    // Discrimination: a fresh resolution after the gate does pick the org key.
+    clearResolvedModelCache();
+    const resolvedAfterGate = await loadModel(ctx.orgId, orgModelId, member.user.id);
+    expect(resolvedAfterGate?.credentialId).toBe(orgCredentialId);
   });
 
   it("admits the org-model run on the member's personal key when the gate removes nothing (control)", async () => {
