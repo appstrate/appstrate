@@ -93,6 +93,7 @@ Every curl flag you know works identically. Highlights:
 | Fail on HTTP ≥ 400             | `appstrate api --fail-with-body …`                  |
 | Timeout the whole call         | `appstrate api --max-time 30 …`                     |
 | Retry with backoff             | `appstrate api --retry 5 …`                         |
+| Many requests, one process     | `appstrate api --batch reqs.jsonl -o out.jsonl`     |
 | Status-code only, no body      | `appstrate api -w '%{http_code}\n' -o /dev/null …`  |
 | Follow redirects (same origin) | `appstrate api -L …` (cross-origin hops strip auth) |
 

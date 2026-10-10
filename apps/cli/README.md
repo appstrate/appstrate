@@ -691,6 +691,23 @@ appstrate api GET /api/agents
 - **Only `api` and `run` read the key.** `appstrate openapi` and the other commands still use the profile, so with `APPSTRATE_INSTANCE` set they may describe a different instance than the one `api` calls.
 - **The key is visible to whatever launches the command.** "The agent never sees the bearer" holds for the profile path only: an environment variable or a flag is readable by the process that sets it. Give an agent a key scoped to what it may do, not a login.
 
+#### Many requests from one process (`--batch`)
+
+Each `appstrate api` invocation starts a process (about half a second), while the request itself takes milliseconds. A script that needs dozens of calls sends them in one invocation instead:
+
+```sh
+appstrate api --batch requests.jsonl --parallel-max 5 --retry 3 -o responses.jsonl
+```
+
+The line shapes follow the OpenAI and Anthropic batch files.
+
+- **Input:** a JSON Lines file (`-` reads stdin), one request per line: `{"custom_id"?, "method"?, "url", "headers"?, "body"?}`. `url` is any path or same-origin URL `appstrate api` accepts. `body` is a string, sent as is, or an object or array, sent as JSON with `Content-Type: application/json` unless the line or `-H` sets one. `method` defaults to `POST` with a body, `GET` without; `custom_id` defaults to the line number.
+- **Output:** one JSON line per request, in input order, each written as soon as the lines before it are: `{"custom_id", "response": {"status_code", "headers", "body", "body_encoding"}}`, or `{"custom_id", "error": {"code", "message"}}` for a request that got no response (`code` is curl's exit code: 6, 7, 28, …). `body_encoding` is `json` (a JSON response, embedded as a value), `utf8` (other text) or `base64` (a body that is not valid UTF-8). On Ctrl-C the requests not yet sent are written as errors (`code` 130) and the process ends once the output is drained (at most 10 s, the CLI's shutdown ceiling), so every input line is accounted for.
+- **Each request** carries the same credential, `X-Org-Id` / `X-Space-Id` and `-H` headers as a single call (its own `headers` win), runs through the same retry loop, and at most `--parallel-max` (default 5) are in flight. With `--retry`, a `429` waits out the server's `Retry-After`, so a batch above the rate limit slows down instead of failing. A profile's access token that expires mid-batch is refreshed and the request resent once.
+- **Validated first:** an invalid line, a duplicate `custom_id`, a body on a `GET` / `HEAD`, or a URL off the instance's origin refuses the whole batch (exit 2) before anything is sent. Single-request flags (`-d`, `-F`, `-q`, `-G`, `-X`, `-i`, `-I`, `-w`, `-T`, `--connect-timeout`) are refused with `--batch`; `--max-time` bounds the whole batch.
+- **Scope:** finite responses. The input is read whole, each response is buffered whole before its line is written, and a line waits for the lines before it, so memory holds the responses not yet written and a response that never ends (an SSE stream) holds up the batch: stream those with a single `appstrate api` call.
+- **Exit code:** 0 when every request got a response, whatever its status; else the first failed request's code (`130` on Ctrl-C); with `-f` / `--fail-with-body`, 22 if a response is a 4xx and 25 if one is a 5xx. Every line is written in every case.
+
 #### curl → appstrate api mapping
 
 Every row below is a direct drop-in: an agent can replace `curl` with `appstrate api` and strip the hostname. All flags work identically.
