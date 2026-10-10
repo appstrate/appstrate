@@ -271,6 +271,21 @@ export async function checkUsageAllowed(args: {
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
   if (err) return { code: err.code, message: err.message, status: err.status };
 
+  // A platform rule, not an admission decision: it holds with or without a module.
+  // A preset that resolves but serves no credential the session user can spend is
+  // refused here; one that does not resolve at all fails at model resolution.
+  const resolved = await loadModel(args.orgId, args.presetId, args.userId);
+  if (resolved && resolved.credentialSource === null) {
+    try {
+      requireBoundModel(resolved);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        return { code: err.code, message: err.message, status: err.status };
+      }
+      throw err;
+    }
+  }
+
   if (!hasHook("beforeUsage")) return null;
   // Fail-closed on a caller that omits `subscription` — the flag became
   // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
@@ -288,21 +303,6 @@ export async function checkUsageAllowed(args: {
     throw new Error(
       "checkUsageAllowed: `subscription` is required (boolean) — caller built against @appstrate/core < 6.0.0",
     );
-  }
-  const resolved = await loadModel(args.orgId, args.presetId, args.userId);
-  // A preset that resolves but serves no credential the session user can spend is
-  // refused before dispatch. A preset that does not resolve at all (unknown,
-  // disabled, dead credential) is NOT skipped: the hook still decides on the turn,
-  // reported as "org" below. The turn fails at model resolution before any upstream call.
-  if (resolved && resolved.credentialSource === null) {
-    try {
-      requireBoundModel(resolved);
-    } catch (err) {
-      if (err instanceof ApiError) {
-        return { code: err.code, message: err.message, status: err.status };
-      }
-      throw err;
-    }
   }
   const rejection = await callHook("beforeUsage", {
     orgId: args.orgId,

@@ -20,6 +20,8 @@
  *     any other — it runs inline in the platform's own process;
  *   - an organization whose deletion is reserved is refused before any of that,
  *     hook or no hook: its usage rows would be cascade-deleted unaccounted for.
+ *   - a model no credential of the session user serves is refused, hook or no
+ *     hook: the turn could not run anyway.
  *
  * These are the exact facts a metering module (the ee module) quotes against, so a
  * regression that stopped reporting one — or resurrected the old "skip the hook
@@ -123,9 +125,7 @@ describe("checkUsageAllowed", () => {
     seedTestModelProviders();
   });
 
-  it("refuses a turn on a model no credential serves, before the hook is dispatched", async () => {
-    const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+  async function seedUnboundModel(): Promise<string> {
     const [unbound] = await db
       .insert(orgModels)
       .values({
@@ -137,10 +137,16 @@ describe("checkUsageAllowed", () => {
         enabled: true,
       })
       .returning();
+    return unbound!.id;
+  }
+
+  it("refuses a turn on a model no credential serves, before the hook is dispatched", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
-      presetId: unbound!.id,
+      presetId: await seedUnboundModel(),
       sessionId: "chs_unbound",
       subscription: false,
       userId: USER_ID,
@@ -148,6 +154,19 @@ describe("checkUsageAllowed", () => {
 
     expect(result).toMatchObject({ code: "model_credential_required", status: 409 });
     expect(calls).toHaveLength(0);
+  });
+
+  it("refuses a turn on a model no credential serves when no module provides the hook", async () => {
+    // A platform rule, not an admission decision: OSS refuses it too.
+    const result = await checkUsageAllowed({
+      orgId: ORG_ID,
+      presetId: await seedUnboundModel(),
+      sessionId: "chs_unbound",
+      subscription: false,
+      userId: USER_ID,
+    });
+
+    expect(result).toMatchObject({ code: "model_credential_required", status: 409 });
   });
 
   it("dispatches the hook for a preset that does not resolve, reporting credentialSource 'org'", async () => {
