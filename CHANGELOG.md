@@ -614,6 +614,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   once a Cloud token for `@appstrate/browserless` is in `CONFORMANCE_TOKENS`.
   Cloud calls consume units.
 
+- **Playwright MCP — a self-hosted Chromium driven through Microsoft's
+  Playwright MCP server (#1917).** `@appstrate/playwright-mcp@1.0.0` speaks
+  `streamable-http` to a `base_url` connection variable with no default, as
+  `coolify-mcp` does. The operator runs `mcr.microsoft.com/playwright/mcp`
+  (Apache-2.0) with
+  `node /app/cli.js --headless --browser chromium --no-sandbox --isolated --no-webmcp --port 8931 --host 0.0.0.0 --allowed-hosts <Host:port>`.
+  `--isolated` is required, `--cdp-endpoint` included: without it every MCP
+  session shares one persistent profile, so concurrent runs fail and a run
+  inherits the cookies and logins of earlier runs, across users; with it each
+  run gets a fresh in-memory browser context. `--allowed-hosts` compares the
+  raw `Host` header the server receives, port included (behind a reverse
+  proxy, the one it forwards). `--no-webmcp` keeps pages from publishing their
+  own tools: they are filtered, but their listings would reach the snapshot as
+  untrusted text. The browser reaches whatever its container reaches, internal
+  services and cloud metadata (169.254.169.254) included, while
+  `authorized_uris` and the SSRF guard cover only the sidecar's call to
+  `base_url`: run it on a network with restricted egress (for example
+  `--proxy-server` to an egress proxy), never next to internal services. A
+  private `base_url` must be listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. The
+  agent drives the page through accessibility snapshots (navigate, click,
+  type, forms, dialogs, tabs, console, network, JavaScript evaluation,
+  screenshots). The six `browser_mouse_*` tools exist only with
+  `--caps vision`, so a live conformance instance runs with it.
+  `browser_pdf_save` (`--caps pdf`) is not declared: it writes the PDF to the
+  server's disk, where the agent never reads it. With `--cdp-endpoint` the
+  server drives an existing Chromium instead, for example a headful one whose
+  live view lets a person watch or take over. Playwright MCP has no
+  authentication of its own, so the one `api_key` auth, sent as
+  `Authorization: Bearer`, is for a token-checking reverse proxy the operator
+  puts in front of it; anyone who reaches the port directly drives the
+  browser. `hidden_tools` holds `browser_run_code_unsafe`, which runs
+  arbitrary JavaScript in the server process, and `browser_file_upload` and
+  `browser_drop`, which read files from the server's disk, never the agent's.
+  No `allow_undeclared_tools`: a new upstream tool is reviewed first.
+  `default_tools` lists every declared tool that is not hidden, so an agent
+  that selects no tools (the chat's default) gets the browser rather than a run
+  that fails at boot with zero tools registered.
+
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
   `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
