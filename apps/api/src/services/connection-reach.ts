@@ -12,6 +12,7 @@
 
 import { and, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { ConnectionAction } from "@appstrate/shared-types";
+import type { OrgRole } from "@appstrate/core/permissions";
 import {
   integrationConnectionShares as shares,
   integrationConnections as c,
@@ -22,6 +23,7 @@ import {
 } from "@appstrate/db/schema";
 import { actorFilter, actorOwns, type Actor } from "../lib/actor.ts";
 import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import type { Permission } from "../lib/permissions.ts";
 import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
 
 function orgOf(spaceId: string): SQL {
@@ -29,12 +31,12 @@ function orgOf(spaceId: string): SQL {
 }
 
 /** The rows that may serve space `spaceId`, whoever owns them. */
-export function connectionInSpace(spaceId: string): SQL {
+function connectionInSpace(spaceId: string): SQL {
   return and(eq(c.orgId, orgOf(spaceId)), or(eq(c.spaceId, spaceId), isNull(c.spaceId)))!;
 }
 
-/** The row is shared into `spaceId`. */
-export function sharedInto(spaceId: string): SQL {
+/** The row is shared into `spaceId` (a value, or a column of an outer query). */
+export function sharedInto(spaceId: string | SQLWrapper): SQL {
   return sql`EXISTS (SELECT 1 FROM ${shares} WHERE ${shares.connectionId} = ${c.id} AND ${shares.spaceId} = ${spaceId})`;
 }
 
@@ -101,18 +103,30 @@ export function meConnectionAuthorityFilter(principal: ConnectionPrincipal): SQL
   );
 }
 
-/** Who reads a connection list, and what they hold in the request space (`null`: none). */
-export interface ConnectionReader {
+/** A space of an org the caller sees, with the caller's permissions there. */
+export interface SpaceSeen {
+  id: string;
+  name: string;
+  permissions: ReadonlySet<Permission>;
+}
+
+/** Who acts on connections, from where, and what they hold: every connection surface's one caller. */
+export interface ConnectionCaller {
   principal: ConnectionPrincipal;
+  /** The request space; `null` on the account surface, which acts from none. */
   spaceId: string | null;
-  /** Holds `integrations:connect`. */
+  /** Holds `integrations:connect` where the credential acts. */
   canConnect: boolean;
   /** Holds `integrations:configure` in `spaceId`. */
   governs: boolean;
+  /** The caller's permissions in one space of `orgId` (empty outside it). */
+  permissionsIn: (spaceId: string, orgId: string) => Promise<ReadonlySet<Permission>>;
+  /** Every space of `orgId` the caller sees under its role `orgRole` there, in one read. */
+  spacesSeen: (orgId: string, orgRole: OrgRole) => Promise<SpaceSeen[]>;
 }
 
 /** Where the owner may share: `integrations:connect` there; `configures` also holds `configure`. */
-export interface ShareTargets {
+interface ShareTargets {
   spaceIds: string[];
   configures: ReadonlySet<string>;
 }
@@ -131,26 +145,26 @@ export function shareableIn(t: ShareTargets): SQL<string[]> {
 }
 
 /**
- * The write actions `reader` holds on `row`, as the share and rename services enforce them. The
+ * The write actions `caller` holds on `row`: what the lists offer and the edit services enforce. The
  * owner renames (a credential bound to a space: rows scoped to it only) and shares a member's row;
  * a governor of the request space renames a colleague's row scoped to it and withdraws one shared
  * into it. Sharing is the owner's consent: a governor never shares.
  */
 export function connectionActions(
   row: { userId: string | null; endUserId: string | null; spaceId: string | null },
-  reader: ConnectionReader,
+  caller: ConnectionCaller,
   sharedHere: boolean,
 ): ConnectionAction[] {
-  if (!reader.canConnect) return [];
+  if (!caller.canConnect) return [];
   const actions: ConnectionAction[] = [];
-  if (actorOwns(reader.principal.actor, row)) {
-    const bound = boundSpaceOf(reader.principal);
+  if (actorOwns(caller.principal.actor, row)) {
+    const bound = boundSpaceOf(caller.principal);
     if (bound === null || row.spaceId === bound) actions.push("rename");
     if (row.userId !== null) actions.push("share");
     return actions;
   }
-  if (!reader.governs || reader.spaceId === null) return actions;
-  if (row.spaceId === reader.spaceId) actions.push("rename");
+  if (!caller.governs || caller.spaceId === null) return actions;
+  if (row.spaceId === caller.spaceId) actions.push("rename");
   if (sharedHere) actions.push("unshare_here");
   return actions;
 }

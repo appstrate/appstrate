@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `connectionActions`: the write controls a row offers, as the share and rename services enforce
- * them. The owner renames and shares; a governor of the request space withdraws a colleague's row
- * shared here and renames one scoped here; a credential bound to a space renames rows of it only.
+ * `connectionActions`: the write controls a row offers, which the edit services enforce. The owner
+ * renames and shares; a governor of the request space withdraws a colleague's row shared here and
+ * renames one scoped here; a credential bound to a space renames rows of it only.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   connectionActions,
-  type ConnectionReader,
+  type ConnectionCaller,
 } from "../../../src/services/connection-reach.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
 
 const OWNER = "user_1";
 const COLLEAGUE = "user_2";
@@ -20,14 +21,14 @@ const ELSEWHERE = "spc_elsewhere";
 const orgRow = (userId = OWNER) => ({ userId, endUserId: null, spaceId: null });
 const spaceRow = (userId = OWNER, spaceId = HERE) => ({ userId, endUserId: null, spaceId });
 
-function reader(overrides: Partial<ConnectionReader> = {}): ConnectionReader {
-  return {
-    principal: { kind: "person", actor: { type: "user", id: OWNER } },
-    spaceId: HERE,
-    canConnect: true,
-    governs: false,
-    ...overrides,
-  };
+function reader(overrides: Partial<ConnectionCaller> = {}): ConnectionCaller {
+  return testCaller(
+    { kind: "person", actor: { type: "user", id: OWNER } },
+    {
+      spaceId: HERE,
+      ...overrides,
+    },
+  );
 }
 
 describe("connectionActions", () => {

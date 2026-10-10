@@ -392,8 +392,11 @@ describe("GET /api/integrations/:packageId/connections — own ∪ shared into t
       (c) => c.id === mine,
     )!;
     // A delegated credential sees the row projected onto its space: its shares there, no origin.
-    expect(viaKey).toMatchObject({ shared_here: true, shared_space_ids: [ctx.defaultSpaceId] });
-    expect(viaKey).not.toHaveProperty("origin_space_id");
+    expect(viaKey).toMatchObject({
+      shared_here: true,
+      shared_space_ids: [ctx.defaultSpaceId],
+      origin_space_id: null,
+    });
     expect(viaKey.identity_claims).not.toBeNull();
     const viaSession = (await listAs(authHeaders(ctx))).find((c) => c.id === mine)!;
     expect(viaSession.origin_space_id).toBe(elsewhere.id);

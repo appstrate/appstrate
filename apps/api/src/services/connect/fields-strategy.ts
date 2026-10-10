@@ -86,7 +86,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       actor: ctx.actor,
       variables,
       ...(labelHint ? { labelHint } : {}),
-      ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
+      ...(ctx.target ? { connectionId: ctx.target.id } : {}),
       ...(ctx.delegated ? { delegated: true } : {}),
     });
   }

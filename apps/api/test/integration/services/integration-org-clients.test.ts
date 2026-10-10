@@ -31,8 +31,9 @@ import {
   resolveIntegrationClientById,
   setDefaultIntegrationClient,
   updateIntegrationOAuthClient,
-  type ConnectionListReader,
 } from "../../../src/services/integration-connections.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -192,14 +193,11 @@ describe("org-level integration OAuth clients", () => {
   }
 
   /** The list reader of a member of the org acting from `spaceA` (a session, no governance). */
-  function memberReader(): ConnectionListReader {
-    return {
-      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
-      spaceId: spaceA.spaceId,
-      canConnect: true,
-      governs: false,
-      shareTargets: null,
-    };
+  function memberReader(): ConnectionCaller {
+    return testCaller(
+      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { spaceId: spaceA.spaceId },
+    );
   }
 
   /** A connection row: `spaceId: null` = org scope. Returns its id. */
@@ -702,7 +700,7 @@ describe("org-level integration OAuth clients", () => {
 
   it("has_oauth_client is true when only an org client exists", async () => {
     await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader());
+    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader(), null);
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.has_oauth_client).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.has_oauth_client).toBe(false);
   });
@@ -715,7 +713,7 @@ describe("org-level integration OAuth clients", () => {
     manifest.auths[AUTH_KEY]!._meta = { "dev.appstrate/auth": { required: true } };
     await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
 
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader());
+    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader(), null);
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.required).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.required).toBe(false);
   });

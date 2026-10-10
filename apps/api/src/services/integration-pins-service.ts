@@ -2,7 +2,7 @@
 
 /**
  * Service layer for `integration_pins` + the per-(space, integration)
- * `block_user_connections` toggle + connection label edits (shares live in `connection-shares.ts`).
+ * `block_user_connections` toggle (connection edits live in `connection-shares.ts`).
  * Consumed by the routes in `routes/integrations.ts` and `routes/me.ts`.
  *
  * Pin model (flat): one row per (space, agent, integration, scope), carrying
@@ -24,10 +24,7 @@ import {
   integrationPins,
   packages,
 } from "@appstrate/db/schema";
-import type {
-  IntegrationConnectionRow as ConnectionRow,
-  IntegrationPinRow as PinRow,
-} from "@appstrate/db/schema";
+import type { IntegrationPinRow as PinRow } from "@appstrate/db/schema";
 import type {
   AccessibleIntegrationConnection,
   ConsumingAgentSummary,
@@ -44,19 +41,20 @@ import {
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { conflict, forbidden, notFound } from "../lib/errors.ts";
-import { isUniqueViolation } from "../lib/db-helpers.ts";
+import { notFound } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { actorOwns } from "../lib/actor.ts";
-import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
-import { connectionReach, loadConnectionShares, lockLabelKeys } from "./integration-connections.ts";
-import { visibleTo, type ConnectionViewer } from "./connection-shares.ts";
+import {
+  connectionReach,
+  connectionViewOf,
+  loadConnectionShares,
+} from "./integration-connections.ts";
 import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
 import {
   resolveConnectionsForRun,
@@ -458,78 +456,6 @@ export async function listMemberPinsForAgent(
     .orderBy(integrationPins.integrationId);
 }
 
-// ─────────────────────────── Connection edits ─────────────────────────────────
-
-/**
- * Renames a connection behind the label PATCH routes. The owner renames any row it sees (a
- * credential bound to a space: rows scoped to it only); a governor of the request space renames a
- * colleague's row scoped to it. Lock order: the label keys, then the connection row.
- */
-export async function renameConnection(input: {
-  connectionId: string;
-  viewer: ConnectionViewer;
-  label: string;
-}): Promise<{ connection: ConnectionRow; isOwner: boolean }> {
-  const { connectionId, viewer, label } = input;
-  const visible = visibleTo(viewer, connectionId);
-  const [read] = await db.select().from(integrationConnections).where(visible).limit(1);
-  if (!read) throw notFound(`Connection '${connectionId}' not found`);
-  authorizeRename(viewer, read);
-  const isOwner = actorOwns(viewer.principal.actor, read);
-
-  return db
-    .transaction(async (tx) => {
-      // A row only widens (space → org): both keys it may hold.
-      const key = {
-        orgId: read.orgId,
-        integrationId: read.integrationId,
-        ownerId: (read.userId ?? read.endUserId)!,
-      };
-      await lockLabelKeys(tx, [
-        { ...key, spaceId: read.spaceId },
-        { ...key, spaceId: null },
-      ]);
-      const [row] = await tx.select().from(integrationConnections).where(visible).for("update");
-      if (!row) throw notFound(`Connection '${connectionId}' not found`);
-      authorizeRename(viewer, row);
-      const [connection] = await tx
-        .update(integrationConnections)
-        .set({ label, updatedAt: new Date() })
-        .where(eq(integrationConnections.id, connectionId))
-        .returning();
-      return { connection: connection!, isOwner };
-    })
-    .catch((err: unknown) => {
-      if (!isUniqueViolation(err)) throw err;
-      throw conflict(
-        "connection_label_taken",
-        `The owner already has a connection of this integration named '${label}'`,
-      );
-    });
-}
-
-/** The viewer's right to rename `row`: 404 when it is not theirs to see, else 403. */
-function authorizeRename(viewer: ConnectionViewer, row: ConnectionRow): void {
-  const here = viewer.spaceId;
-  const bound = boundSpaceOf(viewer.principal);
-  if (!actorOwns(viewer.principal.actor, row)) {
-    if (here === null) throw notFound(`Connection '${row.id}' not found`);
-    if (!viewer.governs) {
-      throw forbidden(
-        "Only the connection owner or a principal with integrations:configure can update this connection",
-      );
-    }
-    if (row.spaceId !== here) {
-      throw forbidden("Only its owner can rename a connection serving the whole organization");
-    }
-  }
-  if (bound !== null && row.spaceId !== bound) {
-    throw forbidden(
-      `A credential bound to space '${bound}' can only rename a connection scoped to it`,
-    );
-  }
-}
-
 // ─────────────────────────── Shared accessor for the picker UI ────────────────
 
 /**
@@ -572,11 +498,10 @@ export async function listAccessibleConnections(
       owner_end_user_id: row.endUserId,
       owner_name: ownerName(row),
       scopes_granted: row.scopesGranted ?? [],
-      ...connectionReach(row, {
-        ownerView: principal.kind === "person" && actorOwns(actor, row),
-        here: scope.spaceId,
-        shares: shares.get(row.id) ?? [],
-      }),
+      ...connectionReach(
+        row,
+        connectionViewOf(principal, row, scope.spaceId, shares.get(row.id) ?? []),
+      ),
       needs_reconnection: row.needsReconnection,
     };
   });

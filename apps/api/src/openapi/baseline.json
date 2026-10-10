@@ -5934,11 +5934,11 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
-                                  "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                                  "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                                 },
                                 "allowed_actions": {
                                   "type": "array",
@@ -5948,12 +5948,21 @@
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
-                                "shareable_space_ids": {
+                                "shareable_spaces": {
                                   "type": "array",
                                   "items": {
-                                    "type": "string"
+                                    "type": "object",
+                                    "required": ["id", "name"],
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
                                   },
-                                  "description": "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only."
+                                  "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
@@ -7007,11 +7016,11 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                      "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                     },
                     "allowed_actions": {
                       "type": "array",
@@ -7021,12 +7030,21 @@
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
-                    "shareable_space_ids": {
+                    "shareable_spaces": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "required": ["id", "name"],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
                       },
-                      "description": "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only."
+                      "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -7648,11 +7666,11 @@
                           "items": {
                             "type": "string"
                           },
-                          "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                          "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                         },
                         "origin_space_id": {
                           "type": ["string", "null"],
-                          "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                          "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                         },
                         "allowed_actions": {
                           "type": "array",
@@ -7662,12 +7680,21 @@
                           },
                           "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                         },
-                        "shareable_space_ids": {
+                        "shareable_spaces": {
                           "type": "array",
                           "items": {
-                            "type": "string"
+                            "type": "object",
+                            "required": ["id", "name"],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
                           },
-                          "description": "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only."
+                          "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                         },
                         "client_ref": {
                           "type": ["string", "null"],
@@ -7783,7 +7810,7 @@
         "operationId": "listIntegrationConnections",
         "tags": ["Integrations"],
         "summary": "List the connections the caller can use for an integration",
-        "description": "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.",
+        "description": "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7916,11 +7943,11 @@
                             "items": {
                               "type": "string"
                             },
-                            "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                            "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                           },
                           "origin_space_id": {
                             "type": ["string", "null"],
-                            "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                            "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                           },
                           "allowed_actions": {
                             "type": "array",
@@ -7930,12 +7957,21 @@
                             },
                             "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                           },
-                          "shareable_space_ids": {
+                          "shareable_spaces": {
                             "type": "array",
                             "items": {
-                              "type": "string"
+                              "type": "object",
+                              "required": ["id", "name"],
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                }
+                              }
                             },
-                            "description": "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only."
+                            "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                           },
                           "client_ref": {
                             "type": ["string", "null"],
@@ -8131,11 +8167,11 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                      "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                     },
                     "allowed_actions": {
                       "type": "array",
@@ -8145,12 +8181,21 @@
                       },
                       "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
-                    "shareable_space_ids": {
+                    "shareable_spaces": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "required": ["id", "name"],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
                       },
-                      "description": "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only."
+                      "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                     },
                     "client_ref": {
                       "type": ["string", "null"],
@@ -8249,8 +8294,7 @@
             "description": "Space the connection is shared into (`spc_…`).",
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 100
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
             }
           }
         ],
@@ -8268,7 +8312,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A malformed `spaceId` (`validation_failed`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
+            "description": "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
@@ -8337,8 +8381,7 @@
             "description": "Space the connection is shared into (`spc_…`).",
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 100
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
             }
           }
         ],
@@ -8356,7 +8399,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A malformed `spaceId` (`validation_failed`)."
+            "description": "A malformed `spaceId` (`invalid_request`)."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden",
@@ -8588,11 +8631,11 @@
                                   "items": {
                                     "type": "string"
                                   },
-                                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
-                                  "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                                  "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                                 },
                                 "allowed_actions": {
                                   "type": "array",
@@ -8602,12 +8645,21 @@
                                   },
                                   "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                                 },
-                                "shareable_space_ids": {
+                                "shareable_spaces": {
                                   "type": "array",
                                   "items": {
-                                    "type": "string"
+                                    "type": "object",
+                                    "required": ["id", "name"],
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      }
+                                    }
                                   },
-                                  "description": "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only."
+                                  "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
@@ -14091,7 +14143,7 @@
                                       }
                                     }
                                   },
-                                  "description": "The spaces the caller may share this connection into."
+                                  "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only."
                                 },
                                 "locked_by": {
                                   "type": ["string", "null"],
@@ -14193,8 +14245,7 @@
             "description": "Space the connection is shared into (`spc_…`).",
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 100
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
             }
           }
         ],
@@ -14212,7 +14263,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A malformed `spaceId` (`validation_failed`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
+            "description": "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14267,8 +14318,7 @@
             "description": "Space the connection is shared into (`spc_…`).",
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 100
+              "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
             }
           }
         ],
@@ -14286,7 +14336,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A malformed `spaceId` (`validation_failed`)."
+            "description": "A malformed `spaceId` (`invalid_request`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14696,7 +14746,7 @@
         },
         "responses": {
           "200": {
-            "description": "Renamed — returns the connection as the account list shows it",
+            "description": "Renamed — returns the bare connection resource, as the space door does",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -14710,35 +14760,42 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "connection_id",
-                    "kind",
-                    "label",
+                    "id",
+                    "integration_package_id",
+                    "auth_key",
+                    "account_id",
+                    "identity_claims",
                     "scopes_granted",
-                    "connected_at",
                     "needs_reconnection",
                     "expiresAt",
-                    "identity",
-                    "auth_key",
+                    "owner_type",
+                    "owner_id",
+                    "label",
                     "scope",
-                    "shared_spaces",
-                    "allowed_actions",
-                    "shareable_spaces",
-                    "reused_by_agents",
-                    "locked_by",
-                    "org",
-                    "space",
-                    "origin_space"
+                    "spaceId",
+                    "shared_here",
+                    "client_ref",
+                    "variables",
+                    "createdAt",
+                    "updatedAt"
                   ],
                   "properties": {
-                    "connection_id": {
-                      "type": "string"
-                    },
-                    "kind": {
+                    "id": {
                       "type": "string",
-                      "enum": ["integration"]
+                      "format": "uuid"
                     },
-                    "label": {
+                    "integration_package_id": {
                       "type": "string"
+                    },
+                    "auth_key": {
+                      "type": "string"
+                    },
+                    "account_id": {
+                      "type": "string"
+                    },
+                    "identity_claims": {
+                      "type": ["object", "null"],
+                      "additionalProperties": true
                     },
                     "scopes_granted": {
                       "type": "array",
@@ -14746,55 +14803,56 @@
                         "type": "string"
                       }
                     },
-                    "connected_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
                     "needs_reconnection": {
                       "type": "boolean"
                     },
                     "expiresAt": {
-                      "oneOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
+                      "type": ["string", "null"],
+                      "format": "date-time"
                     },
-                    "identity": {
+                    "owner_type": {
                       "type": "string",
-                      "description": "First identity claim (`account_email`, `email`, `sub`), else the account id, else the label."
+                      "enum": ["user", "end_user"]
                     },
-                    "reused_by_agents": {
-                      "type": "integer",
-                      "description": "Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one."
-                    },
-                    "auth_key": {
+                    "owner_id": {
                       "type": "string"
+                    },
+                    "owner_name": {
+                      "type": ["string", "null"],
+                      "description": "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own."
+                    },
+                    "locked_by": {
+                      "type": ["string", "null"],
+                      "enum": ["admin_pin", "org_default", null],
+                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label."
                     },
                     "scope": {
                       "type": "string",
                       "enum": ["org", "space"],
                       "description": "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org. `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space."
                     },
-                    "shared_spaces": {
+                    "spaceId": {
+                      "type": ["string", "null"],
+                      "description": "The one space a space-scoped connection lives in; `null` for an org-scoped one."
+                    },
+                    "shared_here": {
+                      "type": "boolean",
+                      "description": "Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses)."
+                    },
+                    "shared_space_ids": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "required": ["id", "name"],
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "name": {
-                            "type": "string"
-                          }
-                        }
+                        "type": "string"
                       },
-                      "description": "The spaces whose members may use it."
+                      "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
+                    },
+                    "origin_space_id": {
+                      "type": ["string", "null"],
+                      "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                     },
                     "allowed_actions": {
                       "type": "array",
@@ -14802,7 +14860,7 @@
                         "type": "string",
                         "enum": ["rename", "share", "unshare_here"]
                       },
-                      "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space)."
+                      "description": "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only."
                     },
                     "shareable_spaces": {
                       "type": "array",
@@ -14818,64 +14876,26 @@
                           }
                         }
                       },
-                      "description": "The spaces the caller may share this connection into."
+                      "description": "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only."
                     },
-                    "locked_by": {
+                    "client_ref": {
                       "type": ["string", "null"],
-                      "enum": ["admin_pin", "org_default", null],
-                      "description": "What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default."
+                      "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                     },
-                    "org": {
-                      "type": "object",
-                      "required": ["id", "name"],
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        }
-                      }
+                    "variables": {
+                      "type": ["object", "null"],
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect."
                     },
-                    "space": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": ["id", "name"],
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The one space a space-scoped connection lives in; `null` for an org-scoped one."
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
                     },
-                    "origin_space": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "required": ["id", "name"],
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            }
-                          }
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "The space an org-scoped connection was connected from; `null` for a space-scoped one, or once that space is deleted."
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   }
                 }
@@ -32515,11 +32535,11 @@
                   "items": {
                     "type": "string"
                   },
-                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read."
+                  "description": "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else."
                 },
                 "origin_space_id": {
                   "type": ["string", "null"],
-                  "description": "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted."
+                  "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                 },
                 "needs_reconnection": {
                   "type": "boolean"

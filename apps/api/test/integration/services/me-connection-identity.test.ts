@@ -10,25 +10,26 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import { getMeConnection } from "../../../src/services/me-connections.ts";
-import type { ConnectionPrincipal } from "../../../src/lib/connection-principal.ts";
-import type { Permission } from "../../../src/lib/permissions.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
+import { listMeConnections } from "../../../src/services/me-connections.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
 
 const INTEGRATION = "@identity/svc";
 const AUTH = "google";
 
-describe("getMeConnection — identity", () => {
+describe("listMeConnections — identity", () => {
   let ctx: TestContext;
-  let principal: ConnectionPrincipal;
-  const reader = {
-    canConnect: true,
-    permissionsIn: async () => new Set<Permission>(),
-  };
+  let caller: ConnectionCaller;
+
+  async function identityOf(id: string): Promise<string | undefined> {
+    const groups = await listMeConnections(caller);
+    return groups.flatMap((g) => g.connections).find((e) => e.connection_id === id)?.identity;
+  }
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "identityorg" });
-    principal = { kind: "person", actor: { type: "user", id: ctx.user.id } };
+    caller = testCaller({ kind: "person", actor: { type: "user", id: ctx.user.id } });
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,
@@ -59,13 +60,11 @@ describe("getMeConnection — identity", () => {
 
   it("shows the label of an identity-less connection, never the placeholder account id", async () => {
     const id = await seedConnection("default", "Connexion 1");
-    const entry = await getMeConnection(principal, id, reader);
-    expect(entry.identity).toBe("Connexion 1");
+    expect(await identityOf(id)).toBe("Connexion 1");
   });
 
   it("shows the account id of a connection whose identity claims are absent", async () => {
     const id = await seedConnection("acct-42", "Connexion 2");
-    const entry = await getMeConnection(principal, id, reader);
-    expect(entry.identity).toBe("acct-42");
+    expect(await identityOf(id)).toBe("acct-42");
   });
 });

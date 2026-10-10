@@ -36,7 +36,7 @@ import {
 } from "../lib/space-role.ts";
 import { assertCanGrantSpaceRole, assertCanManageSpaceMember } from "../lib/space-role-policy.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
-import { actorFromIds, type Actor } from "../lib/actor.ts";
+import { actorFromIds } from "../lib/actor.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { sharedInto } from "./connection-reach.ts";
 
@@ -392,7 +392,7 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
   const lost = await sharesOfOwnersWithoutAccess(
     tx,
     and(
-      sql`EXISTS (SELECT 1 FROM ${s} WHERE ${s.connectionId} = ${c.id} AND ${s.spaceId} = ${spaces.id})`,
+      sharedInto(spaces.id),
       scope.spaceId === undefined ? undefined : eq(spaces.id, scope.spaceId),
     )!,
     and(
@@ -411,7 +411,6 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
           .orderBy(asc(c.id))
           .for("update");
   const withdrawn: ConnectionShare[] = [];
-  const lostShares: { id: string; owner: Actor; inSpaceId: string }[] = [];
   for (const row of locked) {
     const targets = lost
       .filter((share) => share.connectionId === row.id)
@@ -423,15 +422,16 @@ export async function unshareConnectionsOfOwnersWithoutAccess(
       .returning({ spaceId: s.spaceId });
     if (gone.length === 0) continue;
     await tx.update(c).set({ updatedAt: new Date() }).where(eq(c.id, row.id));
-    const owner = actorFromIds(row.userId, row.endUserId)!;
-    for (const { spaceId } of gone) {
-      withdrawn.push({ connectionId: row.id, spaceId });
-      lostShares.push({ id: row.id, owner, inSpaceId: spaceId });
-    }
+    for (const { spaceId } of gone) withdrawn.push({ connectionId: row.id, spaceId });
   }
+  const ownerOf = new Map(locked.map((row) => [row.id, actorFromIds(row.userId, row.endUserId)!]));
   const disabledScheduleIds = await disableForeignSchedules(
     tx,
-    lostShares,
+    withdrawn.map((share) => ({
+      id: share.connectionId,
+      owner: ownerOf.get(share.connectionId)!,
+      inSpaceId: share.spaceId,
+    })),
     "connection_unshared",
     alsoLockSchedules,
   );
@@ -466,16 +466,15 @@ export function invalidShareTarget(detail: string): ApiError {
 }
 
 /**
- * The gate of a share into `targets`, in the sharing transaction: 409 for an end user's row or an
- * owner not reaching a target ({@link unshareConnectionsOfOwnersWithoutAccess}'s twin), 400 for a
- * target outside the row's org. Locks the owner's membership, then the targets in id order.
+ * The gate of a share into `spaceId`, in the sharing transaction: 409 for an end user's row or an
+ * owner not reaching it ({@link unshareConnectionsOfOwnersWithoutAccess}'s twin), 400 for a space
+ * outside the row's org. Locks the owner's membership, then the space.
  */
 export async function assertConnectionShareable(
   tx: Tx,
   connectionId: string,
-  targets: readonly string[],
+  spaceId: string,
 ): Promise<void> {
-  if (targets.length === 0) return;
   const [conn] = await tx
     .select({ userId: integrationConnections.userId, orgId: integrationConnections.orgId })
     .from(integrationConnections)
@@ -489,28 +488,23 @@ export async function assertConnectionShareable(
     );
   }
   await lockOrgMember(tx, conn.orgId, conn.userId);
-  const inTargets = inArray(spaces.id, [...targets]);
-  const locked = await tx
+  const target = eq(spaces.id, spaceId);
+  const [locked] = await tx
     .select({ id: spaces.id })
     .from(spaces)
-    .where(and(inTargets, eq(spaces.orgId, conn.orgId)))
-    .orderBy(asc(spaces.id))
+    .where(and(target, eq(spaces.orgId, conn.orgId)))
     .for("share");
-  if (locked.length !== new Set(targets).size) {
-    const ids = new Set(locked.map((space) => space.id));
-    const missing = targets.find((id) => !ids.has(id))!;
-    throw invalidShareTarget(`'${missing}' is not a space of this organization`);
-  }
+  if (!locked) throw invalidShareTarget(`'${spaceId}' is not a space of this organization`);
   const [lost] = await sharesOfOwnersWithoutAccess(
     tx,
-    inTargets,
+    target,
     eq(integrationConnections.id, connectionId),
   );
   if (lost) {
     throw conflict(
       "connection_owner_without_access",
-      `The connection's owner has no access to space '${lost.spaceId}', so it cannot be shared there.`,
-      { space_id: lost.spaceId },
+      `The connection's owner has no access to space '${spaceId}', so it cannot be shared there.`,
+      { space_id: spaceId },
     );
   }
 }

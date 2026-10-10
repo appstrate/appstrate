@@ -170,8 +170,6 @@ export const integrationConnections = pgTable(
     index("idx_integration_conn_end_user")
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
-    // Unread; dropped with the column.
-    index("idx_integration_conn_shared").using("gin", table.sharedSpaceIds),
     // Referenced target of the shares' composite FK, which keeps a share in its connection's org.
     uniqueIndex("uq_integration_conn_id_org_id").on(table.id, table.orgId),
     // `coalesce` stands in for NULLS NOT DISTINCT (drizzle cannot express it).
@@ -228,9 +226,11 @@ export const integrationConnections = pgTable(
  * never binds a share. Deleting the space or the connection takes the share with it. `org_id` is the
  * connection's org, and both FKs are composite on it, so a share never names a space of another org.
  *
- * Two invariants are held by the service (`assertConnectionShareable` and the reach check), not by
- * the table: an end user's connection is never shared, and a space-scoped row is shared only into
- * its own space.
+ * Two invariants are enforced by the share service (`apps/api/src/services/connection-shares.ts`),
+ * not by a CHECK of this table: an end user's connection is never shared
+ * (`assertConnectionShareable`), and a space-scoped row is shared only into its own space (its
+ * reach check, `connectionInSpace`). Who added a share is in the audit trail
+ * (`integration.connection.share_added`), not on the row.
  */
 export const integrationConnectionShares = pgTable(
   "integration_connection_shares",
@@ -239,8 +239,6 @@ export const integrationConnectionShares = pgTable(
     spaceId: text("space_id").notNull(),
     /** The connection's org, and so the space's: both composite FKs below pin it. */
     orgId: uuid("org_id").notNull(),
-    /** Who shared it (always its owner today); NULL once that user is deleted. */
-    sharedBy: text("shared_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -259,11 +257,6 @@ export const integrationConnectionShares = pgTable(
       columns: [table.spaceId, table.orgId],
       foreignColumns: [spaces.id, spaces.orgId],
     }).onDelete("cascade"),
-    foreignKey({
-      name: "ics_shared_by_fk",
-      columns: [table.sharedBy],
-      foreignColumns: [user.id],
-    }).onDelete("set null"),
   ],
 );
 

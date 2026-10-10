@@ -266,7 +266,6 @@
   "apiError.auto_client_exists_at_org": "The organization already has its own automatic OAuth client for this integration: this space client cannot replace it.",
   "apiError.connection_not_in_org_default": "This connection is not among those the organization enforces: {{message}}",
   "apiError.connection_scope_narrowing": "This connection serves the whole organization: reconnecting it through this space's OAuth client would confine it to this space. Create a new connection instead.",
-  "apiError.invalid_space_id": "The space id is invalid.",
   "apiError.invalid_share_target": "A connection can only be shared with spaces of its organization, and a connection confined to one space only with that space.",
   "apiError.identity_mismatch": "This connection is linked to another account, reconnect with the same account or create a new connection: {{message}}",
   "apiError.connect_unavailable": "This connection method is not available on this instance. Contact your administrator.",

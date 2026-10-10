@@ -44,7 +44,7 @@ import { deleteOwnConnection } from "../../../src/services/integration-connectio
 import { unshareConnection } from "../../../src/services/connection-shares.ts";
 import { leaveOrganization, updateMemberRole } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
 describeRequiresRedis("scheduler service", () => {
@@ -1327,13 +1327,8 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
     await unshareConnection({
       connectionId: unshared!.id,
       spaceId: scope.spaceId,
-      viewer: {
-        principal: { kind: "person", actor: owner },
-        spaceId: scope.spaceId,
-        integrationId: null,
-        governs: false,
-        permissionsIn: async () => new Set(),
-      },
+      integrationId: null,
+      caller: testCaller({ kind: "person", actor: owner }, { spaceId: scope.spaceId }),
     });
 
     for (const created of reads) {

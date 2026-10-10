@@ -12,9 +12,10 @@
  * minting the most connections, a tie going to the org-tier client, then the oldest, then the
  * smallest id. Every other client of the key is merged into the winner: its connections are
  * re-pointed (`client_ref`) and flagged `needs_reconnection` (their refresh token belongs to the
- * merged registration, `repointConnectionsToClient`), then it is deleted. A space-tier winner is
- * then promoted by the service a space admin's promotion runs (`moveClientToOrgTier`), once the
- * org-tier client it beat is gone (one auto client per key and tier). The user-owned rows of the
+ * merged registration), then it is deleted. A space-tier winner is then moved to the org tier, as a
+ * space admin's promotion does, once the org-tier client it beat is gone (one auto client per key
+ * and tier): the default of its auth unless the org tier holds one or it is keyed by an issuer.
+ * The user-owned rows of the
  * whole key are widened to org scope (`widenConnectionsToOrgScope`), each recorded as a `system`
  * `integration.connection.scope_widened` audit row in the space it left; end users' rows stay in
  * their space.
@@ -26,7 +27,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { and, asc, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections as c,
@@ -59,7 +60,7 @@ export async function runPromoteAutoClientsToOrg(options: {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
-  const { moveClientToOrgTier, repointConnectionsToClient, widenConnectionsToOrgScope } =
+  const { widenConnectionsToOrgScope } =
     await import("../../apps/api/src/services/integration-connections.ts");
   const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
     await db.execute(
@@ -146,20 +147,38 @@ export async function runPromoteAutoClientsToOrg(options: {
           )[0]!;
           const losers = clients.filter((client) => client.id !== winner.id).map((l) => l.id);
           if (losers.length > 0) {
-            const repointed = await repointConnectionsToClient(tx, losers, winner.id);
+            const repointed = await tx
+              .update(c)
+              .set({ clientRef: winner.id, needsReconnection: true, updatedAt: new Date() })
+              .where(inArray(c.clientRef, losers))
+              .returning({ id: c.id });
             report.repointed += repointed.length;
             await tx.delete(ioc).where(inArray(ioc.id, losers));
             report.merged += losers.length;
           }
           if (winner.spaceId !== null) {
-            const promoted = await moveClientToOrgTier(
-              tx,
-              { orgId, spaceId: winner.spaceId },
-              group.integrationId,
-              winner.id,
-              true,
-            );
-            widened.push(...promoted.widened);
+            // Its space is locked above; the connections it minted are widened below.
+            const [orgDefault] = await tx
+              .select({ id: ioc.id })
+              .from(ioc)
+              .where(
+                and(
+                  eq(ioc.orgId, orgId),
+                  isNull(ioc.spaceId),
+                  eq(ioc.integrationId, group.integrationId),
+                  eq(ioc.authKey, group.authKey),
+                  eq(ioc.isDefault, true),
+                ),
+              )
+              .limit(1);
+            await tx
+              .update(ioc)
+              .set({
+                spaceId: null,
+                isDefault: winner.issuer === null && orgDefault === undefined,
+                updatedAt: new Date(),
+              })
+              .where(eq(ioc.id, winner.id));
             report.promoted++;
           }
 

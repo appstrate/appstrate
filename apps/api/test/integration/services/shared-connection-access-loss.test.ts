@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, inArray, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   authHeaders,
   createTestContext,
@@ -49,11 +49,8 @@ import {
 } from "../../../src/services/organizations.ts";
 import { removeSpaceMember } from "../../../src/services/space-members.ts";
 import { updateSpace } from "../../../src/services/spaces.ts";
-import {
-  shareConnection,
-  unshareConnection,
-  type ConnectionViewer,
-} from "../../../src/services/connection-shares.ts";
+import { shareConnection, unshareConnection } from "../../../src/services/connection-shares.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
@@ -171,21 +168,29 @@ describe("unsharing on access loss", () => {
     shares.map((share) => share.connectionId);
 
   /** The owner's own view of their connection, from the account surface. */
-  const ownerViewer = (userId: string): ConnectionViewer => ({
-    principal: { kind: "person", actor: { type: "user", id: userId } },
-    spaceId: null,
-    integrationId: INTEGRATION,
-    governs: false,
-    permissionsIn: async () => presetPermissions("operator"),
-  });
+  const ownerViewer = (userId: string): ConnectionCaller =>
+    testCaller(
+      { kind: "person", actor: { type: "user", id: userId } },
+      { permissionsIn: async () => presetPermissions("operator") },
+    );
 
   /** The owner shares their connection into `spaceId`, from the account surface. */
   const shareAs = (userId: string, connectionId: string, spaceId: string) =>
-    shareConnection({ connectionId, spaceId, viewer: ownerViewer(userId) });
+    shareConnection({
+      connectionId,
+      spaceId,
+      integrationId: INTEGRATION,
+      caller: ownerViewer(userId),
+    });
 
   /** The owner withdraws their connection from `spaceId`, from the account surface. */
   const unshareAs = (userId: string, connectionId: string, spaceId: string) =>
-    unshareConnection({ connectionId, spaceId, viewer: ownerViewer(userId) });
+    unshareConnection({
+      connectionId,
+      spaceId,
+      integrationId: INTEGRATION,
+      caller: ownerViewer(userId),
+    });
 
   describe("org exit", () => {
     async function seedExitFixture() {

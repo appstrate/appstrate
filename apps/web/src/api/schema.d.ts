@@ -1686,7 +1686,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can use for an integration
-         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.
+         * @description Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.
          */
         get: operations["listIntegrationConnections"];
         put?: never;
@@ -5908,9 +5908,9 @@ export interface components {
                 spaceId: string | null;
                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                 shared_here: boolean;
-                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                 shared_space_ids?: string[];
-                /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                 origin_space_id?: string | null;
                 needs_reconnection: boolean;
                 missing_scopes: string[];
@@ -12860,14 +12860,17 @@ export interface operations {
                             spaceId: string | null;
                             /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                             shared_here: boolean;
-                            /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                            /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
-                            /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                            /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                             allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                            /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
-                            shareable_space_ids?: string[];
+                            /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                            shareable_spaces?: {
+                                id: string;
+                                name: string;
+                            }[];
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
                             /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13027,14 +13030,17 @@ export interface operations {
                                 spaceId: string | null;
                                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                                 shared_here: boolean;
-                                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
-                                /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                                /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                                 allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                                /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
-                                shareable_space_ids?: string[];
+                                /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                                shareable_spaces?: {
+                                    id: string;
+                                    name: string;
+                                }[];
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
                                 /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13222,14 +13228,17 @@ export interface operations {
                         spaceId: string | null;
                         /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                         shared_here: boolean;
-                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
-                        /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                        /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                         allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
-                        shareable_space_ids?: string[];
+                        /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                        shareable_spaces?: {
+                            id: string;
+                            name: string;
+                        }[];
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13610,14 +13619,17 @@ export interface operations {
                             spaceId: string | null;
                             /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                             shared_here: boolean;
-                            /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                            /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                             shared_space_ids?: string[];
-                            /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                            /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                             origin_space_id?: string | null;
                             /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                             allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                            /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
-                            shareable_space_ids?: string[];
+                            /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                            shareable_spaces?: {
+                                id: string;
+                                name: string;
+                            }[];
                             /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
                             /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13704,14 +13716,17 @@ export interface operations {
                         spaceId: string | null;
                         /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                         shared_here: boolean;
-                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                         shared_space_ids?: string[];
-                        /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                        /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                         origin_space_id?: string | null;
                         /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                         allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                        /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
-                        shareable_space_ids?: string[];
+                        /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                        shareable_spaces?: {
+                            id: string;
+                            name: string;
+                        }[];
                         /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -13774,7 +13789,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed `spaceId` (`validation_failed`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
+            /** @description A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
             400: components["responses"]["ValidationError"];
             /** @description The caller is not the owner of the connection; a credential bound to another space than the target; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`). */
             403: components["responses"]["Forbidden"];
@@ -13823,7 +13838,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed `spaceId` (`validation_failed`). */
+            /** @description A malformed `spaceId` (`invalid_request`). */
             400: components["responses"]["ValidationError"];
             /** @description The caller is neither the owner nor a principal holding `integrations:configure` in the space the request is made from; a governor naming another space than the request's; or a credential bound to another space than the target. */
             403: components["responses"]["Forbidden"];
@@ -14389,14 +14404,17 @@ export interface operations {
                                 spaceId: string | null;
                                 /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
                                 shared_here: boolean;
-                                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read. */
+                                /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
                                 shared_space_ids?: string[];
-                                /** @description Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted. */
+                                /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
                                 origin_space_id?: string | null;
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
                                 allowed_actions?: ("rename" | "share" | "unshare_here")[];
-                                /** @description Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only. */
-                                shareable_space_ids?: string[];
+                                /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                                shareable_spaces?: {
+                                    id: string;
+                                    name: string;
+                                }[];
                                 /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
                                 /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
@@ -15548,7 +15566,7 @@ export interface operations {
                                 }[];
                                 /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
                                 allowed_actions: ("rename" | "share" | "unshare_here")[];
-                                /** @description The spaces the caller may share this connection into. */
+                                /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. */
                                 shareable_spaces: {
                                     id: string;
                                     name: string;
@@ -15633,7 +15651,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Renamed — returns the connection as the account list shows it */
+            /** @description Renamed — returns the bare connection resource, as the space door does */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -15642,56 +15660,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        connection_id: string;
-                        /** @enum {string} */
-                        kind: "integration";
-                        label: string;
-                        scopes_granted: string[];
-                        /** Format: date-time */
-                        connected_at: string;
-                        needs_reconnection: boolean;
-                        expiresAt: string | null;
-                        /** @description First identity claim (`account_email`, `email`, `sub`), else the account id, else the label. */
-                        identity: string;
-                        /** @description Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one. */
-                        reused_by_agents: number;
+                        /** Format: uuid */
+                        id: string;
+                        integration_package_id: string;
                         auth_key: string;
+                        account_id: string;
+                        identity_claims: {
+                            [key: string]: unknown;
+                        } | null;
+                        scopes_granted: string[];
+                        needs_reconnection: boolean;
+                        /** Format: date-time */
+                        expiresAt: string | null;
+                        /** @enum {string} */
+                        owner_type: "user" | "end_user";
+                        owner_id: string;
+                        /** @description Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own. */
+                        owner_name?: string | null;
+                        /**
+                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default. Returned by the list surfaces only, like `owner_name`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.
+                         * @enum {string|null}
+                         */
+                        locked_by?: "admin_pin" | "org_default" | null;
+                        /** @description User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label. */
+                        label: string;
                         /**
                          * @description Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org. `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.
                          * @enum {string}
                          */
                         scope: "org" | "space";
-                        /** @description The spaces whose members may use it. */
-                        shared_spaces: {
-                            id: string;
-                            name: string;
-                        }[];
-                        /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). */
-                        allowed_actions: ("rename" | "share" | "unshare_here")[];
-                        /** @description The spaces the caller may share this connection into. */
-                        shareable_spaces: {
-                            id: string;
-                            name: string;
-                        }[];
-                        /**
-                         * @description What binds this connection for every member of the space: `admin_pin` when an admin pin names it (takes precedence), `org_default` when an org default does; null when unlocked. While locked, unsharing or deleting it is refused with 409 `connection_pinned` until an admin removes it from the pin or default.
-                         * @enum {string|null}
-                         */
-                        locked_by: "admin_pin" | "org_default" | null;
-                        org: {
-                            id: string;
-                            name: string;
-                        };
                         /** @description The one space a space-scoped connection lives in; `null` for an org-scoped one. */
-                        space: {
+                        spaceId: string | null;
+                        /** @description Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses). */
+                        shared_here: boolean;
+                        /** @description Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else. */
+                        shared_space_ids?: string[];
+                        /** @description Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else. */
+                        origin_space_id?: string | null;
+                        /** @description What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space). List surfaces only. */
+                        allowed_actions?: ("rename" | "share" | "unshare_here")[];
+                        /** @description The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only. List surfaces only. */
+                        shareable_spaces?: {
                             id: string;
                             name: string;
+                        }[];
+                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        client_ref: string | null;
+                        /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
+                        variables: {
+                            [key: string]: string;
                         } | null;
-                        /** @description The space an org-scoped connection was connected from; `null` for a space-scoped one, or once that space is deleted. */
-                        origin_space: {
-                            id: string;
-                            name: string;
-                        } | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /** Format: date-time */
+                        updatedAt: string;
                     };
                 };
             };
@@ -15814,7 +15836,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed `spaceId` (`validation_failed`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
+            /** @description A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`). */
@@ -15856,7 +15878,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A malformed `spaceId` (`validation_failed`). */
+            /** @description A malformed `spaceId` (`invalid_request`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`, or a credential bound to another space than the target. */

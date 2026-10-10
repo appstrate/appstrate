@@ -50,17 +50,15 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   listMeConnections,
-  getMeConnection,
   getConnectionDeleteImpact,
   noConnectionDeleteImpact,
-  type MeConnectionReader,
 } from "../services/me-connections.ts";
 import { meConnectionAuthorityFilter } from "../services/connection-reach.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
-import { connectionPrincipal, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { callerOrgRole, callerPermissionsInSpace, resolveListingViewAs } from "../lib/view-as.ts";
-import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
+import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
+import { callerPermissions } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
@@ -81,10 +79,12 @@ import {
   applyConnectionRename,
   applyConnectionShare,
   applyConnectionUnshare,
+  connectionCaller,
+  readConnectionId,
   readShareSpaceId,
   updateConnectionSchema,
+  type ConnectionEdit,
 } from "./integrations.ts";
-import type { ConnectionViewer } from "../services/connection-shares.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -95,19 +95,11 @@ import { listRecentForActor } from "../services/state/runs.ts";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { forbidden, notFound, unauthorized } from "../lib/errors.ts";
+import { forbidden, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
-
-/** What the `/me` connection projection asks of the caller's credential. */
-function meReader(c: Context<AppEnv>): MeConnectionReader {
-  return {
-    canConnect: ceilingAllows(c, "integrations:connect"),
-    permissionsIn: (spaceId, orgId) => callerPermissionsInSpace(c, spaceId, orgId),
-  };
-}
 
 /**
  * GET /api/me/orgs — list orgs the authenticated caller belongs to.
@@ -204,7 +196,7 @@ router.get("/orgs", async (c) => {
  * package) in both cases.
  */
 router.get("/connections", requireCeiling("integrations", "read"), async (c) => {
-  const groups = await listMeConnections(connectionPrincipal(c), meReader(c));
+  const groups = await listMeConnections(connectionCaller(c, null));
   return c.json(listResponse(groups));
 });
 
@@ -332,67 +324,25 @@ router.delete(
   },
 );
 
-/** The org of the caller's connection within the credential's binding; `/me/*` has no org context. */
-async function ownConnectionOrg(
-  principal: ConnectionPrincipal,
-  connectionId: string,
-): Promise<string | null> {
-  const [row] = await db
-    .select({ orgId: integrationConnections.orgId })
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        actorFilter(principal.actor, integrationConnections),
-        meConnectionAuthorityFilter(principal),
-      ),
-    )
-    .limit(1);
-  return row?.orgId ?? null;
-}
-
 /**
- * The owner's edit doors on the account surface: ownership (inside the credential's binding) is
- * proven here, so the services see no request space; a miss is a 404.
+ * The owner's edit doors on the account surface: no request space, so the services reach only the
+ * caller's own rows inside its credential's binding; a miss is a 404.
  */
-async function ownConnectionViewer(
-  c: Context<AppEnv>,
-  connectionId: string,
-): Promise<{ orgId: string; viewer: ConnectionViewer }> {
-  if (!z.uuid().safeParse(connectionId).success) {
-    throw notFound(`Connection '${connectionId}' not found`);
-  }
-  const principal = connectionPrincipal(c);
-  const orgId = await ownConnectionOrg(principal, connectionId);
-  if (!orgId) throw notFound(`Connection '${connectionId}' not found`);
-  return {
-    orgId,
-    viewer: {
-      principal,
-      spaceId: null,
-      integrationId: null,
-      governs: false,
-      permissionsIn: (spaceId) => callerPermissionsInSpace(c, spaceId, orgId),
-    },
-  };
+function meEdit(c: Context<AppEnv>): ConnectionEdit {
+  return { caller: connectionCaller(c, null), integrationId: null };
 }
 
 router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
-  const connectionId = c.req.param("connectionId")!;
-  const { viewer } = await ownConnectionViewer(c, connectionId);
+  const connectionId = readConnectionId(c);
   const body = await readJsonBody(c, updateConnectionSchema);
-  await applyConnectionRename(c, viewer, connectionId, body.label);
-  return c.json(await getMeConnection(viewer.principal, connectionId, meReader(c)));
+  return c.json(await applyConnectionRename(c, meEdit(c), connectionId, body.label));
 });
 
 router.put(
   "/connections/:connectionId/shares/:spaceId",
   requireCeiling("integrations", "connect"),
   async (c) => {
-    const connectionId = c.req.param("connectionId")!;
-    const { viewer } = await ownConnectionViewer(c, connectionId);
-    const spaceId = readShareSpaceId(c);
-    await applyConnectionShare(c, viewer, connectionId, spaceId);
+    await applyConnectionShare(c, meEdit(c), readConnectionId(c), readShareSpaceId(c));
     return c.body(null, 204);
   },
 );
@@ -401,10 +351,7 @@ router.delete(
   "/connections/:connectionId/shares/:spaceId",
   requireCeiling("integrations", "connect"),
   async (c) => {
-    const connectionId = c.req.param("connectionId")!;
-    const { viewer } = await ownConnectionViewer(c, connectionId);
-    const spaceId = readShareSpaceId(c);
-    await applyConnectionUnshare(c, viewer, connectionId, spaceId);
+    await applyConnectionUnshare(c, meEdit(c), readConnectionId(c), readShareSpaceId(c));
     return c.body(null, 204);
   },
 );

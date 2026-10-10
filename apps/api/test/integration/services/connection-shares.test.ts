@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -32,11 +32,8 @@ import {
 } from "@appstrate/db/schema";
 import type { Permission } from "../../../src/lib/permissions.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
-import {
-  shareConnection,
-  unshareConnection,
-  type ConnectionViewer,
-} from "../../../src/services/connection-shares.ts";
+import { shareConnection, unshareConnection } from "../../../src/services/connection-shares.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
 
 const INTEGRATION = "@official/gmail";
 
@@ -75,10 +72,7 @@ async function seedConnection(opts: {
 
 async function sharesOf(connectionId: string) {
   return db
-    .select({
-      spaceId: integrationConnectionShares.spaceId,
-      sharedBy: integrationConnectionShares.sharedBy,
-    })
+    .select({ spaceId: integrationConnectionShares.spaceId })
     .from(integrationConnectionShares)
     .where(eq(integrationConnectionShares.connectionId, connectionId));
 }
@@ -107,44 +101,60 @@ describe("connection shares", () => {
   const person = (id: string): Actor => ({ type: "user", id });
 
   /** The owner on the account surface (no request space), holding `permissions` in every target. */
-  const owner = (permissions = CONNECT, spaceId: string | null = null): ConnectionViewer => ({
-    principal: { kind: "person", actor: person(memberId) },
-    spaceId,
-    integrationId: INTEGRATION,
-    governs: false,
-    permissionsIn: async () => permissions,
-  });
+  const owner = (permissions = CONNECT): ConnectionCaller =>
+    testCaller(
+      { kind: "person", actor: person(memberId) },
+      { permissionsIn: async () => permissions },
+    );
 
   /** The org owner governing `here`, never the row's owner. */
-  const governor = (): ConnectionViewer => ({
-    principal: { kind: "person", actor: person(ctx.user.id) },
-    spaceId: here,
-    integrationId: INTEGRATION,
-    governs: true,
-    permissionsIn: async () => GOVERN,
-  });
+  const governor = (): ConnectionCaller =>
+    testCaller(
+      { kind: "person", actor: person(ctx.user.id) },
+      { spaceId: here, governs: true, permissionsIn: async () => GOVERN },
+    );
 
-  it("the owner shares once: added, then idempotent, one row attributed to the owner", async () => {
+  it("the owner shares once: added, then idempotent, one row", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
-    const first = await shareConnection({ connectionId: id, spaceId: other, viewer: owner() });
+    const first = await shareConnection({
+      connectionId: id,
+      spaceId: other,
+      integrationId: INTEGRATION,
+      caller: owner(),
+    });
     expect(first.added).toBe(true);
-    const second = await shareConnection({ connectionId: id, spaceId: other, viewer: owner() });
+    const second = await shareConnection({
+      connectionId: id,
+      spaceId: other,
+      integrationId: INTEGRATION,
+      caller: owner(),
+    });
     expect(second.added).toBe(false);
-    expect(await sharesOf(id)).toEqual([{ spaceId: other, sharedBy: memberId }]);
+    expect(await sharesOf(id)).toEqual([{ spaceId: other }]);
   });
 
   it("refuses a governor's share of a colleague's row (403)", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
     await seedShare(id, here);
     await expect(
-      shareConnection({ connectionId: id, spaceId: here, viewer: governor() }),
+      shareConnection({
+        connectionId: id,
+        spaceId: here,
+        integrationId: INTEGRATION,
+        caller: governor(),
+      }),
     ).rejects.toMatchObject({ status: 403 });
   });
 
   it("refuses a space-scoped row into another space (400 invalid_share_target)", async () => {
     const id = await seedConnection({ spaceId: here, userId: memberId });
     await expect(
-      shareConnection({ connectionId: id, spaceId: other, viewer: owner() }),
+      shareConnection({
+        connectionId: id,
+        spaceId: other,
+        integrationId: INTEGRATION,
+        caller: owner(),
+      }),
     ).rejects.toMatchObject({ status: 400, code: "invalid_share_target" });
     expect(await sharesOf(id)).toEqual([]);
   });
@@ -157,13 +167,11 @@ describe("connection shares", () => {
       shareConnection({
         connectionId: id,
         spaceId: here,
-        viewer: {
-          principal: { kind: "delegated", actor, orgId: ctx.orgId, spaceId: here },
-          spaceId: here,
-          integrationId: INTEGRATION,
-          governs: false,
-          permissionsIn: async () => CONNECT,
-        },
+        integrationId: INTEGRATION,
+        caller: testCaller(
+          { kind: "delegated", actor, orgId: ctx.orgId, spaceId: here },
+          { spaceId: here, permissionsIn: async () => CONNECT },
+        ),
       }),
     ).rejects.toMatchObject({ status: 409, code: "end_user_connection_not_shareable" });
   });
@@ -171,7 +179,12 @@ describe("connection shares", () => {
   it("refuses a target where the owner lacks integrations:connect (403)", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
     await expect(
-      shareConnection({ connectionId: id, spaceId: other, viewer: owner(NOTHING) }),
+      shareConnection({
+        connectionId: id,
+        spaceId: other,
+        integrationId: INTEGRATION,
+        caller: owner(NOTHING),
+      }),
     ).rejects.toMatchObject({ status: 403 });
     expect(await sharesOf(id)).toEqual([]);
   });
@@ -180,12 +193,18 @@ describe("connection shares", () => {
     await seedPlacedPackage(other, INTEGRATION, { blockUserConnections: true });
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
     await expect(
-      shareConnection({ connectionId: id, spaceId: other, viewer: owner(CONNECT) }),
+      shareConnection({
+        connectionId: id,
+        spaceId: other,
+        integrationId: INTEGRATION,
+        caller: owner(CONNECT),
+      }),
     ).rejects.toMatchObject({ status: 403, code: "connection_blocked_by_admin" });
     const { added } = await shareConnection({
       connectionId: id,
       spaceId: other,
-      viewer: owner(GOVERN),
+      integrationId: INTEGRATION,
+      caller: owner(GOVERN),
     });
     expect(added).toBe(true);
   });
@@ -195,12 +214,18 @@ describe("connection shares", () => {
     await seedShare(id, here);
     await seedShare(id, other);
     await expect(
-      unshareConnection({ connectionId: id, spaceId: other, viewer: governor() }),
+      unshareConnection({
+        connectionId: id,
+        spaceId: other,
+        integrationId: INTEGRATION,
+        caller: governor(),
+      }),
     ).rejects.toMatchObject({ status: 403 });
     const { removed } = await unshareConnection({
       connectionId: id,
       spaceId: here,
-      viewer: governor(),
+      integrationId: INTEGRATION,
+      caller: governor(),
     });
     expect(removed).toBe(true);
     expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([other]);
@@ -219,14 +244,24 @@ describe("connection shares", () => {
       connectionIds: [id],
     });
     await expect(
-      unshareConnection({ connectionId: id, spaceId: here, viewer: owner() }),
+      unshareConnection({
+        connectionId: id,
+        spaceId: here,
+        integrationId: INTEGRATION,
+        caller: owner(),
+      }),
     ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
     expect((await sharesOf(id)).map((s) => s.spaceId)).toEqual([here]);
   });
 
   it("withdrawing a share that does not exist reports removed: false", async () => {
     const id = await seedConnection({ spaceId: here, orgScope: true, userId: memberId });
-    const result = await unshareConnection({ connectionId: id, spaceId: other, viewer: owner() });
+    const result = await unshareConnection({
+      connectionId: id,
+      spaceId: other,
+      integrationId: INTEGRATION,
+      caller: owner(),
+    });
     expect(result).toMatchObject({ removed: false, disabledScheduleIds: [] });
   });
 
@@ -246,7 +281,8 @@ describe("connection shares", () => {
     const { disabledScheduleIds } = await unshareConnection({
       connectionId: id,
       spaceId: here,
-      viewer: owner(),
+      integrationId: INTEGRATION,
+      caller: owner(),
     });
 
     expect(disabledScheduleIds).toEqual([schedule.id]);

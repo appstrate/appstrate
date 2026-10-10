@@ -53,7 +53,7 @@ import {
   type OAuthClientResolver,
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
-import type { IntegrationOAuthClient, OrgRole } from "@appstrate/shared-types";
+import type { IntegrationOAuthClient } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -76,12 +76,20 @@ import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-err
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { db } from "@appstrate/db/client";
+import { connectionPrincipal } from "../lib/connection-principal.ts";
 import {
-  boundSpaceOf,
-  connectionPrincipal,
-  type ConnectionPrincipal,
-} from "../lib/connection-principal.ts";
-import { callerOrgRole, callerPermissionsInSpace } from "../lib/view-as.ts";
+  callerPermissionsInSpace,
+  callerPersonalOwnerId,
+  effectiveInSpace,
+  orgHalfFor,
+  personaFor,
+  personaMemberships,
+} from "../lib/view-as.ts";
+import { ceilingAllows } from "../lib/permissions.ts";
+import { assertSpaceId } from "../lib/ids.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
+import type { ConnectionCaller, SpaceSeen } from "../services/connection-reach.ts";
+import { listSpacesForPrincipal } from "../services/spaces.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
@@ -102,11 +110,12 @@ import {
   resolveIntegrationActivations,
   resolveIntegrationClientById,
   serializeIntegrationConnection,
+  connectionViewOf,
   setDefaultIntegrationClient,
   toPublicClient,
   updateIntegrationOAuthClient,
   usesAutoProvisionedClient,
-  type ConnectionListReader,
+  type IntegrationConnectionSummary,
   type ReconnectTarget,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
@@ -139,15 +148,13 @@ import {
   listIntegrationPins,
   pinAudit,
   pinAuditResourceId,
-  renameConnection,
   setBlockUserConnections,
   upsertIntegrationPin,
 } from "../services/integration-pins-service.ts";
 import {
+  renameConnection,
   shareConnection,
-  shareTargetSpaces,
   unshareConnection,
-  type ConnectionViewer,
 } from "../services/connection-shares.ts";
 import {
   getOrgDefault,
@@ -276,22 +283,20 @@ export const updateConnectionSchema = z
   })
   .strict();
 
-const shareSpaceIdSchema = z.string().min(1).max(100);
-
-/** The `spaceId` path segment of a share door; 400 `validation_failed` when malformed. */
+/** The `spaceId` path segment of a share door; 400 when it is not a space id. */
 export function readShareSpaceId(c: Context<AppEnv>): string {
-  const parsed = shareSpaceIdSchema.safeParse(c.req.param("spaceId"));
-  if (!parsed.success) {
-    throw validationFailed([
-      {
-        field: "spaceId",
-        code: "invalid_space_id",
-        title: "Invalid Space Id",
-        message: "spaceId must be 1 to 100 characters",
-      },
-    ]);
+  const spaceId = c.req.param("spaceId")!;
+  assertSpaceId(spaceId, "spaceId");
+  return spaceId;
+}
+
+/** A connection id hits a `uuid` column: anything else cannot exist → 404, never a PG 500. */
+export function readConnectionId(c: Context<AppEnv>): string {
+  const connectionId = c.req.param("connectionId")!;
+  if (!z.uuid().safeParse(connectionId).success) {
+    throw notFound(`Connection '${connectionId}' not found`);
   }
-  return parsed.data;
+  return connectionId;
 }
 
 const oauthClientSchema = z
@@ -592,18 +597,8 @@ async function completeConnect(
   ctx: ConnectContext,
   input: ConnectCompleteInput,
 ) {
-  const target =
-    ctx.target ??
-    (ctx.connectionId
-      ? await readReconnectTarget({
-          connectionId: ctx.connectionId,
-          spaceId: ctx.scope.spaceId,
-          integrationId: ctx.integrationId,
-          authKey: ctx.authKey,
-          actor: ctx.actor,
-        })
-      : null);
-  const conn = await strategy.complete(target ? { ...ctx, target } : ctx, input);
+  const target = ctx.target;
+  const conn = await strategy.complete(ctx, input);
   const after = { packageId: ctx.integrationId, authKey: ctx.authKey, accountId: conn.account_id };
   const scopes =
     target &&
@@ -628,6 +623,24 @@ async function completeConnect(
     });
   }
   return { conn, audits };
+}
+
+/**
+ * The reconnect target a signed connect context names, read once; 404 when the row is gone or out
+ * of the actor's reach.
+ */
+async function signedReconnectTarget(
+  ctx: Pick<ConnectContext, "scope" | "actor" | "integrationId" | "authKey">,
+  connectionId: string | undefined,
+): Promise<ReconnectTarget | undefined> {
+  if (!connectionId) return undefined;
+  const target = await readReconnectTarget({
+    ...ctx,
+    spaceId: ctx.scope.spaceId,
+    connectionId,
+  });
+  if (!target) throw notFound("Connection not found");
+  return target;
 }
 
 /** The OAuth state holds only `clientRef`; the callback resolves it as token refresh does. */
@@ -716,7 +729,6 @@ async function beginHostedOAuth(
     const result = await begin(
       {
         ...ctx,
-        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
         ...(target ? { target } : {}),
         ...(claims.delegated ? { delegated: true } : {}),
         ...(variables ? { variables } : {}),
@@ -873,12 +885,16 @@ export function createIntegrationsRouter() {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
-      const ctx: ConnectContext = {
+      const base = {
         scope,
         actor: result.actor,
         integrationId: result.packageId,
         authKey: result.authKey,
-        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+      };
+      const target = await signedReconnectTarget(base, result.connectionId);
+      const ctx: ConnectContext = {
+        ...base,
+        ...(target ? { target } : {}),
         ...(result.delegated ? { delegated: true } : {}),
         ...(result.variables ? { variables: result.variables } : {}),
       };
@@ -922,7 +938,7 @@ export function createIntegrationsRouter() {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, connectionReader(c));
+    const status = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
     return c.json(status);
   });
 
@@ -1038,7 +1054,7 @@ export function createIntegrationsRouter() {
           actor,
           integrationId: packageId,
           authKey,
-          ...(target ? { connectionId: target.id, target } : {}),
+          ...(target ? { target } : {}),
           delegated: principal.kind === "delegated",
           ...(body.variables ? { variables: body.variables } : {}),
         };
@@ -1100,7 +1116,7 @@ export function createIntegrationsRouter() {
           actor,
           integrationId: packageId,
           authKey,
-          ...(target ? { connectionId: target.id, target } : {}),
+          ...(target ? { target } : {}),
           delegated: principal.kind === "delegated",
           ...(body.variables ? { variables: body.variables } : {}),
         },
@@ -1370,12 +1386,16 @@ export function createIntegrationsRouter() {
         ? { ...submittedCredentials, ...provisioned }
         : submittedCredentials;
 
-      const ctx: ConnectContext = {
+      const base = {
         scope,
         actor,
         integrationId: claims.package_id,
         authKey: claims.auth_key,
-        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+      };
+      const target = await signedReconnectTarget(base, claims.connection_id);
+      const ctx: ConnectContext = {
+        ...base,
+        ...(target ? { target } : {}),
         ...(claims.delegated ? { delegated: true } : {}),
         ...(body.variables ? { variables: body.variables } : {}),
       };
@@ -1410,7 +1430,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const items = await listIntegrationConnections(scope, packageId, connectionReader(c));
+      const items = await listIntegrationConnections(scope, packageId, ...spaceListCaller(c));
       return c.json(listResponse(items));
     },
   );
@@ -1438,7 +1458,7 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap (#657).
-      const detail = await getIntegrationAuthStatuses(scope, packageId, connectionReader(c));
+      const detail = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
       return c.json(detail);
     },
   );
@@ -1575,37 +1595,12 @@ export function createIntegrationsRouter() {
     },
   );
 
-  /** A connection id hits a `uuid` column: anything else cannot exist → 404, never a PG 500. */
-  const connectionIdParam = (c: Context<AppEnv>): string => {
-    const connectionId = c.req.param("connectionId")!;
-    if (!z.uuid().safeParse(connectionId).success) {
-      throw notFound(`Connection '${connectionId}' not found`);
-    }
-    return connectionId;
-  };
-
   router.patch(
     "/:packageId{@[^/]+/[^/]+}/connections/:connectionId",
     requirePermission("integrations", "connect"),
     async (c) => {
-      const connectionId = connectionIdParam(c);
       const body = await readJsonBody(c, updateConnectionSchema);
-      const viewer = spaceConnectionViewer(c);
-      const { connection, isOwner } = await applyConnectionRename(
-        c,
-        viewer,
-        connectionId,
-        body.label,
-      );
-      const shares = await loadConnectionShares(db, [connection.id]);
-      return c.json(
-        serializeIntegrationConnection(connection, {
-          owner: isOwner,
-          ownerView: isOwner && viewer.principal.kind === "person",
-          here: viewer.spaceId,
-          shares: shares.get(connection.id) ?? [],
-        }),
-      );
+      return c.json(await applyConnectionRename(c, spaceEdit(c), readConnectionId(c), body.label));
     },
   );
 
@@ -1613,9 +1608,7 @@ export function createIntegrationsRouter() {
     "/:packageId{@[^/]+/[^/]+}/connections/:connectionId/shares/:spaceId",
     requirePermission("integrations", "connect"),
     async (c) => {
-      const connectionId = connectionIdParam(c);
-      const spaceId = readShareSpaceId(c);
-      await applyConnectionShare(c, spaceConnectionViewer(c), connectionId, spaceId);
+      await applyConnectionShare(c, spaceEdit(c), readConnectionId(c), readShareSpaceId(c));
       return c.body(null, 204);
     },
   );
@@ -1624,9 +1617,7 @@ export function createIntegrationsRouter() {
     "/:packageId{@[^/]+/[^/]+}/connections/:connectionId/shares/:spaceId",
     requirePermission("integrations", "connect"),
     async (c) => {
-      const connectionId = connectionIdParam(c);
-      const spaceId = readShareSpaceId(c);
-      await applyConnectionUnshare(c, spaceConnectionViewer(c), connectionId, spaceId);
+      await applyConnectionUnshare(c, spaceEdit(c), readConnectionId(c), readShareSpaceId(c));
       return c.body(null, 204);
     },
   );
@@ -1648,74 +1639,98 @@ function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
   return c.get("permissions")?.has("integrations:configure") ?? false;
 }
 
-/** The caller as the space door's connection edits see it. */
-function spaceConnectionViewer(c: Context<AppEnv>): ConnectionViewer {
-  const { orgId, spaceId } = getSpaceScope(c);
+/**
+ * {@link callerPermissionsInSpace} for every space of `orgId` the caller sees, from one listing:
+ * the role the persona previews, if any, over the caller's real org role `orgRole`.
+ */
+async function callerSpacesSeen(
+  c: Context<AppEnv>,
+  orgId: string,
+  orgRole: OrgRole,
+): Promise<SpaceSeen[]> {
+  const userId = c.get("user")?.id;
+  if (!userId) return [];
+  const persona = personaFor(c, orgId);
+  const listed = await listSpacesForPrincipal(
+    orgId,
+    persona?.orgRole ?? orgRole,
+    userId,
+    callerPersonalOwnerId(c, orgId),
+    personaMemberships(persona),
+  );
+  const orgHalf = orgHalfFor(c, orgId, orgRole).orgPermissions;
+  return listed.map(({ space, role }) => ({
+    id: space.id,
+    name: space.name,
+    permissions: effectiveInSpace(c, role, orgHalf),
+  }));
+}
+
+/** The caller of a connection door, from the request space or, on `/me`, from none (`null`). */
+export function connectionCaller(c: Context<AppEnv>, spaceId: string | null): ConnectionCaller {
   return {
     principal: connectionPrincipal(c),
     spaceId,
-    integrationId: c.req.param("packageId")!,
-    governs: canConfigureIntegrations(c),
-    permissionsIn: (target) => callerPermissionsInSpace(c, target, orgId),
+    canConnect:
+      spaceId === null
+        ? ceilingAllows(c, "integrations:connect")
+        : (c.get("permissions")?.has("integrations:connect") ?? false),
+    governs: spaceId !== null && canConfigureIntegrations(c),
+    permissionsIn: (target, orgId) => callerPermissionsInSpace(c, target, orgId),
+    spacesSeen: (orgId, orgRole) => callerSpacesSeen(c, orgId, orgRole),
   };
 }
 
-/**
- * The caller as a space's connection list projects it. Where the owner may share is resolved only
- * for a member's credential holding an org role, by the rule the share door enforces (a credential
- * bound to a space: that space only), and only when the list holds a row it may share.
- */
-function connectionReader(c: Context<AppEnv>): ConnectionListReader {
-  const { orgId, spaceId } = getSpaceScope(c);
-  const principal: ConnectionPrincipal = connectionPrincipal(c);
-  const orgRole: OrgRole | undefined = callerOrgRole(c, orgId);
-  const actor = principal.actor;
+/** A space list's caller and its real org role there (`null`: none, an end-user token). */
+function spaceListCaller(c: Context<AppEnv>): [ConnectionCaller, OrgRole | null] {
+  return [connectionCaller(c, getSpaceScope(c).spaceId), c.get("orgRole") ?? null];
+}
+
+/** The caller of a space door's connection edit, which names its integration. */
+function spaceEdit(c: Context<AppEnv>): ConnectionEdit {
   return {
-    principal,
-    spaceId,
-    canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
-    governs: canConfigureIntegrations(c),
-    shareTargets:
-      actor.type === "user" && orgRole
-        ? () =>
-            shareTargetSpaces({
-              orgId,
-              orgRole,
-              userId: actor.id,
-              boundSpaceId: boundSpaceOf(principal),
-              permissionsIn: (target) => callerPermissionsInSpace(c, target, orgId),
-            })
-        : null,
+    caller: connectionCaller(c, getSpaceScope(c).spaceId),
+    integrationId: c.req.param("packageId")!,
   };
 }
 
-/** Both rename doors: rename, audit, return the row. */
+/** Who edits a connection, and the integration the door names (`null` on `/me`, which names none). */
+export interface ConnectionEdit {
+  caller: ConnectionCaller;
+  integrationId: string | null;
+}
+
+/** Both rename doors: rename, audit, return the row as its caller sees it. */
 export async function applyConnectionRename(
   c: Context<AppEnv>,
-  viewer: ConnectionViewer,
+  edit: ConnectionEdit,
   connectionId: string,
   label: string,
-): Promise<Awaited<ReturnType<typeof renameConnection>>> {
-  const result = await renameConnection({ connectionId, viewer, label });
+): Promise<IntegrationConnectionSummary> {
+  const connection = await renameConnection({ ...edit, connectionId, label });
   // `/me/*` carries no org context: the audit names the connection's org.
   await recordAuditFromContext(c, {
     action: "integration.connection.metadata.updated",
     resourceType: "integration_connection",
     resourceId: connectionId,
     after: { label },
-    orgIdOverride: result.connection.orgId,
+    orgIdOverride: connection.orgId,
   });
-  return result;
+  const shares = (await loadConnectionShares(db, [connectionId])).get(connectionId) ?? [];
+  return serializeIntegrationConnection(
+    connection,
+    connectionViewOf(edit.caller.principal, connection, edit.caller.spaceId, shares),
+  );
 }
 
 /** Both share doors; the share is recorded in the space it opens. */
 export async function applyConnectionShare(
   c: Context<AppEnv>,
-  viewer: ConnectionViewer,
+  edit: ConnectionEdit,
   connectionId: string,
   spaceId: string,
 ): Promise<void> {
-  const { connection, added } = await shareConnection({ connectionId, spaceId, viewer });
+  const { connection, added } = await shareConnection({ ...edit, connectionId, spaceId });
   if (!added) return;
   await recordAuditFromContext(c, {
     action: "integration.connection.share_added",
@@ -1730,14 +1745,14 @@ export async function applyConnectionShare(
 /** Both withdrawal doors: drop disabled schedules' jobs; recorded in the space it closes. */
 export async function applyConnectionUnshare(
   c: Context<AppEnv>,
-  viewer: ConnectionViewer,
+  edit: ConnectionEdit,
   connectionId: string,
   spaceId: string,
 ): Promise<void> {
   const { connection, removed, disabledScheduleIds } = await unshareConnection({
+    ...edit,
     connectionId,
     spaceId,
-    viewer,
   });
   await removeScheduleJobs(disabledScheduleIds);
   if (!removed) return;

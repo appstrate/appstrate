@@ -56,9 +56,9 @@ export interface ConnectionReach {
   spaceId: string | null;
   /** Shared into the space the request is made from; false where none is (account surface, connect responses). */
   shared_here: boolean;
-  /** The owner's own session only (absent otherwise): every space it is shared into. */
+  /** The owner only (absent otherwise): every space it is shared into, within its credential's binding. */
   shared_space_ids?: string[];
-  /** The owner's own session only (absent otherwise): where an org-scoped row was connected from. */
+  /** The owner only (absent otherwise): where an org-scoped row was connected from, within that binding. */
   origin_space_id?: string | null;
 }
 
@@ -108,8 +108,8 @@ export interface IntegrationConnection extends ConnectionReach {
   variables: Record<string, string> | null;
   /** Actions the caller may take on this row. Present on the list surfaces only, like `owner_name`. */
   allowed_actions?: ConnectionAction[];
-  /** Spaces the caller may share this row into. Owner only (its session or its credential). */
-  shareable_space_ids?: string[];
+  /** Spaces the caller may share this row into. The owner's, on the list surfaces only. */
+  shareable_spaces?: { id: string; name: string }[];
   createdAt: string;
   updatedAt: string;
 }

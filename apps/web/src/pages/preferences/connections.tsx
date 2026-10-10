@@ -12,9 +12,8 @@ import {
   useConnectionDeleteImpact,
   useDisconnectIntegrationConnection,
   useRenameMeConnection,
-  useShareMeConnection,
-  useUnshareMeConnection,
 } from "../../hooks/use-me-connections";
+import { useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -340,8 +339,8 @@ export function PreferencesConnectionsPage() {
 
   const disconnectIntegration = useDisconnectIntegrationConnection();
   const renameIntegration = useRenameMeConnection();
-  const shareIntegration = useShareMeConnection();
-  const unshareIntegration = useUnshareMeConnection();
+  const shareIntegration = useConnectionShare("share");
+  const unshareIntegration = useConnectionShare("unshare");
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmState, setConfirmState] = useState<{

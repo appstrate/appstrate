@@ -30,16 +30,10 @@ import {
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
 import { displayAccountId } from "../lib/connection-identity.ts";
-import {
-  boundSpaceOf,
-  sharesSeenBy,
-  type ConnectionPrincipal,
-} from "../lib/connection-principal.ts";
+import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
-import { notFound } from "../lib/errors.ts";
-import type { Permission } from "../lib/permissions.ts";
 import {
   getPackageDisplayName,
   notEphemeralFilter,
@@ -50,18 +44,17 @@ import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
 import {
   connectionLocks,
   connectionReach,
+  connectionViewOf,
   loadConnectionShares,
   planConnectionForget,
 } from "./integration-connections.ts";
 import {
   connectionActions,
   meConnectionAuthorityFilter,
-  shareableIn,
   usableInSpace,
-  type ConnectionReader,
-  type ShareTargets,
+  type ConnectionCaller,
 } from "./connection-reach.ts";
-import { shareTargetSpaces } from "./connection-shares.ts";
+import { shareableSpaces } from "./connection-shares.ts";
 import { listSpacesForPrincipal } from "./spaces.ts";
 import { spacePermissions } from "../lib/space-role.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
@@ -80,14 +73,6 @@ function pinAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
   return principal.kind === "delegated" && principal.spaceId
     ? eq(integrationPins.spaceId, principal.spaceId)
     : undefined;
-}
-
-/** What the `/me` listing asks of the caller's credential, beyond its principal. */
-export interface MeConnectionReader {
-  /** Holds `integrations:connect` where the credential acts. */
-  canConnect: boolean;
-  /** The caller's permissions in a space of one of its orgs. */
-  permissionsIn: (spaceId: string, orgId: string) => Promise<ReadonlySet<Permission>>;
 }
 
 /**
@@ -135,66 +120,15 @@ async function spacesServedToOwner(
 }
 
 /**
- * Per owned row that may be shared, the spaces it may be shared into, by the rule the share door
- * enforces (a credential bound to a space: that space only): one listing per org and one query per
- * org, never one per connection.
+ * Every connection the caller owns, within its credential's binding, grouped by integration; the
+ * connections of a group keep the order of the query. The route derives the principal from the
+ * credential, so a delegated credential is scoped to its own binding while a `person` principal
+ * keeps the cross-org dashboard view. Groups sorted by display name.
  */
-async function shareableSpacesByConnection(
-  principal: ConnectionPrincipal,
-  reader: MeConnectionReader,
-  rows: readonly {
-    connectionId: string;
-    orgId: string;
-    userId: string | null;
-    endUserId: string | null;
-    spaceId: string | null;
-  }[],
-  orgRoles: ReadonlyMap<string, OrgRole>,
-): Promise<Map<string, string[]>> {
-  const out = new Map<string, string[]>();
-  if (principal.actor.type !== "user") return out;
-  const userId = principal.actor.id;
-  const byOrg = new Map<string, string[]>();
-  for (const row of rows) {
-    if (!connectionActions(row, meReader(principal, reader), false).includes("share")) continue;
-    byOrg.set(row.orgId, [...(byOrg.get(row.orgId) ?? []), row.connectionId]);
-  }
-  await Promise.all(
-    [...byOrg].map(async ([orgId, ids]) => {
-      const orgRole = orgRoles.get(orgId);
-      if (!orgRole) return;
-      const targets: ShareTargets = await shareTargetSpaces({
-        orgId,
-        orgRole,
-        userId,
-        boundSpaceId: boundSpaceOf(principal),
-        permissionsIn: (spaceId) => reader.permissionsIn(spaceId, orgId),
-      });
-      if (targets.spaceIds.length === 0) return;
-      const found = await db
-        .select({ id: integrationConnections.id, spaceIds: shareableIn(targets) })
-        .from(integrationConnections)
-        .where(inArray(integrationConnections.id, ids));
-      for (const row of found) out.set(row.id, row.spaceIds);
-    }),
-  );
-  return out;
-}
-
-/** The reader a `/me` row is judged by: the credential acts from no space and governs none. */
-function meReader(principal: ConnectionPrincipal, reader: MeConnectionReader): ConnectionReader {
-  return { principal, spaceId: null, canConnect: reader.canConnect, governs: false };
-}
-
-/**
- * Every connection the principal owns, within its binding, optionally narrowed to `rowFilter`.
- * Groups them by integration; the connections of a group keep the order of the query.
- */
-async function listActorIntegrationConnections(
-  principal: ConnectionPrincipal,
-  reader: MeConnectionReader,
-  rowFilter: SQL | undefined,
+export async function listMeConnections(
+  caller: ConnectionCaller,
 ): Promise<MeConnectionSourceGroup[]> {
+  const principal = caller.principal;
   const actor = principal.actor;
   const rows = await db
     .select({
@@ -215,13 +149,7 @@ async function listActorIntegrationConnections(
       createdAt: integrationConnections.createdAt,
     })
     .from(integrationConnections)
-    .where(
-      and(
-        actorFilter(actor, integrationConnections),
-        meConnectionAuthorityFilter(principal),
-        rowFilter,
-      ),
-    );
+    .where(and(actorFilter(actor, integrationConnections), meConnectionAuthorityFilter(principal)));
 
   if (rows.length === 0) return [];
 
@@ -254,27 +182,25 @@ async function listActorIntegrationConnections(
     db,
     rows.map((r) => r.connectionId),
   );
-  const sharesOf = (connectionId: string) =>
-    sharesSeenBy(principal, shares.get(connectionId) ?? []);
   const reaches = new Map(
     rows.map((r) => [
       r.connectionId,
-      connectionReach(r, {
-        ownerView: principal.kind === "person",
-        here: null,
-        shares: sharesOf(r.connectionId),
-      }),
+      connectionReach(r, connectionViewOf(principal, r, null, shares.get(r.connectionId) ?? [])),
     ]),
   );
+  // The shares each row's caller sees (all of them, or its bound space's).
+  const sharesOf = (connectionId: string) => reaches.get(connectionId)!.shared_space_ids ?? [];
   // The spaces each row reaches by name: its home (its space, else its origin) and its shares.
   const reachedSpaces = (r: (typeof rows)[number]) => {
     const home = r.spaceId ?? reaches.get(r.connectionId)!.origin_space_id ?? null;
     return [...new Set([...(home ? [home] : []), ...sharesOf(r.connectionId)])];
   };
-  const shareable = await shareableSpacesByConnection(principal, reader, rows, orgRoles);
-  const uniqueSpaceIds = [
-    ...new Set([...rows.flatMap(reachedSpaces), ...[...shareable.values()].flat()]),
-  ];
+  const shareable = await shareableSpaces(
+    caller,
+    rows.map((r) => ({ ...r, id: r.connectionId })),
+    orgRoles,
+  );
+  const uniqueSpaceIds = [...new Set(rows.flatMap(reachedSpaces))];
   const spaceRows =
     uniqueSpaceIds.length === 0
       ? []
@@ -406,7 +332,6 @@ async function listActorIntegrationConnections(
           : typeof claims.sub === "string"
             ? claims.sub
             : (displayAccountId(row.accountId) ?? row.label);
-    const actions = connectionActions(row, meReader(principal, reader), false);
 
     const entry: MeConnectionEntry = {
       connection_id: row.connectionId,
@@ -420,8 +345,8 @@ async function listActorIntegrationConnections(
       auth_key: row.authKey,
       scope: reach.scope,
       shared_spaces: sharesOf(row.connectionId).flatMap((id) => spaceRef(id) ?? []),
-      allowed_actions: actions,
-      shareable_spaces: (shareable.get(row.connectionId) ?? []).flatMap((id) => spaceRef(id) ?? []),
+      allowed_actions: connectionActions(row, caller, false),
+      shareable_spaces: shareable.get(row.connectionId) ?? [],
       locked_by: locks.get(row.connectionId) ?? null,
       reused_by_agents: reusingAgents(row),
       org: { id: row.orgId, name: orgName },
@@ -432,39 +357,7 @@ async function listActorIntegrationConnections(
     group.total_connections += 1;
   }
 
-  return [...groups.values()];
-}
-
-/**
- * Unified user-scope listing of integration connection groups, sorted alphabetically by display
- * name. The route derives `principal` from the credential, so a delegated credential is scoped to
- * its own binding while a `person` principal keeps the cross-org dashboard view.
- */
-export async function listMeConnections(
-  principal: ConnectionPrincipal,
-  reader: MeConnectionReader,
-): Promise<MeConnectionSourceGroup[]> {
-  const integrations = await listActorIntegrationConnections(principal, reader, undefined);
-  integrations.sort((a, b) => a.display_name.localeCompare(b.display_name));
-  return integrations;
-}
-
-/** One of the caller's connections, as the listing projects it; `notFound` when it is not theirs. */
-export async function getMeConnection(
-  principal: ConnectionPrincipal,
-  connectionId: string,
-  reader: MeConnectionReader,
-): Promise<MeConnectionEntry> {
-  const groups = await listActorIntegrationConnections(
-    principal,
-    reader,
-    eq(integrationConnections.id, connectionId),
-  );
-  const entry = groups
-    .flatMap((group) => group.connections)
-    .find((c) => c.connection_id === connectionId);
-  if (!entry) throw notFound(`Connection '${connectionId}' not found`);
-  return entry;
+  return [...groups.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
 }
 
 /** One of the caller's member pins that deleting a connection would shrink. */

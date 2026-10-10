@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `0089_connection_shares.sql` on the whole journal: a share row goes with its space, its
- * connection and (as `shared_by`) its user, and names a space of its connection's org; an org-scoped row's `origin_space_id` stays inside the
+ * `0089_connection_shares.sql` on the whole journal: a share row goes with its space and its
+ * connection, and names a space of its connection's org; an org-scoped row's `origin_space_id` stays inside the
  * row's org and is nulled alone when that space is deleted; pins and org defaults carry no
  * `created_by`.
  */
@@ -17,7 +17,6 @@ const A1 = "spc_0089_a1";
 const A2 = "spc_0089_a2";
 const B1 = "spc_0089_b1";
 const ALICE = "usr_0089_alice";
-const BOB = "usr_0089_bob";
 const GMAIL = "@test/gmail-0089";
 
 let pg: PGlite;
@@ -69,8 +68,7 @@ beforeAll(async () => {
       ('${A1}', '${ORG_A}', 'A1', true), ('${A2}', '${ORG_A}', 'A2', false),
       ('${B1}', '${ORG_B}', 'B1', true);
     INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
-      ('${ALICE}', 'Alice', 'a-0089@example.com', true, now(), now()),
-      ('${BOB}', 'Bob', 'b-0089@example.com', true, now(), now());
+      ('${ALICE}', 'Alice', 'a-0089@example.com', true, now(), now());
     INSERT INTO packages (id, type) VALUES ('${GMAIL}', 'integration');
   `);
   // A journal replay runs past the suite's 15s per-test timeout (`--timeout`).
@@ -85,8 +83,8 @@ describe("0089 — connection shares", () => {
     const conn = await insertConnection();
     const space = await insertSpace();
     await pg.exec(
-      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id, shared_by)
-       VALUES ('${conn}', '${space}', '${ORG_A}', '${ALICE}')`,
+      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id)
+       VALUES ('${conn}', '${space}', '${ORG_A}')`,
     );
     await pg.exec(`DELETE FROM spaces WHERE id = '${space}'`);
     expect(
@@ -160,18 +158,5 @@ describe("0089 — connection shares", () => {
            AND column_name = 'shared_space_ids'`,
       ),
     ).toBe(1);
-  });
-
-  it("nulls shared_by when that user is deleted", async () => {
-    const conn = await insertConnection();
-    await pg.exec(
-      `INSERT INTO integration_connection_shares (connection_id, space_id, org_id, shared_by)
-       VALUES ('${conn}', '${A2}', '${ORG_A}', '${BOB}')`,
-    );
-    await pg.exec(`DELETE FROM "user" WHERE id = '${BOB}'`);
-    const { rows } = await pg.query<{ shared_by: string | null }>(
-      `SELECT shared_by FROM integration_connection_shares WHERE connection_id = '${conn}'`,
-    );
-    expect(rows).toEqual([{ shared_by: null }]);
   });
 });

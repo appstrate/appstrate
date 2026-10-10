@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   createTestContext,
   createTestOrg,
@@ -47,15 +47,15 @@ import {
   listAccessibleConnections,
   listAgentsConsumingIntegration,
   listIntegrationPins,
-  renameConnection,
   upsertIntegrationPin,
   upsertMemberPin,
 } from "../../../src/services/integration-pins-service.ts";
 import {
+  renameConnection,
   shareConnection,
   unshareConnection,
-  type ConnectionViewer,
 } from "../../../src/services/connection-shares.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
 import type { ConnectionPrincipal } from "../../../src/lib/connection-principal.ts";
 import {
   deleteOwnConnection,
@@ -145,13 +145,12 @@ describe("integration-pins-service — DB access/ownership", () => {
     await addOrgMember(ctx.orgId, member.id);
   });
 
-  const viewer = (id: string, governs = false): ConnectionViewer => ({
-    principal: person(id),
-    spaceId: scope.spaceId,
-    integrationId: INTEGRATION,
-    governs,
-    permissionsIn: async () => CONNECT,
-  });
+  const viewer = (id: string, governs = false): ConnectionCaller =>
+    testCaller(person(id), {
+      spaceId: scope.spaceId,
+      governs,
+      permissionsIn: async () => CONNECT,
+    });
 
   describe("validatePinTargets", () => {
     /** The refusal with the probed id masked — what a caller could compare across ids. */
@@ -466,7 +465,8 @@ describe("integration-pins-service — DB access/ownership", () => {
         unshareConnection({
           connectionId: ids[1]!,
           spaceId: scope.spaceId,
-          viewer: viewer(memberId),
+          integrationId: INTEGRATION,
+          caller: viewer(memberId),
         }),
       ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
       // Control: a shared connection outside the set unshares freely.
@@ -474,7 +474,8 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { removed } = await unshareConnection({
         connectionId: outside!,
         spaceId: scope.spaceId,
-        viewer: viewer(memberId),
+        integrationId: INTEGRATION,
+        caller: viewer(memberId),
       });
       expect(removed).toBe(true);
       expect(await sharesOf(outside!)).toEqual([]);
@@ -549,7 +550,8 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { removed } = await unshareConnection({
         connectionId: toUnshare!,
         spaceId: scope.spaceId,
-        viewer: viewer(memberId),
+        integrationId: INTEGRATION,
+        caller: viewer(memberId),
       });
       expect(removed).toBe(true);
       expect(await sharesOf(toUnshare!)).toEqual([]);
@@ -874,7 +876,8 @@ describe("integration-pins-service — DB access/ownership", () => {
           unshareConnection({
             connectionId: toUnshare!,
             spaceId: scope.spaceId,
-            viewer: viewer(memberId),
+            integrationId: INTEGRATION,
+            caller: viewer(memberId),
           }),
         ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
         const left = await db
@@ -921,7 +924,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
   describe("renaming — a label is unique per owner (#1622)", () => {
     const rename = (connectionId: string, label: string, by = ctx.user.id) =>
-      renameConnection({ connectionId, viewer: viewer(by), label });
+      renameConnection({ connectionId, integrationId: INTEGRATION, caller: viewer(by), label });
 
     it("refuses a label another of the owner's connections holds (409 connection_label_taken)", async () => {
       await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, label: "prod" });
@@ -944,7 +947,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     it("takes a label a colleague's connection holds: theirs is not disclosed by a refusal", async () => {
       await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "prod" });
       const mine = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
-      expect((await rename(mine, "prod")).connection.label).toBe("prod");
+      expect((await rename(mine, "prod")).label).toBe("prod");
     });
 
     it("keeps its own label, and takes one that differs only by case or lives elsewhere", async () => {
@@ -960,12 +963,12 @@ describe("integration-pins-service — DB access/ownership", () => {
         label: "Prod",
       });
       // Control for the refusal above: the row's own label is not "another" row's.
-      expect((await rename(mine, "prod")).connection.label).toBe("prod");
+      expect((await rename(mine, "prod")).label).toBe("prod");
       // Verbatim comparison, the sidecar's enum: `Prod` is a second address.
       await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, label: "staging" });
-      expect((await rename(mine, "Staging")).connection.label).toBe("Staging");
+      expect((await rename(mine, "Staging")).label).toBe("Staging");
       // `Prod` is taken on the OTHER integration only.
-      expect((await rename(mine, "Prod")).connection.label).toBe("Prod");
+      expect((await rename(mine, "Prod")).label).toBe("Prod");
     });
 
     it("a label of one scope does not collide with the owner's row of the other", async () => {
@@ -975,7 +978,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         orgScope: true,
         userId: ctx.user.id,
       });
-      expect((await rename(orgRow, "prod")).connection.label).toBe("prod");
+      expect((await rename(orgRow, "prod")).label).toBe("prod");
     });
   });
 
@@ -1063,17 +1066,12 @@ describe("integration-pins-service — DB access/ownership", () => {
     });
 
     /** The owner on the account surface unless a space is named: shares and withdraws. */
-    const ownerOn = (spaceId: string | null = null): ConnectionViewer => ({
-      principal: person(memberId),
-      spaceId,
-      integrationId: INTEGRATION,
-      governs: false,
-      permissionsIn: async () => CONNECT,
-    });
-    const shareInto = (connectionId: string, spaceId: string, viewer = ownerOn()) =>
-      shareConnection({ connectionId, spaceId, viewer });
-    const withdrawFrom = (connectionId: string, spaceId: string, viewer = ownerOn()) =>
-      unshareConnection({ connectionId, spaceId, viewer });
+    const ownerOn = (spaceId: string | null = null): ConnectionCaller =>
+      testCaller(person(memberId), { spaceId, permissionsIn: async () => CONNECT });
+    const shareInto = (connectionId: string, spaceId: string, caller = ownerOn()) =>
+      shareConnection({ connectionId, spaceId, integrationId: INTEGRATION, caller });
+    const withdrawFrom = (connectionId: string, spaceId: string, caller = ownerOn()) =>
+      unshareConnection({ connectionId, spaceId, integrationId: INTEGRATION, caller });
 
     it("the owner shares into several spaces and withdraws one, from any surface", async () => {
       const id = await seedConnection({ spaceId: other, orgScope: true, userId: memberId });
@@ -1137,7 +1135,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(await sharesOf(id)).toEqual([]);
 
       const asked: string[] = [];
-      const governor: ConnectionViewer = {
+      const governor: ConnectionCaller = {
         ...ownerOn(),
         permissionsIn: async (spaceId) => {
           asked.push(spaceId);
@@ -1213,7 +1211,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         orgId: ctx.orgId,
         spaceId: scope.spaceId,
       };
-      const bound: ConnectionViewer = {
+      const bound: ConnectionCaller = {
         ...ownerOn(),
         principal: boundPrincipal,
       };
@@ -1227,16 +1225,22 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect((await shareInto(orgRow, scope.spaceId, bound)).added).toBe(true);
       await expect(shareInto(orgRow, other, bound)).rejects.toMatchObject({ status: 403 });
       await expect(
-        renameConnection({ connectionId: orgRow, viewer: bound, label: "renamed" }),
+        renameConnection({
+          connectionId: orgRow,
+          integrationId: INTEGRATION,
+          caller: bound,
+          label: "renamed",
+        }),
       ).rejects.toMatchObject({ status: 403 });
       expect(await sharesOf(orgRow)).toEqual([other, scope.spaceId].sort());
       expect(await withdrawFrom(orgRow, scope.spaceId, bound)).toMatchObject({ removed: true });
       expect(await sharesOf(orgRow)).toEqual([other]);
 
       const spaceRow = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
-      const { connection } = await renameConnection({
+      const connection = await renameConnection({
         connectionId: spaceRow,
-        viewer: bound,
+        integrationId: INTEGRATION,
+        caller: bound,
         label: "renamed",
       });
       expect(connection.label).toBe("renamed");
@@ -1305,7 +1309,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     });
 
     describe("a governor of this space", () => {
-      const governor = (): ConnectionViewer => viewer(ctx.user.id, true);
+      const governor = (): ConnectionCaller => viewer(ctx.user.id, true);
 
       it("withdraws this space only, never another space's share", async () => {
         const id = await seedConnection({
@@ -1332,12 +1336,18 @@ describe("integration-pins-service — DB access/ownership", () => {
           status: 403,
         });
         await expect(
-          renameConnection({ connectionId: orgRow, viewer: governor(), label: "renamed" }),
+          renameConnection({
+            connectionId: orgRow,
+            integrationId: INTEGRATION,
+            caller: governor(),
+            label: "renamed",
+          }),
         ).rejects.toMatchObject({ status: 403 });
         const spaceRow = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
-        const { connection } = await renameConnection({
+        const connection = await renameConnection({
           connectionId: spaceRow,
-          viewer: governor(),
+          integrationId: INTEGRATION,
+          caller: governor(),
           label: "renamed",
         });
         expect(connection.label).toBe("renamed");

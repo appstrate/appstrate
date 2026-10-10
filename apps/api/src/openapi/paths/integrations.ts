@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageSourceValues } from "@appstrate/db/schema";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
@@ -211,25 +212,34 @@ export const sharedSpaceIdsSchema = {
   type: "array",
   items: { type: "string" },
   description:
-    "Owner only: the spaces whose members may use the connection by an explicit pick — to its own session, every one; on a space's connection list, to a credential it delegated, those within the credential's binding (a credential bound to a space: that space at most). Absent from every other read.",
+    "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else.",
 } as const;
 
-/** Owner's own session only (absent otherwise). */
+/** The owner only (absent otherwise). */
 export const originSpaceIdSchema = {
   type: ["string", "null"],
   description:
-    "Owner's own session only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, or once that space is deleted.",
+    "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else.",
 } as const;
 
-/** Owner's own session only (absent otherwise): the spaces the owner may share the connection into. */
-const shareableSpaceIdsSchema = {
+/** A space by id and name. */
+export const namedSpaceSchema = {
+  type: "object",
+  required: ["id", "name"],
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+  },
+} as const;
+
+export const shareableSpacesSchema = {
   type: "array",
-  items: { type: "string" },
+  items: namedSpaceSchema,
   description:
-    "Owner only (its own session or its credential): the spaces this caller may share the connection into now — a credential bound to a space, that space at most. Present on the list surfaces only.",
+    "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only.",
 } as const;
 
-const integrationConnectionSchema = {
+export const integrationConnectionSchema = {
   type: "object",
   required: [
     "id",
@@ -285,7 +295,10 @@ const integrationConnectionSchema = {
       ...connectionActionsSchema,
       description: `${connectionActionsSchema.description} List surfaces only.`,
     },
-    shareable_space_ids: shareableSpaceIdsSchema,
+    shareable_spaces: {
+      ...shareableSpacesSchema,
+      description: `${shareableSpacesSchema.description} List surfaces only.`,
+    },
     client_ref: {
       type: ["string", "null"],
       description:
@@ -738,18 +751,18 @@ export const connectionShareSpaceIdParam = {
   in: "path",
   required: true,
   description: "Space the connection is shared into (`spc_…`).",
-  schema: { type: "string", minLength: 1, maxLength: 100 },
+  schema: { type: "string", pattern: SPACE_ID_RE.source },
 } as const;
 
 export const connectionShareEndpoints = {
   put: {
     description: connectionSharePutDescription,
     refusals400:
-      "A malformed `spaceId` (`validation_failed`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`).",
+      "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`).",
   },
   delete: {
     description: connectionShareDeleteDescription,
-    refusals400: "A malformed `spaceId` (`validation_failed`).",
+    refusals400: "A malformed `spaceId` (`invalid_request`).",
   },
 } as const;
 
@@ -1469,7 +1482,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_space_ids`. Rows on this list carry `allowed_actions`.",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

@@ -114,7 +114,6 @@ column files.user_id text
 column integration_connection_shares.connection_id uuid not null
 column integration_connection_shares.created_at timestamp with time zone not null default now()
 column integration_connection_shares.org_id uuid not null
-column integration_connection_shares.shared_by text
 column integration_connection_shares.space_id text not null
 column integration_connections.account_id text not null
 column integration_connections.auth_key text not null
@@ -697,7 +696,6 @@ constraint files files_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id
 constraint files files_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint files files_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE SET NULL
 constraint integration_connection_shares ics_connection_org_fk FOREIGN KEY (connection_id, org_id) REFERENCES integration_connections(id, org_id) ON DELETE CASCADE
-constraint integration_connection_shares ics_shared_by_fk FOREIGN KEY (shared_by) REFERENCES "user"(id) ON DELETE SET NULL
 constraint integration_connection_shares ics_space_org_fk FOREIGN KEY (space_id, org_id) REFERENCES spaces(id, org_id) ON DELETE CASCADE
 constraint integration_connection_shares integration_connection_shares_pk PRIMARY KEY (connection_id, space_id)
 constraint integration_connections integration_conn_exactly_one_owner CHECK ((((user_id IS NOT NULL) AND (end_user_id IS NULL)) OR ((user_id IS NULL) AND (end_user_id IS NOT NULL))))
@@ -958,7 +956,6 @@ index CREATE INDEX idx_integration_conn_end_user ON public.integration_connectio
 index CREATE INDEX idx_integration_conn_lookup ON public.integration_connections USING btree (integration_package_id, space_id, auth_key)
 index CREATE INDEX idx_integration_conn_org ON public.integration_connections USING btree (org_id, integration_package_id, auth_key)
 index CREATE INDEX idx_integration_conn_origin ON public.integration_connections USING btree (origin_space_id) WHERE (origin_space_id IS NOT NULL)
-index CREATE INDEX idx_integration_conn_shared ON public.integration_connections USING gin (shared_space_ids)
 index CREATE INDEX idx_integration_conn_space ON public.integration_connections USING btree (space_id) WHERE (space_id IS NOT NULL)
 index CREATE INDEX idx_integration_conn_user ON public.integration_connections USING btree (user_id) WHERE (user_id IS NOT NULL)
 index CREATE INDEX idx_integration_oauth_clients_lookup ON public.integration_oauth_clients USING btree (space_id, integration_package_id, auth_key)

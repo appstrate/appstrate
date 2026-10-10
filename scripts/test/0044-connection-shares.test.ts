@@ -18,6 +18,7 @@ import {
 import { runConnectionShares } from "../migration/0044-connection-shares.ts";
 import { unshareConnection } from "../../apps/api/src/services/connection-shares.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
+import { testCaller } from "../../apps/api/test/helpers/connection-shares.ts";
 import {
   addOrgMember,
   createTestContext,
@@ -77,7 +78,7 @@ async function audits() {
 async function shares() {
   const rows = await db.select().from(integrationConnectionShares);
   return rows
-    .map(({ connectionId, spaceId, sharedBy }) => ({ connectionId, spaceId, sharedBy }))
+    .map(({ connectionId, spaceId }) => ({ connectionId, spaceId }))
     .sort((a, b) => `${a.connectionId}${a.spaceId}`.localeCompare(`${b.connectionId}${b.spaceId}`));
 }
 
@@ -105,7 +106,7 @@ describe("0044 — connection shares copied into integration_connection_shares",
     expect((await run(true)).inserted).toBe(2);
     expect(lines.at(-1)).toBe("0044: APPLIED — committed.");
     const expected = [s1, s2]
-      .map((spaceId) => ({ connectionId: id, spaceId, sharedBy: null }))
+      .map((spaceId) => ({ connectionId: id, spaceId }))
       .sort((a, b) => a.spaceId.localeCompare(b.spaceId));
     expect(await shares()).toEqual(expected);
 
@@ -118,7 +119,7 @@ describe("0044 — connection shares copied into integration_connection_shares",
         actorId: null,
         spaceId,
         resourceId: id,
-        after: { spaceId },
+        after: { spaceId, reason: "migrated" },
       })),
     );
 
@@ -136,20 +137,13 @@ describe("0044 — connection shares copied into integration_connection_shares",
     const { removed } = await unshareConnection({
       connectionId: id,
       spaceId: s2,
-      viewer: {
-        principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
-        spaceId: null,
-        integrationId: null,
-        governs: false,
-        permissionsIn: async () => new Set(),
-      },
+      integrationId: null,
+      caller: testCaller({ kind: "person", actor: { type: "user", id: ctx.user.id } }),
     });
     expect(removed).toBe(true);
 
     expect((await run(true)).inserted).toBe(0);
-    expect(await shares()).toEqual([
-      { connectionId: id, spaceId: ctx.defaultSpaceId, sharedBy: null },
-    ]);
+    expect(await shares()).toEqual([{ connectionId: id, spaceId: ctx.defaultSpaceId }]);
   });
 
   it("skips and reports a deleted space and another organization's space", async () => {
@@ -170,9 +164,7 @@ describe("0044 — connection shares copied into integration_connection_shares",
     expect(lines).toContain(`  skipped ${id} → ${gone}: missing space`);
     expect(lines).toContain(`  skipped ${id} → ${other.defaultSpaceId}: foreign space`);
     expect(lines).toContain("inserted: 1, skipped: 2");
-    expect(await shares()).toEqual([
-      { connectionId: id, spaceId: ctx.defaultSpaceId, sharedBy: null },
-    ]);
+    expect(await shares()).toEqual([{ connectionId: id, spaceId: ctx.defaultSpaceId }]);
   });
 
   it("withdraws a copied share whose owner no longer reaches the target space", async () => {
@@ -187,9 +179,7 @@ describe("0044 — connection shares copied into integration_connection_shares",
     expect(result.withdrawn).toEqual([{ connectionId: id, spaceId: closed.id }]);
     expect(lines).toContain(`  withdrawn ${id} → ${closed.id}: owner without access`);
     expect(lines).toContain("withdrawn (owner without access): 1, schedules disabled: 0");
-    expect(await shares()).toEqual([
-      { connectionId: id, spaceId: ctx.defaultSpaceId, sharedBy: null },
-    ]);
+    expect(await shares()).toEqual([{ connectionId: id, spaceId: ctx.defaultSpaceId }]);
     expect(
       (await audits()).filter((a) => a.action === "integration.connection.share_removed"),
     ).toEqual([

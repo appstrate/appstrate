@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sharing a connection into a space and withdrawing it: one `integration_connection_shares` row
- * per (connection, space). Only the owner shares; the owner, or a governor of the request space,
- * withdraws. Lock order, as every other connection write: the owner's membership and the target
- * space (`assertConnectionShareable`), the connection row, then schedules.
+ * The edits of a connection: renaming it, sharing it into a space and withdrawing it (one
+ * `integration_connection_shares` row per (connection, space)). Each edit authorizes on the locked
+ * row by the actions {@link connectionActions} projects, so what a list offers is what an edit
+ * accepts. Lock order, as every other connection write: the owner's membership and the target
+ * space (`assertConnectionShareable`) or the label keys, the connection row, then schedules.
  */
 
 import type { Context } from "hono";
-import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnectionShares as shares,
@@ -17,54 +18,52 @@ import {
 } from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
 import type { AppEnv } from "../types/index.ts";
-import type { Permission } from "../lib/permissions.ts";
-import { ApiError, forbidden, notFound } from "../lib/errors.ts";
-import { actorFilter, actorFromIds, actorOwns } from "../lib/actor.ts";
-import { boundSpaceOf, type ConnectionPrincipal } from "../lib/connection-principal.ts";
+import { ApiError, conflict, forbidden, notFound } from "../lib/errors.ts";
+import { isUniqueViolation, type Tx } from "../lib/db-helpers.ts";
+import { actorFilter, actorFromIds } from "../lib/actor.ts";
+import { boundSpaceOf } from "../lib/connection-principal.ts";
 import {
-  connectionInSpace,
+  connectionActions,
+  meConnectionAuthorityFilter,
   ownRowInSpace,
   scopedOrSharedIn,
-  type ShareTargets,
+  shareableIn,
+  type ConnectionCaller,
 } from "./connection-reach.ts";
 import {
   assertConnectionShareable,
   invalidShareTarget,
   type ConnectionShare,
 } from "./space-members.ts";
-import { assertConnectionsUnpinned } from "./integration-connections.ts";
+import { assertConnectionsUnpinned, lockLabelKeys } from "./integration-connections.ts";
 import { disableForeignSchedules } from "./schedules-naming-connection.ts";
 import { isUserConnectionCreationBlocked } from "./integration-connection-resolver.ts";
-import { listSpacesForPrincipal } from "./spaces.ts";
 import { recordAudit, recordAuditFromContext } from "./audit.ts";
 
-export interface ConnectionViewer {
-  principal: ConnectionPrincipal;
-  /** The space the edit is made from; `null` on the account surface, where only the owner edits. */
-  spaceId: string | null;
+interface EditInput {
+  connectionId: string;
   /** The integration the route names; `null` on the account surface, which names none. */
   integrationId: string | null;
-  /** Holds `integrations:configure` in `spaceId`. */
-  governs: boolean;
-  /** The viewer's permissions in a space — asked of each share target. */
-  permissionsIn: (spaceId: string) => Promise<ReadonlySet<Permission>>;
+  caller: ConnectionCaller;
 }
 
-interface ShareInput {
-  connectionId: string;
+interface ShareInput extends EditInput {
   spaceId: string;
-  viewer: ConnectionViewer;
 }
 
-/** Seen from a space: the owner's row reaching it, or any row a governor there may edit. */
-export function visibleTo(viewer: ConnectionViewer, connectionId: string): SQL {
-  const here = viewer.spaceId;
-  const actor = viewer.principal.actor;
+/**
+ * The row as the caller reaches it: from a space, the owner's row reaching it or any row a
+ * governor there may edit; from the account surface, its own row inside the credential's binding.
+ */
+function visibleTo(input: EditInput): SQL {
+  const { caller, connectionId, integrationId } = input;
+  const here = caller.spaceId;
+  const actor = caller.principal.actor;
   return and(
     eq(c.id, connectionId),
-    viewer.integrationId === null ? undefined : eq(c.integrationId, viewer.integrationId),
+    integrationId === null ? undefined : eq(c.integrationId, integrationId),
     here === null
-      ? undefined
+      ? and(actorFilter(actor, c), meConnectionAuthorityFilter(caller.principal))
       : or(
           ownRowInSpace(here, actor),
           and(sql`(${actorFilter(actor, c)}) IS NOT TRUE`, scopedOrSharedIn(here)),
@@ -72,32 +71,104 @@ export function visibleTo(viewer: ConnectionViewer, connectionId: string): SQL {
   )!;
 }
 
-function shareRow(connectionId: string, spaceId: string): SQL {
-  return and(eq(shares.connectionId, connectionId), eq(shares.spaceId, spaceId))!;
+function connectionNotFound(connectionId: string): ApiError {
+  return notFound(`Connection '${connectionId}' not found`);
 }
 
-function assertBoundTarget(viewer: ConnectionViewer, spaceId: string): void {
-  const bound = boundSpaceOf(viewer.principal);
+/** The locked row the caller reaches: 404 when it reaches none. */
+async function lockVisible(tx: Tx, input: EditInput): Promise<ConnectionRow> {
+  const [row] = await tx.select().from(c).where(visibleTo(input)).for("update");
+  if (!row) throw connectionNotFound(input.connectionId);
+  return row;
+}
+
+function assertBoundTarget(caller: ConnectionCaller, spaceId: string): void {
+  const bound = boundSpaceOf(caller.principal);
   if (bound !== null && spaceId !== bound) {
     throw forbidden(`A credential bound to space '${bound}' can only share into it or withdraw it`);
   }
 }
 
-/** Share the viewer's own connection into `spaceId`; `added: false` when it already was. */
+function shareRow(connectionId: string, spaceId: string): SQL {
+  return and(eq(shares.connectionId, connectionId), eq(shares.spaceId, spaceId))!;
+}
+
+async function touch(tx: Tx, connectionId: string): Promise<ConnectionRow> {
+  const [row] = await tx
+    .update(c)
+    .set({ updatedAt: new Date() })
+    .where(eq(c.id, connectionId))
+    .returning();
+  return row!;
+}
+
+/**
+ * Rename a connection (`rename` action). The keys a row may hold are locked before the row, so
+ * the row is read first for them.
+ */
+export async function renameConnection(
+  input: EditInput & { label: string },
+): Promise<ConnectionRow> {
+  const [read] = await db
+    .select({
+      orgId: c.orgId,
+      integrationId: c.integrationId,
+      spaceId: c.spaceId,
+      userId: c.userId,
+      endUserId: c.endUserId,
+    })
+    .from(c)
+    .where(visibleTo(input))
+    .limit(1);
+  if (!read) throw connectionNotFound(input.connectionId);
+  return db
+    .transaction(async (tx) => {
+      // A row only widens (space → org): both keys it may hold.
+      const key = {
+        orgId: read.orgId,
+        integrationId: read.integrationId,
+        ownerId: (read.userId ?? read.endUserId)!,
+      };
+      await lockLabelKeys(tx, [
+        { ...key, spaceId: read.spaceId },
+        { ...key, spaceId: null },
+      ]);
+      const row = await lockVisible(tx, input);
+      if (!connectionActions(row, input.caller, false).includes("rename")) {
+        throw forbidden(
+          "Only the connection owner or a principal with integrations:configure can rename this connection, the latter only one scoped to this space",
+        );
+      }
+      const [connection] = await tx
+        .update(c)
+        .set({ label: input.label, updatedAt: new Date() })
+        .where(eq(c.id, input.connectionId))
+        .returning();
+      return connection!;
+    })
+    .catch((err: unknown) => {
+      if (!isUniqueViolation(err)) throw err;
+      throw conflict(
+        "connection_label_taken",
+        `The owner already has a connection of this integration named '${input.label}'`,
+      );
+    });
+}
+
+/** Share the caller's own connection into `spaceId` (`share` action); `added: false` when it already was. */
 export async function shareConnection(
   input: ShareInput,
 ): Promise<{ connection: ConnectionRow; added: boolean }> {
-  const { connectionId, spaceId, viewer } = input;
-  const visible = visibleTo(viewer, connectionId);
-  const [read] = await db.select().from(c).where(visible).limit(1);
-  if (!read) throw notFound(`Connection '${connectionId}' not found`);
-  if (!actorOwns(viewer.principal.actor, read)) {
-    if (viewer.spaceId === null) throw notFound(`Connection '${connectionId}' not found`);
-    throw forbidden("Only the connection owner can share it");
-  }
-  assertBoundTarget(viewer, spaceId);
-  // Roles resolve outside the transaction; the refusal applies only to a share this call adds.
-  const permissions = await viewer.permissionsIn(spaceId);
+  const { connectionId, spaceId, caller } = input;
+  // The target's permissions and gate resolve outside the transaction, on `db`.
+  const [read] = await db
+    .select({ orgId: c.orgId, integrationId: c.integrationId })
+    .from(c)
+    .where(visibleTo(input))
+    .limit(1);
+  if (!read) throw connectionNotFound(connectionId);
+  assertBoundTarget(caller, spaceId);
+  const permissions = await caller.permissionsIn(spaceId, read.orgId);
   let refusal: ApiError | null = null;
   if (!permissions.has("integrations:connect")) {
     refusal = forbidden(`Sharing into space '${spaceId}' requires integrations:connect there`);
@@ -114,74 +185,55 @@ export async function shareConnection(
   }
 
   return db.transaction(async (tx) => {
-    await assertConnectionShareable(tx, connectionId, [spaceId]);
-    const [row] = await tx.select().from(c).where(visible).for("update");
-    if (!row) throw notFound(`Connection '${connectionId}' not found`);
+    await assertConnectionShareable(tx, connectionId, spaceId);
+    const row = await lockVisible(tx, input);
+    if (!connectionActions(row, caller, false).includes("share")) {
+      throw forbidden("Only the connection owner can share it");
+    }
     const [existing] = await tx
       .select({ spaceId: shares.spaceId })
       .from(shares)
       .where(shareRow(connectionId, spaceId));
     if (existing) return { connection: row, added: false };
     if (refusal) throw refusal;
-    const [serves] = await tx
-      .select({ id: c.id })
-      .from(c)
-      .where(and(eq(c.id, connectionId), connectionInSpace(spaceId)));
-    if (!serves) {
+    // The gate proved the space is of the row's org: the row serves it unless scoped elsewhere.
+    if (row.spaceId !== null && row.spaceId !== spaceId) {
       throw invalidShareTarget(
         `This connection cannot serve space '${spaceId}': it is confined to its own space`,
       );
     }
-    const actor = viewer.principal.actor;
-    await tx
-      .insert(shares)
-      .values({
-        connectionId,
-        spaceId,
-        orgId: row.orgId,
-        sharedBy: actor.type === "user" ? actor.id : null,
-      })
-      .onConflictDoNothing();
-    const [connection] = await tx
-      .update(c)
-      .set({ updatedAt: new Date() })
-      .where(eq(c.id, connectionId))
-      .returning();
-    return { connection: connection!, added: true };
+    await tx.insert(shares).values({ connectionId, spaceId, orgId: row.orgId });
+    return { connection: await touch(tx, connectionId), added: true };
   });
 }
 
 /**
- * Withdraw a connection from `spaceId`, disabling other actors' schedules there naming it (the
- * caller removes their jobs); `removed: false` when it was not shared there.
+ * Withdraw a connection from `spaceId` — the owner (`share` action) from any space, a governor
+ * (`unshare_here`) from the request space — disabling other actors' schedules there naming it
+ * (the caller removes their jobs); `removed: false` when it was not shared there.
  */
 export async function unshareConnection(input: ShareInput): Promise<{
   connection: ConnectionRow;
   removed: boolean;
   disabledScheduleIds: string[];
 }> {
-  const { connectionId, spaceId, viewer } = input;
-  const visible = visibleTo(viewer, connectionId);
-  const [read] = await db.select().from(c).where(visible).limit(1);
-  if (!read) throw notFound(`Connection '${connectionId}' not found`);
-  if (!actorOwns(viewer.principal.actor, read)) {
-    if (viewer.spaceId === null) throw notFound(`Connection '${connectionId}' not found`);
-    if (!viewer.governs) {
-      throw forbidden(
-        "Only the connection owner or a principal with integrations:configure can update this connection",
-      );
-    }
-    if (spaceId !== viewer.spaceId) throw forbidden("You may only withdraw this space");
-  }
-  assertBoundTarget(viewer, spaceId);
-
+  const { connectionId, spaceId, caller } = input;
   return db.transaction(async (tx) => {
-    const [row] = await tx.select().from(c).where(visible).for("update");
-    if (!row) throw notFound(`Connection '${connectionId}' not found`);
+    const row = await lockVisible(tx, input);
     const [existing] = await tx
       .select({ spaceId: shares.spaceId })
       .from(shares)
       .where(shareRow(connectionId, spaceId));
+    // The owner (`share`) withdraws from anywhere, a governor (`unshare_here`) from here only.
+    const here = spaceId === caller.spaceId;
+    // Judged as if shared here, so a withdrawal already done stays an idempotent no-op.
+    const actions = connectionActions(row, caller, here);
+    if (!actions.includes("share") && !(here && actions.includes("unshare_here"))) {
+      throw forbidden(
+        "Only the connection owner, or a governor of this space withdrawing it from here, can withdraw it",
+      );
+    }
+    assertBoundTarget(caller, spaceId);
     if (!existing) return { connection: row, removed: false, disabledScheduleIds: [] };
     await assertConnectionsUnpinned(
       tx,
@@ -190,51 +242,74 @@ export async function unshareConnection(input: ShareInput): Promise<{
       spaceId,
     );
     await tx.delete(shares).where(shareRow(connectionId, spaceId));
-    const [connection] = await tx
-      .update(c)
-      .set({ updatedAt: new Date() })
-      .where(eq(c.id, connectionId))
-      .returning();
-    const owner = actorFromIds(connection!.userId, connection!.endUserId)!;
+    const connection = await touch(tx, connectionId);
+    const owner = actorFromIds(connection.userId, connection.endUserId)!;
     const disabledScheduleIds = await disableForeignSchedules(
       tx,
       [{ id: connectionId, owner, inSpaceId: spaceId }],
       "connection_unshared",
     );
-    return { connection: connection!, removed: true, disabledScheduleIds };
+    return { connection, removed: true, disabledScheduleIds };
   });
 }
 
+/** A space by id and name, as the share targets name it. */
+interface NamedSpace {
+  id: string;
+  name: string;
+}
+
 /**
- * The spaces `userId` may share into: those they see where `permissionsIn` holds
- * `integrations:connect`; `configures` the ones also holding `integrations:configure`.
+ * Per row the caller may share (`share` action), the spaces it may be shared into: those the
+ * caller sees holding `integrations:connect` (a credential bound to a space: that one only) that
+ * the row reaches and that do not block its integration's personal connections, unless the caller
+ * also configures them there. One listing and one query per org, never one per row or space.
  */
-export async function shareTargetSpaces(input: {
-  orgId: string;
-  orgRole: OrgRole;
-  userId: string;
-  /** A credential bound to a space shares into that space only. */
-  boundSpaceId: string | null;
-  permissionsIn: (spaceId: string) => Promise<ReadonlySet<Permission>>;
-}): Promise<ShareTargets> {
-  const visible = await listSpacesForPrincipal(
-    input.orgId,
-    input.orgRole,
-    input.userId,
-    input.userId,
+export async function shareableSpaces(
+  caller: ConnectionCaller,
+  rows: readonly Pick<ConnectionRow, "id" | "orgId" | "userId" | "endUserId" | "spaceId">[],
+  orgRoles: ReadonlyMap<string, OrgRole>,
+): Promise<Map<string, NamedSpace[]>> {
+  const out = new Map<string, NamedSpace[]>();
+  const byOrg = new Map<string, string[]>();
+  for (const row of rows) {
+    if (!connectionActions(row, caller, false).includes("share")) continue;
+    byOrg.set(row.orgId, [...(byOrg.get(row.orgId) ?? []), row.id]);
+  }
+  const bound = boundSpaceOf(caller.principal);
+  await Promise.all(
+    [...byOrg].map(async ([orgId, ids]) => {
+      const orgRole = orgRoles.get(orgId);
+      if (!orgRole) return;
+      const targets = (await caller.spacesSeen(orgId, orgRole)).filter(
+        (space) =>
+          (bound === null || space.id === bound) && space.permissions.has("integrations:connect"),
+      );
+      if (targets.length === 0) return;
+      const names = new Map(targets.map((space) => [space.id, space.name]));
+      const found = await db
+        .select({
+          id: c.id,
+          spaceIds: shareableIn({
+            spaceIds: targets.map((space) => space.id),
+            configures: new Set(
+              targets
+                .filter((space) => space.permissions.has("integrations:configure"))
+                .map((space) => space.id),
+            ),
+          }),
+        })
+        .from(c)
+        .where(inArray(c.id, ids));
+      for (const row of found) {
+        out.set(
+          row.id,
+          row.spaceIds.map((id) => ({ id, name: names.get(id)! })),
+        );
+      }
+    }),
   );
-  const ids = [...new Set(visible.map(({ space }) => space.id))].filter(
-    (id) => input.boundSpaceId === null || id === input.boundSpaceId,
-  );
-  const held = await Promise.all(ids.map((id) => input.permissionsIn(id)));
-  const spaceIds: string[] = [];
-  const configures = new Set<string>();
-  ids.forEach((id, i) => {
-    if (!held[i]!.has("integrations:connect")) return;
-    spaceIds.push(id);
-    if (held[i]!.has("integrations:configure")) configures.add(id);
-  });
-  return { spaceIds, configures };
+  return out;
 }
 
 /**

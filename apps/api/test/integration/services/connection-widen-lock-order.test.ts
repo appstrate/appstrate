@@ -27,6 +27,7 @@ import {
   promoteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
 import { shareConnection } from "../../../src/services/connection-shares.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
 import type { Permission } from "../../../src/lib/permissions.ts";
 
 const INTEGRATION = "@lockorg/svc";
@@ -149,13 +150,11 @@ describeRequiresPostgres("a write naming a space locks the space before its rows
         shareConnection({
           connectionId: connection,
           spaceId: space,
-          viewer: {
-            principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
-            spaceId: space,
-            integrationId: INTEGRATION,
-            governs: true,
-            permissionsIn: async () => connectAndConfigure,
-          },
+          integrationId: INTEGRATION,
+          caller: testCaller(
+            { kind: "person", actor: { type: "user", id: ctx.user.id } },
+            { spaceId: space, governs: true, permissionsIn: async () => connectAndConfigure },
+          ),
         }),
       expectDone: async ({ connection }) => {
         const rows = await db

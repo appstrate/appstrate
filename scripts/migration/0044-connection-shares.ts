@@ -9,19 +9,19 @@
  *
  * Drizzle `0089` creates `integration_connection_shares` and leaves `shared_space_ids` in place,
  * read by nothing but this script. Each `(id, unnest(shared_space_ids))` becomes one share row in
- * the connection's org (`shared_by` NULL), `ON CONFLICT DO NOTHING`; a target space that no longer
- * exists or belongs to another organization is skipped and printed. The column is then emptied on
- * every row that held one, and each connection that gained a share has its `updated_at` bumped (its
- * owner's open pages refetch). Then, in each organization that gained a share, the access-loss sweep
- * (`unshareConnectionsOfOwnersWithoutAccess`) withdraws the shares whose owner no longer reaches
- * their space and disables other actors' schedules naming them, as a live access loss does. Each
- * share added is audited `integration.connection.share_added`, each withdrawal `share_removed`
- * (`reason: access_lost`), both by the `system` actor. The target spaces are locked `FOR KEY SHARE`
- * in id order before any connection row, the order a space delete takes. Run FIRST after the
- * deploy, app up, `pg_dump` first: until it runs, no existing share is visible. Refuses an empty
- * `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry run by default
- * (rolled back), `--apply` commits. A second `--apply` finds the column empty and inserts nothing,
- * so a share withdrawn since the first stays withdrawn.
+ * the connection's org, `ON CONFLICT DO NOTHING`; a target space that no longer exists or belongs
+ * to another organization is skipped and printed. The column is then emptied, and `updated_at`
+ * bumped, on every row that held one (its owner's open pages refetch). Then, in each organization
+ * that gained a share, the access-loss sweep (`unshareConnectionsOfOwnersWithoutAccess`) withdraws
+ * the shares whose owner no longer reaches their space and disables other actors' schedules naming
+ * them, as a live access loss does. Each share added is audited `integration.connection.share_added`
+ * (`reason: migrated`), each withdrawal `share_removed` (`reason: access_lost`), both by the
+ * `system` actor. The target spaces are locked `FOR KEY SHARE` in id order before any connection
+ * row, the order a space delete takes. Run after the migrate service (`appstrate-migrate`) has applied `0089` and BEFORE
+ * the app starts, `pg_dump` first: an app serving `0089` before it runs sees no existing share.
+ * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry run
+ * by default (rolled back), `--apply` commits. A second `--apply` finds the column empty and
+ * inserts nothing, so a share withdrawn since the first stays withdrawn.
  */
 
 import { parseArgs } from "node:util";
@@ -115,8 +115,8 @@ export async function runConnectionShares(options: {
       }
 
       const inserted = toRows<{ connection_id: string; space_id: string; org_id: string }>(
-        await tx.execute(sql`INSERT INTO ${integrationConnectionShares} (connection_id, space_id, org_id, shared_by)
-          SELECT ${c.id}, pair.space_id, ${c.orgId}, NULL FROM ${PAIRS}
+        await tx.execute(sql`INSERT INTO ${integrationConnectionShares} (connection_id, space_id, org_id)
+          SELECT ${c.id}, pair.space_id, ${c.orgId} FROM ${PAIRS}
           WHERE ${spaces.orgId} = ${c.orgId}
           ORDER BY ${c.id}, pair.space_id
           ON CONFLICT DO NOTHING
@@ -132,20 +132,17 @@ export async function runConnectionShares(options: {
           action: "integration.connection.share_added",
           resourceType: "integration_connection",
           resourceId: share.connection_id,
-          after: { spaceId: share.space_id },
+          after: { spaceId: share.space_id, reason: "migrated" },
         });
       }
 
       const cleared = await tx
         .update(c)
-        .set({ sharedSpaceIds: [] })
+        .set({ sharedSpaceIds: [], updatedAt: sql`now()` })
         .where(sql`cardinality(${c.sharedSpaceIds}) > 0`)
         .returning({ id: c.id });
       result.cleared = cleared.length;
       const gained = [...new Set(inserted.map((row) => row.connection_id))];
-      if (gained.length > 0) {
-        await tx.update(c).set({ updatedAt: new Date() }).where(inArray(c.id, gained));
-      }
       out(`shared_space_ids emptied: ${result.cleared}`);
 
       // An owner who lost a target space after the deploy: withdrawn as a live access loss does.

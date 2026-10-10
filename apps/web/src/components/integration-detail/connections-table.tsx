@@ -33,8 +33,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgSpaces } from "../../hooks/use-spaces";
 import {
   useRenameIntegrationConnection,
-  useShareConnection,
-  useUnshareConnection,
+  useConnectionShare,
   type IntegrationAuthType,
   type IntegrationConnection,
   type IntegrationManifestView,
@@ -123,8 +122,8 @@ function ConnectionTableRow({
 }) {
   const { t } = useTranslation("settings");
   const renameConnection = useRenameIntegrationConnection();
-  const shareConnection = useShareConnection();
-  const unshareConnection = useUnshareConnection();
+  const shareConnection = useConnectionShare("share", packageId);
+  const unshareConnection = useConnectionShare("unshare", packageId);
   const disconnect = useDisconnectIntegrationConnection();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -147,19 +146,17 @@ function ConnectionTableRow({
   const canUnshareHere = actions.includes("unshare_here");
   // Reconnect writes the connection, which guards on `integrations:connect` whoever owns it.
   const canConnect = can("integrations:connect");
-  // Share targets: the spaces the owner may share into, plus those it is already shared into,
-  // named by the org's spaces. Only the owner's session carries either list.
+  // Share targets: the spaces the owner may share into, plus those it is already shared into
+  // (named by the org's spaces). Only the owner carries either list.
   const { data: orgSpaces } = useOrgSpaces(canShare ? orgId : null);
   const shareTargets = useMemo(() => {
     const names = new Map((orgSpaces ?? []).map((s) => [s.id, s.name]));
-    const ids = [
-      ...new Set([
-        ...(connection.shareable_space_ids ?? []),
-        ...(connection.shared_space_ids ?? []),
-      ]),
-    ];
-    return ids.map((id) => ({ id, name: names.get(id) ?? id }));
-  }, [orgSpaces, connection.shareable_space_ids, connection.shared_space_ids]);
+    const shareable = connection.shareable_spaces ?? [];
+    const sharedOnly = (connection.shared_space_ids ?? []).filter(
+      (id) => !shareable.some((s) => s.id === id),
+    );
+    return [...shareable, ...sharedOnly.map((id) => ({ id, name: names.get(id) ?? id }))];
+  }, [orgSpaces, connection.shareable_spaces, connection.shared_space_ids]);
   // A pin or default names the row (in any space, for its owner): delete answers 409.
   const lockKey = connectionLockHintKey(connection.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
@@ -342,18 +339,10 @@ function ConnectionTableRow({
               lockHint={lockHint}
               pending={shareConnection.isPending || unshareConnection.isPending}
               onShare={(targetSpaceId) =>
-                shareConnection.mutate({
-                  params: {
-                    path: { packageId, connectionId: connection.id, spaceId: targetSpaceId },
-                  },
-                })
+                shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
               }
               onUnshare={(targetSpaceId) =>
-                unshareConnection.mutate({
-                  params: {
-                    path: { packageId, connectionId: connection.id, spaceId: targetSpaceId },
-                  },
-                })
+                unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
               }
             />
           </div>

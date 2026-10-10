@@ -19,9 +19,9 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api, client } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
-const { useRenameIntegrationConnection, useShareConnection } =
+const { useConnectionShare, useRenameIntegrationConnection } =
   await import("../use-integrations.ts");
-const { useRenameMeConnection, useShareMeConnection } = await import("../use-me-connections.ts");
+const { useRenameMeConnection } = await import("../use-me-connections.ts");
 
 const header = { "X-Org-Id": undefined, "X-Space-Id": undefined };
 const ME_LIST_KEY = $api.queryOptions("get", "/api/me/connections", {}).queryKey;
@@ -88,7 +88,7 @@ describe("connection update — settles after the list refetch", () => {
       name: "user-scope share (/api/me/connections/{connectionId}/shares/{spaceId})",
       key: ME_LIST_KEY,
       run: (qc: QueryClient) =>
-        capture(() => useShareMeConnection(), qc).mutateAsync({
+        capture(() => useConnectionShare("share"), qc).mutateAsync({
           connectionId: "conn_1",
           spaceId: "spc_a",
         }),
@@ -106,10 +106,9 @@ describe("connection update — settles after the list refetch", () => {
       name: "space-scope share (/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId})",
       key: SPACE_LIST_KEY,
       run: (qc: QueryClient) =>
-        capture(() => useShareConnection(), qc).mutateAsync({
-          params: {
-            path: { packageId: "@acme/gmail", connectionId: "conn_1", spaceId: "spc_a" },
-          },
+        capture(() => useConnectionShare("share", "@acme/gmail"), qc).mutateAsync({
+          connectionId: "conn_1",
+          spaceId: "spc_a",
         }),
     },
   ];

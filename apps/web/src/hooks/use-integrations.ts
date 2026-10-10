@@ -655,49 +655,29 @@ export function useRenameIntegrationConnection() {
 }
 
 /**
- * Share the connection into a space. Idempotent: sharing into a space that
- * already holds it answers 204 again. The returned promise keeps the mutation
- * pending until the refetched sharing lands, so the share editor never
- * re-enables on a stale state.
+ * Share a connection into a space (`share`, idempotent) or withdraw it (`unshare`), through the
+ * space's door (`packageId` set) or the account's. The returned promise keeps the mutation pending
+ * until the refetched sharing lands, so the share editor never re-enables on a stale state.
+ * Withdrawing disables other actors' schedules there naming the connection.
  */
-export function useShareConnection() {
+export function useConnectionShare(op: "share" | "unshare", packageId?: string) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; connectionId: string; spaceId: string } };
-    }) => {
-      await client.PUT(
-        "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}",
-        vars,
-      );
+    mutationFn: async ({ connectionId, spaceId }: { connectionId: string; spaceId: string }) => {
+      if (packageId) {
+        const path = "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}";
+        const init = { params: { path: { packageId, connectionId, spaceId } } };
+        await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
+      } else {
+        const path = "/api/me/connections/{connectionId}/shares/{spaceId}";
+        const init = { params: { path: { connectionId, spaceId } } };
+        await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
+      }
     },
     onSuccess: () => {
       toast.success(t("integration.connection.updated"));
-      return invalidateIntegrationQueries(qc);
-    },
-  });
-}
-
-/**
- * Withdraw the connection from a space. Disables other actors' schedules in
- * that space naming the connection, so the schedule caches are invalidated too.
- */
-export function useUnshareConnection() {
-  const { t } = useTranslation("settings");
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; connectionId: string; spaceId: string } };
-    }) => {
-      await client.DELETE(
-        "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}",
-        vars,
-      );
-    },
-    onSuccess: () => {
-      toast.success(t("integration.connection.updated"));
-      invalidateSchedules(qc);
+      if (op === "unshare") invalidateSchedules(qc);
       return invalidateIntegrationQueries(qc);
     },
   });

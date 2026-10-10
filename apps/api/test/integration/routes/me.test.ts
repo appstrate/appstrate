@@ -650,10 +650,15 @@ describe("Me API (/api/me)", () => {
       };
 
       const asKey = await list({ Authorization: `Bearer ${key.rawKey}` });
+      // Its origin lies outside the key's space: projected away like the shares there.
       expect(asKey).toEqual([
-        expect.objectContaining({ id, shared_here: true, shared_space_ids: [ctx.defaultSpaceId] }),
+        expect.objectContaining({
+          id,
+          shared_here: true,
+          shared_space_ids: [ctx.defaultSpaceId],
+          origin_space_id: null,
+        }),
       ]);
-      expect(asKey[0]).not.toHaveProperty("origin_space_id");
       const asOwner = await list(authHeaders(ctx));
       expect(asOwner).toEqual([
         expect.objectContaining({

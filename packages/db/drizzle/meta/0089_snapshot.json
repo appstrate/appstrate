@@ -5113,12 +5113,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "shared_by": {
-          "name": "shared_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5161,15 +5155,6 @@
           "columnsFrom": ["space_id", "org_id"],
           "columnsTo": ["id", "org_id"],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "ics_shared_by_fk": {
-          "name": "ics_shared_by_fk",
-          "tableFrom": "integration_connection_shares",
-          "tableTo": "user",
-          "columnsFrom": ["shared_by"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -5445,21 +5430,6 @@
           "where": "\"integration_connections\".\"end_user_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
-          "with": {}
-        },
-        "idx_integration_conn_shared": {
-          "name": "idx_integration_conn_shared",
-          "columns": [
-            {
-              "expression": "shared_space_ids",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
           "with": {}
         },
         "uq_integration_conn_id_org_id": {

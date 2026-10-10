@@ -266,7 +266,6 @@
   "apiError.auto_client_exists_at_org": "L'organisation a déjà son propre client OAuth automatique pour cette intégration : ce client d'espace ne peut pas le remplacer.",
   "apiError.connection_not_in_org_default": "Cette connexion ne fait pas partie de celles imposées par l'organisation : {{message}}",
   "apiError.connection_scope_narrowing": "Cette connexion sert toute l'organisation : la reconnecter via le client OAuth de cet espace la limiterait à cet espace. Créez plutôt une nouvelle connexion.",
-  "apiError.invalid_space_id": "L'identifiant de l'espace est invalide.",
   "apiError.invalid_share_target": "Une connexion ne peut être partagée qu'avec des espaces de son organisation, et une connexion limitée à un espace seulement avec cet espace.",
   "apiError.identity_mismatch": "Cette connexion est liée à un autre compte, reconnectez-vous avec le même compte ou créez une nouvelle connexion : {{message}}",
   "apiError.connect_unavailable": "Cette méthode de connexion n'est pas disponible sur cette instance. Contactez votre administrateur.",

@@ -177,11 +177,15 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
     });
     expect(res.status).toBe(200);
     const { data } = (await res.json()) as {
-      data: { id: string; allowed_actions: string[]; shareable_space_ids?: string[] }[];
+      data: {
+        id: string;
+        allowed_actions: string[];
+        shareable_spaces?: { id: string; name: string }[];
+      }[];
     };
     const row = data.find((entry) => entry.id === orgRow.id)!;
     expect(row.allowed_actions).toContain("share");
-    expect(row.shareable_space_ids).toEqual([ctx.defaultSpaceId]);
+    expect(row.shareable_spaces?.map((space) => space.id)).toEqual([ctx.defaultSpaceId]);
   });
 
   it("renews a row scoped to its space", async () => {

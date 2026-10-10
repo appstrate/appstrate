@@ -16,10 +16,8 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage, seedPlacedPackage, seedSpace, seedSpacePackage } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
-import { seedShares } from "../../helpers/connection-shares.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import { listMeConnections } from "../../../src/services/me-connections.ts";
-import type { Permission } from "../../../src/lib/permissions.ts";
-import type { MeConnectionReader } from "../../../src/services/me-connections.ts";
 import type { ConnectionPrincipal } from "../../../src/lib/connection-principal.ts";
 
 const INTEGRATION = "@reuse/svc";
@@ -30,10 +28,6 @@ describe("listMeConnections — reused_by_agents", () => {
   let a: string;
   let b: string;
   let principal: ConnectionPrincipal;
-  const reader: MeConnectionReader = {
-    canConnect: true,
-    permissionsIn: async () => new Set<Permission>(),
-  };
 
   const declaring = (id: string): Record<string, unknown> => ({
     name: id,
@@ -81,7 +75,7 @@ describe("listMeConnections — reused_by_agents", () => {
   }
 
   async function reuseOf(connectionId: string): Promise<number | undefined> {
-    const groups = await listMeConnections(principal, reader);
+    const groups = await listMeConnections(testCaller(principal));
     return groups
       .flatMap((g) => g.connections)
       .find((entry) => entry.connection_id === connectionId)?.reused_by_agents;
@@ -167,7 +161,7 @@ describe("listMeConnections — reused_by_agents", () => {
       orgId: ctx.orgId,
       spaceId: a,
     };
-    const groups = await listMeConnections(bound, reader);
+    const groups = await listMeConnections(testCaller(bound));
     const boundCount = groups
       .flatMap((g) => g.connections)
       .find((entry) => entry.connection_id === id)?.reused_by_agents;

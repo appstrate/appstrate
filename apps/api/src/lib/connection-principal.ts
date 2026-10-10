@@ -26,9 +26,3 @@ export function connectionPrincipal(c: Context<AppEnv>): ConnectionPrincipal {
 export function boundSpaceOf(principal: ConnectionPrincipal): string | null {
   return principal.kind === "delegated" ? principal.spaceId : null;
 }
-
-/** The shares of a connection `principal` sees: all of them, or only its bound space's. */
-export function sharesSeenBy(principal: ConnectionPrincipal, shares: readonly string[]): string[] {
-  const bound = boundSpaceOf(principal);
-  return shares.filter((id) => bound === null || id === bound);
-}

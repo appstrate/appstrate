@@ -150,7 +150,7 @@ describe("integration multi-client", () => {
       const created = await connect(SYSTEM_ID);
       expect(await readClientRef(created.id)).toBe("gmail-system");
       expect(created).toMatchObject({ scope: "org", spaceId: null });
-      expect(created).not.toHaveProperty("origin_space_id");
+      expect(created).toMatchObject({ origin_space_id: ctx.defaultSpaceId });
       expect(await readOriginSpaceId(created.id)).toBe(ctx.defaultSpaceId);
     });
 

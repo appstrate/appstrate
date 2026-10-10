@@ -183,7 +183,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       spaceId: ctx.scope.spaceId,
       actor: ctx.actor,
       forceAccountSelect: opts.forceAccountSelect ?? false,
-      ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
+      ...(ctx.target ? { connectionId: ctx.target.id } : {}),
       ...(ctx.delegated ? { delegated: true } : {}),
       ...(perConnection && issuer ? { redirectTag: authorizationServerTag(issuer) } : {}),
       ...(variables ? { variables } : {}),

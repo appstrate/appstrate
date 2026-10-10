@@ -16,20 +16,14 @@ import {
   connectionUpdateDescription,
   connectionUpdateRefusals400,
   connectionUpdateRequestBody,
+  integrationConnectionSchema,
   integrationPackageIdParam,
   lockedBySchema,
+  namedSpaceSchema,
+  shareableSpacesSchema,
 } from "./integrations.ts";
 
-const namedSpaceSchema = {
-  type: "object",
-  required: ["id", "name"],
-  properties: {
-    id: { type: "string" },
-    name: { type: "string" },
-  },
-} as const;
-
-/** One connection on the account surface, as the list (`GET /api/me/connections`) and the rename return it. */
+/** One connection on the account surface, as the list (`GET /api/me/connections`) returns it. */
 const meConnectionEntrySchema = {
   type: "object",
   required: [
@@ -80,11 +74,7 @@ const meConnectionEntrySchema = {
       description: "The spaces whose members may use it.",
     },
     allowed_actions: connectionActionsSchema,
-    shareable_spaces: {
-      type: "array",
-      items: namedSpaceSchema,
-      description: "The spaces the caller may share this connection into.",
-    },
+    shareable_spaces: shareableSpacesSchema,
     locked_by: lockedBySchema,
     org: {
       type: "object",
@@ -612,9 +602,9 @@ export const mePaths = {
       requestBody: connectionUpdateRequestBody,
       responses: {
         "200": {
-          description: "Renamed — returns the connection as the account list shows it",
+          description: "Renamed — returns the bare connection resource, as the space door does",
           headers: STD_RESPONSE_HEADERS,
-          content: { "application/json": { schema: meConnectionEntrySchema } },
+          content: { "application/json": { schema: integrationConnectionSchema } },
         },
         "400": {
           $ref: "#/components/responses/ValidationError",

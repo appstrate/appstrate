@@ -80,22 +80,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   connection set (`[]`, "No connection" pins and overrides) as absent and
   falls back to automatic resolution.
 
-- **After the deploy, run `scripts/migration/0044-connection-shares.ts --apply`
-  before anything else** (#1910). Migration `0089` creates
-  `integration_connection_shares` and copies nothing into it. Until 0044 runs,
-  the app sees no share: every connection shared into another space, including
-  those `0086` folded from `shared_with_org`, is visible only to its owner.
-  Before the deploy, `SELECT count(*) FROM integration_connections WHERE
-shared_with_org;` tells whether the step applies; a non-zero result makes it
-  required. After the deploy, run it right away: first the dry run
+- **Run `scripts/migration/0044-connection-shares.ts --apply` between the
+  migration and the app's start** (#1910). Migration `0089` creates
+  `integration_connection_shares` and copies nothing into it: an app serving
+  `0089` before 0044 has run sees no share, and every connection shared into
+  another space, including those `0086` folded from `shared_with_org`, would be
+  visible only to its owner. Before the deploy, `SELECT count(*) FROM
+integration_connections WHERE shared_with_org;` tells whether the step
+  applies; a non-zero result makes it required. The order, app stopped and
+  `pg_dump` taken: the `appstrate-migrate` service run alone (applies `0089`), then 0044's dry run
   (`set -a && . ./.env && set +a && bun scripts/migration/0044-connection-shares.ts`),
   which writes nothing and lists the shares it will insert and the target
   spaces it will skip (deleted, or owned by another organization), then the
-  same with `--apply`. It runs in one transaction, empties `shared_space_ids`
-  once copied, and audits each share it adds (`share_added`, `system` actor):
-  a second `--apply` inserts nothing, so a share withdrawn in between stays
-  withdrawn. The `shared_space_ids` column and its two CHECKs are dropped in
-  beta.68.
+  same with `--apply`, then start the app. It runs in one transaction, empties
+  `shared_space_ids` once copied, and audits each share it adds
+  (`share_added`, `reason: migrated`, `system` actor): a second `--apply`
+  inserts nothing, so a share withdrawn since stays withdrawn. The
+  `shared_space_ids` column and its two CHECKs are dropped in beta.68.
 
 - **`pg_dump` the platform database BEFORE deploying, then after the deploy
   and after `0044`, run
@@ -159,7 +160,7 @@ shared_with_org;` tells whether the step applies; a non-zero result makes it
   enables a subscription module, so its report should show none.
 
 - **After the deploy, run `scripts/migration/0043-promote-auto-clients-to-org.ts`,
-  dry, then with `--apply`, once `0041` and `0042` are done** (#1910). It
+  dry, then with `--apply`, once `0044` and `0041` are done** (#1910). It
   promotes the auto-provisioned OAuth clients (RFC 7591 DCR, CIMD) that were
   registered at a space's tier to the organization tier, so one client per
   authorization server serves the organization. Where an organization holds
