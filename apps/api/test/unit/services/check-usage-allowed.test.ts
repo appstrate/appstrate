@@ -32,12 +32,10 @@
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, organizations, orgModels } from "@appstrate/db/schema";
+import { organizations, orgModels } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
-import { enforceSystemProxyAdmission } from "../../../src/services/system-proxy-admission.ts";
-import { loadModel, requireBoundModel } from "../../../src/services/org-models.ts";
-import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
+import { admittedChatTurnPin } from "../../../src/services/system-proxy-admission.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -54,6 +52,16 @@ import type {
 
 const SYSTEM_PRESET = "sys-chat-model";
 const OPENAI_PRESET = "sys-chat-openai";
+
+/** The error `fn` throws, or `undefined` when it returns. */
+function thrownBy(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+}
 
 /** The test organization and its session user, created fresh for each test. */
 let ORG_ID = "";
@@ -445,9 +453,9 @@ describe("checkUsageAllowed", () => {
     ).resolves.toBeNull();
   });
 
-  it("holds an admitted chat turn to the credential source it was admitted on, with no module loaded", async () => {
+  it("pins an admitted chat turn to the credential that admitted it, for its session, preset and user", async () => {
     // A system preset of a provider whose catalog serves its model, so a personal key of
-    // that family can serve it: the member's own key makes the turn admitted on "org".
+    // that family can serve it: the member's own key is the credential the turn is admitted on.
     initSystemModelProviderKeys([
       {
         id: "sys-key-openai",
@@ -464,6 +472,7 @@ describe("checkUsageAllowed", () => {
       providerId: "openai",
       apiKey: "sk-mine",
     });
+    const admitted = { credentialId: personal.id, source: "org" as const };
     const sessionId = "chs_pin";
     expect(
       await checkUsageAllowed({
@@ -475,33 +484,40 @@ describe("checkUsageAllowed", () => {
       }),
     ).toBeNull();
 
-    const usage = { context: "chat" as const, sessionId, userId: USER_ID };
-    // Control: while the payer's key still exists, the call spends what was admitted.
-    const payerBound = requireBoundModel((await loadModel(ORG_ID, OPENAI_PRESET, USER_ID))!);
-    expect(payerBound.credentialSource).toBe("org");
-    await enforceSystemProxyAdmission({ orgId: ORG_ID, resolved: payerBound, usageContext: usage });
+    // The turn's calls are held to the personal key it was admitted on.
+    expect(
+      admittedChatTurnPin({ orgId: ORG_ID, userId: USER_ID, sessionId, presetId: OPENAI_PRESET }),
+    ).toEqual(admitted);
 
-    // The payer's key is removed mid-turn: the next call resolves to the platform key, and is refused.
-    await db.delete(modelProviderCredentials).where(eq(modelProviderCredentials.id, personal.id));
-    clearResolvedModelCache();
-    const platformBound = requireBoundModel((await loadModel(ORG_ID, OPENAI_PRESET, null))!);
-    expect(platformBound.credentialSource).toBe("system");
-    const refusal = await enforceSystemProxyAdmission({
-      orgId: ORG_ID,
-      resolved: platformBound,
-      usageContext: usage,
-    }).catch((err: unknown) => err);
-    expect(refusal).toBeInstanceOf(ApiError);
-    expect((refusal as ApiError).status).toBe(409);
-    expect((refusal as ApiError).code).toBe("model_credential_changed");
-
-    // A turn with no session is not held to a source: nothing was recorded for it.
-    await expect(
-      enforceSystemProxyAdmission({
+    // A turn with no session is admitted and pinned the same way.
+    expect(
+      await checkUsageAllowed({
         orgId: ORG_ID,
-        resolved: platformBound,
-        usageContext: { context: "chat", sessionId: null, userId: USER_ID },
+        presetId: OPENAI_PRESET,
+        sessionId: null,
+        subscription: false,
+        userId: USER_ID,
       }),
-    ).resolves.toBeUndefined();
+    ).toBeNull();
+    expect(
+      admittedChatTurnPin({
+        orgId: ORG_ID,
+        userId: USER_ID,
+        sessionId: null,
+        presetId: OPENAI_PRESET,
+      }),
+    ).toEqual(admitted);
+
+    // No admission covers another preset or another user: refused, never re-routed.
+    const otherUserId = "00000000-0000-4000-a000-0000000000e1";
+    for (const turn of [
+      { orgId: ORG_ID, userId: USER_ID, sessionId, presetId: SYSTEM_PRESET },
+      { orgId: ORG_ID, userId: otherUserId, sessionId, presetId: OPENAI_PRESET },
+    ]) {
+      const refusal = thrownBy(() => admittedChatTurnPin(turn));
+      expect(refusal).toBeInstanceOf(ApiError);
+      expect((refusal as ApiError).status).toBe(409);
+      expect((refusal as ApiError).code).toBe("model_credential_changed");
+    }
   });
 });

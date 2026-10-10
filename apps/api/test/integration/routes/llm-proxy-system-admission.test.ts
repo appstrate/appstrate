@@ -45,6 +45,7 @@ import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { loadModulesFromInstances, resetModules } from "../../../src/lib/modules/module-loader.ts";
 import { restoreDiscoveredModules } from "../../helpers/test-modules.ts";
 import { mintLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import { recordChatTurnAdmission } from "../../../src/services/system-proxy-admission.ts";
 
 const app = getTestApp();
 const SYSTEM_PRESET = "system-proxy-test";
@@ -424,6 +425,16 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
       },
       { chatSessionId: "chs_loopback" },
     );
+    // The turn was admitted at its start (`checkUsageAllowed`) on the system preset.
+    recordChatTurnAdmission(
+      {
+        orgId: h.ctx.orgId,
+        userId: h.ctx.user.id,
+        sessionId: "chs_loopback",
+        presetId: SYSTEM_PRESET,
+      },
+      { credentialId: null, source: "system" },
+    );
 
     const res = await app.request("/api/llm-proxy/openai-completions/v1/chat/completions", {
       method: "POST",
@@ -583,6 +594,16 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
         orgRole: "owner",
       },
       { chatSessionId: "chs_reserved" },
+    );
+    // The turn was admitted at its start (`checkUsageAllowed`) on the system preset.
+    recordChatTurnAdmission(
+      {
+        orgId: h.ctx.orgId,
+        userId: h.ctx.user.id,
+        sessionId: "chs_reserved",
+        presetId: SYSTEM_PRESET,
+      },
+      { credentialId: null, source: "system" },
     );
     const chatHeaders = {
       authorization: `Bearer ${loopback}`,

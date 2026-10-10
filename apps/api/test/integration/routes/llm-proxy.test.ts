@@ -56,6 +56,8 @@ import {
 } from "../../../src/services/llm-proxy/core.ts";
 import { openaiResponsesAdapter } from "../../../src/services/llm-proxy/openai-responses.ts";
 import type { LlmProxyPrincipal } from "../../../src/services/llm-proxy/types.ts";
+import { recordChatTurnAdmission } from "../../../src/services/system-proxy-admission.ts";
+import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 import {
   CACHE_STATUS_HIT as HIT,
   CACHE_STATUS_MISS as MISS,
@@ -1506,7 +1508,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
   async function proxyAs(
     principal: LlmProxyPrincipal,
     presetId: string,
-    payer: Pick<Parameters<typeof proxyLlmCall>[0], "payerUserId" | "pinned">,
+    payer: Pick<Parameters<typeof proxyLlmCall>[0], "payerUserId" | "pinned" | "chatTurn">,
     onUpstream: () => void = () => {},
   ): Promise<{ status: number; authorization: string | null }> {
     let authorization: string | null = null;
@@ -1646,6 +1648,88 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
         },
       ),
     ).rejects.toBeInstanceOf(LlmProxyUnsupportedModelError);
+    expect(upstreamCalls).toBe(0);
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
+  });
+
+  it("a chat turn's calls are served on the credential it was admitted on", async () => {
+    const h = await buildPersonalHarness();
+    const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
+    const chatTurn = { userId: h.ctx.user.id, sessionId: null };
+    recordChatTurnAdmission(
+      { orgId: h.ctx.orgId, userId: h.ctx.user.id, sessionId: null, presetId: h.presetId },
+      { credentialId: h.personalCredentialId, source: "org" },
+    );
+    // The payer adds another personal key after the turn was admitted. The chain
+    // ranks personal keys oldest first, so this one is backdated to rank ahead of
+    // the admitted key: a turn that re-resolved would be served by it.
+    await db.insert(modelProviderCredentials).values({
+      orgId: h.ctx.orgId,
+      ownerUserId: h.ctx.user.id,
+      label: "Added later",
+      providerId: "openai",
+      credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey: "sk-added-later" }),
+      baseUrlOverride: UPSTREAM_BASE,
+      createdBy: h.ctx.user.id,
+      createdAt: new Date("2020-01-01T00:00:00Z"),
+    });
+
+    // Control: outside any turn the payer's chain serves the key that ranks first.
+    expect(
+      (await proxyAs(principal, h.presetId, { payerUserId: h.ctx.user.id })).authorization,
+    ).toBe("Bearer sk-added-later");
+    // The admitted turn keeps the key it was admitted on.
+    const admittedCall = await proxyAs(principal, h.presetId, {
+      payerUserId: h.ctx.user.id,
+      chatTurn,
+    });
+    expect(admittedCall.status).toBe(200);
+    expect(admittedCall.authorization).toBe("Bearer sk-personal");
+  });
+
+  it("a chat turn whose admitted credential is deleted is refused, never served by the org key", async () => {
+    const h = await buildPersonalHarness();
+    const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
+    recordChatTurnAdmission(
+      { orgId: h.ctx.orgId, userId: h.ctx.user.id, sessionId: null, presetId: h.presetId },
+      { credentialId: h.personalCredentialId, source: "org" },
+    );
+    // The payer deletes the personal key the turn was admitted on.
+    await db
+      .delete(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, h.personalCredentialId));
+    clearResolvedModelCache();
+
+    let upstreamCalls = 0;
+    await expect(
+      proxyAs(
+        principal,
+        h.presetId,
+        { payerUserId: h.ctx.user.id, chatTurn: { userId: h.ctx.user.id, sessionId: null } },
+        () => {
+          upstreamCalls++;
+        },
+      ),
+    ).rejects.toBeInstanceOf(LlmProxyUnsupportedModelError);
+    expect(upstreamCalls).toBe(0);
+    expect(await db.select().from(llmUsage)).toHaveLength(0);
+  });
+
+  it("a chat call no admission covers is refused", async () => {
+    const h = await buildPersonalHarness();
+    const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
+
+    let upstreamCalls = 0;
+    await expect(
+      proxyAs(
+        principal,
+        h.presetId,
+        { payerUserId: h.ctx.user.id, chatTurn: { userId: h.ctx.user.id, sessionId: null } },
+        () => {
+          upstreamCalls++;
+        },
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "model_credential_changed" });
     expect(upstreamCalls).toBe(0);
     expect(await db.select().from(llmUsage)).toHaveLength(0);
   });

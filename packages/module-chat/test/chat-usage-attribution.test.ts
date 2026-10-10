@@ -25,6 +25,7 @@ import { createTestContext, type TestContext } from "../../../apps/api/test/help
 import { flushRedis } from "../../../apps/api/test/helpers/redis.ts";
 import { seedOrgModelProviderKey, seedOrgModel } from "../../../apps/api/test/helpers/seed.ts";
 import { mintLoopbackToken } from "../src/loopback-auth.ts";
+import { recordChatTurnAdmission } from "../../../apps/api/src/services/system-proxy-admission.ts";
 
 const app = getTestApp();
 
@@ -51,6 +52,7 @@ async function waitForRow<T>(query: () => Promise<T[]>): Promise<T> {
 describe("chat proxy-routed path — session attribution via the loopback bearer", () => {
   let ctx: TestContext;
   let presetId: string;
+  let credentialId: string;
 
   beforeEach(async () => {
     await truncateAll();
@@ -70,6 +72,7 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
       cost: { input: 5, output: 15, cacheRead: 0, cacheWrite: 0 },
     });
     presetId = model.id;
+    credentialId = providerKey.id;
   });
 
   afterEach(() => restoreFetch());
@@ -97,6 +100,11 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
 
     // The exact bearer chat mints for its ai-sdk inference calls: identity +
     // the session id signed INTO the claims (never a header).
+    // The turn was admitted at its start (`checkUsageAllowed`) on the org key.
+    recordChatTurnAdmission(
+      { orgId: ctx.orgId, userId: ctx.user.id, sessionId: "chs_attr_1", presetId },
+      { credentialId, source: "org" },
+    );
     const token = mintLoopbackToken(
       {
         userId: ctx.user.id,
@@ -146,6 +154,11 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
 
     // An ephemeral turn mints the bearer WITHOUT a session id — usage is still
     // metered, but attributed to no context.
+    // The turn was admitted at its start (`checkUsageAllowed`) on the org key.
+    recordChatTurnAdmission(
+      { orgId: ctx.orgId, userId: ctx.user.id, sessionId: null, presetId },
+      { credentialId, source: "org" },
+    );
     const token = mintLoopbackToken({
       userId: ctx.user.id,
       email: ctx.user.email,

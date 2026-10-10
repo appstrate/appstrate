@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
+import { addOrgMember, createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
 import {
   cancelPairing,
   cleanupExpiredPairings,
@@ -71,6 +71,46 @@ describe("createPairing", () => {
     expect(row!.tokenHash).not.toContain(result.token);
     expect(row!.providerId).toBe("test-oauth");
     expect(row!.consumedAt).toBeNull();
+  });
+
+  it("refuses a user who is not a member of the organization with 403, inserting no pairing row", async () => {
+    const stranger = await createTestUser();
+
+    const refusal = await createPairing({
+      userId: stranger.id,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    }).catch((err: unknown) => err);
+
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect((refusal as ApiError).status).toBe(403);
+    expect(
+      await db
+        .select({ id: modelProviderPairings.id })
+        .from(modelProviderPairings)
+        .where(eq(modelProviderPairings.orgId, fix.org.id)),
+    ).toEqual([]);
+  });
+
+  it("mints a pairing for a member of the organization", async () => {
+    const member = await createTestUser();
+    await addOrgMember(fix.org.id, member.id, "member");
+
+    const { id } = await createPairing({
+      userId: member.id,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+
+    const rows = await db
+      .select({ userId: modelProviderPairings.userId })
+      .from(modelProviderPairings)
+      .where(eq(modelProviderPairings.id, id));
+    expect(rows).toEqual([{ userId: member.id }]);
   });
 });
 

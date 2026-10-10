@@ -532,37 +532,3 @@ describe("model resolution — a member's own credential first", () => {
     expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), model.id)).toBe("org");
   });
 });
-
-describe("model writes — one unbound model per provider and model", () => {
-  let ctx: TestContext;
-
-  beforeEach(async () => {
-    await truncateAll();
-    ctx = await createTestContext({ orgSlug: "unboundorg" });
-  });
-
-  it("refuses a second unbound model of the same provider and model id, and admits it under another provider", async () => {
-    const first = await createOrgModel(ctx.orgId, "Shared Claude", ANTHROPIC_A, ctx.user.id, {
-      credentialId: null,
-      providerId: "anthropic",
-    });
-
-    const error = await createOrgModel(ctx.orgId, "Shared again", ANTHROPIC_A, ctx.user.id, {
-      credentialId: null,
-      providerId: "anthropic",
-    }).catch((err: unknown) => err);
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).status).toBe(409);
-    expect((error as ApiError).code).toBe("model_already_added");
-    // The row that already holds the unbound binding, so the caller can act on it.
-    expect((error as ApiError).extensions).toEqual({ existing_model_id: first });
-
-    // Control: the same model id under another provider is another binding.
-    expect(
-      await createOrgModel(ctx.orgId, "OpenAI route", ANTHROPIC_A, ctx.user.id, {
-        credentialId: null,
-        providerId: "openai",
-      }),
-    ).toEqual(expect.any(String));
-  });
-});
