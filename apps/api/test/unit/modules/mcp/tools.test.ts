@@ -724,6 +724,63 @@ describe("invoke_operation", () => {
     expect(calls.length).toBe(0);
   });
 
+  it("rejects an object query value instead of sending [object Object]", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, query: { filter: { a: 1 } } }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain("query.filter");
+    expect(calls.length).toBe(0);
+  });
+
+  it("rejects a query array containing a non-scalar", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, query: { tag: ["a", { b: 1 }] } }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(calls.length).toBe(0);
+  });
+
+  it("sends an array of scalars as repeated query keys", async () => {
+    const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, query: { tag: ["a", 2, true] } }, noExtra);
+    expect(new URL(calls[0]!.url).searchParams.getAll("tag")).toEqual(["a", "2", "true"]);
+  });
+
+  it("rejects an object path param", async () => {
+    const op = firstOp((o) => o.pathParams.length === 1 && o.pathParams[0] !== "scope");
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler(
+        { operation_id: op.operationId, path_params: { [op.pathParams[0]!]: { id: 1 } } },
+        noExtra,
+      );
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toContain(`path_params.${op.pathParams[0]}`);
+    expect(calls.length).toBe(0);
+  });
+
+  it("still accepts a numeric path param", async () => {
+    const op = firstOp(
+      (o) =>
+        o.pathParams.length === 1 && o.pathParams[0] !== "scope" && o.pathParams[0] !== "packageId",
+    );
+    const { byName, calls } = makeTools(["mcp:invoke"]);
+    const res = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: op.operationId, path_params: { [op.pathParams[0]!]: 42 } }, noExtra);
+    expect(res.isError).toBeFalsy();
+    expect(calls[0]!.url).toContain("/42");
+  });
+
   it("forwards extra headers but never overrides forwarded auth headers", async () => {
     const op = firstOp((o) => o.method === "GET" && o.pathParams.length === 0);
     const { byName, calls } = makeTools(["mcp:invoke"]);

@@ -3,7 +3,9 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { WidgetProps } from "@rjsf/utils";
 import { SchemaForm } from "../src/schema-form/index.tsx";
+import { SelectWidget } from "../src/schema-form/widgets.tsx";
 
 const browserLanguages = Object.getOwnPropertyDescriptor(globalThis.navigator, "languages");
 
@@ -69,5 +71,24 @@ describe("SchemaForm inputs", () => {
     expect(tag).toContain('type="text"');
     expect(tag).not.toContain("inputmode");
     expect(tag).not.toContain("step=");
+  });
+});
+
+describe("SelectWidget option matching", () => {
+  const enumOptions = [
+    { label: "Alpha", value: { id: 1 } },
+    { label: "Beta", value: { id: 2 } },
+  ];
+  const render = (value: unknown) =>
+    renderToStaticMarkup(
+      <SelectWidget
+        {...({ id: "s", value, options: { enumOptions } } as unknown as WidgetProps)}
+      />,
+    );
+
+  it("selects only the object option equal to the value", () => {
+    const html = render({ id: 2 });
+    expect(html).toContain("Beta");
+    expect(html).not.toContain("Alpha");
   });
 });

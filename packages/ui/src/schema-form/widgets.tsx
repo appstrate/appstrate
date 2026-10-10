@@ -79,11 +79,17 @@ export function CheckboxWidget(props: WidgetProps) {
   );
 }
 
+/** Primitives compare by text ("1" matches 1); objects by JSON, as String() collapses them all. */
+function sameOptionValue(a: unknown, b: unknown): boolean {
+  const key = (v: unknown) => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v));
+  return key(a) === key(b);
+}
+
 export function SelectWidget(props: WidgetProps) {
   const { id, value, onChange, disabled, options, placeholder } = props;
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
-  const selected = enumOptions.find((o) => String(o.value) === String(value)) ?? null;
+  const selected = enumOptions.find((o) => sameOptionValue(o.value, value)) ?? null;
 
   return (
     <Select<EnumOption, false>
@@ -106,7 +112,7 @@ export function MultiSelectWidget(props: WidgetProps) {
   const enumOptions = (options.enumOptions as EnumOption[] | undefined) ?? [];
 
   const raw = Array.isArray(value) ? value : [];
-  const selected = enumOptions.filter((o) => raw.some((v) => String(v) === String(o.value)));
+  const selected = enumOptions.filter((o) => raw.some((v) => sameOptionValue(v, o.value)));
 
   return (
     <Select<EnumOption, true>

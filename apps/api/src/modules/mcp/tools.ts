@@ -575,6 +575,31 @@ function isSafePathParamValue(value: string): boolean {
   return true;
 }
 
+type Scalar = string | number | boolean;
+
+// `String(x)` on an object yields "[object Object]"; only scalars have a
+// faithful text form for a URL.
+function isScalar(value: unknown): value is Scalar {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+/** Name of the first path/query parameter holding a non-scalar value, or null. */
+function findNonScalarParam(
+  op: CatalogOperation,
+  pathParams: Record<string, unknown>,
+  query: Record<string, unknown>,
+): string | null {
+  for (const name of op.pathParams) {
+    const value = pathParams[name];
+    if (value != null && !isScalar(value)) return `path_params.${name}`;
+  }
+  for (const [key, value] of Object.entries(query)) {
+    if (value == null) continue;
+    if (Array.isArray(value) ? !value.every(isScalar) : !isScalar(value)) return `query.${key}`;
+  }
+  return null;
+}
+
 function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknown>): string | null {
   let path = op.pathTemplate;
   for (const name of op.pathParams) {
@@ -705,12 +730,14 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
           type: "object",
-          description: "Values for path placeholders (e.g. { scope, name }).",
+          description:
+            "Values for path placeholders (e.g. { scope, name }); strings, numbers or booleans only.",
           additionalProperties: true,
         },
         query: {
           type: "object",
-          description: "Query-string parameters.",
+          description:
+            "Query-string parameters: string, number or boolean values (or arrays of them for repeated keys).",
           additionalProperties: true,
         },
         body: {
@@ -770,6 +797,25 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     }
 
     const pathParams = asRecord(args.path_params) ?? {};
+    const query = asRecord(args.query) ?? {};
+    const nonScalar = findNonScalarParam(op, pathParams, query);
+    if (nonScalar !== null) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return jsonResult(
+        {
+          error:
+            `Invalid ${nonScalar}: only string, number or boolean values are accepted ` +
+            "(query also accepts arrays of those).",
+        },
+        true,
+      );
+    }
     const path = interpolatePath(op, pathParams);
     if (path === null) {
       emit(ctx, {
@@ -784,8 +830,6 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         true,
       );
     }
-
-    const query = asRecord(args.query) ?? {};
 
     // An invalid model-supplied header is a tool error, not a 500.
     const rejectHeader = (name: string): CallToolResult => {
