@@ -114,4 +114,53 @@ describe("non-string credentials reach the delivery plan (#1897)", () => {
     });
     expect(wire.deliveryPlans.primary?.value).toBe('k;5432;false;["db1","db2"]');
   });
+
+  it("judges a templated authorized_uris entry on the same projection at write and at read", async () => {
+    const manifest = typedManifest() as {
+      auths: {
+        primary: {
+          authorized_uris: string[];
+          credentials: { schema: { properties: Record<string, unknown>; required: string[] } };
+        };
+      };
+    };
+    manifest.auths.primary.authorized_uris = ["https://{$credential.host}:{$credential.port}/**"];
+    manifest.auths.primary.credentials.schema.properties.host = { type: "string" };
+    manifest.auths.primary.credentials.schema.required.push("host");
+    await seedPackage({
+      id: "@myorg/pg-ports",
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      source: "local",
+      draftManifest: { ...manifest, name: "@myorg/pg-ports" } as unknown as Record<string, unknown>,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@myorg/pg-ports");
+
+    // An integer port is a valid authority value once rendered: the write must not refuse
+    // what every later read accepts.
+    const post = await app.request(
+      `/api/integrations/@myorg/pg-ports/auths/primary/connect/fields`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credentials: { api_key: "k", host: "db.example.com", port: 8443, tls: true, hosts: [] },
+        }),
+      },
+    );
+    expect(post.status, await post.clone().text()).toBe(200);
+    const { id } = (await post.json()) as { id: string };
+
+    const wire = await resolveLiveIntegrationCredentials("@myorg/pg-ports", {
+      runId: "run_test",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      agentPackageId: "@myorg/agent",
+      actor: { type: "user", id: ctx.user.id },
+      connectionId: id,
+      connectionSource: "member_pin",
+    });
+    expect(wire.auths[0]!.authorizedUris).toEqual(["https://db.example.com:8443/**"]);
+  });
 });
