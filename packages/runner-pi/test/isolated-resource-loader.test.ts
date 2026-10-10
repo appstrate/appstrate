@@ -142,18 +142,60 @@ describe("createIsolatedResourceLoader", () => {
   /**
    * The flags (`noSkills`, …) are applied after Pi's package manager has
    * already walked the user-scope directories, so an empty RESULT does not
-   * prove the walk did not happen. Ask the package manager itself: unshimmed,
-   * it reports the seeded host skills and extension.
+   * prove the walk did not happen. Ask the patched package manager itself.
    */
   it("never lets Pi's package manager scan the filesystem", async () => {
     const loader = await load([seeded().platformSkills]);
-    // `packageManager` is private in Pi's TypeScript surface, a normal field at runtime.
     const packageManager = Reflect.get(loader, "packageManager") as {
       resolve: () => Promise<{ skills: unknown[]; extensions: unknown[] }>;
+      resolveExtensionSources: () => Promise<{ skills: unknown[]; extensions: unknown[] }>;
     };
+    for (const resolved of [
+      await packageManager.resolve(),
+      await packageManager.resolveExtensionSources(),
+    ]) {
+      expect(resolved.skills).toEqual([]);
+      expect(resolved.extensions).toEqual([]);
+    }
+  });
+
+  it("patches the field Pi's own scan goes through", async () => {
+    const sdk = await loadPiCodingAgentSdk();
+    const raw = new sdk.DefaultResourceLoader({
+      cwd: seeded().cwd,
+      agentDir: seeded().agentDir,
+      settingsManager: sdk.SettingsManager.inMemory(),
+      extensionFactories: [],
+      additionalSkillPaths: [seeded().platformSkills],
+      systemPrompt: "Platform prompt",
+      appendSystemPrompt: [],
+    });
+    // `packageManager` is private in Pi's TypeScript surface, a normal field at runtime.
+    const packageManager = Reflect.get(raw, "packageManager") as {
+      resolve: () => Promise<{ skills: unknown[] }>;
+    };
+    expect(typeof packageManager.resolve).toBe("function");
     const resolved = await packageManager.resolve();
-    expect(resolved.skills).toEqual([]);
-    expect(resolved.extensions).toEqual([]);
+    expect(JSON.stringify(resolved.skills)).toContain("home-skill");
+  });
+
+  it("refuses to build when Pi has no packageManager to shim", async () => {
+    const sdk = await loadPiCodingAgentSdk();
+    await expect(
+      createIsolatedResourceLoader({
+        DefaultResourceLoader: class {
+          reload() {
+            return Promise.resolve();
+          }
+        } as never,
+        SettingsManager: sdk.SettingsManager,
+        cwd: seeded().cwd,
+        agentDir: seeded().agentDir,
+        systemPrompt: "Platform prompt",
+        extensionFactories: [],
+        skillPaths: [],
+      }),
+    ).rejects.toThrow(/no longer exposes packageManager\.resolve\/resolveExtensionSources/);
   });
 });
 

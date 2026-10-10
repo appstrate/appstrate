@@ -173,3 +173,34 @@ export function isBlockedUrl(url: string, allowHost?: (host: string) => boolean)
   if (allowHost?.(parsed.hostname)) return false;
   return isBlockedHost(parsed.hostname);
 }
+
+/** The parsed `EGRESS_ALLOW_INTERNAL_HOSTS` list: the accepted hosts and one message per refused entry. */
+export interface EgressAllowlistParse {
+  /** Lowercased bare hostnames / dotted IPv4, matched exactly against a URL's `hostname`. */
+  hosts: ReadonlySet<string>;
+  /** One message per refused entry, in input order; empty when valid. */
+  invalid: readonly string[];
+}
+
+/**
+ * Parse the comma-separated `EGRESS_ALLOW_INTERNAL_HOSTS` list: entries are trimmed and lowercased,
+ * empty items skipped. An entry is kept only when it is spelled with `[a-z0-9._-]` and is already its
+ * own normalized host (no trailing dot, short or hex IPv4). IPv6 literals are refused: the per-run
+ * bridge is IPv4-only, and sidecar CONNECT hosts arrive unbracketed while `URL.hostname` keeps brackets.
+ */
+export function parseEgressAllowInternalHosts(raw: string | undefined): EgressAllowlistParse {
+  const hosts = new Set<string>();
+  const invalid: string[] = [];
+  for (const item of (raw ?? "").split(",")) {
+    const entry = item.trim().toLowerCase();
+    if (entry === "") continue;
+    if (/^[a-z0-9._-]+$/.test(entry) && normalizeHost(entry) === entry) {
+      hosts.add(entry);
+    } else {
+      invalid.push(
+        `"${entry}" is not a bare hostname or dotted IPv4 address (e.g. "keycloak.internal", "10.0.0.5"; no scheme, port, path, wildcard, IPv6 literal or trailing dot; IDN hosts in punycode)`,
+      );
+    }
+  }
+  return { hosts, invalid };
+}

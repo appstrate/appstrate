@@ -299,7 +299,9 @@ Two consequences worth stating, because they are where this gets uncomfortable:
   A retired env name is the operator's to fix, announced in the release notes.
   What may legitimately stand in its place is a check that names no old
   spelling at all — warning on any key the running version does not read covers
-  retired names, typos and every future removal, and never expires.
+  retired names, typos and every future removal, and never expires. It is
+  implemented as `warnOnUnreadEnvKeys` (`apps/api/src/lib/unread-env-keys.ts`),
+  one boot line; its namespace rule and limits are in `docs/ENV.md` § Unread keys.
 - **A guard that is load-bearing for CURRENT data is not a guard.** If deleting
   it breaks something that works today, it was never transitional and §4 does
   not reach it. The AFPS retired-key handling is the live example: its "drop"

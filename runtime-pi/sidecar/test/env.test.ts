@@ -116,6 +116,14 @@ describe("parseSidecarEnv", () => {
     ]);
   });
 
+  it("refuses a malformed EGRESS_ALLOW_INTERNAL_HOSTS entry at boot, naming the entry", () => {
+    expect(issuesOf({ ...VALID, EGRESS_ALLOW_INTERNAL_HOSTS: "a.internal,b.internal:80" })).toEqual(
+      [
+        'EGRESS_ALLOW_INTERNAL_HOSTS: "b.internal:80" is not a bare hostname or dotted IPv4 address (e.g. "keycloak.internal", "10.0.0.5"; no scheme, port, path, wildcard, IPv6 literal or trailing dot; IDN hosts in punycode)',
+      ],
+    );
+  });
+
   it("renders a single-line message (connect mode relays it on one stdout sentinel)", () => {
     expect.assertions(1);
     try {
