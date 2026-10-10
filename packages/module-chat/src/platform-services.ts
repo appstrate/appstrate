@@ -56,9 +56,15 @@ export interface ChatPlatformDeps {
    * user `userId`: an API-key / unknown provider yields `{ subscription: false }`
    * (llm-proxy-bound); an oauth2 provider yields the real upstream binding + a
    * fresh access token from the user's own subscription, or a `needsReconnection`
-   * signal when its credential is dead.
+   * signal when its credential is dead. `turnId` ties that subscription to the
+   * turn's admission.
    */
-  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
+  resolveChatModel(
+    orgId: string,
+    presetId: string,
+    userId: string,
+    turnId: string,
+  ): Promise<ChatModelResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
@@ -154,8 +160,8 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
     publicOrigin: ctx.appUrl,
-    resolveChatModel: (orgId, presetId, userId) =>
-      ctx.services.resolveChatModel(orgId, presetId, userId),
+    resolveChatModel: (orgId, presetId, userId, turnId) =>
+      ctx.services.resolveChatModel(orgId, presetId, userId, turnId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),

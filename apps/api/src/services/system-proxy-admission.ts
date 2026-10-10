@@ -166,7 +166,7 @@ export async function enforceSystemProxyAdmission(args: {
  * instead of a fresh chain resolution. Keyed by the turn id the chat signs into
  * its inference bearer, so concurrent turns never share an entry. The chat engine
  * reaches the proxy through this process's own loopback, so a process-local entry
- * sees every call of the turn; it lives as long as the engine's loopback bearer.
+ * sees every call of the turn; it outlives the turn (`ENGINE_LOOPBACK_TTL_MS`, module-chat).
  */
 const admittedChatTurns = createCache<{ presetId: string; pin: PinnedModelCredential }>({
   name: "chat-turn-admission",
@@ -211,4 +211,34 @@ export function admittedChatTurnPin(
     );
   }
   return admitted.pin;
+}
+
+/**
+ * The subscription each chat turn resolved for its engine (`resolveChatModel`),
+ * taken once by the turn's admission. A subscription turn never reaches the proxy,
+ * so this is its own map, never readable by {@link admittedChatTurnPin}.
+ */
+const resolvedSubscriptionTurns = createCache<{ presetId: string; pin: PinnedModelCredential }>({
+  name: "chat-subscription-turn",
+  ttlMs: 5 * 60_000,
+  max: 10_000,
+});
+
+/** Remember the subscription credential a chat turn's engine was handed. */
+export function recordSubscriptionTurn(
+  turn: ChatTurn,
+  presetId: string,
+  pin: PinnedModelCredential,
+): void {
+  resolvedSubscriptionTurns.set(chatTurnKey(turn), { presetId, pin });
+}
+
+/** The subscription a chat turn resolved, once; `undefined` when none was recorded. */
+export function takeSubscriptionTurn(
+  turn: ChatTurn,
+): { presetId: string; pin: PinnedModelCredential } | undefined {
+  const key = chatTurnKey(turn);
+  const recorded = resolvedSubscriptionTurns.peek(key);
+  resolvedSubscriptionTurns.invalidate(key);
+  return recorded;
 }

@@ -27,10 +27,15 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
-import { recordChatTurnAdmission } from "./system-proxy-admission.ts";
+import {
+  recordChatTurnAdmission,
+  recordSubscriptionTurn,
+  takeSubscriptionTurn,
+} from "./system-proxy-admission.ts";
 import {
   credentialPin,
   loadModel,
+  loadPinnedModel,
   modelNeedsReconnection,
   requireBoundModel,
 } from "./org-models.ts";
@@ -38,7 +43,7 @@ import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, conflict } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { db } from "@appstrate/db/client";
 
@@ -47,12 +52,14 @@ import { db } from "@appstrate/db/client";
  * chat turn, for the session user `userId` (their personal subscription serves
  * it first). Only oauth-subscription (authMode `oauth2`) models take the Pi
  * chat-engine path; everything else returns `{ subscription: false }` so the
- * chat module binds the same engine to the llm-proxy instead.
+ * chat module binds the same engine to the llm-proxy instead. The subscription
+ * a turn resolves is recorded under `turnId`: admission checks that one.
  */
 export async function resolveChatModel(
   orgId: string,
   presetId: string,
   userId: string,
+  turnId: string,
 ): Promise<ChatModelResolution> {
   const resolved = await loadModel(orgId, presetId, userId);
   if (!resolved) {
@@ -99,7 +106,7 @@ export async function resolveChatModel(
   ) {
     return { subscription: true, needsReconnection: true };
   }
-  const { credentialId } = requireBoundModel(resolved);
+  const { credentialId } = requireBoundModel(resolved, userId);
   if (!credentialId) {
     return { subscription: true, needsReconnection: true };
   }
@@ -115,6 +122,7 @@ export async function resolveChatModel(
     throw err;
   }
 
+  recordSubscriptionTurn({ orgId, userId, turnId }, presetId, credentialPin(resolved));
   return {
     subscription: true,
     model: {
@@ -126,6 +134,7 @@ export async function resolveChatModel(
       maxTokens: resolved.maxTokens ?? null,
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
+      credentialId,
       accessToken: token.accessToken,
     },
   };
@@ -213,6 +222,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialSource: "org",
+        credentialId: record.credentialId,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -281,18 +291,39 @@ export async function checkUsageAllowed(args: {
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
   if (err) return { code: err.code, message: err.message, status: err.status };
 
-  // A platform rule, not an admission decision: it holds with or without a module.
-  // A preset that resolves but serves no credential the session user can spend is
-  // refused here; one that does not resolve at all fails at model resolution.
-  const resolved = await loadModel(args.orgId, args.presetId, args.userId);
-  if (resolved && resolved.credentialSource === null) {
-    try {
-      requireBoundModel(resolved);
-    } catch (err) {
-      if (err instanceof ApiError) {
-        return { code: err.code, message: err.message, status: err.status };
+  const turn = { orgId: args.orgId, userId: args.userId, turnId: args.turnId };
+  let resolved: Awaited<ReturnType<typeof loadModel>> | undefined;
+  if (args.subscription) {
+    // A subscription turn is admitted on the credential `resolveChatModel` handed
+    // the engine, checked again now: never a second, independent resolution. No
+    // record means no token was handed (a reconnect answer): nothing to spend.
+    const recorded = takeSubscriptionTurn(turn);
+    resolved = recorded
+      ? recorded.presetId === args.presetId
+        ? await loadPinnedModel(args.orgId, args.presetId, recorded.pin)
+        : null
+      : undefined;
+    if (resolved === null) {
+      const err = conflict(
+        "model_credential_changed",
+        "The model's access changed while this message was being sent. Send it again.",
+      );
+      return { code: err.code, message: err.message, status: err.status };
+    }
+  } else {
+    // A platform rule, not an admission decision: it holds with or without a module.
+    // A preset that resolves but serves no credential the session user can spend is
+    // refused here; one that does not resolve at all fails at model resolution.
+    resolved = await loadModel(args.orgId, args.presetId, args.userId);
+    if (resolved && resolved.credentialSource === null) {
+      try {
+        requireBoundModel(resolved, args.userId);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          return { code: err.code, message: err.message, status: err.status };
+        }
+        throw err;
       }
-      throw err;
     }
   }
 
@@ -301,11 +332,7 @@ export async function checkUsageAllowed(args: {
   // subscription turn talks to its provider directly, never through the proxy.
   const admit = () => {
     if (resolved && !args.subscription) {
-      recordChatTurnAdmission(
-        { orgId: args.orgId, userId: args.userId, turnId: args.turnId },
-        args.presetId,
-        credentialPin(resolved),
-      );
+      recordChatTurnAdmission(turn, args.presetId, credentialPin(resolved));
     }
     return null;
   };

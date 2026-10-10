@@ -38,7 +38,9 @@ import { initSystemModelProviderKeys } from "../../../src/services/model-registr
 import {
   admittedChatTurnPin,
   recordChatTurnAdmission,
+  recordSubscriptionTurn,
 } from "../../../src/services/system-proxy-admission.ts";
+import { deleteModelProviderCredential } from "../../../src/services/model-providers/credentials.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -71,6 +73,7 @@ let ORG_ID = "";
 let USER_ID = "";
 /** An org-owned model bound to the org's own API key (not a system preset). */
 let orgPresetId = "";
+let orgKeyId = "";
 
 function fakeInitCtx(): ModuleInitContext {
   return {
@@ -133,6 +136,7 @@ describe("checkUsageAllowed", () => {
       enabled: true,
     });
     orgPresetId = model.id;
+    orgKeyId = orgKey.id;
   });
 
   afterAll(async () => {
@@ -388,6 +392,10 @@ describe("checkUsageAllowed", () => {
     // the SYSTEM preset precisely because that is where the two disagree.
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+    recordSubscriptionTurn({ orgId: ORG_ID, userId: USER_ID, turnId: "turn_test" }, SYSTEM_PRESET, {
+      credentialId: null,
+      source: "system",
+    });
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
@@ -420,6 +428,10 @@ describe("checkUsageAllowed", () => {
       [gateModule({ code: "subscription_suspended", message: "Suspended", status: 402 }, calls)],
       fakeInitCtx(),
     );
+    recordSubscriptionTurn({ orgId: ORG_ID, userId: USER_ID, turnId: "turn_test" }, orgPresetId, {
+      credentialId: orgKeyId,
+      source: "org",
+    });
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
@@ -432,6 +444,55 @@ describe("checkUsageAllowed", () => {
 
     expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });
     expect(calls).toHaveLength(1);
+  });
+
+  it("admits a subscription turn no credential was handed for (a reconnect answer), pinning nothing", async () => {
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
+    const result = await checkUsageAllowed({
+      orgId: ORG_ID,
+      presetId: orgPresetId,
+      sessionId: "chs_sub",
+      subscription: true,
+      turnId: "turn_unresolved",
+      userId: USER_ID,
+    });
+
+    expect(result).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(
+      thrownBy(() =>
+        admittedChatTurnPin(
+          { orgId: ORG_ID, userId: USER_ID, turnId: "turn_unresolved" },
+          orgPresetId,
+        ),
+      ),
+    ).toBeInstanceOf(ApiError);
+  });
+
+  it("refuses a subscription turn whose resolved credential stopped serving before admission", async () => {
+    // Resolved for the engine, then deleted: admission never re-resolves onto another credential.
+    recordSubscriptionTurn({ orgId: ORG_ID, userId: USER_ID, turnId: "turn_gone" }, orgPresetId, {
+      credentialId: orgKeyId,
+      source: "org",
+    });
+    await db.update(orgModels).set({ credentialId: null }).where(eq(orgModels.id, orgPresetId));
+    await deleteModelProviderCredential(
+      { orgId: ORG_ID, userId: null, readsOrg: true, writesOrg: true, deletesOrg: true },
+      orgKeyId,
+    );
+
+    const result = await checkUsageAllowed({
+      orgId: ORG_ID,
+      presetId: orgPresetId,
+      sessionId: "chs_sub",
+      subscription: true,
+      turnId: "turn_gone",
+      userId: USER_ID,
+    });
+
+    expect(result).toMatchObject({ code: "model_credential_changed", status: 409 });
   });
 
   it("rejects a caller that omits `subscription` (module built against core < 6.0.0)", async () => {
@@ -541,7 +602,7 @@ describe("checkUsageAllowed", () => {
     }
   });
 
-  it("keeps the pins of two concurrent turns of one user, session and preset apart", async () => {
+  it("keeps the pins of two concurrent turns of one user apart, each keyed by its turn id", async () => {
     initSystemModelProviderKeys([
       {
         id: "sys-key-openai",

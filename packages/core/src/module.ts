@@ -1462,8 +1462,15 @@ export interface PlatformServices {
    * (only the returned in-memory string, used to build the Pi `AuthStorage`).
    * `userId` is the session user: their own personal subscription serves the
    * turn, and an org-wide model they hold no credential for is unbound.
+   * `turnId` names the turn: the subscription it resolves is the one
+   * {@link checkUsageAllowed} admits, and nothing else.
    */
-  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
+  resolveChatModel(
+    orgId: string,
+    presetId: string,
+    userId: string,
+    turnId: string,
+  ): Promise<ChatModelResolution>;
   /**
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for
