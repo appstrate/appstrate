@@ -5,6 +5,7 @@
  * joined onto their routes' guards, so the index and tools read the enforcing table.
  */
 
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getPlatformOperations, type PlatformOperations } from "../../lib/platform-app.ts";
 import { isGranted, type RouteRequirement } from "../../lib/route-requirements.ts";
 
@@ -154,20 +155,50 @@ export function buildOperationIndex(
   ceiling: ReadonlySet<string> | undefined,
 ): string {
   const { operations } = getCatalog();
-  const byTag = new Map<string, string[]>();
+  return indexByTag(
+    [...operations.values()].filter((op) => operationGranted(op, permissions, ceiling)),
+  );
+}
+
+/**
+ * The index of an org-wide connection, ranked by tag exactly as
+ * {@link buildOperationIndex}: one grouping, whatever the spaces. An operation
+ * granted in only some reachable spaces carries them after its id
+ * (`createAgent [gestion]`); one granted everywhere carries nothing, so the
+ * index is the pinned one when the roles agree.
+ */
+export function buildOrgWideOperationIndex(
+  spaces: ReadonlyArray<{ name: string; permissions: ReadonlySet<string> }>,
+  ceiling: ReadonlySet<string> | undefined,
+): string {
+  const { operations } = getCatalog();
+  const where = new Map<string, string[]>();
   for (const op of operations.values()) {
-    if (!operationGranted(op, permissions, ceiling)) continue;
+    const names = spaces
+      .filter((s) => operationGranted(op, s.permissions, ceiling))
+      .map((s) => s.name);
+    if (names.length > 0) where.set(op.operationId, names);
+  }
+  return indexByTag(
+    [...operations.values()].filter((op) => where.has(op.operationId)),
+    (id) => {
+      const names = where.get(id)!;
+      return names.length === spaces.length ? id : `${id} [${names.join(", ")}]`;
+    },
+  );
+}
+
+function indexByTag(ops: CatalogOperation[], label: (id: string) => string = (id) => id): string {
+  const byTag = new Map<string, string[]>();
+  for (const op of ops) {
     const tag = op.tags[0] ?? "Other";
     // operationId only: summaries would cost several KB on every uncached turn.
     (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);
   }
-
-  const sections = [...byTag.keys()].sort().map((tag) => {
-    const ids = byTag.get(tag)!.sort();
-    return `## ${tag}\n${ids.join(", ")}`;
-  });
-
-  return sections.join("\n\n");
+  return [...byTag.keys()]
+    .sort()
+    .map((tag) => `## ${tag}\n${byTag.get(tag)!.sort().map(label).join(", ")}`)
+    .join("\n\n");
 }
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";
@@ -201,4 +232,30 @@ export function collectReferencedSchemas(
   }
 
   return resolved;
+}
+
+type ToolOutputSchema = NonNullable<Tool["outputSchema"]>;
+
+let runAndWaitOutputSchema: ToolOutputSchema | undefined;
+
+/**
+ * `RunAndWaitResult` as `run_and_wait`'s self-contained `outputSchema` (refs as `$defs`, no
+ * descriptions: the tool's own carries them). Built once: one object reaches the validator cache.
+ */
+export function getRunAndWaitOutputSchema(): ToolOutputSchema {
+  if (runAndWaitOutputSchema) return runAndWaitOutputSchema;
+  const { componentSchemas } = getCatalog();
+  const root = componentSchemas.RunAndWaitResult;
+  const $defs = collectReferencedSchemas(root, componentSchemas);
+  runAndWaitOutputSchema = JSON.parse(
+    JSON.stringify({ ...(root as object), $defs }),
+    (key, value: unknown) => {
+      if (typeof value !== "string") return value;
+      if (key === "description") return undefined;
+      return key === "$ref" && value.startsWith(SCHEMA_REF_PREFIX)
+        ? `#/$defs/${value.slice(SCHEMA_REF_PREFIX.length)}`
+        : value;
+    },
+  ) as ToolOutputSchema;
+  return runAndWaitOutputSchema;
 }

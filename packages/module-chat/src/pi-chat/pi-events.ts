@@ -133,8 +133,8 @@ type _StreamToolCallEnd = Assert<
 >;
 type _StreamError = Assert<Conforms<VendorStreamEvent<"error">, OurStreamEvent<"error">>>;
 
-// Usage is consumed whole (every counter is read), so it is pinned in BOTH
-// directions: a field the vendor adds is a field the chat's usage record is
+// Usage is the chat's metering input, so it is pinned in BOTH directions: a
+// field the vendor adds may be a token bucket the chat's usage record is
 // silently dropping.
 type _UsageVendorFitsOurs = Assert<Conforms<PiSdkUsage, PiUsage>>;
 type _UsageOursFitVendor = Assert<Conforms<PiUsage, PiSdkUsage>>;

@@ -18,10 +18,10 @@ import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
-import type { EgressPolicy } from "@appstrate/afps-shared/authorized-uris";
 
 import { logger } from "./logger.ts";
 import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
+import type { RunnerEgressPolicy } from "./helpers.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import {
   startTransparentEgressPlane,
@@ -411,12 +411,7 @@ export function isContainerPathSafeForMount(containerPath: string): boolean {
  *     world-writable inside the container.
  *   - {@link STICKY_STAGED_DIRS} are the exception: `/tmp` and `/var/tmp` are
  *     1777 in every base image, and 0755 there would break every runtime that
- *     writes to them. The world-writable half is what matters and is what
- *     lands; the sticky bit is requested but not reachable from here — Bun's
- *     `fs.chmod` masks off every bit above 0o777 (setuid/setgid/sticky alike,
- *     measured on 1.3.11), so 0777 is what the staged directory actually
- *     carries. Nothing depends on the sticky bit: the runner container has one
- *     user.
+ *     writes to them, so they are staged 1777, sticky bit included.
  *
  * Throws (after wiping the partial staging directory) on an unsafe path or an
  * I/O failure, so the per-spec try/catch in `integrations-boot.ts` records it.
@@ -723,12 +718,12 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const hostTempDirsByContainer: Map<string, string[]> = new Map();
   let runNetwork: string | null = null;
   /**
-   * #779 — `null` when the setup failed or doesn't apply: spawn() then omits
+   * #779 — `null` when the setup failed: spawn() then omits
    * `--dns` and the runner degrades to the proxy-env-only contract.
    */
   let transparentEgress: TransparentEgressPlane | null = null;
   let peers: RunnerPeers | null = null;
-  const transparentPolicies = new Map<string, EgressPolicy>();
+  const transparentPolicies = new Map<string, RunnerEgressPolicy>();
 
   return {
     id: "docker",
@@ -737,42 +732,38 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
       // The per-run docker network is created by the platform launcher
       // (`appstrate-exec-<runId>`) with the sidecar attached under the
       // `sidecar` DNS alias. The runner joins the same network so its
-      // HTTPS_PROXY resolves via Docker's embedded DNS. RUN_ID is set
-      // on sidecar create; when it's absent (sidecar booted outside
-      // the platform launcher's path — dev / tests), we fall back to
-      // the default bridge with loopback URLs and skip the alias path.
+      // HTTPS_PROXY resolves via Docker's embedded DNS. Without RUN_ID there is
+      // none, and the default bridge would bypass the egress policy: refuse.
       const envRunId = process.env.RUN_ID;
-      const network = envRunId ? `appstrate-exec-${envRunId}` : null;
+      if (!envRunId) {
+        throw new Error(
+          "docker integration adapter: RUN_ID is not set, so there is no per-run network to attach runners to. " +
+            "Only the docker orchestrator (RUN_ADAPTER=docker) launches a sidecar that can spawn docker runners.",
+        );
+      }
+      const network = `appstrate-exec-${envRunId}`;
       runNetwork = network;
-      peers = network
-        ? createRunnerPeers({
-            network,
-            inspect: (name) => dockerExec(["network", "inspect", name]),
-          })
-        : null;
+      peers = createRunnerPeers({
+        network,
+        inspect: (name) => dockerExec(["network", "inspect", name]),
+      });
       // #779 — transparent egress plane for proxy-unaware HTTP clients.
-      // Only meaningful on a per-run bridge (a routable sidecar IP exists).
-      transparentEgress =
-        network && peers
-          ? await startTransparentEgressPlane({
-              ipv4: () => sidecarIpOn(network),
-              policyForPeer: policyForRunnerPeer(peers.runnerOf, transparentPolicies),
-            })
-          : null;
+      transparentEgress = await startTransparentEgressPlane({
+        ipv4: () => sidecarIpOn(network),
+        policyForPeer: policyForRunnerPeer(peers.runnerOf, transparentPolicies),
+      });
       logger.info("docker integration adapter ready", { runId, runNetwork });
       return {
-        // Bind 0.0.0.0 when we have a per-run network — the runner
-        // reaches the listener via the bridge. Without a network we
-        // can't make the listener routable from a sibling container
-        // anyway, so 127.0.0.1 is the safe default.
-        listenerBindHost: runNetwork ? "0.0.0.0" : "127.0.0.1",
-        proxyUrlFor: (port: number) =>
-          runNetwork ? `http://sidecar:${port}` : `http://127.0.0.1:${port}`,
+        listenerBindHost: "0.0.0.0",
+        proxyUrlFor: (port: number) => `http://sidecar:${port}`,
       };
     },
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
+      if (!runNetwork || !peers) {
+        throw new Error("docker integration adapter: spawn() called before prepare()");
+      }
       const plan = planContainer(spec, bundleRoot);
       const safeNs = spec.namespace.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
       // Every connection of one integration shares `namespace`; its uuid prefix does not.
@@ -848,7 +839,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         `appstrate.integration=${spec.integrationId}`,
       ];
 
-      const networkFlags: string[] = runNetwork ? ["--network", runNetwork] : [];
+      const networkFlags = ["--network", runNetwork];
 
       // #779 — transparent egress for plain-CONNECT egress runners
       // (`caCertHostPath === null`). `--dns` points the embedded DNS
@@ -909,7 +900,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
       }
       containerIds.push(containerId);
-      peers?.register(containerName, runnerKeyOf(spec));
+      peers.register(containerName, runnerKeyOf(spec));
       if (egress && egress.caCertHostPath === null) {
         transparentPolicies.set(runnerKeyOf(spec), egress.policy);
       }
@@ -963,8 +954,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
     },
 
     peerAttribution() {
-      // No per-run network (dev / tests): the listeners bind loopback, which no
-      // runner container can reach, so no peer is a runner.
+      // Before prepare() no runner exists, so no peer is a runner.
       return peers ? peers.runnerOf : noRunnerPeers;
     },
 

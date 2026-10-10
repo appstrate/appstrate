@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.5 — live integration credentials resolver for the sidecar's MITM
- * `MitmCredentialSource`. Backs both `GET /internal/integration-credentials/
- * {scope}/{name}` (read-current) and `POST .../refresh` (force-refresh-then-read).
+ * Live integration credentials resolver for the sidecar's MITM `MitmCredentialSource`. Backs both
+ * `GET /internal/integration-credentials/{scope}/{name}` (a read) and `POST .../refresh` (after an
+ * upstream 401).
  *
  * For the ONE bound connection the caller names (`connection_id`):
  *
  *   1. Find the connection row for the run's actor.
- *   2. If the auth is OAuth2 AND (forced OR within the lead window),
- *      call {@link forceRefreshIntegrationConnection}. RefreshError
- *      with `kind="revoked"` flips needsReconnection and bubbles a
- *      structured 410; transient failures bubble a 502.
+ *   2. Ask {@link refreshConnectionCredential} and translate its outcome (dead →
+ *      410, retry → 502).
  *   3. Resolve the live HTTP delivery plan via `resolveHttpDelivery`.
  *   4. Build a `ResolvedAuthCredentials` entry + the matching plan.
  *
@@ -21,34 +19,29 @@
 
 import {
   resolveAfpsHttpDelivery,
-  RefreshError,
+  decryptCredentialsToStringMap,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type HttpDeliveryPlan,
   type ResolvedAuthCredentials,
   type IntegrationCredentialsWire,
 } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { scopesNotCovered } from "@appstrate/core/integration";
-import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
 import { renderAuthAuthorizedUris, type AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 
+import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
 import { logger } from "../lib/logger.ts";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../lib/credential-failure.ts";
+import { decryptStoredCredential } from "../lib/stored-credential.ts";
 import { notFound, gone, conflict, internalError, badGateway } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
-import {
-  buildIntegrationOAuthRefreshContext,
-  decryptIntegrationConnectionFields,
-  refreshAndClassify,
-} from "./integration-token-refresh.ts";
+import { refreshConnectionCredential, type RefreshTrigger } from "./integration-token-refresh.ts";
 import {
   assertIntegrationActive,
   loadAccessibleConnectionById,
   markIntegrationConnectionNeedsReconnection,
   readCredentialRevision,
-  recordUnrefreshableRejection,
   upstreamRejectionStreak,
 } from "./integration-connections.ts";
-import { computeRequiredScopes } from "./integration-scope-resolver.ts";
 import {
   readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
@@ -63,16 +56,6 @@ interface MutableCredentialsWire {
   credentialRevision?: string;
 }
 
-interface ResolveLiveCredentialsOptions {
-  /** When true, refresh OAuth tokens regardless of remaining lifetime. */
-  forceRefresh?: boolean;
-  /**
-   * The `credential_revision` the caller holds. A forced refresh from a caller holding a
-   * superseded credential is a plain read: its 401 says nothing about the current one.
-   */
-  heldRevision?: string;
-}
-
 /**
  * NEVER returns an empty payload — the sidecar would read it as "skip the MITM
  * listener" and boot uncredentialed — so every unproducible credential throws.
@@ -84,18 +67,11 @@ interface ResolveLiveCredentialsOptions {
  *     declared by the manifest VERSION this run is pinned to (auth renamed or
  *     removed since the connection was made). The credential is intact and may
  *     be valid under another version, so it is NOT flagged.
- *   - 410: the credential is dead and the connection has been flagged
- *     `needsReconnection` — refresh token revoked upstream, an unrefreshable
- *     auth whose forced refreshes reached the failure threshold, or stored
- *     credentials that cannot be decrypted. The sidecar propagates it as a
- *     401 to the integration so the LLM sees a clean "please re-connect"
- *     surface, and stops retrying.
- *   - 502: transient OAuth refresh failure (network, upstream 5xx, etc), or
- *     an unrefreshable auth rejected fewer times than the failure threshold
- *     (consecutive, see `clearReachableUpstreamRejections`).
- *     The cached credential may still be valid; the sidecar treats it as
- *     retry-later and the listener's `refreshOnUnauthorized` cooldown
- *     keeps a flapping upstream from hammering this endpoint.
+ *   - 410 `integration_connection_needs_reconnection`: dead, the connection flagged;
+ *     the sidecar answers the integration a 401 and stops retrying.
+ *   - 502: not refreshed now, still usable; the listener's cooldown backs off.
+ *   - 503 `encryption_key_unavailable`: a stored credential or client secret
+ *     it needs is under a key id the keyring lacks — operator config, NOT flagged.
  */
 export async function resolveLiveIntegrationCredentials(
   integrationId: string,
@@ -109,14 +85,14 @@ export async function resolveLiveIntegrationCredentials(
     connectionId: string;
     connectionSource: string;
     /**
-     * Snapshot from `runs.resolved_integration_versions` (#686). When present,
+     * Snapshot from `runs.resolved_integration_versions`. When present,
      * `[integrationId]` pins the manifest VERSION this resolver reads — so the
      * delivery/auth plan a mid-run MITM refresh injects matches the version the
      * spawn resolver used at kickoff. Absent (legacy / soft-resolved) → draft.
      */
     resolvedIntegrationVersions?: Record<string, ResolvedIntegrationVersion> | null;
   },
-  options: ResolveLiveCredentialsOptions = {},
+  trigger: RefreshTrigger = { kind: "expiring" },
 ): Promise<IntegrationCredentialsWire> {
   if (!context.actor) {
     // Scheduled runs without an actor cannot connect to user-scoped
@@ -196,235 +172,101 @@ export async function resolveLiveIntegrationCredentials(
     );
   }
 
-  const forceRefresh =
-    options.forceRefresh === true &&
-    (options.heldRevision === undefined || options.heldRevision === connection.credentialRevision);
-
   // Terminally unusable, and already flagged by whoever concluded it: surface 410 so the sidecar
   // stops retrying and the next-launch readiness gate fires.
-  const throwTerminal = (reason: string): never => {
+  const throwTerminal = (cause: CredentialFailureCause, detail?: string): never => {
     logger.warn("Integration credential terminally unusable — flagged needsReconnection", {
       runId: context.runId,
       integrationId,
       authKey,
       connectionId: connection.id,
-      forced: forceRefresh,
-      reason,
+      trigger: trigger.kind,
+      cause,
+      detail,
     });
     throw gone(
-      "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
-      `Integration '${integrationId}' auth '${authKey}' is unusable (${reason}) — ` +
-        `the connection has been flagged as needing re-connection. Re-connect ` +
-        `'${integrationId}' and relaunch the run.`,
+      "integration_connection_needs_reconnection",
+      `Integration '${integrationId}' auth '${authKey}' is unusable ` +
+        `(${CREDENTIAL_FAILURE_SENTENCES[cause]}) — the connection has been flagged as needing ` +
+        `re-connection. Re-connect '${integrationId}' and relaunch the run.`,
+      { cause },
     );
   };
 
-  // A forced refresh nothing can recover (no refresh client, or not oauth2).
-  // One 401 can be a transient upstream fault, or a permission error the agent
-  // provoked, so it is counted: 502 until INTEGRATION_REFRESH_MAX_FAILURES
-  // consecutive rejections (a successful call ends the streak), then terminal.
-  const rejectUnrefreshable = async (reason: string): Promise<never> => {
-    const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
-      connection.id,
-      integrationId,
-      reach,
-    );
-    if (needsReconnection) return throwTerminal(reason);
-    logger.warn("Integration credential rejected upstream — below the reconnect threshold", {
-      runId: context.runId,
-      integrationId,
-      authKey,
-      connectionId: connection.id,
-      failures,
-      maxFailures,
-      reason,
-    });
-    throw badGateway(
-      `Integration '${integrationId}' auth '${authKey}' was rejected upstream (${reason}); ` +
-        `${failures}/${maxFailures} consecutive upstream rejections before it is flagged`,
-    );
-  };
-
-  let fields = decryptIntegrationConnectionFields(
-    connection.credentialsEncrypted,
-    integrationId,
-    authKey,
+  const { variables } = connection;
+  let fields = decryptStoredCredential(
+    () => decryptCredentialsToStringMap(connection.credentialsEncrypted),
+    { connectionId: connection.id, packageId: integrationId, authKey },
   );
   if (!fields) {
-    // STATE C — the stored ciphertext cannot be decrypted (rotated
-    // `CONNECTION_ENCRYPTION_KEY` without re-encrypting, corrupted blob, an
-    // envelope this build cannot read). A credential nobody can read is dead
-    // regardless of how we got here, so this is the terminal path: flag +
-    // 410. The old silent empty return made this state answer 200 even on a
-    // FORCED refresh — i.e. the sidecar had already seen a 401 and we told it
-    // "nothing to inject, carry on".
+    // STATE C — unreadable ciphertext (a missing key has thrown the 503 instead):
+    // a credential nobody can read is dead — flag + 410, even on a plain read.
     // `return` rather than a bare `await`: the helper's `Promise<never>` does
     // not narrow `fields` on its own, and everything below reads it non-null.
     await markIntegrationConnectionNeedsReconnection(connection.id);
-    return throwTerminal("stored credentials could not be decrypted");
+    return throwTerminal("credentials_undecryptable");
   }
 
-  let expiresAtEpochMs: number | null = connection.expiresAt
-    ? connection.expiresAt.getTime()
-    : null;
-
-  // Decide whether to refresh.
-  const needsRefresh =
-    authDef.type === "oauth2" && (forceRefresh || isWithinLeadWindow(connection.expiresAt));
+  let expiresAtEpochMs = connection.expiresAt ? connection.expiresAt.getTime() : null;
   let credentialRevision: string | null = connection.credentialRevision;
 
-  if (needsRefresh) {
-    let refreshContext;
-    try {
-      refreshContext = await buildIntegrationOAuthRefreshContext(
+  const outcome = await refreshConnectionCredential({
+    connection,
+    integrationId,
+    authDef,
+    scope: { orgId: context.orgId, spaceId: context.spaceId },
+    actor: context.actor,
+    trigger,
+  });
+  switch (outcome.status) {
+    case "dead":
+      return throwTerminal(outcome.cause, outcome.detail);
+    case "retry": {
+      // The cached credential may still be usable: 502 lets the sidecar's
+      // `refreshOnUnauthorized` cooldown back off without poisoning the row.
+      const { cause, detail, rejections } = outcome;
+      logger.warn("Integration credential not refreshed — retry later", {
+        runId: context.runId,
         integrationId,
         authKey,
-        authDef,
-        context.spaceId,
-        connection.clientRef,
+        connectionId: connection.id,
+        cause,
+        detail,
+      });
+      const streak = rejections
+        ? ` (${rejections.failures}/${rejections.maxFailures} consecutive upstream rejections before it is flagged)`
+        : "";
+      throw badGateway(
+        `Integration '${integrationId}' auth '${authKey}' was not refreshed: ` +
+          `${CREDENTIAL_FAILURE_SENTENCES[cause]}${streak}`,
+        { cause },
       );
-    } catch (err) {
-      // Transient token-endpoint discovery failure on an issuer-only manifest —
-      // NEVER terminal (the row stays untouched; the next run re-discovers).
-      if (err instanceof RefreshError && err.kind === "transient") {
-        if (forceRefresh) {
-          // Forced = the sidecar already saw an upstream 401, so the cached
-          // token is known-bad. We can't refresh right now → 502 so the sidecar
-          // keeps the original 401 and backs off.
-          logger.warn("Integration token endpoint discovery transient failure (forced refresh)", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            error: err.message,
-          });
-          throw badGateway(
-            `Integration '${integrationId}' auth '${authKey}' token endpoint discovery failed (transient)`,
-          );
-        }
-        // Proactive (lead-window) path: the cached token is still valid (we're
-        // merely ahead of expiry). A discovery blip must NOT fail the run —
-        // serve the cached credential unchanged and let a later real 401 drive
-        // forced re-discovery. `refreshContext` left null → refresh skipped.
-        logger.info(
-          "Integration token endpoint discovery transient failure on proactive refresh — serving cached credential",
-          { runId: context.runId, integrationId, authKey, error: err.message },
-        );
-        refreshContext = null;
-      } else {
-        throw err;
-      }
     }
-    if (refreshContext) {
-      // Re-acquisition = fast-path refresh_token POST. `needsRefresh`
-      // already gated type=oauth2, so this is the only refreshable auth.
-      const classified = await refreshAndClassify(
-        connection.id,
+    case "kept":
+      logger.debug("Integration credential not refreshed — serving the stored one", {
+        runId: context.runId,
         integrationId,
         authKey,
-        connection.credentialsEncrypted,
-        refreshContext,
-        // A forced refresh follows an upstream 401: the post-lock freshness
-        // short-circuit must not answer it with the very token that 401'd.
-        // The proactive (lead-window) branch keeps the short-circuit — there
-        // the stored token is presumed good, we are merely ahead of expiry.
-        { force: forceRefresh },
-      );
-      if (classified.status === "terminal") {
-        // The connection can never be refreshed as stored (no refresh_token).
-        // Same terminal surface as every other dead credential: 410, the helper having flagged it.
-        return throwTerminal(classified.reason);
-      }
-      if (classified.status === "revoked") {
-        // 410 here propagates to the sidecar, which translates back
-        // to a 401 to the integration's MCP client. The
-        // needsReconnection flag has already been set by the helper.
-        // Matches the model-provider token endpoint's revoked semantics.
-        logger.warn("Integration token refresh revoked", {
-          runId: context.runId,
-          integrationId,
-          authKey,
-          status: classified.error.status,
-        });
-        throw gone(
-          "INTEGRATION_CONNECTION_NEEDS_RECONNECTION",
-          `Integration '${integrationId}' auth '${authKey}' needs re-connection (refresh token revoked)`,
-        );
-      }
-      if (classified.status === "transient") {
-        // Transient failure (network, upstream 5xx, parse error). The
-        // cached credential may still be usable; surfacing 502 lets the
-        // sidecar's `refreshOnUnauthorized` cooldown back off without
-        // poisoning the connection row.
-        const err = classified.error;
-        logger.warn("Integration token refresh transient error", {
-          runId: context.runId,
-          integrationId,
-          authKey,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw badGateway(
-          `Integration '${integrationId}' auth '${authKey}' token refresh failed upstream (transient)`,
-        );
-      }
-
-      const refreshed = classified.result;
-      fields = refreshed.fields;
+        connectionId: connection.id,
+        cause: outcome.cause,
+        detail: outcome.detail,
+      });
+      break;
+    case "refreshed":
+      fields = outcome.fields;
       credentialRevision = await readCredentialRevision(connection.id);
-      expiresAtEpochMs = refreshed.expiresAt ? refreshed.expiresAt.getTime() : null;
-
-      // Niveau 2 Phase 6 — IdP-side scope shrink awareness. When the
-      // refresh response narrowed `scopesGranted` (user revoked some
-      // permissions in their account settings between issuance and
-      // refresh), cross-check against the union of `requiredScopes`
-      // across every agent in the space and flip `needsReconnection`
-      // if the actor has dropped below that floor. Fast-path: skip
-      // the agent scan unless the refresh actually shrank scopes.
-      if (refreshed.shrinkDetected && refreshed.scopesGranted !== null) {
-        const granted = refreshed.scopesGranted;
-        const { required } = await computeRequiredScopes({
-          scope: { orgId: context.orgId, spaceId: context.spaceId },
-          integrationId: integrationId,
-          authKey,
-        });
-        // Diff through the manifest `implies` hierarchy: a parent grant (e.g.
-        // GitHub `repo`) covers the children it implies (`public_repo`).
-        const missing = scopesNotCovered(required, granted, manifest, authKey);
-        if (missing.length > 0) {
-          await markIntegrationConnectionNeedsReconnection(connection.id);
-          logger.warn("Integration scope shrink dropped below required floor", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            granted,
-            required,
-            missing,
-          });
-        } else {
-          logger.info("Integration scope shrink absorbed (still covers required)", {
-            runId: context.runId,
-            integrationId,
-            authKey,
-            granted,
-            required,
-          });
-        }
-      }
-    } else if (forceRefresh) {
-      // OAuth2 but `buildIntegrationOAuthRefreshContext` returned null — no
-      // resolvable pinned OAuth client or no token_endpoint, so the token can
-      // never be refreshed. Terminal.
-      await rejectUnrefreshable("no OAuth client or token endpoint");
-    }
-  } else if (forceRefresh) {
-    // A FORCED refresh of a NON-oauth2 auth (api_key / basic / a custom auth
-    // with no connect.tool re-login handler — those route to re-login in the
-    // sidecar and never reach here). There is nothing to refresh.
-    await rejectUnrefreshable(`auth type '${authDef.type}' is not refreshable`);
+      expiresAtEpochMs = outcome.expiresAt ? outcome.expiresAt.getTime() : null;
+      break;
   }
 
   const http = authDef.delivery?.http;
   if (http) {
-    const plan = resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery);
+    const plan = resolveAfpsHttpDelivery(
+      authDef.type,
+      fields,
+      http as ConnectAfpsHttpDelivery,
+      variables,
+    );
     if (plan) {
       out.deliveryPlans[authKey] = plan;
     }
@@ -435,7 +277,7 @@ export async function resolveLiveIntegrationCredentials(
     authType: authDef.type,
     fields: Object.freeze({ ...fields }),
     // Rendered from the post-refresh fields.
-    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields)),
+    authorizedUris: Object.freeze(renderAuthAuthorizedUris(authDef, fields, variables)),
     // AFPS §7.3 (RFC 8707) names this field `resource`.
     ...(authDef.resource !== undefined ? { resource: authDef.resource } : {}),
     ...(connection.expiresAt ? { expiresAt: connection.expiresAt.toISOString() } : {}),
@@ -459,7 +301,7 @@ async function loadIntegrationManifest(
   integrationId: string,
   frozenVersion: ResolvedIntegrationVersion | null,
 ): Promise<IntegrationManifest> {
-  // Read AT the version frozen for this run (#686) so the delivery/auth plan
+  // Read AT the version frozen for this run so the delivery/auth plan
   // matches the spawn. No frozen entry → draft (legacy / soft-resolved).
   const res = await readIntegrationManifestForRun(integrationId, frozenVersion);
   if (res.ok) return res.manifest;
@@ -483,7 +325,7 @@ async function loadIntegrationManifest(
 }
 
 /**
- * Printable label for the integration manifest version this run reads (#686):
+ * Printable label for the integration manifest version this run reads:
  * the semver frozen at kickoff, or the snapshot's `source` (`draft`/`system`,
  * which carry no semver), or `"draft"` when nothing was frozen at all (legacy /
  * soft-resolved runs). Used in the error messages that report a
@@ -497,11 +339,6 @@ function pinnedManifestVersionLabel(
   const entry = context.resolvedIntegrationVersions?.[integrationId] ?? null;
   if (!entry) return "draft";
   return entry.version ?? entry.source;
-}
-
-function isWithinLeadWindow(expiresAt: Date | null): boolean {
-  if (!expiresAt) return false;
-  return expiresAt.getTime() - Date.now() < OAUTH_REFRESH_LEAD_MS;
 }
 
 /**

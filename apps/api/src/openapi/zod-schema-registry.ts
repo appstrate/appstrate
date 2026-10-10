@@ -611,7 +611,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     method: "PATCH",
     path: "/api/integrations/{packageId}/connections/{connectionId}",
     jsonSchema: toJsonSchema(updateConnectionSchema),
-    description: "Update integration connection metadata",
+    description: "Rename a connection and/or set the spaces it is shared into",
+  },
+  {
+    method: "PATCH",
+    path: "/api/me/connections/{connectionId}",
+    jsonSchema: toJsonSchema(updateConnectionSchema),
+    description: "Rename one of the caller's connections and/or set its share targets",
   },
   {
     method: "POST",
@@ -745,6 +751,8 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // JSON-RPC 2.0 envelope dispatched by the MCP server; the method-level
   // params are validated per tool, not by one body schema.
   "POST /api/mcp/o/{org}":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /api/mcp/o/{org}/s/{space}":
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
 
   // ─── Module-owned surfaces with no single comparable body ───────────────

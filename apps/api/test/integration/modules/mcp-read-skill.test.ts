@@ -21,7 +21,6 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
-  authHeaders,
   createTestContext,
   createTestUser,
   memberContext,
@@ -36,7 +35,7 @@ import {
   seedSpacePackage,
   seedSpaceRole,
 } from "../../helpers/seed.ts";
-import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
+import { mcpRpc, type JsonRpcEnvelope, inSpace, mcpAuthHeaders } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import {
   AGENT_PACKAGES_BUCKET,
@@ -115,7 +114,7 @@ async function customMember(permissions: string[]) {
     presetRole: null,
     customRoleId: role.id,
   });
-  return { user, roleId: role.id, headers: authHeaders({ ...owner, cookie: user.cookie }) };
+  return { user, roleId: role.id, headers: mcpAuthHeaders({ ...owner, cookie: user.cookie }) };
 }
 
 async function readSkill(
@@ -208,7 +207,7 @@ function turnHeaders(
     permissions: opts.permissions ?? ["mcp:read", "chat:write"],
     injectedSkills: { spaceId: opts.claimSpaceId ?? spaceId, skills },
   });
-  return { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId, "X-Space-Id": spaceId };
+  return inSpace({ Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId }, spaceId);
 }
 
 const PUBLISHED_1_0: InjectedSkill = { definition: "published", version: "1.0.0" };
@@ -461,11 +460,10 @@ describe("read_skill — a chat turn under a role preview", () => {
         },
         injectedSkills: { spaceId: owner.defaultSpaceId, skills: { [TONE]: PUBLISHED_1_0 } },
       });
-      return {
-        Authorization: `Bearer ${token}`,
-        "X-Org-Id": owner.orgId,
-        "X-Space-Id": owner.defaultSpaceId,
-      };
+      return inSpace(
+        { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
+        owner.defaultSpaceId,
+      );
     };
     // A builder chats: the pinned version. A viewer does not: the claim is
     // ignored and its own skills:read serves the latest.
@@ -508,7 +506,7 @@ describe("read_skill — a role preview", () => {
     const persona = async (permissions: string[]) => {
       const role = await seedSpaceRole({ orgId: owner.orgId, permissions });
       return {
-        ...authHeaders(owner),
+        ...mcpAuthHeaders(owner),
         "X-View-As": `org_role=member; space=${owner.defaultSpaceId}; role=custom:${role.id}`,
       };
     };
@@ -532,7 +530,7 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
   });
 
   it("serves an author the draft, as the REST file explorer does", async () => {
-    expect(await readSkill(authHeaders(owner), { id: CHOSEN })).toEqual({
+    expect(await readSkill(mcpAuthHeaders(owner), { id: CHOSEN })).toEqual({
       isError: false,
       data: {
         id: CHOSEN,
@@ -557,7 +555,7 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
       draftManifest: { name: system, version: "1.0.0", type: "skill" },
       draftContent: "system tone",
     });
-    const viewer = authHeaders(await memberContext(owner, "member", "viewer"));
+    const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
     const { data } = await readSkill(viewer, { id: system });
     expect(data).toMatchObject({
       id: system,
@@ -568,7 +566,7 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
   });
 
   it("serves a reader who cannot write it the latest published version", async () => {
-    const viewer = authHeaders(await memberContext(owner, "member", "viewer"));
+    const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
     const { data } = await readSkill(viewer, { id: CHOSEN, path: "scripts/run.sh" });
     expect(data).toMatchObject({
       version: "1.0.0",
@@ -578,7 +576,7 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
   });
 
   it("answers 404 for a skill this space cannot reach, and for a package that is no skill", async () => {
-    const viewer = authHeaders(await memberContext(owner, "member", "viewer"));
+    const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
     const other = await seedSpace({ orgId: owner.orgId, name: "Other" });
     const unreachable = "@readskill/unreachable";
     await seedSkill(unreachable, other.id);
@@ -602,7 +600,7 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
 
   it("answers 404 for a path the version does not hold, traversal included", async () => {
     for (const path of ["missing.md", "../SKILL.md", "./SKILL.md", "/SKILL.md", "__proto__"]) {
-      expect(await readSkill(authHeaders(owner), { id: TONE, path })).toEqual({
+      expect(await readSkill(mcpAuthHeaders(owner), { id: TONE, path })).toEqual({
         isError: true,
         data: refusal(404, "not_found", "Not Found", "File not found"),
       });
@@ -610,7 +608,7 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
   });
 
   it("refuses an argument it does not declare", async () => {
-    const { envelope } = await rpc(authHeaders(owner), {
+    const { envelope } = await rpc(mcpAuthHeaders(owner), {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",

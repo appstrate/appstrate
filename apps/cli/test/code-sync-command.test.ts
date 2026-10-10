@@ -36,7 +36,7 @@ import {
 import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { runCli } from "./helpers/isolated-process.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createSkillServer, skillMd, type SkillFixture } from "./helpers/skills-server.ts";
 import { exists, pluginRoot, readText, snapshot, useSyncHarness } from "./helpers/sync-harness.ts";
 
@@ -90,7 +90,7 @@ describe("code sync — claude-plugin target", () => {
     expect(manifest.name).toBe("appstrate");
     expect(manifest).not.toHaveProperty("version");
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(
-      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1",\n      "headers": {\n        "X-Space-Id": "spc_1"\n      }\n    }\n  }\n}\n',
+      '{\n  "mcpServers": {\n    "appstrate": {\n      "type": "http",\n      "url": "https://app.example.com/api/mcp/o/org_1/s/spc_1"\n    }\n  }\n}\n',
     );
     expect(await readText(join(pluginRoot(), "README.md"))).toContain("appstrate code sync");
 
@@ -135,15 +135,14 @@ describe("code sync — claude-plugin target", () => {
     expect(server.downloads()).toBe(1);
   });
 
-  for (const [changed, profile, url, spaceId] of [
-    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2", "spc_1"],
+  for (const [changed, profile, url] of [
+    ["organization", { orgId: "org_2" }, "https://app.example.com/api/mcp/o/org_2/s/spc_1"],
     [
       "instance",
       { instance: "https://other.example.com/" },
-      "https://other.example.com/api/mcp/o/org_1",
-      "spc_1",
+      "https://other.example.com/api/mcp/o/org_1/s/spc_1",
     ],
-    ["space", { spaceId: "spc_2" }, "https://app.example.com/api/mcp/o/org_1", "spc_2"],
+    ["space", { spaceId: "spc_2" }, "https://app.example.com/api/mcp/o/org_1/s/spc_2"],
   ] as const) {
     it(`updates the MCP ${changed} without re-downloading unchanged skills`, async () => {
       const server = createSkillServer(ONE_SKILL);
@@ -157,7 +156,7 @@ describe("code sync — claude-plugin target", () => {
       await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
       expect(JSON.parse(await readText(join(pluginRoot(), ".mcp.json")))).toEqual({
-        mcpServers: { appstrate: { type: "http", url, headers: { "X-Space-Id": spaceId } } },
+        mcpServers: { appstrate: { type: "http", url } },
       });
       expect(await readText(skillPath)).toBe(before);
       expect(server.downloads()).toBe(1);
@@ -196,8 +195,7 @@ describe("code sync — claude-plugin target", () => {
       mcpServers: {
         appstrate: {
           type: "http",
-          url: "https://app.example.com/api/mcp/o/org_1",
-          headers: { "X-Space-Id": "spc_1" },
+          url: "https://app.example.com/api/mcp/o/org_1/s/spc_1",
         },
       },
     });
@@ -257,7 +255,7 @@ describe("code sync — claude-plugin target", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
     expect(stderr()).toContain("Integrity mismatch");
   });
@@ -282,7 +280,7 @@ describe("code sync — --print-path", () => {
 
     await expect(
       codeSyncCommand({ printPath: true, target: ["codex"] }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("--print-path prints the Claude Code plugin directory");
   });
 });
@@ -388,7 +386,7 @@ describe("code sync — guards and dry run", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
     expect(stderr()).toBe(
       "No space pinned. Run: appstrate space switch <space-id> --profile default\n",
@@ -400,7 +398,7 @@ describe("code sync — guards and dry run", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], profile: "nope" }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("Run: appstrate login --profile nope");
   });
 
@@ -485,7 +483,7 @@ describe("code sync — unmanaged destinations", () => {
     createSkillServer(ONE_SKILL).install();
     const { io, stderr } = createMemoryIO();
 
-    await expect(codeSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(codeSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(CommandExit);
 
     expect(await readText(join(mine, "SKILL.md"))).toBe("hand written\n");
     expect(stderr()).toContain(
@@ -504,7 +502,7 @@ describe("code sync — unmanaged destinations", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin", "codex"] }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools"))).toBe(true);
   });
@@ -533,7 +531,7 @@ describe("code sync — exit codes", () => {
     const { io } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
   });
 
@@ -544,7 +542,7 @@ describe("code sync — exit codes", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stdout()).toBe("");
   });
 });
@@ -557,7 +555,7 @@ describe("code sync — resilience", () => {
 
     createSkillServer([{ ...ONE_SKILL[0]!, version: "2.0.0", corruptDownload: true }]).install();
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     // The v1 directory must survive: a full-tree rebuild that dropped it would
@@ -693,7 +691,7 @@ describe("code sync — a failed resolution is not a deletion", () => {
     ]).install();
     await expect(
       codeSyncCommand({ target: ["claude-plugin", "codex"] }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["notes", "pdf-tools"]);
     expect((await readdir(codexRoot())).sort()).toEqual(["notes", "pdf-tools"]);
@@ -744,7 +742,7 @@ describe("code sync — a failed resolution is not a deletion", () => {
       ONE_SKILL[0]!,
       { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
     ]).install();
-    await expect(codeSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(codeSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(CommandExit);
 
     // Nothing on disk and nothing fetchable: there is nothing to retain, and
     // a ledger entry pointing at a missing directory would later fail the
@@ -770,7 +768,7 @@ describe("code sync — a failed resolution is not a deletion", () => {
       { id: "@zz/other", skillMd: skillMd("pdf-tools") },
     ]).install();
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     // `@zz/other` must NOT be promoted to `pdf-tools`: that command belongs to
@@ -795,7 +793,7 @@ describe("code sync — ledger ownership", () => {
 
     const second = createMemoryIO();
     await expect(codeSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(await readText(join(mine, "SKILL.md"))).toBe("hand written\n");
@@ -836,7 +834,7 @@ describe("code sync — ledger ownership", () => {
     createSkillServer(ONE_SKILL).install();
     const second = createMemoryIO();
     await expect(codeSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     const state = JSON.parse(await readText(getStatePath())) as {
@@ -863,7 +861,7 @@ describe("code sync — ledger ownership", () => {
     const plain = createMemoryIO();
     await expect(
       codeSyncCommand({ target: ["claude-plugin", "codex"] }, plain.io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(plain.stderr()).toContain("Failed to remove codex/notes");
   });
 });
@@ -925,7 +923,7 @@ describe("code sync — plugin tree hygiene", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(stderr()).toContain("Failed to write claude-plugin");
@@ -962,8 +960,8 @@ describe("code sync — flag combinations", () => {
 
       const failure = await codeSyncCommand({ target }, io).catch((err: unknown) => err);
 
-      expect(failure).toBeInstanceOf(ExitError);
-      expect((failure as ExitError).code).toBe(1);
+      expect(failure).toBeInstanceOf(CommandExit);
+      expect((failure as CommandExit).code).toBe(1);
       expect(stdout()).toBe("");
       expect(stderr()).toBe(TARGET_REQUIRED);
     }
@@ -977,7 +975,7 @@ describe("code sync — flag combinations", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true, dryRun: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(stderr()).toBe(
@@ -1027,7 +1025,7 @@ describe("code sync — one bad skill does not cost the plugin", () => {
     ]).install();
     const second = createMemoryIO();
     await expect(codeSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(second.stderr()).toContain("is not managed by appstrate");
@@ -1052,7 +1050,7 @@ describe("code sync — one bad skill does not cost the plugin", () => {
     ]).install();
     const second = createMemoryIO();
     await expect(codeSyncCommand({ target: ["codex"] }, second.io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(second.stderr()).toContain("Failed to write codex/third");
@@ -1232,7 +1230,7 @@ describe("code sync — fresh install", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], profile: "nope", printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(stderr()).toContain("Run: appstrate login --profile nope");
@@ -1252,7 +1250,7 @@ describe("code sync — fresh install", () => {
           { target: ["claude-plugin"], profile: "nope", printPath: true, source },
           io,
         ),
-      ).rejects.toBeInstanceOf(ExitError);
+      ).rejects.toBeInstanceOf(CommandExit);
 
       expect(stdout()).toBe("");
       expect(stderr()).toContain("Run: appstrate login --profile nope");
@@ -1268,7 +1266,7 @@ describe("code sync — fresh install", () => {
     await writeFile(staging, "blocks staging");
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, createMemoryIO().io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     await rm(staging);
     const { io, stdout } = createMemoryIO();
 
@@ -1315,7 +1313,7 @@ describe("code sync — session notice", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     // The same TTY-free login the notice offers.
@@ -1360,7 +1358,7 @@ describe("code sync — session notice", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);
@@ -1388,7 +1386,7 @@ describe("code sync — session notice", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);
@@ -1406,7 +1404,7 @@ describe("code sync — session notice", () => {
         { target: ["claude-plugin"], profile: "nope", printPath: true },
         createMemoryIO().io,
       ),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools", "SKILL.md"))).toBe(true);
     const out = await hookOutput();
@@ -1421,7 +1419,7 @@ describe("code sync — session notice", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toBe(
@@ -1483,7 +1481,7 @@ describe("code sync — session notice", () => {
     globalThis.fetch = (async () =>
       new Response("unavailable", { status: 503 })) as unknown as typeof fetch;
 
-    await expect(syncPlugin()).rejects.toBeInstanceOf(ExitError);
+    await expect(syncPlugin()).rejects.toBeInstanceOf(CommandExit);
     expect(await exists(getNoticePath())).toBe(false);
 
     await writeNotice(older);
@@ -1491,7 +1489,7 @@ describe("code sync — session notice", () => {
       throw new TypeError("fetch failed");
     }) as unknown as typeof fetch;
 
-    await expect(syncPlugin()).rejects.toBeInstanceOf(ExitError);
+    await expect(syncPlugin()).rejects.toBeInstanceOf(CommandExit);
     expect(await hookOutput()).toEqual(older);
     expect(await snapshot(pluginRoot())).toEqual(before);
   });
@@ -1521,14 +1519,14 @@ describe("code sync — session notice", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stdout()).toBe("");
     expect(stderr()).toContain('Pinned space "spc_1" is not accessible');
     expect(await exists(getNoticePath())).toBe(false);
 
     await writeNotice(older);
     const before = await readText(getNoticePath());
-    await expect(syncPlugin()).rejects.toBeInstanceOf(ExitError);
+    await expect(syncPlugin()).rejects.toBeInstanceOf(CommandExit);
     expect(await readText(getNoticePath())).toBe(before);
   });
 
@@ -1558,7 +1556,7 @@ describe("code sync — session notice", () => {
     await deleteTokens("default");
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], dryRun: true }, createMemoryIO().io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(await hookOutput()).toEqual(older);
   });
 
@@ -1643,7 +1641,7 @@ describe("code sync — multiple spaces", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain("older than the CLI");
@@ -1681,7 +1679,7 @@ describe("code sync — multiple spaces", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], space: ["spc_1"] }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain(
       "Cannot select spaces: this organization no longer grants this profile access to them. Run: appstrate org switch <org-id-or-slug> --profile default\n",
@@ -1702,7 +1700,7 @@ describe("code sync — multiple spaces", () => {
     const { io, stderr } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).not.toContain("no longer grants");
@@ -1739,10 +1737,8 @@ describe("code sync — multiple spaces", () => {
     await codeSyncCommand({ target: ["claude-plugin"], space: ["spc_1", "Library", "spc_2"] }, io);
     expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
     expect(
-      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
-        "X-Space-Id"
-      ],
-    ).toBe("spc_1");
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_1/s/spc_1");
     expect(await exists(join(pluginRoot(), "skills", "other", "SKILL.md"))).toBe(true);
   });
 });
@@ -1785,7 +1781,7 @@ describe("code sync — active context replacement", () => {
     createSkillServer([{ ...nextSkill, corruptDownload: true }]).install();
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(await readText(join(pluginRoot(), ".mcp.json"))).toBe(previousMcp);
     expect(await readText(getStatePath())).toBe(previousState);
     createSkillServer([nextSkill]).install();
@@ -1793,7 +1789,7 @@ describe("code sync — active context replacement", () => {
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["new-context"]);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
-    ).toBe("https://app.example.com/api/mcp/o/org_2");
+    ).toBe("https://app.example.com/api/mcp/o/org_2/s/spc_1");
   });
 
   it("rejects a context changed while downloading before writing any installation", async () => {
@@ -1808,7 +1804,7 @@ describe("code sync — active context replacement", () => {
     }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
     expect(await exists(pluginRoot())).toBe(false);
   });
@@ -1832,10 +1828,8 @@ describe("code sync — active context replacement", () => {
     expect(stdout()).toBe(`${pluginRoot()}\n`);
     expect(stderr()).toContain("Skipped @acme/pdf-tools");
     expect(
-      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.headers[
-        "X-Space-Id"
-      ],
-    ).toBe("spc_2");
+      JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
+    ).toBe("https://app.example.com/api/mcp/o/org_1/s/spc_2");
     expect(await readText(skillPath)).toBe(before);
     expect(server.downloads()).toBe(0);
   });
@@ -1863,7 +1857,7 @@ describe("code sync — active context replacement", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain("Active sync context changed");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);

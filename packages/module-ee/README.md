@@ -79,7 +79,7 @@ section.
 `apps/web/src/pages/test/billing-admin-sections.test.tsx`,
 `apps/web/src/pages/test/billing-plan-change.test.tsx`.
 
-**4. SPA — edit (7 files)**
+**4. SPA — edit (8 files)**
 
 - `apps/web/src/app.tsx` — drop the two `lazy()` imports (`OnboardingPlanStep`,
   `OrgSettingsBillingPage`), the `/onboarding/plan` `<Route>` block, and the
@@ -97,6 +97,9 @@ section.
 - `apps/web/src/pages/onboarding/done-step.tsx` — drop the `useBilling` and
   `useAppConfig` imports, both hook calls, and the `{features.billing && billing
 && (…)}` card.
+- `apps/web/src/lab/fixtures.ts` — drop the `billing` fixture, the hand-written
+  mirror of the `/api/billing` answer the redesign lab serves, and its `GET`
+  handler in `apps/web/src/lab/handlers.ts`.
 - `apps/web/src/hooks/use-global-run-sync.ts` — drop the
   `qc.invalidateQueries({ queryKey: ["get", "/api/billing"] })` call. It is
   untyped, so nothing fails if it stays; it is dead either way.

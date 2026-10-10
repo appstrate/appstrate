@@ -30,6 +30,7 @@ import {
   type UIMessageChunk,
 } from "ai";
 import {
+  createIsolatedResourceLoader,
   loadPiCodingAgentSdk,
   derivePiCompactionSettings,
   prepareRequestedThinkingLevel,
@@ -53,7 +54,7 @@ import {
 import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import { piChatModelRuntimeOptions, type ResolvedPiChatModelBinding } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
-import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
+import { PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -90,6 +91,8 @@ export interface PiChatInput {
   platformMcp: {
     url: string;
     headers: Record<string, string>;
+    /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
+    spaceId: string;
     fetch?: typeof fetch;
     surfaceKey?: string;
   };
@@ -224,6 +227,8 @@ export function runPiChat(input: PiChatInput): Response {
     onFirstModelEvent: () => {
       timings.firstModelEventMs = Date.now() - startedAt;
     },
+    // Bands each call by its tier for the platform to price; a proxy-metered turn needs none.
+    cost: modelBinding.metering.kind === "inline" ? modelBinding.metering.cost : null,
   });
 
   const stream = createUIMessageStream({
@@ -481,9 +486,12 @@ export function runPiChat(input: PiChatInput): Response {
           modelBinding.authMode === "proxy" ? [modelBinding.authExtension] : [];
         const resourceLoader = await untilAborted(
           timed(
-            createPiChatResourceLoader({
+            createIsolatedResourceLoader({
               DefaultResourceLoader,
               SettingsManager,
+              cwd: PI_CHAT_CWD,
+              agentDir: PI_CHAT_AGENT_DIR,
+              skillPaths: [],
               extensionFactories: [
                 ...tools.extensionFactories,
                 ...authExtensions,
@@ -660,10 +668,11 @@ export function runPiChat(input: PiChatInput): Response {
             presetId: input.presetId,
             modelId: model.id,
             apiShape: model.api as ChatUsageRecord["apiShape"],
-            inputTokens: meta.usage.input,
-            outputTokens: meta.usage.output,
-            cacheReadTokens: meta.usage.cacheRead,
-            cacheWriteTokens: meta.usage.cacheWrite,
+            inputTokens: meta.usage.input_tokens ?? 0,
+            outputTokens: meta.usage.output_tokens ?? 0,
+            cacheReadTokens: meta.usage.cache_read_input_tokens ?? 0,
+            cacheWriteTokens: meta.usage.cache_creation_input_tokens ?? 0,
+            ...(meta.usage.tiers ? { tiers: meta.usage.tiers } : {}),
             cost: modelBinding.metering.cost,
             durationMs: Date.now() - startedAt,
           });

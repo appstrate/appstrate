@@ -9,7 +9,6 @@
  * unchanged.
  */
 
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import { unrenderableAuthorizedUriFields } from "@appstrate/afps-shared/authorized-uris";
 
 import {
@@ -18,15 +17,20 @@ import {
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
-import { validateConnectionCredentials } from "../schema.ts";
 import { maskCredentialLabel } from "./mask-label.ts";
-import { invalidRequest, validationFailed } from "../../lib/errors.ts";
+import { validationFailed } from "../../lib/errors.ts";
 import type {
   ConnectContext,
   ConnectCompleteInput,
   IntegrationConnectStrategy,
 } from "./strategy.ts";
-import { assertFieldsInput, requireNonEmptyCredentials } from "./strategy.ts";
+import {
+  assertCredentialsMatchSchema,
+  assertFieldsInput,
+  requireNonEmptyCredentials,
+} from "./strategy.ts";
+import { resolveConnectionVariables } from "./connection-variables.ts";
+import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 export class FieldsStrategy implements IntegrationConnectStrategy {
   async complete(
@@ -37,31 +41,28 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     requireNonEmptyCredentials(credentials);
 
-    // Validate the pasted bag against the auth's declared credentials.schema.
     // Rejects missing required fields AND wrong-cased keys (e.g. `apiKey` for a
     // manifest declaring `api_key`), which would otherwise persist a connection
     // that looks healthy but whose `delivery.http` injection silently no-ops at
     // runtime (the field lookup misses → empty value → header never injected).
-    const credsResult = validateConnectionCredentials(
-      auth.credentials?.schema as JSONSchemaObject | undefined,
-      credentials,
+    assertCredentialsMatchSchema(auth.credentials?.schema, credentials);
+    const variables = await resolveConnectionVariables(
+      manifest,
+      auth as unknown as AfpsManifestAuth,
+      ctx.variables,
     );
-    if (!credsResult.valid) {
-      throw invalidRequest(
-        `Credentials do not match the integration's declared schema: ${credsResult.errors
-          .map((e) => `${e.field} ${e.message}`)
-          .join("; ")}`,
-        "credentials",
-      );
-    }
     // #1627: an `authorized_uris` entry the submitted fields cannot render would refuse every
     // later call, so the connection is refused now. Never echoes the value.
-    const unrenderable = unrenderableAuthorizedUriFields(auth.authorized_uris ?? [], credentials);
+    const unrenderable = unrenderableAuthorizedUriFields(
+      auth.authorized_uris ?? [],
+      credentials,
+      variables ?? {},
+    );
     if (unrenderable.length > 0) {
       throw validationFailed(
-        unrenderable.map(({ field, expected }) => ({
-          field: `credentials.${field}`,
-          code: "unrenderable_authorized_uri",
+        unrenderable.map(({ root, field, expected }) => ({
+          field: root === "variable" ? `variables.${field}` : `credentials.${field}`,
+          code: root === "variable" ? "unrenderable_variable" : "unrenderable_authorized_uri",
           title: "Invalid Connection Field",
           message: `must be ${expected}`,
         })),
@@ -81,8 +82,10 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       credentials,
       identityClaims,
       actor: ctx.actor,
+      variables,
       ...(labelHint ? { labelHint } : {}),
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
     });
   }
 }

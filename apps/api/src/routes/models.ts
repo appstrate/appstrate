@@ -34,7 +34,7 @@ import {
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   loadInferenceCredentials,
-  loadCredentialRow,
+  loadCredentialMetadata,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -604,7 +604,8 @@ export function createModelsRouter() {
       // Metadata-only (no decrypt): works even when the row's credential is
       // dead. A gone credential/provider yields no catalog defaults.
       const providerId =
-        newCreds?.providerId ?? (await loadCredentialRow(current.credentialId, orgId))?.providerId;
+        newCreds?.providerId ??
+        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
       if (rebinds && providerId) throwOnModelOutsideOffer(providerId, effectiveModelId);
       const catalogDefaults: CatalogDefaults = providerId
         ? resolveCatalogDefaults(providerId, effectiveModelId)

@@ -22,6 +22,9 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { ResolvedConnectionMap } from "@appstrate/core/integration";
 
 import { resolveIntegrationSpawns } from "../../../src/services/integration-spawn-resolver.ts";
+import { buildPlatformSystemPrompt } from "../../../src/services/run-launcher/prompt-builder.ts";
+import type { AppstrateRunPlan } from "../../../src/services/run-launcher/types.ts";
+import { defaultTestAgentResources } from "../../helpers/run-resources.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -107,6 +110,7 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
         integrationId: INTEG,
         authKey: "key",
         accountId: opts.accountId ?? opts.host,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
@@ -167,6 +171,34 @@ describe("resolveIntegrationSpawns — one spec per bound connection", () => {
     expect(byLabel.get("web-1")!.spawnEnv.SSH_PRIVATE_KEY).toBe("key-for-web-1.example.com");
     expect(byLabel.get("db")!.spawnEnv.SSH_HOST).toBe("db.example.com");
     expect(byLabel.get("db")!.spawnEnv.SSH_PRIVATE_KEY).toBe("key-for-db.example.com");
+  });
+
+  it("renders ONE prompt section for the integration, however many connections it spawns", async () => {
+    await seedConnection({ label: "web-1", host: "web-1.example.com" });
+    await seedConnection({ label: "db", host: "db.example.com" });
+    const { specs } = await resolve(await bindAllConnections(INTEG));
+    expect(specs).toHaveLength(2);
+
+    const identity = "@orga/agent@0.1.0" as AppstrateRunPlan["bundle"]["root"];
+    const packages: AppstrateRunPlan["bundle"]["packages"] = new Map();
+    const files = new Map([["prompt.md", new TextEncoder().encode("Do it.")]]);
+    packages.set(identity, {
+      identity,
+      manifest: agentManifest(),
+      files,
+      integrity: "sha256-stub",
+    });
+    // The prompt builder reads only the bundle, timeout, resources and integrations.
+    const plan = {
+      bundle: { bundleFormatVersion: "1.0", root: identity, packages, integrity: "sha256-stub" },
+      timeout: 60,
+      resources: defaultTestAgentResources(),
+      integrations: specs,
+    } as Partial<AppstrateRunPlan> as AppstrateRunPlan;
+
+    const prompt = await buildPlatformSystemPrompt({ runId: "run_test", input: {} }, plan);
+    expect(prompt.split(`## Integration: ${INTEG}\n`)).toHaveLength(2);
+    expect(prompt).not.toContain("## Unavailable Integrations");
   });
 
   it("CONTROL: one bound connection still yields exactly one spec, `connection` added", async () => {
@@ -291,6 +323,7 @@ describe("resolveIntegrationSpawns — api_call per connection auth", () => {
         authKey,
         accountId: label,
         label,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,

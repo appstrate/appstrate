@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { encryptCredentials } from "@appstrate/connect";
 import { prefixedId } from "@appstrate/db/ids";
 import { db } from "@appstrate/db/client";
 import { user as userTable, organizations, spaces, spaceSmtpConfigs } from "@appstrate/db/schema";
@@ -113,23 +115,37 @@ describe("resolveSmtpForClient", () => {
     expect(afterDelete).toBeNull();
   });
 
-  it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
+  it("treats an unreadable ciphertext as unconfigured, a missing key as a 503", async () => {
     const spaceId = await seedOrgWithSpace();
-    // Envelope with a kid absent from the keyring — decryption must fail and
-    // the resolver must surface "not configured" instead of throwing.
-    await db.insert(spaceSmtpConfigs).values({
+    const values = {
       spaceId,
       host: "smtp.tenant.example",
       port: 587,
       username: "u",
-      passEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}`,
+      passEncrypted: "v1:not-a-real-envelope",
       fromAddress: "noreply@tenant.example",
+    };
+    await db.insert(spaceSmtpConfigs).values(values);
+    const client = { level: "space" as const, referencedSpaceId: spaceId };
+    expect(await resolveSmtpForClient(client)).toBeNull();
+
+    // A missing key must not read as "not configured", and must not be cached as such.
+    await db
+      .update(spaceSmtpConfigs)
+      .set({ passEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}` })
+      .where(eq(spaceSmtpConfigs.spaceId, spaceId));
+    await invalidateSmtpCache(spaceId);
+    await expect(resolveSmtpForClient(client)).rejects.toMatchObject({
+      status: 503,
+      code: "encryption_key_unavailable",
     });
-    const resolved = await resolveSmtpForClient({
-      level: "space",
-      referencedSpaceId: spaceId,
-    });
-    expect(resolved).toBeNull();
+
+    // The 503 was not cached: once the row reads again, the very next call serves it.
+    await db
+      .update(spaceSmtpConfigs)
+      .set({ host: "__test_json__", passEncrypted: encryptCredentials({ pass: "p" }) })
+      .where(eq(spaceSmtpConfigs.spaceId, spaceId));
+    expect(await resolveSmtpForClient(client)).not.toBeNull();
   });
 
   it("level=org / level=instance fall back to env SMTP (null when env absent)", async () => {

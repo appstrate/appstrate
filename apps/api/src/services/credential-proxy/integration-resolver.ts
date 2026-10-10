@@ -23,7 +23,7 @@
 import {
   resolveAfpsHttpDelivery,
   buildProxyCredentialsPayload,
-  RefreshError,
+  decryptCredentialsToStringMap,
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
@@ -33,24 +33,21 @@ import {
 } from "../integration-manifest-helpers.ts";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
+import { decryptStoredCredential } from "../../lib/stored-credential.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 import {
   assertIntegrationActive,
   selectAccessibleConnection,
-  recordUnrefreshableRejection,
   upstreamRejectionStreak,
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
+import type { ConnectionVariables } from "../connect/connection-variables.ts";
 import {
   readIntegrationManifestForProxy,
   type ResolvedIntegrationVersion,
 } from "../integration-service.ts";
-import {
-  buildIntegrationOAuthRefreshContext,
-  decryptIntegrationConnectionFields,
-  refreshAndClassify,
-} from "../integration-token-refresh.ts";
+import { refreshConnectionCredential } from "../integration-token-refresh.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
 /** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
@@ -108,6 +105,8 @@ interface ResolvedIntegrationProxyCredentials {
   declaredUris: readonly string[];
   /** The decrypted connection id — used by the route's 401 force-refresh path. */
   connectionId: string;
+  /** The `credential_revision` of the decrypted credential, which a 401 rejects. */
+  credentialRevision: string;
   authKey: string;
   /** Consecutive upstream rejections counted before this call (`upstreamRejectionStreak`). */
   rejectionStreak: number;
@@ -141,160 +140,72 @@ export async function resolveIntegrationProxyCredentials(
     payload,
     declaredUris: declaredUrisOf(manifest, connection.authKey),
     connectionId: connection.id,
+    credentialRevision: connection.credentialRevision,
     authKey: connection.authKey,
     rejectionStreak: upstreamRejectionStreak(connection),
   };
 }
 
 /**
- * Force-refresh the integration connection's OAuth2 token (the proxy's
- * reactive 401-retry path) and rebuild the payload. `input.connectionId` names
- * the connection the failed call used; the selection still re-checks reach. Never throws for a
- * credential outcome — both call sites in `core.ts` sit inside `catch {}`, so
- * a throw would be swallowed and buy nothing. Returns `null` in the five
- * not-refreshed cases, which are NOT equivalent and are told apart by what
- * they leave behind:
+ * The proxy's reactive 401 path: the payload to replay the call with, after
+ * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`
+ * (`kept`: superseded, so replay with the one the connection holds now).
  *
- *   - transient (discovery blip, upstream 5xx) — row untouched, retry later;
- *   - no accessible connection — nothing to conclude;
- *   - UNREFRESHABLE (a non-oauth2 auth, or oauth2 whose minting client is gone
- *     or whose manifest can never yield a token endpoint) — the rejection is
- *     counted by `recordUnrefreshableRejection`, as on the sidecar path, and
- *     flags the connection at the threshold;
- *   - TERMINAL (the stored bundle has no `refresh_token`) — the connection is
- *     flagged `needsReconnection` before returning;
- *   - REVOKED (the refresh token was rejected upstream) — `refreshAndClassify`
- *     has already flagged `needsReconnection`, so the caller relaying the
- *     upstream 401 is not what stands between the user and a reconnect prompt.
+ * `null` — the proxy relays the upstream 401 unchanged — when nothing accessible serves, and on
+ * `retry` and `dead` (already flagged: the relayed 401 does not hide a reconnect prompt).
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
-): Promise<ResolvedIntegrationProxyCredentials | null> {
+  rejectedRevision: string | null,
+): Promise<ProxyCredentialsPayload | null> {
   const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
   if (!connection) return null;
 
   const authDef = manifest.auths?.[connection.authKey];
   if (!authDef) return null;
-  if (authDef.type !== "oauth2") {
-    return countUnrefreshableRejection(input, connection, `auth type '${authDef.type}'`);
-  }
-
-  let refreshContext;
-  try {
-    refreshContext = await buildIntegrationOAuthRefreshContext(
-      input.integrationId,
-      connection.authKey,
-      authDef,
-      input.spaceId,
-      connection.clientRef,
-    );
-  } catch (err) {
-    // Transient token-endpoint discovery failure (issuer-only manifest) —
-    // surface as not-refreshed; the route keeps the original 401, the row is
-    // untouched, the next run re-discovers. Same handling as a transient
-    // exchange failure below.
-    if (err instanceof RefreshError && err.kind === "transient") {
-      logger.warn("credential-proxy: integration token endpoint discovery transient failure", {
+  const outcome = await refreshConnectionCredential({
+    connection,
+    integrationId: input.integrationId,
+    authDef,
+    scope: { orgId: input.orgId, spaceId: input.spaceId },
+    actor: input.actor,
+    trigger: { kind: "rejected", revision: rejectedRevision },
+  });
+  let fields: Record<string, string> | null;
+  switch (outcome.status) {
+    case "refreshed":
+      fields = outcome.fields;
+      break;
+    case "kept":
+      fields = decryptStoredCredential(
+        () => decryptCredentialsToStringMap(connection.credentialsEncrypted),
+        {
+          connectionId: connection.id,
+          packageId: input.integrationId,
+          authKey: connection.authKey,
+        },
+      );
+      break;
+    case "retry":
+    case "dead":
+      logger.warn("credential-proxy: integration credential not refreshed — relaying the 401", {
         integrationId: input.integrationId,
         authKey: connection.authKey,
-        error: err.message,
+        connectionId: connection.id,
+        outcome: outcome.status,
+        cause: outcome.cause,
+        detail: outcome.detail,
       });
       return null;
-    }
-    throw err;
   }
-  if (!refreshContext) {
-    return countUnrefreshableRejection(input, connection, "no OAuth client or token endpoint");
-  }
-
-  // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
-  // to oauth2 above, so this is the only refreshable auth. `force` is left at
-  // its default (true): this whole function IS the proxy's 401-retry hook, so
-  // the stored token is known-bad and its remaining lifetime proves nothing.
-  const classified = await refreshAndClassify(
-    connection.id,
-    input.integrationId,
-    connection.authKey,
-    connection.credentialsEncrypted,
-    refreshContext,
-  );
-  if (classified.status === "terminal") {
-    // Terminal, and already recorded: the connection carries no refresh_token
-    // at all, and `refreshAndClassify` flagged `needsReconnection` before
-    // returning. Degrade-and-mark: the caller keeps seeing the real upstream 401.
-    logger.warn("credential-proxy: integration credential unrefreshable — needs re-connection", {
-      integrationId: input.integrationId,
-      authKey: connection.authKey,
-      connectionId: connection.id,
-      reason: classified.reason,
-    });
-    return null;
-  }
-  if (classified.status === "revoked") {
-    // Terminal, and already recorded: `refreshAndClassify` flipped
-    // `needsReconnection` on the connection before returning this status.
-    logger.warn("credential-proxy: integration refresh token revoked — needs re-connection", {
-      integrationId: input.integrationId,
-      authKey: connection.authKey,
-      connectionId: connection.id,
-    });
-    return null;
-  }
-  if (classified.status === "transient") {
-    // Transient failure — surface as not-refreshed; the route keeps the
-    // original 401.
-    const err = classified.error;
-    logger.warn("credential-proxy: integration token refresh transient error", {
-      integrationId: input.integrationId,
-      authKey: connection.authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-
-  const fields = classified.result.fields;
-  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
-  if (!payload) return null;
-  return {
-    payload,
-    declaredUris: declaredUrisOf(manifest, connection.authKey),
-    connectionId: connection.id,
-    authKey: connection.authKey,
-    rejectionStreak: upstreamRejectionStreak(connection),
-  };
+  if (!fields) return null;
+  return buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables);
 }
 
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
-
-/**
- * A 401 nothing can refresh: counted like the sidecar's (one 401 can be a transient upstream
- * fault), so CLI / GitHub Action / runner callers still reach a reconnect prompt. Returns `null`:
- * the proxy relays the upstream 401 unchanged.
- */
-async function countUnrefreshableRejection(
-  input: ResolveIntegrationProxyInput,
-  connection: ResolvedConnectionRow,
-  reason: string,
-): Promise<null> {
-  const { failures, maxFailures, needsReconnection } = await recordUnrefreshableRejection(
-    connection.id,
-    input.integrationId,
-    input,
-  );
-  logger.warn("credential-proxy: integration credential rejected upstream and unrefreshable", {
-    integrationId: input.integrationId,
-    authKey: connection.authKey,
-    connectionId: connection.id,
-    reason,
-    failures,
-    maxFailures,
-    needsReconnection,
-  });
-  return null;
-}
 
 async function loadManifest(input: ResolveIntegrationProxyInput): Promise<IntegrationManifest> {
   const { integrationId } = input;
@@ -344,17 +255,21 @@ function buildPayload(
   manifest: IntegrationManifest,
   connection: ResolvedConnectionRow,
 ): ProxyCredentialsPayload {
-  const fields = decryptIntegrationConnectionFields(
-    connection.credentialsEncrypted,
-    integrationId,
-    connection.authKey,
+  const fields = decryptStoredCredential(
+    () => decryptCredentialsToStringMap(connection.credentialsEncrypted),
+    { connectionId: connection.id, packageId: integrationId, authKey: connection.authKey },
   );
   if (!fields) {
     throw new IntegrationCredentialNotFoundError(
       `Failed to decrypt credentials for integration '${integrationId}'`,
     );
   }
-  const payload = buildPayloadFromFields(manifest, connection.authKey, fields);
+  const payload = buildPayloadFromFields(
+    manifest,
+    connection.authKey,
+    fields,
+    connection.variables,
+  );
   if (!payload) {
     throw new IntegrationCredentialNotFoundError(
       `Integration '${integrationId}' auth '${connection.authKey}' has no resolvable credentials`,
@@ -376,20 +291,21 @@ function buildPayloadFromFields(
   manifest: IntegrationManifest,
   authKey: string,
   fields: Record<string, string>,
+  variables: ConnectionVariables,
 ): ProxyCredentialsPayload | null {
   const authDef = manifest.auths?.[authKey] as AfpsManifestAuth | undefined;
   if (!authDef) return null;
 
   const http = authDef.delivery?.http;
   const plan = http
-    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery)
+    ? resolveAfpsHttpDelivery(authDef.type, fields, http as ConnectAfpsHttpDelivery, variables)
     : null;
 
   // Integrations always declare ≥1 authorized_uri unless allow_all_uris is set.
   return buildProxyCredentialsPayload({
     fields,
     plan,
-    authorizedUris: renderAuthAuthorizedUris(authDef, fields),
+    authorizedUris: renderAuthAuthorizedUris(authDef, fields, variables),
     allowAllUris: authDef.allow_all_uris === true,
   });
 }

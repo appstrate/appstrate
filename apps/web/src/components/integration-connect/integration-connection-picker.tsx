@@ -6,7 +6,7 @@ import {
   type ConnectionPickerOptions,
   type ConnectionPickerPersistence,
 } from "./use-connection-picker";
-import { useIntegrationAgentResolution } from "../../hooks/use-integrations";
+import { useIntegrationReadinessEntry } from "../../hooks/use-integrations";
 import { PickerMenu } from "./connection-picker-menu";
 import {
   BlockedPicker,
@@ -27,7 +27,7 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
 /**
  * Per-integration connection picker, rendered as a rich dropdown. Lists every
  * accessible connection (own + shared-with-org) with its name, auth type
- * (OAuth / API key …), and who created it, plus a reset entry and "add a
+ * (OAuth / API key …), and who created it, plus a "no connection" entry, a reset entry and "add a
  * connection" entries (one per declared auth) that launch the connect flow
  * inline.
  *
@@ -49,7 +49,7 @@ export function IntegrationConnectionPicker({
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });
   // Same query the hook reads, deduped: it only answers whether that read failed.
-  const { isError } = useIntegrationAgentResolution(integrationId, agentPackageId, version);
+  const { isError } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
 
   // Failure first, then loading — the order `collection.ts` owns, applied to a
   // CONTROL rather than to a body. `isPending` is false once a query has
@@ -60,7 +60,7 @@ export function IntegrationConnectionPicker({
 
   const {
     canAddConnection,
-    lockedConnectionIds,
+    lockedBy,
     emptyPickerPrompt,
     canConnect,
     integrationPath,
@@ -80,14 +80,14 @@ export function IntegrationConnectionPicker({
   }
 
   // An admin force (pin or enforced org default) renders read-only: a member pin loses to it.
-  if (lockedConnectionIds.length > 0) {
+  if (lockedBy !== null) {
     return <LockedPicker integrationId={integrationId} picker={picker} />;
   }
 
   // Blocked for this member AND nothing to pick → dead end. Show a
   // disabled, explanatory button instead of an empty dropdown.
   // Unless a stored set is left to clear: the menu's reset item is the way out.
-  if (!canAddConnection && !hasCandidates && explicitIds.length === 0) {
+  if (!canAddConnection && !hasCandidates && explicitIds === null) {
     return <BlockedPicker integrationId={integrationId} canConnect={canConnect} />;
   }
 
@@ -95,7 +95,7 @@ export function IntegrationConnectionPicker({
   // oauth2 auth lacks an admin-registered OAuth client) → point at the
   // admin setup instead of an empty dropdown that would only 403 — unless a
   // stored set is left to clear, as above.
-  if (!hasCandidates && authKeys.length === 0 && explicitIds.length === 0) {
+  if (!hasCandidates && authKeys.length === 0 && explicitIds === null) {
     return (
       <NoClientPicker
         integrationId={integrationId}
@@ -129,8 +129,8 @@ export function IntegrationConnectionPicker({
           })}
         </PickerWarning>
       )}
-      {/* Under-scoped → blocked server-side. The owner can upgrade in place;
-          a foreign owner can only be flagged. */}
+      {/* Under-scoped → blocked server-side: a new connection with the agent's
+          scopes first, an in-place upgrade (owner only) second. */}
       {underScopedConns.map((conn) => (
         <UnderScopedWarning key={conn.id} conn={conn} picker={picker} />
       ))}

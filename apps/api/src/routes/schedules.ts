@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import {
-  assertConnectionOverrideKeysDeclared,
+  assertConnectionOverridesAllowed,
   assertDependencyOverrideKeysDeclared,
   connectionOverridesSchema,
   dependencyOverridesSchema,
@@ -26,7 +26,13 @@ import {
 import { computeNextRun, isValidCron } from "../lib/cron.ts";
 import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
+import {
+  ApiError,
+  invalidRequest,
+  notFound,
+  validationFailed,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { ORG_ROLES_WITH_FULL_ACCESS, type OrgRole } from "@appstrate/core/permissions";
 import { parseListPagination } from "../lib/list-query.ts";
@@ -49,6 +55,8 @@ import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
   assertScheduleOverridesReachable,
+  sameRecord,
+  sameSet,
 } from "../services/schedule-connections.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
@@ -465,7 +473,7 @@ export function createSchedulesRouter() {
       // key the effective manifest does not declare is refused here as a
       // malformed request, rather than freezing onto the row and 400-ing at
       // every tick.
-      assertConnectionOverrideKeysDeclared(
+      assertConnectionOverridesAllowed(
         effectiveAgent.manifest as unknown as Record<string, unknown>,
         data.connection_overrides,
       );
@@ -507,7 +515,7 @@ export function createSchedulesRouter() {
         connectionOverrides: data.connection_overrides ?? null,
         storedOverrides: null,
       });
-      await assertScheduleConnectionsChosen({
+      const warnings = await assertScheduleConnectionsChosen({
         agent: effectiveAgent,
         orgId: scope.orgId,
         spaceId: scope.spaceId,
@@ -549,7 +557,7 @@ export function createSchedulesRouter() {
           actorId: actor.id,
         },
       });
-      return c.json(schedule, 201);
+      return c.json({ ...schedule, warnings }, 201);
     },
   );
 
@@ -750,7 +758,7 @@ export function createSchedulesRouter() {
       nextOverrides &&
       Object.keys(nextOverrides).length > 0
     ) {
-      assertConnectionOverrideKeysDeclared(
+      assertConnectionOverridesAllowed(
         (await firedDefinition()).manifest as unknown as Record<string, unknown>,
         nextOverrides,
       );
@@ -764,6 +772,15 @@ export function createSchedulesRouter() {
       storedOverrides: actorChanged ? null : existing.connection_overrides,
     });
     // Armed: re-judged on every write, since a new connection can make the choice ambiguous.
+    // `warnings` stays `null` unless this write moves what a fire resolves with: a disabled
+    // schedule fires nothing, and an unrelated edit has no news to report.
+    const resolutionMoved =
+      actorChanged ||
+      (data.enabled === true && !existing.enabled) ||
+      draftSelectorMoved(data.version_override, existing.version_override) ||
+      !sameRecord(nextOverrides, existing.connection_overrides, sameSet) ||
+      !sameRecord(effectiveDependencyOverrides, existing.dependency_overrides, (x, y) => x === y);
+    let warnings: ResolutionFieldError[] | null = null;
     if (data.enabled ?? existing.enabled) {
       await assertScheduleActorValid(nextActor, scope.orgId, scope.spaceId);
       // A version that cannot resolve already fails every tick; it must not block a rename.
@@ -772,7 +789,7 @@ export function createSchedulesRouter() {
         throw err;
       });
       if (definition) {
-        await assertScheduleConnectionsChosen({
+        const judged = await assertScheduleConnectionsChosen({
           agent: definition,
           orgId: scope.orgId,
           spaceId: scope.spaceId,
@@ -781,6 +798,7 @@ export function createSchedulesRouter() {
           connectionOverrides: nextOverrides,
           dependencyOverrides: effectiveDependencyOverrides ?? null,
         });
+        if (resolutionMoved) warnings = judged;
       }
     }
 
@@ -832,7 +850,7 @@ export function createSchedulesRouter() {
         ...diff,
       });
     }
-    return c.json(schedule);
+    return c.json({ ...schedule, warnings });
   });
 
   // DELETE /api/schedules/:id — delete a schedule

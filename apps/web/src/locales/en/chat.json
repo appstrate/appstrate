@@ -70,6 +70,7 @@
   "connect.resumed": "{{name}} connected",
   "connect.active": "Connection active",
   "connect.failed": "The connection failed.",
+  "connect.expired": "Link expired — start the connection again from the integration's page.",
   "tool.op.launch": "Launch",
   "tool.op.create": "Create",
   "tool.op.update": "Update",

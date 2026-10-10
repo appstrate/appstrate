@@ -25,13 +25,22 @@
  *                                     (`parseRequestInput` cannot own this here:
  *                                     it runs after the preflight on the launch
  *                                     route and not at all on validate)
+ *   - non-required, not connected   → launch 201 / validate 200 with a
+ *                                     `not_connected` warning
+ *   - `[]` override                 → binds none on a non-required integration
+ *                                     (`integration_unbound`), 400 on a `required` one
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { runs } from "@appstrate/db/schema";
 import {
   createFakeOrchestrator,
@@ -58,6 +67,8 @@ interface ValidationFieldError {
   code: string;
   title?: string;
   message: string;
+  auth_key?: string;
+  required_scopes?: string[];
   candidate_connections?: {
     id: string;
     label: string | null;
@@ -77,6 +88,7 @@ interface ProblemDetails {
   detail?: string;
   param?: string;
   errors?: ValidationFieldError[];
+  version_ref?: string;
 }
 
 describe("POST /api/runs/inline — connection_overrides disambiguation", () => {
@@ -126,6 +138,8 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
     expect(res.status).toBe(409);
     const body = (await res.json()) as ProblemDetails;
     expect(body.code).toBe("missing_integration_connection");
+    // The posted definition runs as the shadow's draft.
+    expect(body.version_ref).toBe("draft");
 
     const err = body.errors!.find((e) => e.field === `integrations.${INTEGRATION}`);
     expect(err).toBeDefined();
@@ -228,7 +242,123 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       connection_overrides: { [INTEGRATION]: [picked] },
     });
     expect(withPick.status).toBe(200);
-    expect(await withPick.json()).toEqual({ valid: true });
+    expect(await withPick.json()).toEqual({ valid: true, warnings: [] });
+  });
+
+  // ─── A non-required integration nobody connected ───────────
+  describe("non-required integration with no connection", () => {
+    it("launches with a not_connected warning, binding none", async () => {
+      await seedIntegration(INTEGRATION);
+      await seedDefaultModel();
+
+      const res = await app.request("/api/runs/inline", {
+        method: "POST",
+        headers: {
+          ...authHeaders(ctx),
+          "Content-Type": "application/json",
+          [RUN_CONNECT_OFFERS_HEADER]: "1",
+        },
+        body: JSON.stringify({ manifest: inlineManifest([INTEGRATION]), prompt: "do the thing" }),
+      });
+
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
+      expect(created.warnings).toHaveLength(1);
+      // The lone api_key auth is the connect target, as on the required twin…
+      expect(created.warnings[0]).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "not_connected",
+        auth_key: "primary",
+      });
+      expect(created.warnings[0]!.required_scopes).toBeUndefined();
+      // …but no link is minted for a non-oauth2 auth, even opted in.
+      expect(created.warnings[0]!.connect_url).toBeUndefined();
+      const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+    });
+
+    it("validates with the same warning", async () => {
+      await seedIntegration(INTEGRATION);
+
+      const res = await post("/api/runs/inline/validate", {
+        manifest: inlineManifest([INTEGRATION]),
+        prompt: "do the thing",
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { valid: true; warnings: ValidationFieldError[] };
+      expect(body.valid).toBe(true);
+      expect(body.warnings.map((w) => [w.field, w.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "not_connected"],
+      ]);
+    });
+
+    it("refuses the same agent when it marks the integration required", async () => {
+      await seedIntegration(INTEGRATION);
+
+      const res = await post("/api/runs/inline", {
+        manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+        prompt: "do the thing",
+      });
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemDetails;
+      expect(body.errors!.map((e) => e.code)).toEqual(["not_connected"]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+  });
+
+  // ─── Explicit none ───────────
+  describe("connection_overrides naming no connection", () => {
+    it("starts a non-required integration with none bound, even with a connection to fall back on", async () => {
+      await seedIntegration(INTEGRATION);
+      await seedDefaultModel();
+      await seedConnection(INTEGRATION);
+
+      const res = await post("/api/runs/inline", {
+        manifest: inlineManifest([INTEGRATION]),
+        prompt: "do the thing",
+        connection_overrides: { [INTEGRATION]: [] },
+      });
+
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string; warnings: ValidationFieldError[] };
+      // Still reported so the launcher sees it, with no connect target: the absence was chosen.
+      expect(created.warnings).toHaveLength(1);
+      expect(created.warnings[0]).toMatchObject({
+        field: `integrations.${INTEGRATION}`,
+        code: "integration_unbound",
+        source: "run_override",
+      });
+      expect(created.warnings[0]!.auth_key).toBeUndefined();
+      expect(created.warnings[0]!.required_scopes).toBeUndefined();
+      const [row] = await db.select().from(runs).where(eq(runs.id, created.id));
+      expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+      expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+    });
+
+    it.each(["/api/runs/inline", "/api/runs/inline/validate"])(
+      "400s on %s when the integration is required",
+      async (path) => {
+        await seedIntegration(INTEGRATION);
+        await seedConnection(INTEGRATION);
+
+        const res = await post(path, {
+          manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+          prompt: "do the thing",
+          connection_overrides: { [INTEGRATION]: [] },
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as ProblemDetails;
+        // One item, fail-fast or accumulated: readiness judges the launch without the refused key.
+        expect(body.code).toBe("validation_failed");
+        expect(body.errors!.map((e) => [e.field, e.code])).toEqual([
+          [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+        ]);
+        expect(await db.select().from(runs)).toHaveLength(0);
+      },
+    );
   });
 
   // An empty connection id is falsy at the resolver's `resolveOne`, so the
@@ -328,12 +458,19 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
     }
 
-    async function launch(path: string, headers: Record<string, string>) {
+    async function launch(
+      path: string,
+      headers: Record<string, string>,
+      opts: { required: boolean } = { required: true },
+    ) {
       return app.request(path, {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json", ...headers },
         body: JSON.stringify({
-          manifest: inlineManifest([OAUTH_INTEGRATION]),
+          manifest: inlineManifest(
+            [OAUTH_INTEGRATION],
+            opts.required ? { required: [OAUTH_INTEGRATION] } : {},
+          ),
           prompt: "do the thing",
         }),
       });
@@ -380,6 +517,122 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       const body = (await res.json()) as ProblemDetails;
       const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
       expect(err.connect_url).toBeUndefined();
+    });
+
+    it("carries connect_url on the not_connected warning of a non-required integration", async () => {
+      await seedOauthIntegration();
+      await seedDefaultModel();
+
+      const res = await launch(
+        "/api/runs/inline",
+        { [RUN_CONNECT_OFFERS_HEADER]: "1" },
+        { required: false },
+      );
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { warnings: ValidationFieldError[] };
+      const warning = body.warnings.find((w) => w.field === `integrations.${OAUTH_INTEGRATION}`)!;
+      expect(warning).toMatchObject({
+        code: "not_connected",
+        auth_key: "primary",
+        required_scopes: ["search.read"],
+      });
+      expect(warning.connect_url).toStartWith("http");
+      const token = new URL(warning.connect_url!).searchParams.get("token");
+      expect(readConnectToken(token!)).toMatchObject({
+        package_id: OAUTH_INTEGRATION,
+        auth_key: "primary",
+        scopes: ["search.read"],
+      });
+    });
+
+    it("keeps no connect link in the cached launch an Idempotency-Key replays", async () => {
+      await seedOauthIntegration();
+      await seedDefaultModel();
+      const admin = await memberContext(ctx, "admin");
+      const key = crypto.randomUUID();
+      const field = `integrations.${OAUTH_INTEGRATION}`;
+      const body = JSON.stringify({
+        manifest: inlineManifest([OAUTH_INTEGRATION]),
+        prompt: "do the thing",
+      });
+      const launchAs = (who: TestContext, headers: Record<string, string>) =>
+        app.request("/api/runs/inline", {
+          method: "POST",
+          headers: {
+            ...authHeaders(who),
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+            ...headers,
+          },
+          body,
+        });
+      const warningOf = async (res: Response) =>
+        ((await res.json()) as { warnings: ValidationFieldError[] }).warnings.find(
+          (w) => w.field === field,
+        )!;
+
+      const original = await launchAs(ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(original.status).toBe(201);
+      const minted = await warningOf(original);
+      expect(minted.connect_url).toStartWith("http");
+      expect(minted.expiresAt).toBeDefined();
+
+      for (const [who, headers] of [
+        [ctx, {}],
+        [ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" }],
+        [admin, {}],
+      ] as const) {
+        const replay = await launchAs(who, headers);
+        expect(replay.status).toBe(201);
+        expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+        const warning = await warningOf(replay);
+        expect(warning).toMatchObject({ code: "not_connected", auth_key: "primary" });
+        expect(warning).not.toHaveProperty("connect_url");
+        expect(warning).not.toHaveProperty("expiresAt");
+        expect(warning).not.toHaveProperty("packageId");
+      }
+      expect(await db.select().from(runs)).toHaveLength(1);
+    });
+
+    it("stores no 409: a key reuser is judged again and never handed the first caller's link", async () => {
+      await seedOauthIntegration();
+      const admin = await memberContext(ctx, "admin");
+      const key = crypto.randomUUID();
+      const field = `integrations.${OAUTH_INTEGRATION}`;
+      const body = JSON.stringify({
+        manifest: inlineManifest([OAUTH_INTEGRATION], { required: [OAUTH_INTEGRATION] }),
+        prompt: "do the thing",
+      });
+      const launchAs = (who: TestContext, headers: Record<string, string>) =>
+        app.request("/api/runs/inline", {
+          method: "POST",
+          headers: {
+            ...authHeaders(who),
+            "Content-Type": "application/json",
+            "Idempotency-Key": key,
+            ...headers,
+          },
+          body,
+        });
+      const errorOf = async (res: Response) =>
+        ((await res.json()) as ProblemDetails).errors!.find((e) => e.field === field)!;
+
+      const original = await launchAs(ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" });
+      expect(original.status).toBe(409);
+      expect((await errorOf(original)).connect_url).toStartWith("http");
+
+      for (const [who, headers] of [
+        [admin, {}],
+        [ctx, {}],
+      ] as const) {
+        const retry = await launchAs(who, headers);
+        expect(retry.status).toBe(409);
+        expect(retry.headers.get("Idempotent-Replayed")).toBeNull();
+        const err = await errorOf(retry);
+        expect(err).toMatchObject({ code: "not_connected", auth_key: "primary" });
+        expect(err).not.toHaveProperty("connect_url");
+      }
+      expect(await db.select().from(runs)).toHaveLength(0);
     });
 
     it("never mints on /inline/validate, header or not", async () => {

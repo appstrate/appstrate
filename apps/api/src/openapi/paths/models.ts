@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
+import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 export const modelsPaths = {
@@ -121,6 +122,7 @@ export const modelsPaths = {
                     cacheWrite: { type: "number" },
                     tiers: {
                       type: "array",
+                      maxItems: MAX_TOKEN_USAGE_TIERS,
                       items: { $ref: "#/components/schemas/ModelCostTier" },
                     },
                   },
@@ -158,6 +160,7 @@ export const modelsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -219,6 +222,7 @@ export const modelsPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -278,6 +282,7 @@ export const modelsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -455,6 +460,7 @@ export const modelsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -501,6 +507,7 @@ export const modelsPaths = {
                     cacheWrite: { type: "number" },
                     tiers: {
                       type: "array",
+                      maxItems: MAX_TOKEN_USAGE_TIERS,
                       items: { $ref: "#/components/schemas/ModelCostTier" },
                     },
                   },
@@ -547,6 +554,7 @@ export const modelsPaths = {
             },
           },
         },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
     delete: {
@@ -594,6 +602,7 @@ export const modelsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },

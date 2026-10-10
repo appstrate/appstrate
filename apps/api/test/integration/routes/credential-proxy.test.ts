@@ -55,7 +55,6 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { updateConnectionMetadata } from "../../../src/services/integration-pins-service.ts";
 import {
   seedProxyIntegration,
   seedProxyConnection,
@@ -127,11 +126,11 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     authKey: "api",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
     scopesGranted: [],
-    sharedWithOrg: false,
   });
 }
 
@@ -400,6 +399,40 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
+  it("maps a connection under a kid the keyring lacks to 503, flagging nothing", async () => {
+    await seedIntegrationWithConnection(ctx);
+    await db
+      .update(integrationConnections)
+      .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+    let upstreamCalls = 0;
+    mockUpstream(async () => {
+      upstreamCalls += 1;
+      return new Response("nope", { status: 599 });
+    });
+
+    const res = await app.request("/api/credential-proxy/proxy", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "X-Integration-Id": INTEGRATION_ID,
+        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        "X-Session-Id": uuidV4(),
+      },
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("encryption_key_unavailable");
+    expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_configuration_error");
+    expect(upstreamCalls).toBe(0);
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+    expect(row!.needsReconnection).toBe(false);
+  });
+
   it("maps an integration not activated in the space to 404 (not 500)", async () => {
     // Package exists in the org but is NOT inserted into spacePackages,
     // so assertIntegrationActive throws an RFC 9457 notFound (an ApiError, not
@@ -491,6 +524,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       authKey: "api",
       accountId: "acct-2",
       label: "acct-2",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "second-token" } }),
@@ -776,7 +810,7 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
   let shared: string;
   let upstreamAuth: string[];
 
-  async function insertConnection(accountId: string, userId: string, sharedWithOrg = false) {
+  async function insertConnection(accountId: string, userId: string, shared = false) {
     const [row] = await db
       .insert(integrationConnections)
       .values({
@@ -784,13 +818,14 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
         authKey: "api",
         accountId,
         label: accountId,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         credentialsEncrypted: encryptCredentialEnvelope({
           outputs: { api_key: `tok-${accountId}` },
         }),
         scopesGranted: [],
-        sharedWithOrg,
+        sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -1037,7 +1072,10 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     const runId = await runBinding([shared]);
     expect((await call({ "X-Run-Id": runId })).status).toBe(200);
 
-    await updateConnectionMetadata(shared, { sharedWithOrg: false });
+    await db
+      .update(integrationConnections)
+      .set({ sharedSpaceIds: [] })
+      .where(eq(integrationConnections.id, shared));
 
     expect((await call({ "X-Run-Id": runId })).status).toBe(404);
     expect(upstreamAuth).toEqual(["Bearer tok-shared"]);

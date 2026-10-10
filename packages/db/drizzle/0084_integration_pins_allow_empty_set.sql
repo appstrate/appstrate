@@ -1,0 +1,2 @@
+ALTER TABLE "integration_pins" DROP CONSTRAINT "integration_pins_connection_ids_cardinality";--> statement-breakpoint
+ALTER TABLE "integration_pins" ADD CONSTRAINT "integration_pins_connection_ids_cardinality" CHECK (cardinality(connection_ids) BETWEEN 0 AND 20);

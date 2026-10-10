@@ -193,7 +193,7 @@ describe("block_user_connections workflow", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { code?: string; detail?: string };
     expect(body.code).toBe("connection_blocked_by_admin");
-    expect(body.detail ?? "").toMatch(/disabled by the organization admin/i);
+    expect(body.detail ?? "").toMatch(/disabled by an admin of this space/i);
 
     // Nothing persisted — the gate fires before strategy.complete.
     const rows = await db
@@ -491,11 +491,12 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: opts.spaceId ?? ctx.defaultSpaceId,
         userId: opts.userId,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedWithOrg: opts.shared ?? false,
+        sharedSpaceIds: opts.shared ? [opts.spaceId ?? ctx.defaultSpaceId] : [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
@@ -517,7 +518,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       integration_package_id: string;
       auth_key: string;
       label: string;
-      shared_with_org: boolean;
+      shared_space_ids: string[];
       owner_type: string;
       createdAt: string;
       updatedAt: string;
@@ -546,7 +547,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const res = await app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
       method: "PATCH",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ shared_with_org: true }),
+      body: JSON.stringify({ shared_space_ids: [ctx.defaultSpaceId] }),
     });
     // Admin is allowed to edit metadata in general, but sharing is consent —
     // only the owner may give it.
@@ -554,29 +555,25 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const body = (await res.json()) as { detail?: string };
     expect(body.detail ?? "").toMatch(/only the connection owner can share it/i);
 
-    // Not flipped.
-    const [row] = await db
-      .select({ shared: integrationConnections.sharedWithOrg })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    expect(row?.shared).toBe(false);
+    // Not shared.
+    expect(await isShared(connId)).toBe(false);
   });
 
-  /** PATCH `shared_with_org` on `connId` as the session behind `headers`. */
+  /** Share `connId` into (or withdraw it from) the default space, as the session behind `headers`. */
   function patchShared(connId: string, shared: boolean, headers: Record<string, string>) {
     return app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
       method: "PATCH",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ shared_with_org: shared }),
+      body: JSON.stringify({ shared_space_ids: shared ? [ctx.defaultSpaceId] : [] }),
     });
   }
 
   async function isShared(connId: string): Promise<boolean | undefined> {
     const [row] = await db
-      .select({ shared: integrationConnections.sharedWithOrg })
+      .select({ shared: integrationConnections.sharedSpaceIds })
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
-    return row?.shared;
+    return row?.shared.includes(ctx.defaultSpaceId);
   }
 
   it("lets an integrations:configure holder unshare a colleague's connection (200)", async () => {
@@ -587,7 +584,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const res = await patchShared(connId, false, authHeaders(ctx));
 
     expect(res.status, await res.clone().text()).toBe(200);
-    expect(((await res.json()) as { shared_with_org: boolean }).shared_with_org).toBe(false);
+    expect(((await res.json()) as { shared_space_ids: string[] }).shared_space_ids).toEqual([]);
     expect(await isShared(connId)).toBe(false);
   });
 
@@ -643,9 +640,8 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
   });
 
   it("404s a connection that belongs to a different space", async () => {
-    // A second space in the SAME org; the connection lives there, so the
-    // route's `ownership.spaceId !== scope.spaceId` check 404s
-    // (scope is ctx.defaultSpaceId via the headers).
+    // A second space in the SAME org; the connection is scoped to it, so it
+    // does not reach ctx.defaultSpaceId (the headers' space) and the edit 404s.
     const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space" });
     const connId = await seedConn({ userId: ctx.user.id, spaceId: otherSpace.id });
 
@@ -665,6 +661,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-eu",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         endUserId: endUser.id,
         credentialsEncrypted: "x",
@@ -714,11 +711,12 @@ describe("integrations:configure is never grantable to an API key", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
@@ -942,11 +940,11 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
-        sharedWithOrg: false,
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });

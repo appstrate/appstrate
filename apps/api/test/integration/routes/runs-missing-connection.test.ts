@@ -26,8 +26,12 @@
  *         auth_key?, required_scopes? }
  *     ] }
  *
- * Code path: agent-readiness.ts:151-158. Triggered by resolveRunPreflight
+ * Code path: agent-readiness.ts. Triggered by resolveRunPreflight
  * inside the run pipeline.
+ *
+ * The fixtures mark their integrations `required` (the blocking contract); a
+ * non-required one with nothing to bind starts the run with a warning instead
+ * (`run-launch-override-source.test.ts`).
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
@@ -75,14 +79,17 @@ const INTEGRATION = "@runorg/svc";
 const SECOND_INTEGRATION = "@runorg/extra-svc";
 const MCP_SERVER = "@runorg/svc-server";
 
-function buildAgentManifest(integrations: string[]): Record<string, unknown> {
+function buildAgentManifest(
+  integrations: string[],
+  opts: { required: boolean } = { required: true },
+): Record<string, unknown> {
   // AFPS §4.1/§4.4: the dependency value is a bare semver string; per-integration
   // tool/scope selection lives in the top-level `integrations_configuration` map.
   const deps: Record<string, string> = {};
-  const config: Record<string, { tools: string[] }> = {};
+  const config: Record<string, { tools: string[]; required: boolean }> = {};
   for (const id of integrations) {
     deps[id] = "^1.0.0";
-    config[id] = { tools: ["search"] };
+    config[id] = { tools: ["search"], required: opts.required };
   }
   return {
     name: AGENT,
@@ -125,10 +132,11 @@ function buildRequiredIntegrationManifest(id: string) {
   return m as unknown as ReturnType<typeof buildIntegrationManifest>;
 }
 
-/** Declares the dependency but selects zero tools → "inert" unless required auth. */
+/** Declares the dependency (required) but selects zero tools → "inert" unless required auth. */
 function buildAgentManifestNoTools(integrations: string[]): Record<string, unknown> {
   const m = buildAgentManifest(integrations);
-  (m as { integrations_configuration: Record<string, unknown> }).integrations_configuration = {};
+  (m as { integrations_configuration: Record<string, unknown> }).integrations_configuration =
+    Object.fromEntries(integrations.map((id) => [id, { required: true }]));
   return m;
 }
 
@@ -161,6 +169,7 @@ interface ProblemDetails {
   code?: string;
   detail?: string;
   errors?: ValidationFieldError[];
+  version_ref?: string;
 }
 
 describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connection", () => {
@@ -189,6 +198,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: integrationId,
         authKey: "primary",
         accountId: overrides?.accountId ?? `acct-${userId.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
@@ -242,6 +252,35 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(err.code).toBe("not_connected");
     expect(err.title).toBe("Integration Not Connected");
     expect(err.message).toBeTruthy();
+  });
+
+  it("names the version it judged, an omitted version being the latest published", async () => {
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifest([INTEGRATION]),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedIntegration(INTEGRATION);
+    await seedPublishedVersion(AGENT, "1.0.0");
+
+    for (const [query, versionRef] of [
+      ["", "1.0.0"],
+      ["?version=1.0.0", "1.0.0"],
+      ["?version=draft", "draft"],
+    ] as const) {
+      const res = await app.request(`/api/agents/${AGENT}/run${query}`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as ProblemDetails;
+      expect(body.code).toBe("missing_integration_connection");
+      expect(body.version_ref).toBe(versionRef);
+    }
   });
 
   it("returns 409 for a required-auth integration declared with no tools selected (inert) and no connection", async () => {
@@ -398,6 +437,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
@@ -704,8 +744,14 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     return m as unknown as ReturnType<typeof buildIntegrationManifest>;
   }
 
-  /** Declares the dependency ONLY — no `integrations_configuration` entry at all. */
-  function buildAgentManifestBareDependency(id: string): Record<string, unknown> {
+  /**
+   * Declares the dependency with no tool selection — no `integrations_configuration`
+   * entry at all, or (`required`) one carrying only the `required` flag.
+   */
+  function buildAgentManifestBareDependency(
+    id: string,
+    opts: { required?: boolean } = {},
+  ): Record<string, unknown> {
     return {
       name: AGENT,
       version: "1.0.0",
@@ -713,6 +759,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       schema_version: "0.2",
       display_name: "Bare-Dependency Agent",
       dependencies: { integrations: { [id]: "^1.0.0" } },
+      ...(opts.required ? { integrations_configuration: { [id]: { required: true } } } : {}),
     };
   }
 
@@ -743,13 +790,13 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
-  it("409s an agent that declares the dependency only, when the integration's default_tools make it active", async () => {
+  it("409s a required dependency with no tool selection, when the integration's default_tools make it active", async () => {
     await seedAgent({
       id: AGENT,
       homeSpaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
-      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION, { required: true }),
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await seedDefaultToolsIntegration(INTEGRATION);
@@ -798,6 +845,29 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
     expect(err).toBeDefined();
     expect(err!.code).toBe("must_choose_connection");
     expect(err!.candidate_connections!.map((c) => c.id).sort()).toEqual([conn1, conn2].sort());
+  });
+
+  it("does not 409 a NON-required dependency with no connection, default_tools or not", async () => {
+    // Same arrangement as the required case above, minus the flag: the absence
+    // degrades to a warning instead of refusing the launch.
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: buildAgentManifestBareDependency(INTEGRATION),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    await seedDefaultToolsIntegration(INTEGRATION);
+
+    const res = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).not.toBe(409);
+    expect(res.status).toBeLessThan(500);
   });
 
   it("keeps a bare dependency INERT when the integration declares no default_tools", async () => {
@@ -1025,24 +1095,28 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
-    // `needs_reconnection` is minted under the same rule as an under-scoped
-    // connection: the remedy re-consents THAT row, so it is the owner's to run.
+    // `needs_reconnection` re-consents THAT row in place, so it is the owner's to run.
     describe("needs_reconnection", () => {
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
-      async function seedDeadConnection(userId: string, sharedWithOrg = false): Promise<string> {
+      async function seedDeadConnection(
+        userId: string,
+        shared = false,
+        scopesGranted = ["base", "search.read"],
+      ): Promise<string> {
         const [row] = await db
           .insert(integrationConnections)
           .values({
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,
             credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
-            scopesGranted: ["base", "search.read"],
+            scopesGranted,
             needsReconnection: true,
-            sharedWithOrg,
+            sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
             label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
@@ -1051,23 +1125,27 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
 
       it("mints a connect_url when the dead connection belongs to the caller", async () => {
         await seedOauthIntegration();
-        const connectionId = await seedDeadConnection(ctx.user.id);
+        const connectionId = await seedDeadConnection(ctx.user.id, false, ["base"]);
         const body = await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" });
 
         const err = body.errors!.find((e) => e.field === `integrations.${OAUTH_INTEGRATION}`)!;
         expect(err.code).toBe("needs_reconnection");
         expect(err.owned_by_actor).toBe(true);
         expect(err.connection_id).toBe(connectionId);
+        // #1871: the agent needs `search.read`, the row holds `base` only. A reconnect
+        // re-consents what the row holds; this agent's scopes would widen every agent on it.
+        expect(err.required_scopes).toBeUndefined();
         expect(err.connect_url).toStartWith("http");
         // The claims re-consent the SAME row — without `connection_id` the
         // callback INSERTs a duplicate instead of reviving the dead one.
         const token = new URL(err.connect_url!).searchParams.get("token");
-        expect(readConnectToken(token!)).toMatchObject({
+        const claims = readConnectToken(token!);
+        expect(claims).toMatchObject({
           package_id: OAUTH_INTEGRATION,
           auth_key: "primary",
           connection_id: connectionId,
-          scopes: ["search.read"],
         });
+        expect(claims!.scopes ?? []).not.toContain("search.read");
       });
 
       it("mints nothing when the dead connection is a colleague's shared row", async () => {
@@ -1094,25 +1172,21 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       });
     });
 
-    // `insufficient_scopes` is the third code a connect flow can clear, and its
-    // remedy is an upgrade of an EXISTING row — so the same ownership rule as
-    // `needs_reconnection` decides it, through the same route.
+    // #1871: `insufficient_scopes` gets no link. An upgrade in place widens every
+    // agent bound to the row; a fresh connection leaves the binding on it.
     describe("insufficient_scopes", () => {
       /**
        * A LIVE oauth2 connection granted `base` only — short of the
-       * `search.read` the agent's `search` selection requires — owned by
-       * `userId` and optionally shared with the org.
+       * `search.read` the agent's `search` selection requires — owned by `userId`.
        */
-      async function seedUnderScopedConnection(
-        userId: string,
-        sharedWithOrg = false,
-      ): Promise<string> {
+      async function seedUnderScopedConnection(userId: string): Promise<string> {
         const [row] = await db
           .insert(integrationConnections)
           .values({
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,
@@ -1120,51 +1194,23 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
               outputs: { access_token: "live-but-narrow" },
             }),
             scopesGranted: ["base"],
-            sharedWithOrg,
             label: `Étroite ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
         return row!.id;
       }
 
-      it("mints a connect_url upgrading the caller's own under-scoped connection", async () => {
+      it("mints nothing on the caller's own under-scoped connection", async () => {
         await seedOauthIntegration();
         const connectionId = await seedUnderScopedConnection(ctx.user.id);
         const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
 
         expect(err.code).toBe("insufficient_scopes");
         expect(err.owned_by_actor).toBe(true);
+        expect(err.connection_id).toBe(connectionId);
         expect(err.missing_scopes).toEqual(["search.read"]);
-        expect(err.connect_url).toStartWith("http");
-        // The claims widen the SAME row — without `connection_id` the callback
-        // INSERTs a second account and the narrow one is still what resolves.
-        const token = new URL(err.connect_url!).searchParams.get("token");
-        expect(readConnectToken(token!)).toMatchObject({
-          package_id: OAUTH_INTEGRATION,
-          auth_key: "primary",
-          connection_id: connectionId,
-          scopes: ["search.read"],
-        });
-      });
-
-      it("mints nothing when the under-scoped connection is a colleague's shared row", async () => {
-        // Discriminating control for the case above: same code, same header,
-        // same permissions — only the owner differs. Minting here would let the
-        // caller re-consent (and widen) somebody else's account.
-        await seedOauthIntegration();
-        const colleague = await createTestUser();
-        await addOrgMember(ctx.orgId, colleague.id, "member");
-        await seedSpaceMember({
-          spaceId: ctx.defaultSpaceId,
-          userId: colleague.id,
-          presetRole: "operator",
-          customRoleId: null,
-        });
-        await pinForCaller(await seedUnderScopedConnection(colleague.id, true));
-
-        const err = relayItem(await launch({ [RUN_CONNECT_OFFERS_HEADER]: "1" }));
-        expect(err.code).toBe("insufficient_scopes");
-        expect(err.owned_by_actor).toBe(false);
+        // The relay fields stay, for a caller that starts a new connection itself.
+        expect(err.required_scopes).toEqual(["search.read"]);
         expect(err.connect_url).toBeUndefined();
         expect(err.expiresAt).toBeUndefined();
       });

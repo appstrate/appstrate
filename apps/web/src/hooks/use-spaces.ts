@@ -41,6 +41,14 @@ export function primeSpaceList(orgs: Promise<readonly { id: string }[]>): void {
   );
 }
 
+/** The listing of an org the caller belongs to, current or not: same key as `useSpaces` for the current one. */
+export function useOrgSpaces(orgId: string | null) {
+  return $api.useQuery("get", "/api/spaces", spacesListInit(orgOnlyHeader(orgId)), {
+    enabled: !!orgId,
+    select: (e) => e.data,
+  });
+}
+
 export function useSpace(spaceId: string) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(

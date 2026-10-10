@@ -23,7 +23,7 @@ import { useFiles } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { DocumentListPanel } from "../document-list-panel";
 import { formatDateField } from "../../lib/format-date";
-import { groupByIntegration } from "../../lib/run-connections";
+import { runConnectionRows } from "../../lib/run-connections";
 import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
 import type { ExecutionEntry } from "../log-utils";
 import { OverviewCardAction } from "../overview-card-action";
@@ -76,8 +76,9 @@ export function RunSnapshotInspector({
   const config = (run.input as Record<string, unknown> | null) ?? null;
   const metadata = (run.metadata as Record<string, unknown> | null) ?? null;
   const usage = run.token_usage;
-  // One fact per integration, listing every connection it bound (#1611).
-  const connections = groupByIntegration(run.connections_used ?? []);
+  // One fact per integration, listing every connection it bound (#1611), and one per
+  // declared integration the run started without.
+  const connections = runConnectionRows(run);
   const agentExecuted =
     [run.agent_scope, run.agent_name].filter(Boolean).join("/") || t("run.unknownValue");
   const triggerActor = getRunTriggerActor(run);
@@ -367,26 +368,38 @@ export function RunSnapshotInspector({
                 headerInside={cardHeaders}
               >
                 <SnapshotFacts>
-                  {connections.map(([integrationId, bound]) => (
+                  {connections.map(({ integrationId, bound, unboundCause }) => (
                     <SnapshotFact
                       key={integrationId}
                       label={integrationId}
                       value={
-                        <span className="flex flex-col">
-                          {bound.map((connection, i) => (
-                            <span key={`${connection.label}-${i}`}>
-                              {[
-                                connection.label,
-                                connection.account_id,
-                                t(`run.connSource.${connection.source}`, {
-                                  defaultValue: connection.source,
-                                }),
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
+                        unboundCause !== null ? (
+                          <span
+                            className="flex flex-col"
+                            data-testid={`run-integration-unbound-${integrationId}`}
+                          >
+                            <span className="text-muted-foreground">
+                              {t("run.integrationUnbound")}
                             </span>
-                          ))}
-                        </span>
+                            <span className="text-muted-foreground text-xs">{unboundCause}</span>
+                          </span>
+                        ) : (
+                          <span className="flex flex-col">
+                            {bound.map((connection, i) => (
+                              <span key={`${connection.label}-${i}`}>
+                                {[
+                                  connection.label,
+                                  connection.account_id,
+                                  t(`run.connSource.${connection.source}`, {
+                                    defaultValue: connection.source,
+                                  }),
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                            ))}
+                          </span>
+                        )
                       }
                     />
                   ))}

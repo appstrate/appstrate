@@ -454,10 +454,7 @@ It must stay byte-stable: changing it stops the background re-runs until the use
   "mcpServers": {
     "appstrate": {
       "type": "http",
-      "url": "https://app.example.com/api/mcp/o/org_123abc",
-      "headers": {
-        "X-Space-Id": "spc_456def"
-      }
+      "url": "https://app.example.com/api/mcp/o/org_123abc/s/spc_456def"
     }
   }
 }
@@ -465,7 +462,7 @@ It must stay byte-stable: changing it stops the background re-runs until the use
 
 It contains no tokens. The setup plugin has no MCP configuration. In Claude Code, open `/mcp`, select `plugin:appstrate:appstrate`, and complete the browser OAuth flow if authentication is needed. This login is separate from `appstrate login`; the CLI's keyring session is never copied into the plugin. Tools use names such as `mcp__plugin_appstrate_appstrate__search_operations`. [Claude Code plugin MCP reference](https://code.claude.com/docs/en/mcp#plugin-provided-mcp-servers).
 
-**MCP stays on the active space.** The `X-Space-Id` header pins MCP operations to the CLI's pinned `spaceId`, independently of `--space` and `syncSpaces`. For example, skills selected from Production and Team still execute MCP operations in Production when Production is pinned. Synchronizing a skill from another space does not route its tools to that space. The server validates the header against the organization: a pinned space that no longer exists fails every MCP call with `404 Space '<id>' not found in this organization` until `appstrate space switch` re-pins one and the next sync rewrites the file. A connection without the header (a manual `claude mcp add`, see below) lands in the organization's **default space** instead; `appstrate space list` shows which one that is.
+**MCP stays on the active space.** The URL's `/s/<space>` segment pins MCP operations to the CLI's pinned `spaceId`, independently of `--space` and `syncSpaces`. For example, skills selected from Production and Team still execute MCP operations in Production when Production is pinned. Synchronizing a skill from another space does not route its tools to that space. The server validates the space against the organization and your role in it: a pinned space that no longer exists, or where you lost your role, refuses every MCP call until `appstrate space switch` re-pins one and the next sync rewrites the file. Claude Code keys an MCP login on the server's URL, so a space switch asks for the OAuth login again once. The organization's URL alone (a manual `claude mcp add`, see below) is not pinned: it reaches every space you hold a role in, and each of its tool calls names the space it acts in (`space_id`); `appstrate space list` shows those spaces.
 
 **Upgrading or switching organizations or spaces.** The first sync after this CLI upgrade changes the plugin's content hash even if the skills are unchanged. Switching instance, organization or space also rewrites the connection. To apply it immediately:
 
@@ -548,13 +545,13 @@ codex mcp add appstrate --url https://app.example.com/api/mcp/o/org_123abc
 codex mcp login appstrate
 ```
 
-If `appstrate` already names the intended endpoint, keep its configuration and log in only if needed. If it names something else, use a distinct name such as `appstrate-acme` in both commands to preserve the existing connection. On an organization or instance switch, update only the intended entry's `url` under `[mcp_servers.<name>]` in `~/.codex/config.toml`, preserving its other settings, then run `codex mcp login <name>`, restart Codex and verify `/mcp` before using it. Skill sync does not update this URL or share the CLI's login. This manual connection sends no `X-Space-Id`, so it lands in the organization's default space; to target the pinned space instead, add `http_headers = { "X-Space-Id" = "<spc_id>" }` under the same `[mcp_servers.<name>]` table (`appstrate space current` prints the id). [Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+If `appstrate` already names the intended endpoint, keep its configuration and log in only if needed. If it names something else, use a distinct name such as `appstrate-acme` in both commands to preserve the existing connection. On an organization or instance switch, update only the intended entry's `url` under `[mcp_servers.<name>]` in `~/.codex/config.toml`, preserving its other settings, then run `codex mcp login <name>`, restart Codex and verify `/mcp` before using it. Skill sync does not update this URL or share the CLI's login. This organization URL reaches every space you hold a role in and each tool call names its `space_id`; to pin the connection to the CLI's space instead, append `/s/<spc_id>` to the URL (`appstrate space current` prints the id). [Codex MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 For Claude Code without the plugin, use the same instance and organization with an explicit user scope, then authenticate through `/mcp`:
 
 ```sh
-claude mcp add --transport http --scope user appstrate https://app.example.com/api/mcp/o/org_123abc \
-  --header "X-Space-Id: spc_456def"   # omit to use the organization's default space
+claude mcp add --transport http --scope user appstrate https://app.example.com/api/mcp/o/org_123abc/s/spc_456def
+# drop "/s/spc_456def" to reach every space you hold a role in
 ```
 
 Inspect an existing entry with `claude mcp get appstrate` before adding; keep it or choose another name rather than replacing it blindly. [Claude Code installation scopes](https://code.claude.com/docs/en/mcp#user-scope).
@@ -840,9 +837,22 @@ Exit codes on the signal path are the conventional POSIX ones (128 + signal numb
 | `--proxy <id>`          | Proxy id to associate with the run (overrides the per-space inherited value).                                                                                                                                                                                |
 | `--[no-]cancel-on-exit` | Remote runs only: whether SIGINT/SIGTERM/SIGHUP cancels the platform-side run. Default: on when stdin is a TTY and `--json` is not set (interactive Ctrl-C cancels), off otherwise — the CLI detaches and the run keeps going, like closing a dashboard tab. |
 | `--no-inherit`          | Skip per-space run-config inheritance — flags + env vars + defaults only.                                                                                                                                                                                    |
-| `--json`                | Emit canonical RunEvents as JSONL on stdout.                                                                                                                                                                                                                 |
+| `--json`                | Emit canonical RunEvents as JSONL on stdout, plus the CLI's own envelopes (below).                                                                                                                                                                           |
 | `-v, --verbose`         | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`.                                                                                                       |
 | `-q, --quiet`           | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                                                                                                                              |
+
+**`--json` envelopes**
+
+Besides the canonical RunEvents, `--json` writes four envelopes of the CLI's own, one JSON object per line, told apart by `type`:
+
+| `type`                       | When                                                                           | Fields                                                     |
+| ---------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `appstrate.remote.triggered` | `--remote`: the instance created the run, before the first event               | `runId`, `instance`, `warnings` (only when there are some) |
+| `appstrate.report.started`   | `--report`: the instance registered the locally executed run, before it starts | `runId`, `instance`, `warnings` (only when there are some) |
+| `appstrate.remote.detached`  | `--remote`: a signal detached the CLI from a run that keeps going              | `runId`, `instance`                                        |
+| `appstrate.finalize`         | Every mode: the run reached a terminal status (a detached run has none)        | `result` (the run's `RunResult`)                           |
+
+`warnings` holds the launch's items as the API returns them (`{ field, code, message, … }`), for the integrations the run starts without.
 
 **Tool-call rendering**
 
@@ -860,7 +870,7 @@ The full flag set is documented under `appstrate run --help`.
 
 **Connection readiness**
 
-Connection readiness is enforced server-side at run-trigger time: a run that targets an integration without a healthy connection is rejected with HTTP 409 (`missing_integration_connection`) before the container launches. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
+Connection readiness is enforced server-side at run-trigger time. A run is rejected with HTTP 409 (`missing_integration_connection`) before the container launches when an integration it binds is broken (expired, under-scoped, unavailable), when several of your connections are open to choose from, or when an integration the agent marks `required` (`integrations_configuration.<id>.required`) has nothing to bind or is inactive in the space; the CLI prints the refused items one per line. An integration the agent does not mark `required` never blocks for lack of a connection: the run starts without it and the CLI prints one `⚠` line per launch warning (`integration_unbound`: nothing usable to bind, or bound to no connection on purpose; `integration_not_active`: inactive in the space). With `--json` the warnings ride the launch envelope instead (above). Under `--report`, the locally executed agent is told which integrations it runs without, and their tools are not exposed to it. Connect or repair the connection from the dashboard's connectors panel (`${instance}/preferences/connectors`).
 
 ---
 

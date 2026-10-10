@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { ReactElement } from "react";
+import type { IntegrationManifestView } from "../../hooks/use-integrations.ts";
 import type { DataColumn } from "../data-table.tsx";
 import { useRunColumns } from "../runs-table.tsx";
 import { useScheduleColumns } from "../schedules-table.tsx";
@@ -252,6 +253,7 @@ const SETS = {
         authKey: "drive",
         authType: "oauth2",
         canRenew: true,
+        manifest: {} as IntegrationManifestView,
         userId: "user_1",
         isAdmin: true,
       }),

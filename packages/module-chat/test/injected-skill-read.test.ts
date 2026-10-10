@@ -22,7 +22,7 @@ import {
   seedSpaceMember,
   seedSpaceRole,
 } from "../../../apps/api/test/helpers/seed.ts";
-import { mcpRpc } from "../../../apps/api/test/helpers/mcp.ts";
+import { mcpRpc, inSpace } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
@@ -84,11 +84,10 @@ async function strictTurn(
     permissions,
     injectedSkills: block.injected,
   });
-  const bearer = {
-    Authorization: `Bearer ${token}`,
-    "X-Org-Id": owner.orgId,
-    "X-Space-Id": owner.defaultSpaceId,
-  };
+  const bearer = inSpace(
+    { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
+    owner.defaultSpaceId,
+  );
   // Control: the same turn's bearer without the claim, which the read must refuse.
   const unclaimed = {
     ...bearer,

@@ -24,6 +24,7 @@ import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
+import { versionRefOf } from "./agent-version-resolver.ts";
 import {
   resolveRunConnectionsOrError,
   type LaunchOverrides,
@@ -34,14 +35,14 @@ import {
   type ResolvedIntegrationVersionMap,
 } from "./integration-service.ts";
 import { assertDependencyOverrideKeysDeclared } from "../lib/launch-schemas.ts";
-import type { ResolvedConnectionMap } from "@appstrate/core/integration";
+import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
-import { ApiError } from "../lib/errors.ts";
+import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
@@ -159,7 +160,7 @@ interface RunPipelineParams {
  * Validate agent readiness against the PINNED integration manifests.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
  *
- * Returns nothing: readiness is a gate, and the per-space run settings
+ * Returns the launch response's `warnings`. The per-space run settings
  * (model, generation config, proxy) are read by each origin from the
  * `SpacePackageSettings` row it already loaded to resolve the input
  * layers — projecting them back through here only duplicated that read.
@@ -172,9 +173,11 @@ interface RunPipelineParams {
  */
 export async function resolveRunPreflight(params: {
   agent: LoadedPackage;
+  /** `runs.version_ref` of `agent` (`versionRefOf`), named on the 409. */
+  versionRef: string;
   spaceId: string;
   orgId: string;
-  actor: Actor | null;
+  actor: Actor;
   launchOverrides?: LaunchOverrides | null;
   /**
    * The run's `dependency_overrides` — forwarded so the seeding below resolves
@@ -196,13 +199,13 @@ export async function resolveRunPreflight(params: {
    * request and no human to hand a link to, so it passes nothing.
    */
   connectOffers?: ConnectOfferPolicy | null;
-}): Promise<void> {
+}): Promise<ResolutionFieldError[]> {
   const { agent, spaceId, orgId, actor } = params;
 
   // --- Seed the manifest memo with the PINNED integration manifests ---
   //
-  // Readiness reads every declared integration's manifest three times over
-  // (manifest-health gate, activation gate, connection cascade), all
+  // Readiness reads every declared integration's manifest twice over
+  // (manifest-health gate, connection cascade), both
   // through this memo. Unseeded, `fetchIntegrationManifest` falls through to
   // `packages.draft_manifest` — so readiness judged manifest health, required
   // scopes and auth keys against the integration AUTHOR'S LIVE DRAFT, while
@@ -248,8 +251,9 @@ export async function resolveRunPreflight(params: {
     manifestCache: params.manifestCache,
   });
 
-  await validateAgentReadiness({
+  return validateAgentReadiness({
     agent,
+    versionRef: params.versionRef,
     orgId,
     spaceId,
     actor,
@@ -454,7 +458,9 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // state (connection deleted / pin shifted). Either way the caller
   // needs structured feedback, not a silent fallback. The cascade reads the
   // pinned manifests seeded by Step 2a (auth keys / scopes match the spawn).
+  // Its warnings repeat the preflight's; the run records them as `integrationsUnbound`.
   let resolvedConnections: ResolvedConnectionMap | null = null;
+  let integrationsUnbound: RunIntegrationUnbound[] | undefined;
   let connectionsMs = 0;
   // An actor-less run leaves the connection snapshot null (nothing to pin).
   // Scheduled actor-less runs that declare integrations never reach here —
@@ -465,18 +471,22 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
       "appstrate.run.connections",
       { attributes: spanAttributes },
       () =>
-        resolveRunConnectionsOrError({
-          agentManifest: agent.manifest as Record<string, unknown>,
-          packageId: agent.id,
-          actor,
-          scope: { orgId, spaceId },
-          launchOverrides: params.launchOverrides ?? null,
-          manifestCache,
-        }),
+        resolveRunConnectionsOrError(
+          {
+            agentManifest: agent.manifest as Record<string, unknown>,
+            packageId: agent.id,
+            actor,
+            scope: { orgId, spaceId },
+            launchOverrides: params.launchOverrides ?? null,
+            manifestCache,
+          },
+          versionRefOf(overrideVersionLabel),
+        ),
     );
     connectionsMs = Date.now() - connectionsStart;
     if (!outcome.ok) throw outcome.error;
     resolvedConnections = outcome.resolved;
+    integrationsUnbound = outcome.integrationsUnbound;
   }
 
   // --- Step 3: Build run context ---
@@ -625,6 +635,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         connectionOverrides:
           params.launchOverrides?.source === "run_override" ? params.launchOverrides.ids : null,
         resolvedConnections,
+        integrationsUnbound,
         resolvedIntegrationVersions,
         runnerName: params.runnerName ?? null,
         runnerKind: params.runnerKind ?? null,
@@ -696,16 +707,16 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     });
   });
 
-  // Degradation marker — one `warn` run log per integration the agent
-  // declared but that could not be resolved (not active / not connected /
-  // unresolvable reference), and per stored generation setting the model
+  // Degradation marker — one run log per integration the agent declared but
+  // the run starts without (`warn`; `info` when a layer chose none), and
+  // per stored generation setting the model
   // refuses. Without it a degraded run is indistinguishable from a healthy
   // one: an agent that chose not to call a tool, a setting that took effect.
   // Awaited (not fire-and-forget like the breadcrumbs above) so the marker is
   // ordered BEFORE the container's own logs; it is the empty-array no-op on
   // every healthy run, and it swallows its own write failures, so it can
   // neither slow down nor fail a normal kickoff.
-  await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations);
+  await recordDroppedIntegrations({ orgId }, runId, droppedIntegrations, integrationsUnbound);
   await recordDroppedGenerationSettings({ orgId }, runId, modelLabel, droppedGenerationSettings);
   await recordModelFallback({ orgId }, runId, modelLabel, unavailablePinnedModelId);
 
@@ -720,6 +731,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     agentPackage,
     modelSource,
     sinkCredentials,
+    integrationsUnbound,
   }).catch((err) => {
     logger.error("Unhandled error in background run", {
       runId,

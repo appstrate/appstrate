@@ -61,6 +61,8 @@ export const MAX_SCHEMA_SERIALISED_BYTES = 8192;
 // per-code-point predicate (not a regex character class) because some
 // adjacent fillers — e.g. Hangul ᅟ + ᅠ — render as a single
 // combined glyph and trip eslint's no-misleading-character-class rule.
+// The DB CHECK `integration_connections_label_normalized` mirrors this set (pinned by
+// `apps/api/test/unit/lib/connection-label-check.test.ts`).
 export function isHiddenCodePoint(cp: number): boolean {
   return (
     cp === 0x00ad ||

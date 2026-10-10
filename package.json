@@ -44,9 +44,9 @@
     "typescript-eslint": "^8.71.0"
   },
   "engines": {
-    "bun": ">=1.3.14"
+    "bun": ">=1.4.2"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.2",
   "private": true,
   "scripts": {
     "dev": "turbo dev",
@@ -150,7 +150,7 @@
     "*.{ts,tsx,json,md,yml,yaml}": "prettier --write"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.7.0",
+    "@afps-spec/schema": "^0.9.0",
     "@appstrate/afps-shared": "workspace:*",
     "@appstrate/connect": "workspace:*",
     "@appstrate/core": "workspace:*",

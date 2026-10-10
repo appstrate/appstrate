@@ -34,22 +34,31 @@ export function connectionLockHintKey(
 }
 
 /**
- * The write controls a connection row offers, as the API enforces them (every write needs
- * `integrations:connect`): rename is the owner's or a governor's; sharing is the owner's
- * consent, a governor only withdraws one. A `locked` row refuses an unshare (409
- * `connection_pinned`): the toggle stays, disabled.
+ * The write controls a row offers in the current space, as the API enforces them: the owner
+ * renames and edits shares; a governor withdraws a colleague's row here, and renames it only
+ * when space-scoped (an org-scoped row spans spaces).
  */
 export function connectionRowGrants(args: {
   isOwn: boolean;
   isShared: boolean;
+  scope: "org" | "space";
   canConnect: boolean;
   canConfigure: boolean;
-  locked: boolean;
-}): { canRename: boolean; canToggleShare: boolean; shareLocked: boolean } {
-  const canRename = args.canConnect && (args.isOwn || args.canConfigure);
+}): { canRename: boolean; canEditShares: boolean; canUnshareHere: boolean } {
+  const governs = args.canConnect && args.canConfigure && !args.isOwn;
   return {
-    canRename,
-    canToggleShare: (args.isOwn && args.canConnect) || (args.isShared && canRename),
-    shareLocked: args.locked && args.isShared,
+    canRename: args.canConnect && (args.isOwn || (governs && args.scope === "space")),
+    canEditShares: args.canConnect && args.isOwn,
+    canUnshareHere: governs && args.isShared,
   };
+}
+
+export function isSharedInSpace(c: { shared_space_ids: string[] }, spaceId: string | null) {
+  return !!spaceId && c.shared_space_ids.includes(spaceId);
+}
+
+/** The `shared_space_ids` a PATCH sends (it replaces the set) to share into or out of `spaceId`. */
+export function withSpaceShare(ids: string[], spaceId: string, shared: boolean): string[] {
+  const rest = ids.filter((id) => id !== spaceId);
+  return shared ? [...rest, spaceId] : rest;
 }

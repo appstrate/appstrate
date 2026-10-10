@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Users, Check, Plus, ChevronDown, RefreshCw, Settings } from "lucide-react";
+import {
+  AlertTriangle,
+  Ban,
+  Users,
+  Check,
+  Plus,
+  ChevronDown,
+  RefreshCw,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -15,8 +25,36 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpaces } from "../../hooks/use-spaces";
+import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import { AMBER_TEXT } from "./connection-picker-states";
+import { isSharedInSpace } from "./connection-ownership";
+import { NoConnectionLabel } from "./no-connection-label";
+import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
+
+/** What the closed trigger shows, first match wins. */
+type TriggerKind = "unavailable" | "none" | "one" | "many" | "inherit" | "choose" | "connect";
+
+function triggerKind(p: ConnectionPicker): TriggerKind {
+  if (p.unavailableIds.length > 0) return "unavailable";
+  if (p.pickedNone) return "none";
+  if (p.displayConns.length === 1) return "one";
+  if (p.displayConns.length > 1) return "many";
+  if (p.overrideMode) return "inherit";
+  return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
+}
+
+const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
+  unavailable: Users,
+  none: Ban,
+  one: Users,
+  many: Users,
+  inherit: Plus,
+  choose: Plus,
+  connect: Plus,
+};
 
 /** The picker's dropdown: its trigger, one row per candidate, and the write/connect entries. */
 export function PickerMenu({
@@ -28,6 +66,8 @@ export function PickerMenu({
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const navigate = useNavigate();
+  const spaceId = useCurrentSpaceId();
+  const { data: spaces } = useSpaces();
   const {
     runBlocking,
     candidates,
@@ -35,7 +75,6 @@ export function PickerMenu({
     canAddConnection,
     byDefault,
     softDefaultIds,
-    emptyPickerPrompt,
     canConnect,
     integrationPath,
     canOpenIntegration,
@@ -44,6 +83,8 @@ export function PickerMenu({
     authKeys,
     hasCandidates,
     explicitIds,
+    pickedNone,
+    required,
     storedIds,
     unavailableIds,
     checkedIds,
@@ -56,6 +97,10 @@ export function PickerMenu({
     canApply,
     ownerLabel,
     setLabel,
+    scopeFitOf,
+    manifest,
+    missingScopeLabels,
+    connectsWithAgentScopes,
     open,
     setOpen,
     onOpenChange,
@@ -63,30 +108,56 @@ export function PickerMenu({
     persist,
     toggle,
     triggerConnect,
+    renewConnection,
   } = picker;
   const typeLabel = (authKey: string): string | null => {
     const type = auths[authKey]?.type;
     return type ? t(`settings:integration.auth.type.${type}`) : null;
   };
-  const triggerLabel =
-    unavailableIds.length > 0
-      ? setLabel(storedIds, unavailableIds)
-      : displayConns.length === 1
-        ? displayConns[0]!.label
-        : displayConns.length > 1
-          ? t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length })
-          : overrideMode
-            ? t("detail.integrationMemberPicker.inherit")
-            : emptyPickerPrompt === "choose"
-              ? t("detail.integrationMemberPicker.chooseLabel")
-              : t("detail.integrationMemberPicker.connectLabel");
+  // The owner of an org-scoped row reads where it was connected from; anyone else, who owns it.
+  const provenance = (c: IntegrationCandidate): string => {
+    const origin =
+      c.is_own && c.scope === "org"
+        ? spaces?.find((s) => s.id === c.origin_space_id)?.name
+        : undefined;
+    return origin
+      ? t("detail.integrationMemberPicker.connectedFrom", { space: origin })
+      : t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) });
+  };
+  // A fresh connect requests the agent's scopes: saying so is what makes it the safe choice
+  // over upgrading a shared connection.
+  const addLabel = (authKey: string): string => {
+    const tl = authKeys.length > 1 ? typeLabel(authKey) : null;
+    if (connectsWithAgentScopes(authKey)) {
+      return tl
+        ? t("detail.integrationMemberPicker.newWithAgentScopesVia", { label: tl })
+        : t("detail.integrationMemberPicker.newWithAgentScopes");
+    }
+    return tl
+      ? t("detail.integrationMemberPicker.addVia", { label: tl })
+      : t("detail.integrationMemberPicker.addConnection");
+  };
+  const trigger = triggerKind(picker);
+  const triggerLabel = {
+    unavailable: () => setLabel(storedIds, unavailableIds),
+    none: () => t("detail.integrationMemberPicker.none"),
+    one: () => displayConns[0]!.label,
+    many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
+    inherit: () => t("detail.integrationMemberPicker.inherit"),
+    choose: () => t("detail.integrationMemberPicker.chooseLabel"),
+    connect: () => t("detail.integrationMemberPicker.connectLabel"),
+  }[trigger]();
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an empty pick inherits, so only an under-scoped, unavailable or dead set warns.
+  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
+  // warns — or a stored "no connection" for an integration the agent now requires.
   const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 || unavailableIds.length > 0 || deadConns.length > 0
-    : (runBlocking ?? false);
-  const TriggerIcon = triggerWarn ? AlertTriangle : displayConns.length > 0 ? Users : Plus;
+    ? underScopedConns.length > 0 ||
+      unavailableIds.length > 0 ||
+      deadConns.length > 0 ||
+      (pickedNone && required)
+    : runBlocking;
+  const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -113,9 +184,11 @@ export function PickerMenu({
         </DropdownMenuLabel>
         {candidates.map((c) => {
           const tl = typeLabel(c.auth_key);
+          const fit = scopeFitOf(c);
+          const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
           const isDefault =
-            explicitIds.length === 0 &&
+            explicitIds === null &&
             (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
           // Only the connection owner can renew via OAuth — a foreign
           // shared connection's tokens belong to someone else. We still
@@ -152,20 +225,18 @@ export function PickerMenu({
               )}
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate font-medium">{c.label}</span>
+                  {/* An incompatible row is muted on its name; its reason stays legible. */}
+                  <span className={`truncate font-medium ${fit === "missing" ? "opacity-60" : ""}`}>
+                    {c.label}
+                  </span>
                   {tl && (
                     <Badge variant="outline" className="text-[0.6rem]">
                       {tl}
                     </Badge>
                   )}
-                  {c.shared_with_org && (
+                  {isSharedInSpace(c, spaceId) && (
                     <Badge variant="secondary" className="text-[0.6rem]">
                       {t("detail.integrationMemberPicker.sharedBadge")}
-                    </Badge>
-                  )}
-                  {c.missing_scopes.length > 0 && (
-                    <Badge variant="destructive" className="text-[0.6rem]">
-                      {t("detail.integrationMemberPicker.missingScopesBadge")}
                     </Badge>
                   )}
                   {isDefault && (
@@ -175,10 +246,30 @@ export function PickerMenu({
                   )}
                 </div>
                 <span className="text-muted-foreground truncate text-[0.65rem]">
-                  {t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) })}
+                  {provenance(c)}
                   {c.needs_reconnection &&
                     ` · ${t("detail.integrationMemberPicker.needsReconnection")}`}
                 </span>
+                {fit === "missing" ? (
+                  <span
+                    className={`truncate text-[0.65rem] ${AMBER_TEXT}`}
+                    title={c.missing_scopes.join(" ")}
+                  >
+                    {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
+                  </span>
+                ) : (
+                  <ScopeSummaryText
+                    manifest={manifest}
+                    authKey={c.auth_key}
+                    scopes={c.scopes_granted}
+                    className="text-muted-foreground truncate text-[0.65rem]"
+                  />
+                )}
+                {fit === "broader" && (
+                  <span className="text-muted-foreground truncate text-[0.65rem] italic">
+                    {t("detail.integrationMemberPicker.broaderThanAgent")}
+                  </span>
+                )}
               </div>
               {canRenew && (
                 <Button
@@ -191,7 +282,7 @@ export function PickerMenu({
                     // click doesn't also toggle the dead row.
                     e.preventDefault();
                     e.stopPropagation();
-                    void triggerConnect(c.auth_key, { connectionId: c.id });
+                    void renewConnection(c);
                   }}
                   data-testid={`member-pick-renew-${c.id}`}
                   aria-label={t("detail.integrationMemberPicker.renew")}
@@ -250,10 +341,23 @@ export function PickerMenu({
             })}
           </DropdownMenuLabel>
         )}
-        {explicitIds.length > 0 && (
+        {!required && (
+          <DropdownMenuItem
+            // A radio, like the rows are checkboxes: its state is read out, not only drawn.
+            role="menuitemradio"
+            aria-checked={pickedNone}
+            disabled={busy || pickedNone}
+            onSelect={() => void persist([])}
+            data-testid={`member-pick-none-${integrationId}`}
+          >
+            <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
+            <NoConnectionLabel />
+          </DropdownMenuItem>
+        )}
+        {explicitIds !== null && (
           <DropdownMenuItem
             disabled={busy}
-            onSelect={() => void persist([])}
+            onSelect={() => void persist(null)}
             data-testid={`member-pick-reset-${integrationId}`}
           >
             <Check className="size-3.5 opacity-0" />
@@ -266,25 +370,18 @@ export function PickerMenu({
         )}
         {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
         {canAddConnection &&
-          authKeys.map((k) => {
-            const tl = typeLabel(k);
-            return (
-              <DropdownMenuItem
-                key={`add-${k}`}
-                onSelect={() => void triggerConnect(k)}
-                data-testid={`member-pick-add-${integrationId}-${k}`}
-              >
-                <Plus className="size-3.5" />
-                <span>
-                  {authKeys.length > 1 && tl
-                    ? t("detail.integrationMemberPicker.addVia", { label: tl })
-                    : t("detail.integrationMemberPicker.addConnection")}
-                </span>
-              </DropdownMenuItem>
-            );
-          })}
+          authKeys.map((k) => (
+            <DropdownMenuItem
+              key={`add-${k}`}
+              onSelect={() => void triggerConnect(k)}
+              data-testid={`member-pick-add-${integrationId}-${k}`}
+            >
+              <Plus className="size-3.5" />
+              <span>{addLabel(k)}</span>
+            </DropdownMenuItem>
+          ))}
         {/* Escape hatch to the integration page for the full connection
-            management surface (rename, share-with-org, delete, OAuth client). */}
+            management surface (rename, sharing, delete, OAuth client). */}
         {canOpenIntegration && (
           <>
             <DropdownMenuSeparator />

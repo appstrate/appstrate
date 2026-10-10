@@ -30,6 +30,7 @@ describe("proxyProblem", () => {
     ["unresolved_placeholder", 400, "appstrate; error=proxy_internal_response"],
     ["upstream_unresolvable", 502, "appstrate; error=dns_error"],
     ["upstream_timeout", 504, "appstrate; error=http_response_timeout"],
+    ["encryption_key_unavailable", 503, "appstrate; error=proxy_configuration_error"],
   ] as const)("answers %s with %i and one Proxy-Status member", async (code, status, member) => {
     const res = await answer(code);
     expect(res.status).toBe(status);

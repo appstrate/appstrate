@@ -27,9 +27,9 @@
  *
  * ─── What `bun audit --json` actually emits ──────────────────────────
  *
- * Measured 2026-09-07 against this lockfile (`bun audit v1.3.11`; CI pins
- * 1.3.14 via `.github/actions/bun-setup`). Four properties this file depends
- * on, none of them guessed:
+ * Measured 2026-10-09 against this lockfile with `bun audit` v1.4.2, the
+ * version `package.json` pins in `packageManager` (v1.3.14 emitted the same
+ * payload). Four properties this file depends on, none of them guessed:
  *
  *   1. stdout is a flat map, `{"<package>": [advisory, …], …}`, and an
  *      advisory carries `id`, `url`, `title`, `severity`, `vulnerable_versions`,
@@ -41,11 +41,11 @@
  *      exit code is ignored below and the JSON is the sole input.
  *   3. `--audit-level` and `--ignore` do NOT filter `--json` output.
  *      `bun audit --json --audit-level=critical --ignore=GHSA-w7jw-789q-3m8p`
- *      printed all 66 advisories, `low` ones included. Every severity and
+ *      printed all 44 advisories, `low` ones included. Every severity and
  *      allowlist decision has to be made here; do not reach for those flags on
  *      the theory that they narrow the payload.
  *   4. No `node_modules` is required. `package.json` + `bun.lock` copied alone
- *      into an empty directory produced a byte-identical 20-package report, so
+ *      into an empty directory produced a byte-identical 18-package report, so
  *      the CI job skips `bun install`.
  *
  * ─── The knob ────────────────────────────────────────────────────────
@@ -72,8 +72,8 @@ export type Severity = (typeof SEVERITIES)[number];
  * `high` is where CVSS v3 crosses 7.0, which is the line at which an advisory
  * is expected to be acted on as its own piece of work rather than batched into
  * the next dependency sweep. Below it, the npm feed's volume is the dominant
- * term: 28 of the 66 advisories on this lockfile are moderate or low
- * (measured 2026-09-07), and blocking on them would make the gate's verdict
+ * term: 29 of the 44 advisories on this lockfile are moderate or low
+ * (measured 2026-10-09), and blocking on them would make the gate's verdict
  * track the advisory database's publishing rate rather than this repo's risk —
  * a red that arrives on a morning nobody changed anything is a red people learn
  * to clear rather than read.

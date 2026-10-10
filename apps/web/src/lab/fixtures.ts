@@ -147,11 +147,14 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           identity: profile.email,
           reused_by_agents: 3,
           auth_key: "drive",
-          shared_with_org: true,
-          // The org default names it: unsharing or deleting it is refused.
+          // Org-wide (its OAuth client is the system's), shared into Production.
+          scope: "org",
+          shared_spaces: [{ id: APP_ID, name: "Production" }],
+          // The org default names it: deleting it is refused.
           locked_by: "org_default",
           org: { id: ORG_ID, name: "Tractr" },
-          space: { id: APP_ID, name: "Production" },
+          space: null,
+          origin_space: { id: APP_ID, name: "Production" },
         },
         {
           connection_id: "conn_personal_lab_2",
@@ -164,10 +167,13 @@ export const myConnections: Json200<"/api/me/connections", "get"> = {
           identity: "archives@tractr.net",
           reused_by_agents: 1,
           auth_key: "drive",
-          shared_with_org: false,
+          // Minted by Production's own OAuth client: it stays in that space.
+          scope: "space",
+          shared_spaces: [],
           locked_by: null,
           org: { id: ORG_ID, name: "Tractr" },
           space: { id: APP_ID, name: "Production" },
+          origin_space: null,
         },
       ],
     },
@@ -701,6 +707,7 @@ function makeRun(over: Partial<Run> & Pick<Run, "id" | "status">): Run {
     connection_overrides: null,
     dependency_overrides: null,
     connections_used: null,
+    integrations_unbound: null,
     ...over,
   };
 }
@@ -729,6 +736,10 @@ export const runs: Run[] = [
         account_id: "olivier@tractr.net",
         source: "admin_pin",
       },
+    ],
+    // Declared but not connected: the run started without it.
+    integrations_unbound: [
+      { integration_package_id: "@appstrate/gmail", code: "not_connected", source: null },
     ],
     file_counts: { input: 1, output: 0 },
     started_at: ago(2),
@@ -763,6 +774,15 @@ export const runs: Run[] = [
     proxy_label: "Sortie Europe",
     runner_name: "Runner Appstrate Montréal",
     runner_kind: "docker",
+    // Launched with « Aucune connexion » for the one integration it declares.
+    connections_used: [],
+    integrations_unbound: [
+      {
+        integration_package_id: "@appstrate/google-drive",
+        code: "integration_unbound",
+        source: "run_override",
+      },
+    ],
   }),
   makeRun({
     id: "run_08",
@@ -1155,6 +1175,18 @@ export const schedules: Json200<"/api/schedules", "get"> = {
       version_override: "published",
       last_run_at: null,
       next_run_at: ago(-20_000),
+    }),
+    // Run by someone else, for an agent that declares integrations: its Connexions
+    // section is the actor's choice, not the viewer's pickers.
+    makeSchedule({
+      id: "sch_05",
+      packageId: "@tractr/compta-trimestrielle",
+      name: "Clôture mensuelle (Pierre)",
+      cron_expression: "0 8 2 * *",
+      userId: "user_lab_2",
+      actor_name: "Pierre",
+      last_run_at: null,
+      next_run_at: ago(-30_000),
     }),
   ],
 };
@@ -2329,6 +2361,15 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
     ],
     integrations: [
       { id: "@appstrate/google-drive", version: "2.1.0", tools: ["drive_search", "drive_upload"] },
+      // The agent exits without it (`required`): a stored "no connection" refuses the launch.
+      {
+        id: "@appstrate/gmail",
+        version: "1.8.2",
+        tools: ["gmail_search"],
+        required: true,
+      },
+      // Optional: unbound, the run starts without it and says why.
+      { id: "@appstrate/clickup", version: "0.9.0", tools: ["clickup_list_tasks"] },
     ],
   },
   last_run: { id: "run_01", status: "running", started_at: ago(2), duration: null },
@@ -2717,16 +2758,20 @@ export const agentConnectionReadiness: Json200<
   integrations: [
     {
       integration_package_id: "@appstrate/google-drive",
-      run_blocking: false,
+      required: false,
+      // Two own accounts and nothing choosing: the run is refused (409), so the launch is blocked.
+      run_blocking: true,
       resolution: {
         // Two usable accounts and nothing naming one: the member has to pick.
         source: null,
         error_code: "must_choose_connection",
+        warning: null,
         resolved_connection_ids: [],
         resolved_missing_scopes: [],
-        admin_pinned_connection_ids: [],
-        member_pinned_connection_ids: [],
-        org_default_connection_ids: [],
+        // `null` is no pin (an admin pin to none would be `[]`, and it would say so).
+        admin_pinned_connection_ids: null,
+        member_pinned_connection_ids: null,
+        org_default_connection_ids: null,
         org_default_enforced: false,
         can_add_connection: true,
         candidates: [
@@ -2742,7 +2787,9 @@ export const agentConnectionReadiness: Json200<
               "https://www.googleapis.com/auth/drive.readonly",
               "https://www.googleapis.com/auth/drive.file",
             ],
-            shared_with_org: true,
+            scope: "org",
+            shared_space_ids: [],
+            origin_space_id: null,
             needs_reconnection: false,
             missing_scopes: [],
             is_own: true,
@@ -2756,7 +2803,10 @@ export const agentConnectionReadiness: Json200<
             owner_end_user_id: null,
             owner_name: "Pierre",
             scopes_granted: ["https://www.googleapis.com/auth/drive"],
-            shared_with_org: true,
+            scope: "org",
+            // Another member's row lists only the current space, the one it is shared into here.
+            shared_space_ids: ["app_lab_default"],
+            origin_space_id: null,
             needs_reconnection: false,
             // Under-scoped on purpose: the amber warning under a candidate is a
             // state of this picker that nothing else in the lab reaches.
@@ -2764,6 +2814,48 @@ export const agentConnectionReadiness: Json200<
             is_own: false,
           },
         ],
+      },
+    },
+    {
+      // Required, and an admin pinned it to no connection: the launch is refused.
+      integration_package_id: "@appstrate/gmail",
+      required: true,
+      run_blocking: true,
+      resolution: {
+        source: "admin_pin",
+        error_code: "required_integration_unbound",
+        warning: null,
+        resolved_connection_ids: [],
+        resolved_missing_scopes: [],
+        admin_pinned_connection_ids: [],
+        member_pinned_connection_ids: null,
+        org_default_connection_ids: null,
+        org_default_enforced: false,
+        can_add_connection: true,
+        candidates: [],
+      },
+    },
+    {
+      // Optional and nothing connected: the run starts without it, and the table says so.
+      integration_package_id: "@appstrate/clickup",
+      required: false,
+      run_blocking: false,
+      resolution: {
+        source: null,
+        error_code: null,
+        warning: {
+          field: "integrations.@appstrate/clickup",
+          code: "not_connected",
+          message: "No connection to bind.",
+        },
+        resolved_connection_ids: [],
+        resolved_missing_scopes: [],
+        admin_pinned_connection_ids: null,
+        member_pinned_connection_ids: null,
+        org_default_connection_ids: null,
+        org_default_enforced: false,
+        can_add_connection: true,
+        candidates: [],
       },
     },
   ],
@@ -3812,11 +3904,13 @@ const driveConnections: Connection[] = [
     owner_id: USER_ID,
     owner_name: "Olivier Tarbès",
     label: "olivier@tractr.net",
-    shared_with_org: true,
-    // Named by the org default (`integrationOrgDefault`): unsharing or
-    // deleting it is refused (409).
+    scope: "org",
+    shared_space_ids: ["app_lab_default", "app_lab_sandbox"],
+    origin_space_id: "app_lab_default",
+    // Named by the org default (`integrationOrgDefault`): deleting it is refused (409).
     locked_by: "org_default",
     client_ref: "cli_lab_custom",
+    variables: null,
     createdAt: ago(60_000),
     updatedAt: ago(400),
   },
@@ -3833,8 +3927,12 @@ const driveConnections: Connection[] = [
     owner_id: USER_ID,
     owner_name: "Olivier Tarbès",
     label: "olivier@appstrate.com",
-    shared_with_org: false,
+    scope: "space",
+    shared_space_ids: [],
+    origin_space_id: null,
     client_ref: "cli_lab_custom",
+    // A self-hosted instance (AFPS §7.12): what tells two accounts of one integration apart.
+    variables: { base_url: "https://drive.tractr.ca" },
     createdAt: ago(50_000),
     updatedAt: ago(2_800),
   },
@@ -3854,10 +3952,14 @@ const driveConnections: Connection[] = [
     owner_id: "user_lab_2",
     owner_name: "Pierre",
     label: "compta@tractr.net",
-    shared_with_org: true,
+    scope: "org",
+    // Another member's row lists only the current space, the one it is shared into here.
+    shared_space_ids: ["app_lab_default"],
+    origin_space_id: null,
     // An admin pin names it (`integrationPins`), which outranks the default.
     locked_by: "admin_pin",
     client_ref: "cli_lab_custom",
+    variables: null,
     createdAt: ago(30_000),
     updatedAt: ago(1_200),
   },
@@ -3865,6 +3967,21 @@ const driveConnections: Connection[] = [
 
 const driveAuthDeclaration = {
   type: "oauth2" as const,
+  // What every connect asks for; the rest of the catalog is a choice at "+ Ajouter", and each
+  // connection's permissions read through these labels.
+  default_scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+  scope_catalog: [
+    { value: "https://www.googleapis.com/auth/drive.readonly", label: "Lire les fichiers" },
+    {
+      value: "https://www.googleapis.com/auth/drive.file",
+      label: "Gérer les fichiers créés par l'agent",
+    },
+    { value: "https://www.googleapis.com/auth/drive", label: "Accès complet à Drive" },
+    {
+      value: "https://www.googleapis.com/auth/drive.metadata.readonly",
+      label: "Lire les métadonnées",
+    },
+  ],
   authorized_uris: [
     "https://www.googleapis.com/drive/v3",
     "https://www.googleapis.com/upload/drive/v3",

@@ -11,6 +11,8 @@ import {
   encryptCredentialEnvelope,
   decryptCredentialEnvelope,
   _resetKeyringForTesting,
+  UnknownKeyIdError,
+  CredentialDecryptError,
 } from "../src/encryption.ts";
 
 const PRIMARY_KEY_B64 = randomBytes(32).toString("base64");
@@ -129,6 +131,44 @@ describe("encryption — keyring resolution during rotation", () => {
     const packed = Buffer.concat([iv, tag, enc]).toString("base64");
     const forged = `v1:unknown:${packed}`;
     expect(() => decrypt(forged)).toThrow(/No encryption key registered/);
+  });
+});
+
+describe("encryption — failure classification", () => {
+  /** What decrypting `ciphertext` threw. */
+  function failureOf(ciphertext: string): unknown {
+    try {
+      decryptCredentials(ciphertext);
+    } catch (err) {
+      return err;
+    }
+    throw new Error("expected decrypt to throw");
+  }
+
+  it("an unknown kid is an UnknownKeyIdError naming the kid, whatever the payload", () => {
+    for (const payload of [encrypt("x").slice("v1:k1:".length), "AA=="]) {
+      const err = failureOf(`v1:gone:${payload}`);
+      expect(err).toBeInstanceOf(UnknownKeyIdError);
+      expect((err as UnknownKeyIdError).kid).toBe("gone");
+    }
+  });
+
+  it("an unreadable blob under a known kid is a CredentialDecryptError", () => {
+    const valid = encrypt("payload");
+    const packed = Buffer.from(valid.slice("v1:k1:".length), "base64");
+    packed[packed.length - 1] = packed[packed.length - 1]! ^ 0xff;
+    for (const blob of [
+      `v1:k1:${packed.toString("base64")}`, // GCM integrity
+      "v1:k1:AA==", // too short
+      "v1:no-separator", // malformed envelope
+      "plain", // no version prefix
+      encrypt("not json"), // authentic, but not a credentials object
+    ]) {
+      expect(failureOf(blob)).toBeInstanceOf(CredentialDecryptError);
+    }
+    expect(() => decryptCredentialEnvelope(encryptCredentials({ flat: "x" }))).toThrow(
+      CredentialDecryptError,
+    );
   });
 });
 

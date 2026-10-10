@@ -891,6 +891,7 @@ export const oidcPaths = {
           description: "Space or configuration not found",
         },
         "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },

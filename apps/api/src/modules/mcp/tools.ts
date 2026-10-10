@@ -27,32 +27,43 @@
  * — the org comes from the URL/token, and the org-context middleware pins it.
  */
 
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import type {
-  AppstrateRequestExtra,
-  AppstrateResourceProvider,
-  AppstrateToolDefinition,
-  ReadResourceResult,
+import {
+  notifyDetached,
+  type AppstrateRequestExtra,
+  type AppstrateResourceProvider,
+  type AppstrateToolDefinition,
+  type ReadResourceResult,
 } from "@appstrate/mcp-transport";
 import {
+  enrichTerminalRunAndWaitStep,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
-  fetchRunFiles,
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
   type RunAndWaitFile,
+  type RunAndWaitLaunch,
 } from "@appstrate/core/run-and-wait-client";
+import type { ResolutionFieldError } from "@appstrate/core/api-errors";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
   collectReferencedSchemas,
+  getRunAndWaitOutputSchema,
   operationGranted,
   operationIdGranted,
   type CatalogOperation,
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
+import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
+import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
@@ -68,6 +79,15 @@ import { filePurposeValues } from "@appstrate/db/schema";
 import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult } from "./tool-results.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
+import {
+  assertSpaceArgument,
+  describeSpace,
+  grantedIn,
+  spaceRef,
+  NO_FALLBACK_HINT,
+  type McpSpace,
+  type OrgWideSpaces,
+} from "./spaces.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -156,6 +176,8 @@ export interface McpToolContext {
    * server instructions); external MCP clients leave it false and keep get_me.
    */
   contextInjected?: boolean;
+  /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
+  orgSpaces?: OrgWideSpaces;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -182,7 +204,6 @@ export const FORWARDED_AUTH_HEADERS = [
   "authorization",
   "cookie",
   "x-org-id",
-  "x-space-id",
   "appstrate-user",
   "appstrate-version",
   // A role preview narrows what the caller reaches; a dispatch that dropped it
@@ -204,6 +225,8 @@ export const FORWARDED_AUTH_HEADERS = [
 // a forgery cannot succeed; this is defence in depth.)
 const PROTECTED_HEADERS = new Set<string>([
   ...FORWARDED_AUTH_HEADERS,
+  // The router sets it to the space entered; `space_id` is the only way to change it.
+  "x-space-id",
   "host",
   "content-length",
   // Client-source headers: the model must not be able to influence the
@@ -265,12 +288,9 @@ function fileResourceLink(doc: RunAndWaitFile): {
   };
 }
 
-/**
- * Map a run's terminal status to an HTTP-shaped code for telemetry, so a
- * failed / timed-out / cancelled run is reported distinctly rather than always
- * as 200 (the polling GET's status).
- */
+/** A run's status as an HTTP-shaped telemetry code; a failed poll's `status` already is one. */
 function runStatusToHttp(status: unknown): number {
+  if (typeof status === "number") return status;
   switch (status) {
     case "success":
       return 200;
@@ -281,7 +301,7 @@ function runStatusToHttp(status: unknown): number {
     case "cancelled":
       return 499;
     default:
-      return 200;
+      return 202;
   }
 }
 
@@ -303,9 +323,12 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
-  ctx: Pick<McpToolContext, "permissions" | "ceiling">,
+  ctx: Pick<McpToolContext, "permissions" | "ceiling" | "orgSpaces">,
 ): Record<string, unknown> {
+  const granted = operationGranted(op, ctx.permissions, ctx.ceiling);
   return {
+    ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
+    ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
     operation_id: op.operationId,
     method: op.method,
     path: op.pathTemplate,
@@ -318,7 +341,8 @@ function describePayload(
     target_space_permissions: op.requirement.targetSpaceRequirements,
     // Asked of a delegated credential's scopes only, never of the role.
     ceiling_permissions: op.requirement.ceilingRequirements,
-    granted: operationGranted(op, ctx.permissions, ctx.ceiling),
+    granted,
+    ...(ctx.orgSpaces && !granted ? { hint: NO_FALLBACK_HINT } : {}),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -422,12 +446,14 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
         path: op.pathTemplate,
         summary: op.summary,
         tags: op.tags,
+        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
       denied_total: denied.length,
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
         required_permissions: op.requirement.requirements,
         ...deniedCeiling(op, ctx),
+        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
       best_match: bestMatch,
     });
@@ -853,15 +879,20 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         ? {
             required_permissions: op.requirement.requirements,
             ...deniedCeiling(op, ctx),
+            ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
             hint:
               (ctx.ceiling === undefined
-                ? "Your role does not hold this permission."
-                : "Your role, or your credential's scopes, do not hold this permission.") +
-              " Report it to the user; do not retry and do not look for another operation " +
-              "that does the same thing.",
+                ? "Your role does not hold this permission"
+                : "Your role, or your credential's scopes, do not hold this permission") +
+              (ctx.orgSpaces
+                ? ` in ${ctx.orgSpaces.current.name}. ${NO_FALLBACK_HINT} Do not look for another ` +
+                  "operation that does the same thing."
+                : ". Report it to the user; do not retry and do not look for another operation " +
+                  "that does the same thing."),
           }
         : undefined;
-    return readResponse(response, denial);
+    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : undefined;
+    return readResponse(response, space || denial ? { ...space, ...denial } : undefined);
   };
 
   return { descriptor, handler };
@@ -872,6 +903,45 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (!signal?.aborted) return;
   throw signal.reason ?? new Error("Aborted");
+}
+
+/** Well under the SDK client's request timeout, which each progress notification resets. */
+export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = DEFAULT_REQUEST_TIMEOUT_MSEC / 4;
+/** Wait cap (launch included) without a progress token: a heartbeat period before that timeout. */
+export const RUN_AND_WAIT_UNSTREAMED_MAX_MS =
+  DEFAULT_REQUEST_TIMEOUT_MSEC - RUN_AND_WAIT_PROGRESS_INTERVAL_MS;
+
+export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(
+  ", ",
+);
+
+/** The resume instruction for a caller with time to wait (not the chat). */
+export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION} \`query: { wait: true }\` holds that read until the run ends.`;
+
+function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
+  const progressToken = extra._meta?.progressToken;
+  if (progressToken === undefined) return null;
+  const startedAt = performance.now();
+  let progress = 0;
+  const beat = (message: string) =>
+    notifyDetached(
+      extra,
+      {
+        method: "notifications/progress",
+        params: { progressToken, progress: ++progress, message },
+      },
+      (err) =>
+        logger.debug("mcp: run_and_wait progress notification failed", {
+          runId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+    );
+  beat(`Run ${runId} launched`);
+  const timer = setInterval(() => {
+    const elapsedS = Math.round((performance.now() - startedAt) / 1000);
+    beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
+  }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
+  return () => clearInterval(timer);
 }
 
 /**
@@ -968,9 +1038,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "by `manifest`+`prompt`)"
         : 'a run of an existing agent (`kind:"agent"`, by `scope`/`name`)') +
       ", exposes the created run to chat for live progress, then returns " +
-      "`{ id, packageId, status, done:true, result?, error? }` when the run reaches a terminal " +
-      "status. Do NOT call `getRun` after this tool just to wait for completion; this tool already " +
-      "waits. " +
+      "`{ id, packageId, status, done:true, result?, error?, warnings }` when the run reaches a " +
+      "terminal status; `error` is the run's own failure. `warnings` (`[]` when none) lists the " +
+      "integrations the run started without, each with the code that state raises as an error " +
+      `on a required integration (${WARNING_CODES_PHRASE}; ` +
+      "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
+      `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
+      "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
@@ -1046,15 +1120,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           additionalProperties: {
             type: "array",
             items: { type: "string" },
-            minItems: 1,
+            minItems: 0,
             maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
           },
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
             ': `{ "@scope/integration": ' +
-            `["<connection_id>", ...] }\`, 1 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
+            `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
+            "`[]` runs without that integration — only for one the agent does not mark " +
+            "`required` (a 400 otherwise). " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
@@ -1074,6 +1150,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       required: ["kind"],
       additionalProperties: false,
     },
+    outputSchema: getRunAndWaitOutputSchema(),
   };
 
   const handler = async (
@@ -1117,9 +1194,12 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // readable with `runs:read-all`. Not a new exposure class —
       // `initiateIntegrationConnect` already returns a bearer `connect_url` on
       // this very path — but any change to how these links are scoped or
-      // expired has to account for run logs, not only IDE transcripts.
+      // expired has to account for run logs, not only IDE transcripts. Only the
+      // 409 keeps its links: a started run's `warnings` lose theirs (below).
       connectOffers: true,
     });
+    // Success or failure, the result names the space it was launched in.
+    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
     if (!launched.ok) {
       // A launch HTTP failure (payload carries a numeric `status`) reached the
       // route and it rejected the request (bad input, unconnected integration,
@@ -1141,10 +1221,14 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           outcome: "rejected",
         });
       }
-      return jsonResult(launched.step.payload, true);
+      return jsonResult({ ...launched.step.payload, ...space }, true);
     }
 
-    const runId = launched.launch.runId;
+    // Any caller of this handler (an agent run included) may persist what it returns; the
+    // in-app chat launches through its own extension instead. A mint writes nothing, so the
+    // stripped links leave nothing behind.
+    const launch = withoutWarningOffers(launched.launch);
+    const runId = launch.runId;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
@@ -1153,50 +1237,52 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    const final = await waitForRunAndWaitCompletion(launched.launch, {
+    const stopHeartbeat = startProgressHeartbeat(extra, runId);
+    const waitOpts = {
       origin: ctx.origin,
       headers: dispatchHeaders,
       fetch: dispatchFetch,
       signal,
-    });
+    };
+    const waited = await waitForRunAndWaitCompletion(launch, {
+      ...waitOpts,
+      maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+    }).finally(() => stopHeartbeat?.());
 
-    // Report the REAL run outcome, not the polling GET's HTTP status (which is
-    // always 200 for a completed run). Map the run's terminal status to an
-    // HTTP-shaped code so a failed/timed-out/cancelled run is distinguishable
-    // in telemetry.
-    const runStatus = (final.payload as { status?: unknown }).status;
+    // The run's outcome, not the polling GET's HTTP status (200 for any run read).
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
       operationId: "getRun",
       method: "GET",
-      status: typeof runStatus === "number" ? runStatus : runStatusToHttp(runStatus),
+      status: runStatusToHttp(waited.payload.status),
       outcome: "invoked",
     });
 
-    // Enrich the terminal result with the run's published files (D6). The
-    // SAME enrichment the chat gets from `runAndWaitStepsWithFiles`, reused
-    // via `fetchRunFiles` (best-effort, empty on any failure). Beyond echoing
-    // them in the text payload, each is returned as an MCP `resource_link`
-    // content block (spec 2025-06-18) so an external client (claude.ai, …)
-    // consumes them natively — read one with `resources/read`, or chain its
-    // `appfile://` URI into a follow-up run's input file field.
-    if (!final.isError) {
-      const files = await fetchRunFiles(runId, {
-        origin: ctx.origin,
-        headers: dispatchHeaders,
-        fetch: dispatchFetch,
-        signal,
-      });
-      if (files.length > 0) {
-        const result = jsonResult({ ...final.payload, files });
-        return { ...result, content: [...result.content, ...files.map(fileResourceLink)] };
-      }
-    }
-    return jsonResult(final.payload, final.isError);
+    const { step: final, files } = await enrichTerminalRunAndWaitStep(waited, waitOpts);
+    const result = jsonResult({ ...final.payload, ...space }, final.isError);
+    // Each published file is also an MCP `resource_link` block (spec 2025-06-18), read with
+    // `resources/read` or chained by URI; a run still going gets its next step as text.
+    const blocks =
+      final.payload.done === false
+        ? [{ type: "text" as const, text: RUN_AND_WAIT_LONG_POLL_RESUME }]
+        : files.map(fileResourceLink);
+    return blocks.length > 0 ? { ...result, content: [...result.content, ...blocks] } : result;
   };
 
   return { descriptor, handler };
+}
+
+function withoutWarningOffers(launch: RunAndWaitLaunch): RunAndWaitLaunch {
+  const strip = (record: Record<string, unknown>) =>
+    Array.isArray(record.warnings)
+      ? { ...record, warnings: withoutConnectOffers(record.warnings as ResolutionFieldError[]) }
+      : record;
+  return {
+    ...launch,
+    launchRecord: strip(launch.launchRecord),
+    preliminary: strip(launch.preliminary),
+  };
 }
 
 // --- list_files --------------------------------------------------------
@@ -1496,8 +1582,7 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const headers = new Headers(ctx.authHeaders);
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
-    // org-pinned MCP token reach a space-scoped route, and lets requireSpaceContext
-    // fall back to the org default space when no X-Space-Id is forwarded.
+    // org-pinned MCP token reach a space-scoped route, in the space it entered.
     headers.set(...internalDispatchHeader());
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",
@@ -1512,7 +1597,12 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: response.status,
       outcome: "invoked",
     });
-    return readResponse(response);
+    const spaces = ctx.orgSpaces?.reachable.map((s) => ({
+      id: s.id,
+      name: s.name,
+      role: s.role,
+    }));
+    return readResponse(response, spaces ? { spaces } : undefined);
   };
 
   return { descriptor, handler };
@@ -1522,7 +1612,8 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
  * What one request's caller is offered: the tools `buildMcpTools` declares AND
  * the acts `buildServerInstructions` teaches, each read off the guards of the
  * route it dispatches to (or, for `import_package_file`, stands in for). A
- * withheld act is ABSENT from both — never declared then refused.
+ * withheld act is ABSENT from both — never declared then refused. Org-wide, the
+ * surface is the union of the spaces', refused per space by `withSpaceArgument`.
  */
 export interface McpSurface {
   /** `invoke_operation`; the transport already required `mcp:read`. */
@@ -1595,7 +1686,7 @@ function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateTool
  * and re-lists, where an alias would be a permanent second dispatch path.
  */
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
-  return [
+  const tools = [
     buildSearchTool(ctx, surface.invokes),
     buildDescribeTool(ctx, surface.invokes),
     ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
@@ -1611,5 +1702,88 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...buildPackageFileTools(ctx, surface.importsPackages),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
-  ].map(refuseUndeclaredArguments);
+  ];
+  const { orgSpaces } = ctx;
+  return (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map(
+    refuseUndeclaredArguments,
+  );
+}
+
+/**
+ * What each tool needs in the space an org-wide call names: `false` no space
+ * (no `space_id`), `null` the route guard alone, else the surface act
+ * re-checked there. Exhaustive, so a new tool must decide.
+ */
+const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
+  search_operations: null,
+  describe_operation: null,
+  invoke_operation: "invokes",
+  run_and_wait: "runs",
+  list_files: "listsFiles",
+  read_file: null,
+  read_skill: null,
+  validate_package_file: null,
+  import_package_file: "importsPackages",
+  get_me: null,
+  get_runtime_capabilities: false,
+};
+
+/** `space_id`, listing the spaces itself: clients truncate server instructions. */
+function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
+  return {
+    type: "string",
+    enum: spaces.reachable.map((s) => s.id),
+    description:
+      `The space this call acts in, by id: ${spaces.reachable.map(describeSpace).join("; ")}. ` +
+      "Take it from the user's request; when the request names no space and several could serve, " +
+      "ask the user which one instead of choosing. There is no default space.",
+  };
+}
+
+/** Declare `space_id` on a space-acting tool and check it before the handler runs. */
+function withSpaceArgument(
+  tool: AppstrateToolDefinition,
+  spaces: OrgWideSpaces,
+): AppstrateToolDefinition {
+  const act = SPACE_ACTS[tool.descriptor.name as McpToolName];
+  if (act === false) return tool;
+  const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
+    need === null || space.surface[need];
+  const { granted_in } = grantedIn(spaces, holds(act));
+  const schema = tool.descriptor.inputSchema;
+  const descriptor: Tool = {
+    ...tool.descriptor,
+    // Leading: clients cap long descriptions, and this is the part that varies.
+    description: granted_in
+      ? `Available in: ${granted_in.join(", ")}. ${tool.descriptor.description}`
+      : tool.descriptor.description,
+    inputSchema: {
+      ...schema,
+      properties: { ...schema.properties, space_id: spaceIdProperty(spaces) },
+      required: [...(schema.required ?? []), "space_id"],
+    },
+  };
+  return {
+    descriptor,
+    handler: async (args, extra) => {
+      assertSpaceArgument(spaces, args.space_id);
+      // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
+      const need = act === "runs" && args.kind === "inline" ? "composes" : act;
+      const { current } = spaces;
+      if (!holds(need)(current)) {
+        return jsonResult(
+          {
+            error: `Your role in ${current.name} does not allow ${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}.`,
+            space: spaceRef(current),
+            granted_in: grantedIn(spaces, holds(need)).granted_in,
+            hint: NO_FALLBACK_HINT,
+          },
+          true,
+        );
+      }
+      // Consumed: `run_and_wait` validates its own arguments.
+      const { space_id: _entered, ...rest } = args;
+      return tool.handler(rest, extra);
+    },
+  };
 }

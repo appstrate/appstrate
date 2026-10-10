@@ -48,6 +48,7 @@ import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
+import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { upstreamFailureDetail, type ProxyProblemCode } from "../../lib/proxy-status.ts";
 import {
@@ -180,6 +181,21 @@ export class ProxyCallError extends Error {
   }
 }
 
+/** A key missing from the keyring is the proxy's own 503, never a relayed upstream 401. */
+function rethrowKeyUnavailable(err: unknown, connectionId?: string): void {
+  if (err instanceof EncryptionKeyUnavailableError) {
+    throw new ProxyCallError("encryption_key_unavailable", err.message, connectionId);
+  }
+}
+
+function logRefreshFault(err: unknown, integrationId: string, connectionId: string): void {
+  logger.error("credential-proxy: recovering from a 401 failed — relaying the 401", {
+    integrationId,
+    connectionId,
+    error: getErrorMessage(err),
+  });
+}
+
 /**
  * Execute one authenticated proxy call. Credentials never leak into the
  * caller's response — the only thing that crosses the boundary is the
@@ -199,18 +215,21 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // Both 401-refresh paths NAME the connection the call used: a new selection could pick another.
   let refreshSelection;
   let connectionId: string;
+  let credentialRevision: string;
   let rejectionStreak: number;
   try {
     const result = await resolveIntegrationProxyCredentials(selection);
     resolved = result.payload;
     declaredUris = result.declaredUris;
     connectionId = result.connectionId;
+    credentialRevision = result.credentialRevision;
     rejectionStreak = result.rejectionStreak;
     refreshSelection = { ...selection, connectionId };
   } catch (err) {
     if (err instanceof IntegrationCredentialNotFoundError) {
       throw new ProxyCallError("credential_not_found", err.message);
     }
+    rethrowKeyUnavailable(err);
     throw err;
   }
 
@@ -230,6 +249,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
 
   const authorizedUris = resolved.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
+    target,
     templates,
     fields,
     allowAllUris: resolved.allowAllUris,
@@ -240,7 +260,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   if (policy.refuse) {
     throw new ProxyCallError(
       URL_POLICY_REFUSAL_CODE[policy.refuse],
-      urlPolicyRefusalMessage(policy.refuse, input.integrationId),
+      urlPolicyRefusalMessage(policy.refuse, input.integrationId, templateHost(input.target)),
     );
   }
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
@@ -366,8 +386,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       credentialForwarded
     ) {
       try {
-        const refreshedResult = await forceRefreshIntegrationProxyCredentials(refreshSelection);
-        const refreshed = refreshedResult?.payload ?? null;
+        const refreshed = await forceRefreshIntegrationProxyCredentials(
+          refreshSelection,
+          credentialRevision,
+        );
         if (refreshed) {
           // Rebuild the credential header from the rotated token. Drop the
           // previous platform-injected value first so the refreshed delivery
@@ -388,13 +410,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         if (err instanceof InvalidHeaderValueError) {
           throw unusableCredential(err.message, input.integrationId, connectionId);
         }
-        // Refresh itself failed transiently (network hiccup, upstream 5xx, …)
-        // — surface the original 401 as-is; the caller will
-        // handle re-authentication. `forceRefresh` returns `null` rather than
-        // throwing on every not-refreshed outcome: a revoked or missing refresh
-        // token flags `needsReconnection`, an unrefreshable credential counts
-        // the rejection toward the flag, and a transient failure leaves the
-        // row untouched so the next call retries.
+        rethrowKeyUnavailable(err, connectionId);
+        // Every verdict on the connection is a `null`, not a throw: what lands here is a fault
+        // of the refresh or of the replay, and the caller still gets the original 401.
+        logRefreshFault(err, input.integrationId, connectionId);
       }
     }
   } finally {
@@ -421,13 +440,10 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // can signal the client to retry itself with a fresh body stream.
   if (res.status === 401 && isStreamBody && credentialInjection.kind === "inject") {
     try {
-      await forceRefreshIntegrationProxyCredentials(refreshSelection);
-    } catch {
-      // Refresh itself failed (invalid_grant, revoked token, etc.) —
-      // surface the 401 as-is; the caller will handle re-authentication.
-      // As above, the connection is flagged (or the rejection counted) by
-      // this point, so the retry the caller re-issues is not the only thing
-      // standing between the user and a reconnect prompt.
+      await forceRefreshIntegrationProxyCredentials(refreshSelection, credentialRevision);
+    } catch (err) {
+      rethrowKeyUnavailable(err, connectionId);
+      logRefreshFault(err, input.integrationId, connectionId);
     }
     return {
       connectionId,

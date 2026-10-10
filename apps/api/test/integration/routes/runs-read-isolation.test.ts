@@ -296,7 +296,9 @@ describe("run read isolation between members", () => {
     // the 404 has to be a refusal to WRITE, not merely a hidden 200. The
     // fixture's five rows carry no sink, so the two rows below are the only
     // ones this route can touch at all.
-    const withOpenSink = async (userId: string) =>
+    // Still open: an expired sink is not extendable, whoever asks.
+    const openUntil = new Date(Date.now() + 600_000);
+    const withOpenSink = async (userId: string, sinkExpiresAt = openUntil) =>
       (
         await seedRun({
           packageId: AGENT_ID,
@@ -308,7 +310,7 @@ describe("run read isolation between members", () => {
           // its ingestion verifies against, so the fixture writes one; this
           // route never reads it.
           sinkSecretEncrypted: "encrypted-sink-secret",
-          sinkExpiresAt: T0,
+          sinkExpiresAt,
           lastHeartbeatAt: T0,
         })
       ).id;
@@ -331,10 +333,10 @@ describe("run read isolation between members", () => {
     };
 
     expect((await extend(operatorA, sinkOfB)).status).toBe(404);
-    // Untouched: both columns still hold the seeded T0, so the refusal happened
-    // in the WHERE and not after the write.
+    // Untouched: both columns still hold their seeded values, so the refusal
+    // happened in the WHERE and not after the write.
     expect(await sinkRow(sinkOfB)).toEqual({
-      expiresAt: T0.getTime(),
+      expiresAt: openUntil.getTime(),
       heartbeatAt: T0.getTime(),
     });
 
@@ -342,12 +344,17 @@ describe("run read isolation between members", () => {
     // both columns — the 404 above is about the run, not about the route.
     expect((await extend(operatorA, sinkOfA)).status).toBe(200);
     const moved = await sinkRow(sinkOfA);
-    expect(moved.expiresAt).toBeGreaterThan(T0.getTime());
+    expect(moved.expiresAt).toBeGreaterThan(openUntil.getTime());
     expect(moved.heartbeatAt).toBeGreaterThan(T0.getTime());
 
     // `runs:read-all` is the space, here as everywhere: an admin supervising
     // the space extends a member's sink, the same rows they may already cancel.
     expect((await extend(owner, sinkOfB)).status).toBe(200);
+
+    // An expired sink stays expired: extending it would revive a sink ingestion refuses.
+    const expired = await withOpenSink(operatorA.user.id, T0);
+    expect((await extend(operatorA, expired)).status).toBe(404);
+    expect((await sinkRow(expired)).expiresAt).toBe(T0.getTime());
   });
 
   it("404s ?wait on a colleague's run without waiting for it", async () => {

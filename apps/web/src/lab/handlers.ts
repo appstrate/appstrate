@@ -10,6 +10,7 @@
  * mistake for a design decision.
  */
 import type { PackageType } from "@appstrate/core/validation";
+import type { components } from "../api/schema";
 import type { Scenario } from "./scenario";
 import * as f from "./fixtures";
 import { getRole } from "./role";
@@ -35,6 +36,25 @@ export type LabResponse = {
 
 type Handler = (url: URL, scenario: Scenario, headers: Headers, body: unknown) => LabResponse;
 
+/**
+ * The `warnings[]` of a launch or schedule write: one `integration_unbound` item per integration
+ * the request bound to nothing (`[]`), the way the API answers it.
+ */
+function unboundWarnings(
+  connectionOverrides: unknown,
+  source: "run_override" | "schedule_override",
+): components["schemas"]["ConnectionResolutionWarning"][] {
+  if (typeof connectionOverrides !== "object" || connectionOverrides === null) return [];
+  return Object.entries(connectionOverrides as Record<string, unknown>)
+    .filter(([, ids]) => Array.isArray(ids) && ids.length === 0)
+    .map(([id]) => ({
+      field: `integrations.${id}`,
+      code: "integration_unbound",
+      message: "The integration binds no connection.",
+      source,
+    }));
+}
+
 function labFile(id: string | undefined) {
   return [...f.documents.data, ...f.heavyDocuments].find((file) => file.id === id);
 }
@@ -47,6 +67,14 @@ type AgentUpdate = f.JsonRequest<"/api/packages/agents/{scope}/{name}", "patch">
 const changedEndUsers = new Map<string, LabEndUser>();
 const deletedEndUsers = new Set<string>();
 const dashboardSsoByOrg = new Map<string, boolean>();
+/** The sets of spaces the share editor wrote, by connection id: the lab keeps them for the session. */
+const sharedSpacesByConnection = new Map<string, string[]>();
+
+/** A connection as the share editor last wrote it. */
+function withWrittenShares<T extends { id: string; shared_space_ids: string[] }>(connection: T): T {
+  const written = sharedSpacesByConnection.get(connection.id);
+  return written ? { ...connection, shared_space_ids: written } : connection;
+}
 const organizationLogoByOrg = new Map<string, string | null>();
 const changedAgentBundles = new Map<string, LabAgentDetail>();
 /** Skill and MCP-server drafts saved in this lab session. */
@@ -754,8 +782,42 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/me\/connections$/,
     handler: (_u, s) => ({
       status: 200,
-      body: { ...f.myConnections, data: list(f.myConnections.data, s) },
+      body: {
+        ...f.myConnections,
+        data: list(f.myConnections.data, s).map((group) => ({
+          ...group,
+          connections: group.connections.map((connection) => {
+            const written = sharedSpacesByConnection.get(connection.connection_id);
+            const named = Object.values(f.spacesByOrg).flat();
+            return written
+              ? {
+                  ...connection,
+                  shared_spaces: written.map((id) => ({
+                    id,
+                    name: named.find((space) => space.id === id)?.name ?? id,
+                  })),
+                }
+              : connection;
+          }),
+        })),
+      },
     }),
+  },
+  {
+    // The user-scope door of the same share editor.
+    method: "PATCH",
+    pattern: /^\/api\/me\/connections\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      const id = decodeURIComponent(url.pathname.split("/").filter(Boolean)[3] ?? "");
+      if (
+        scenario !== "error" &&
+        typeof body === "object" &&
+        body !== null &&
+        "shared_space_ids" in body
+      )
+        sharedSpacesByConnection.set(id, body.shared_space_ids as string[]);
+      return { status: 200, body: { id } };
+    },
   },
   {
     method: "GET",
@@ -926,10 +988,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
               ? { ...detail.manifest, ...row.manifest }
               : detail.manifest,
           auths: detail.auths.map((auth) => {
-            const connections =
+            const connections = (
               auth.auth_key === f.INTEGRATION_AUTH_KEY
                 ? list(auth.connections, scenario, f.heavyIntegrationConnections)
-                : auth.connections;
+                : auth.connections
+            ).map(withWrittenShares);
             return {
               ...auth,
               connections,
@@ -952,9 +1015,27 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
           f.integrationDetail.auths.find((a) => a.auth_key === f.INTEGRATION_AUTH_KEY)!.connections,
           s,
           f.heavyIntegrationConnections,
-        ),
+        ).map(withWrittenShares),
       },
     }),
+  },
+  {
+    // The share editor writes the whole set of spaces a connection is shared into.
+    method: "PATCH",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/connections\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      const id = decodeURIComponent(url.pathname.split("/").filter(Boolean)[5] ?? "");
+      const connection = f.integrationDetail.auths
+        .flatMap((auth) => auth.connections)
+        .find((candidate) => candidate.id === id);
+      if (!connection) return { status: 404, body: {} };
+      const ids =
+        typeof body === "object" && body !== null && "shared_space_ids" in body
+          ? (body.shared_space_ids as string[])
+          : undefined;
+      if (scenario !== "error" && ids) sharedSpacesByConnection.set(id, ids);
+      return { status: 200, body: withWrittenShares(connection) };
+    },
   },
   {
     method: "GET",
@@ -1671,6 +1752,21 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     },
   },
   {
+    // Launching: the run that answers is the first one, with the launch's warnings.
+    method: "POST",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/run$/,
+    handler: (_url, scenario, _headers, body) => {
+      if (scenario === "error") return { status: 500, body: { title: "Launch unavailable" } };
+      const { connection_overrides } = (typeof body === "object" && body !== null ? body : {}) as {
+        connection_overrides?: unknown;
+      };
+      return {
+        status: 201,
+        body: { ...f.runs[0]!, warnings: unboundWarnings(connection_overrides, "run_override") },
+      };
+    },
+  },
+  {
     method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/connection-readiness$/,
     handler: () => ({ status: 200, body: f.agentConnectionReadiness }),
@@ -1761,7 +1857,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         f.schedules.data.push(created);
         f.scheduleDetails[created.id] = created;
       }
-      return { status: 201, body: created };
+      return {
+        status: 201,
+        body: {
+          ...created,
+          warnings: unboundWarnings(fields.connection_overrides, "schedule_override"),
+        },
+      };
     },
   },
   {
@@ -1951,7 +2053,17 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         updatedAt: new Date().toISOString(),
       };
       if (scenario !== "error") Object.assign(schedule, next);
-      return { status: 200, body: next };
+      // `warnings` is `null` unless this write moves what a fire resolves with.
+      return {
+        status: 200,
+        body: {
+          ...next,
+          warnings:
+            "connection_overrides" in fields
+              ? unboundWarnings(fields.connection_overrides, "schedule_override")
+              : null,
+        },
+      };
     },
   },
   {

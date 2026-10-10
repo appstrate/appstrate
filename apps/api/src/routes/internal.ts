@@ -498,7 +498,8 @@ export function createInternalRouter() {
   // where a credential was expected but could not be produced fails loud — 400
   // (see `requireBoundConnection`), 404 (the bound connection is gone), 409
   // `integration_auth_undeclared` (the pinned manifest version no longer
-  // declares the connection's auth), 410 (dead credential, connection flagged).
+  // declares the connection's auth), 410 (dead credential, connection flagged),
+  // 503 (credential under a key id the keyring lacks, connection NOT flagged).
   // The sidecar treats an empty payload as "no `delivery.http` auths, skip the
   // MITM listener", so answering 200-with-empty for any of those booted the run
   // with zero credentials and left the agent reporting a phantom upstream
@@ -573,7 +574,7 @@ export function createInternalRouter() {
           connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
-        { forceRefresh: true, heldRevision: credentialRevisionQuery(c, false) },
+        { kind: "rejected", revision: credentialRevisionQuery(c, false) ?? null },
       );
     } catch (err) {
       // 410 = the connection was flagged needsReconnection (terminal). Record

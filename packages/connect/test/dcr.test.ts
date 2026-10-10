@@ -253,6 +253,19 @@ describe("registerDynamicClient (RFC 7591)", () => {
     ).rejects.toBeInstanceOf(DynamicClientRegistrationError);
   });
 
+  it("throws on a registration response larger than 64 KiB", async () => {
+    const fetchImpl = (async () =>
+      jsonResponse({ client_id: "c", padding: "x".repeat(64 * 1024) })) as unknown as typeof fetch;
+    await expect(
+      registerDynamicClient({
+        registrationEndpoint: "https://as/register",
+        redirectUri: "https://app/cb",
+        clientName: "X",
+        fetchImpl,
+      }),
+    ).rejects.toBeInstanceOf(DynamicClientRegistrationError);
+  });
+
   it("throws on a network failure", async () => {
     const fetchImpl = (async () => {
       throw new Error("ECONNREFUSED");

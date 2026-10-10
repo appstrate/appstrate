@@ -3,7 +3,7 @@
 
 /**
  * Byte-level Subresource Integrity (SRI) primitives, re-exported from the
- * shared zero-dependency `@appstrate/afps-shared` package — the single source
+ * shared zero-internal-dependency `@appstrate/afps-shared` package — the single source
  * of truth shared with `@appstrate/core/integrity`.
  *
  * Returns the canonical SRI form (`sha256-<base64>`), directly usable in

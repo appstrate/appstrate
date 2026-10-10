@@ -63,8 +63,10 @@ import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import {
   resolvedConnectionMapSchema,
+  runIntegrationsUnboundSchema,
   type ConnectionOverrides,
   type ResolvedConnectionMap,
+  type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
@@ -75,6 +77,7 @@ import type {
   RunWireDto,
   EnrichedRun,
   RunConnectionUsed,
+  RunIntegrationUnboundWire,
   ListEnvelope,
 } from "@appstrate/shared-types";
 
@@ -192,6 +195,7 @@ const enrichedRunColumns = {
   connectionOverrides: runs.connectionOverrides,
   dependencyOverrides: runs.dependencyOverrides,
   resolvedConnections: runs.resolvedConnections,
+  integrationsUnbound: runs.integrationsUnbound,
 } as const;
 
 /** Row shape produced by `enrichedRunColumns` — a strict subset of a `runs` row. */
@@ -339,16 +343,15 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
  * renders even after the connection is renamed or deleted. Empty/absent → null.
  */
 function projectConnectionsUsed(
-  resolved: typeof runs.$inferSelect.resolvedConnections,
+  snapshot: ResolvedConnectionMap | null,
 ): RunConnectionUsed[] | null {
-  const used = Object.entries(readResolvedConnections(resolved) ?? {}).flatMap(
-    ([integrationId, bound]) =>
-      bound.map((v) => ({
-        integration_package_id: integrationId,
-        label: v.label,
-        account_id: v.accountId,
-        source: v.source,
-      })),
+  const used = Object.entries(snapshot ?? {}).flatMap(([integrationId, bound]) =>
+    bound.map((v) => ({
+      integration_package_id: integrationId,
+      label: v.label,
+      account_id: v.accountId,
+      source: v.source,
+    })),
   );
   return used.length > 0 ? used : null;
 }
@@ -358,7 +361,23 @@ export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | n
   return raw === null || raw === undefined ? null : resolvedConnectionMapSchema.parse(raw);
 }
 
+/** `runs.integrations_unbound` as read back from jsonb; null = not recorded. */
+function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
+  return raw === null || raw === undefined ? null : runIntegrationsUnboundSchema.parse(raw);
+}
+
+function projectIntegrationsUnbound(raw: unknown): RunIntegrationUnboundWire[] | null {
+  return (
+    readIntegrationsUnbound(raw)?.map((u) => ({
+      integration_package_id: u.integrationId,
+      code: u.code,
+      source: u.source ?? null,
+    })) ?? null
+  );
+}
+
 function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): EnrichedRun {
+  const snapshot = readResolvedConnections(r.run.resolvedConnections);
   return {
     ...runRowToWireDto(r.run),
     // Resolved input includes editor-imposed values. The placement's current locks
@@ -370,7 +389,8 @@ function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): Enriched
     end_user_name: r.endUserName ?? null,
     api_key_name: r.apiKeyName ?? null,
     schedule_name: r.scheduleName ?? null,
-    connections_used: projectConnectionsUsed(r.run.resolvedConnections),
+    connections_used: projectConnectionsUsed(snapshot),
+    integrations_unbound: projectIntegrationsUnbound(r.run.integrationsUnbound),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
     // INPUT = distinct `appfile://` ids referenced in the run's persisted
@@ -426,11 +446,9 @@ async function nextRunNumber(
  * object (every one threads `{ orgId, spaceId }` from `string`-typed pipeline
  * params); and the module contract (`PlatformServices` in
  * `@appstrate/core/module`) exposes no run-creation surface, so no out-of-tree
- * JS caller exists either. The sibling `ActorScope` deliberately carries NO
- * `orgId`, but it is not structurally assignable to `SpaceScope` — passing one
- * here is a compile error, not an `"undefined"` lock. The same reasoning
- * covers `orgRunConcurrencyLockKey` below. If a dynamically-typed caller is
- * ever added, a defined-key guard has to land WITH it.
+ * JS caller exists either. The same reasoning covers `orgRunConcurrencyLockKey`
+ * below. If a dynamically-typed caller is ever added, a defined-key guard has
+ * to land WITH it.
  */
 async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
   const lockKey = `run_number:${scope.orgId}:${scope.spaceId}:${packageId}`;
@@ -626,6 +644,8 @@ interface CreateRunParams {
    */
   connectionOverrides?: ConnectionOverrides | null;
   resolvedConnections?: ResolvedConnectionMap | null;
+  /** Why each `[]` of {@link resolvedConnections} is unbound; omit when no resolution ran. */
+  integrationsUnbound?: RunIntegrationUnbound[];
   /**
    * Snapshot of each declared integration's resolved manifest version at
    * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
@@ -749,6 +769,9 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
         : {}),
       ...(params.resolvedConnections !== undefined
         ? { resolvedConnections: params.resolvedConnections }
+        : {}),
+      ...(params.integrationsUnbound !== undefined
+        ? { integrationsUnbound: params.integrationsUnbound }
         : {}),
       ...(params.resolvedIntegrationVersions !== undefined
         ? { resolvedIntegrationVersions: params.resolvedIntegrationVersions }

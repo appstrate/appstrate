@@ -12,7 +12,6 @@ import {
   translateResolutionError,
   type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
-import { listActiveIntegrationIds } from "./integration-connections.ts";
 import {
   fetchIntegrationManifest,
   type IntegrationManifestCache,
@@ -22,7 +21,7 @@ import { resolveDeclaredSkills } from "./package-catalog.ts";
 import { isPromptEmpty } from "@appstrate/core/validation";
 import type { ConnectionResolutionError } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
+import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import type { ConnectOfferPolicy } from "../lib/connect-offer-policy.ts";
 import { attachConnectOffers } from "./connect/preflight-connect-offer.ts";
@@ -32,13 +31,8 @@ interface AgentReadinessParams {
   agent: LoadedPackage;
   orgId: string;
   spaceId: string;
-  /**
-   * Actor whose integration connections we validate. Run kickoff paths
-   * pass an actor so missing or under-scoped connections produce a 409
-   * before the run is created. `null` skips integration gating — callers
-   * that resolve the actor from request context may not have one.
-   */
-  actor: Actor | null;
+  /** Actor whose integration connections we validate. */
+  actor: Actor;
   /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
   /**
@@ -47,25 +41,19 @@ interface AgentReadinessParams {
    * and the spawn resolver dedupe the SELECT + Zod parse per integration.
    */
   manifestCache?: IntegrationManifestCache;
+}
+
+/** What only the throwing wrapper reads: its 409 names the version and may carry connect links. */
+interface ValidateAgentReadinessParams extends AgentReadinessParams {
+  /** `runs.version_ref` of `agent` — the 409's `version_ref`. */
+  versionRef: string;
   /**
    * Opt-in relay for the run-kickoff connect link (#1207) — see
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
-   *
-   * Read by the THROWING wrapper only: `collectAgentReadinessErrors` ignores
-   * it, so its one direct caller (the dry-run validator, via the accumulate
-   * branch of `inline-run-preflight.ts`) stays link-free by passing none — not
-   * by anything this function does.
    */
   connectOffers?: ConnectOfferPolicy | null;
 }
 
-/**
- * Collect every readiness error as structured field entries (non-throwing).
- *
- * Single source of truth for readiness checks — the throwing wrapper
- * `validateAgentReadiness` delegates to this. Fail-fast sequence:
- * prompt → skills → integration activation → integration connections.
- */
 /**
  * Map an {@link IntegrationManifestLoadFailure} to a structured readiness
  * error. The `integrations.` field prefix routes it into the 409 envelope
@@ -108,21 +96,15 @@ function manifestFailureError(
   }
 }
 
-export async function collectAgentReadinessErrors(
-  params: AgentReadinessParams,
-): Promise<ValidationFieldError[]> {
-  return (await collectAgentReadiness(params)).errors;
-}
-
-/** {@link collectAgentReadinessErrors} plus the resolver errors, whose `source` the wire drops. */
+/** Every readiness error and warning (non-throwing); `validateAgentReadiness` delegates to this. */
 export async function collectAgentReadiness(params: AgentReadinessParams): Promise<{
   errors: ValidationFieldError[];
   resolutionErrors: ConnectionResolutionError[];
+  warnings: ResolutionFieldError[];
 }> {
   const { agent, orgId, spaceId, actor, launchOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
-  const resolutionErrors: ConnectionResolutionError[] = [];
 
   if (isPromptEmpty(agent.prompt)) {
     errors.push({
@@ -166,123 +148,46 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     });
   }
 
-  // Integration ACTIVATION gate — runs regardless of actor (it is a
-  // space-level fact, not an actor-level one). Every integration the agent
-  // declares MUST be active in the space. Without this the run silently
-  // degrades: the runtime spawn resolver skips an inactive integration
-  // (`isIntegrationActive` false) and the agent launches without its tools.
-  // The connection resolver below does NOT catch this — it gates on whether an
-  // accessible connection exists, and an inactive integration can still have
-  // lingering connections that resolve cleanly.
-  // Checked before connections so an inactive integration fails fast with a
-  // clear cause rather than a downstream `not_connected`.
-  // Batched: one SELECT over `space_packages` for every declared
-  // integration instead of N serial single-row queries (run-kickoff hot path).
+  // Manifest health (#737): the spawn would silently skip a broken package; the resolver ignores it.
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
-  // Integrations this gate has already refused, and which the connection
-  // resolution below must therefore not look at a second time — see the
-  // `skipIntegrationIds` note on `resolveConnectionsForRun`.
-  const refusedIntegrations = new Set<string>();
-  if (declaredIntegrations.length > 0) {
-    // Integration manifest-health gate (#737) — mirrors the manifest drop
-    // conditions in `resolveOne` (integration-spawn-resolver.ts): a declared
-    // integration whose package is missing (`not_found`), is the wrong type
-    // (`not_integration`), or fails manifest validation (`invalid_manifest`)
-    // is silently skipped at spawn, so the agent launches without its tools
-    // yet the run finishes `success`. The connection resolver below
-    // deliberately ignores these (`buildRequirement` returns null and defers
-    // to this check), so readiness is the single place that surfaces them.
-    // Runs regardless of actor — manifest validity is a package-level fact.
-    // Fetched through the shared `manifestCache` so the connection-resolution
-    // and spawn passes reuse the same SELECT + Zod parse within this run.
-    const manifestResults = await Promise.all(
-      declaredIntegrations.map(async (entry) => ({
-        id: entry.id,
-        result: await fetchIntegrationManifest(entry.id, params.manifestCache),
-      })),
-    );
-    const manifestUnhealthy = new Set<string>();
-    for (const { id, result } of manifestResults) {
-      if (result.ok) continue;
-      manifestUnhealthy.add(id);
-      errors.push(manifestFailureError(id, result.failure));
-    }
-
-    // ACTIVATION gate — every declared integration MUST be active in the
-    // space. Without this the run silently degrades: the runtime spawn
-    // resolver skips an inactive integration (`isIntegrationActive` false) and
-    // the agent launches without its tools. The connection resolver below does
-    // NOT catch this — it gates on whether an accessible connection exists, and
-    // an inactive integration can still have lingering connections that resolve
-    // cleanly. Checked before connections so an
-    // inactive integration fails fast with a clear cause rather than a
-    // downstream `not_connected`. Integrations already flagged for a manifest
-    // failure are skipped here — a missing package is necessarily inactive too,
-    // and the manifest error is the more precise cause (no double-report).
-    //
-    // "Fails fast rather than a downstream `not_connected`" is enforced, not
-    // merely ordered: each id flagged here is added to `refusedIntegrations`,
-    // which the resolution below excludes. The resolver applies no active
-    // filter of its own, so without that the same integration produced BOTH
-    // errors — and, for a caller opted into the connect-offer relay, a live
-    // connect link for an integration nobody can use in this space.
-    const activeIds = await listActiveIntegrationIds(
-      declaredIntegrations.map((entry) => entry.id),
-      spaceId,
-    );
-    for (const entry of declaredIntegrations) {
-      if (manifestUnhealthy.has(entry.id)) continue;
-      if (!activeIds.has(entry.id)) {
-        refusedIntegrations.add(entry.id);
-        errors.push({
-          field: `integrations.${entry.id}`,
-          code: "integration_not_active",
-          title: "Integration Not Active",
-          message: `Integration '${entry.id}' is not active in this space.`,
-        });
-      }
-    }
+  const manifestResults = await Promise.all(
+    declaredIntegrations.map(async (entry) => ({
+      id: entry.id,
+      result: await fetchIntegrationManifest(entry.id, params.manifestCache),
+    })),
+  );
+  for (const { id, result } of manifestResults) {
+    if (!result.ok) errors.push(manifestFailureError(id, result.failure));
   }
 
-  // Resolver enumerates own + shared connections, applies the cascade, and surfaces
-  // structured errors per (integration, authKey). Skipped when the caller
-  // has no actor context (integration gating only applies to run kickoff).
-  //
-  // run-pipeline.ts re-runs the resolver after readiness
-  // (with the same overrides) to produce the persisted snapshot. The two
-  // passes cannot disagree even though only this one passes
-  // `skipIntegrationIds`: a non-empty set means an error was pushed above, and
-  // the throwing wrapper raises it, so the snapshot pass never runs on an
-  // agent whose integrations this pass refused. When the set IS empty the two
-  // calls are identical.
-  if (actor) {
-    const resolution = await resolveConnectionsForRun({
-      agentManifest: manifest as Record<string, unknown>,
-      packageId: agent.id,
-      actor,
-      scope: { orgId, spaceId },
-      ...(launchOverrides ? { launchOverrides } : {}),
-      ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
-      ...(refusedIntegrations.size > 0 ? { skipIntegrationIds: refusedIntegrations } : {}),
-    });
-    for (const e of resolution.errors) {
-      errors.push(translateResolutionError(e));
-    }
-    resolutionErrors.push(...resolution.errors);
+  const resolution = await resolveConnectionsForRun({
+    agentManifest: manifest as Record<string, unknown>,
+    packageId: agent.id,
+    actor,
+    scope: { orgId, spaceId },
+    ...(launchOverrides ? { launchOverrides } : {}),
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+  });
+  for (const e of resolution.errors) {
+    errors.push(translateResolutionError(e));
   }
 
-  return { errors, resolutionErrors };
+  return {
+    errors,
+    resolutionErrors: resolution.errors,
+    warnings: resolution.warnings.map(translateResolutionError),
+  };
 }
 
 /**
- * Validate that an agent is ready for a run. Delegates to
- * `collectAgentReadinessErrors` and throws the first error, preserving the
- * historical fail-fast contract (single ApiError with the original code and
- * human-readable title carried on the field entry).
+ * Throws `collectAgentReadiness`'s first error (its code and title on the field entry), else
+ * returns the launch `warnings`, with connect links under the same opt-in as the 409's.
  */
-export async function validateAgentReadiness(params: AgentReadinessParams): Promise<void> {
-  const errors = await collectAgentReadinessErrors(params);
-  if (errors.length === 0) return;
+export async function validateAgentReadiness(
+  params: ValidateAgentReadinessParams,
+): Promise<ResolutionFieldError[]> {
+  const { errors, warnings } = await collectAgentReadiness(params);
+  if (errors.length === 0) return withConnectOffers(params, warnings);
 
   // Integration errors get their own 409 envelope with every integration
   // failure populated on `errors[]` so the dashboard's MissingConnections
@@ -290,36 +195,25 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
   if (integrationErrors.length > 0) {
     // Fire-and-forget — modules opting in (e.g. webhooks) get a structured
-    // notification before we throw. Integration errors only accumulate when
-    // an actor was present, so the guard narrows the type for the payload.
-    if (params.actor) {
-      void emitEvent("onRunConnectionMissing", {
-        orgId: params.orgId,
-        spaceId: params.spaceId,
-        packageId: params.agent.id,
-        actor: { type: params.actor.type, id: params.actor.id },
-        errors: integrationErrors.map((e) => ({
-          field: e.field,
-          code: e.code,
-          message: e.message,
-          ...(e.title ? { title: e.title } : {}),
-        })),
-      });
-    }
+    // notification before we throw.
+    void emitEvent("onRunConnectionMissing", {
+      orgId: params.orgId,
+      spaceId: params.spaceId,
+      packageId: params.agent.id,
+      actor: { type: params.actor.type, id: params.actor.id },
+      errors: integrationErrors.map((e) => ({
+        field: e.field,
+        code: e.code,
+        message: e.message,
+        ...(e.title ? { title: e.title } : {}),
+      })),
+    });
     // Mint the connect links LAST — strictly after the webhook projection
-    // above, which must never carry a bearer capability off-platform, and only
-    // for a caller that opted in and holds `integrations:connect`.
-    const responseErrors =
-      params.connectOffers && params.actor
-        ? await attachConnectOffers({
-            errors: integrationErrors,
-            scope: { orgId: params.orgId, spaceId: params.spaceId },
-            actor: params.actor,
-            policy: params.connectOffers,
-            ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
-          })
-        : integrationErrors;
-    throw missingIntegrationConnection(responseErrors);
+    // above, which must never carry a bearer capability off-platform.
+    throw missingIntegrationConnection(
+      await withConnectOffers(params, integrationErrors),
+      params.versionRef,
+    );
   }
 
   const first = errors[0]!;
@@ -328,5 +222,20 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     code: first.code,
     title: first.title ?? first.code,
     detail: first.message,
+  });
+}
+
+/** Connect links on `items`, only for a caller that opted in and holds `integrations:connect`. */
+async function withConnectOffers(
+  params: ValidateAgentReadinessParams,
+  items: ResolutionFieldError[],
+): Promise<ResolutionFieldError[]> {
+  if (!params.connectOffers || items.length === 0) return items;
+  return attachConnectOffers({
+    errors: items,
+    scope: { orgId: params.orgId, spaceId: params.spaceId },
+    actor: params.actor,
+    policy: params.connectOffers,
+    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
 }

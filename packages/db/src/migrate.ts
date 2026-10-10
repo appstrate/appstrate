@@ -3,9 +3,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { createLogger } from "@appstrate/core/logger";
-
-const logger = createLogger("info");
+import { logger } from "./logger.ts";
 
 const url = process.env["DATABASE_URL"];
 if (!url) {

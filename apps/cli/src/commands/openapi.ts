@@ -37,7 +37,7 @@
 import { Command } from "commander";
 import { resolveProfileName, readConfig } from "../lib/config.ts";
 import { formatError } from "../lib/ui.ts";
-import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
+import { CommandExit, DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { fetchOpenApi, type OpenApiDocument } from "../lib/openapi-cache.ts";
 import {
   collectOperations,
@@ -208,6 +208,7 @@ export async function openapiShowCommand(
     }
     io.stdout.write(formatShow(derefEntry, detectColor()));
   } catch (err) {
+    if (err instanceof CommandExit) throw err;
     io.stderr.write(formatError(err) + "\n");
     io.exit(1);
   }

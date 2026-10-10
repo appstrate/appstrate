@@ -35,7 +35,7 @@ const originalFetch = globalThis.fetch;
 
 let fetchCalls: FetchCall[];
 
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
 interface Responders {
@@ -154,7 +154,7 @@ describe("space list", () => {
 
   it("errors out when the profile is not logged in", async () => {
     const { io, stderr } = createMemoryIO();
-    await expect(spaceListCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(spaceListCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("not configured");
   });
 });
@@ -172,13 +172,17 @@ describe("space current", () => {
   it("exits 1 with a hint when no space is pinned", async () => {
     const { io, stderr } = createMemoryIO();
     await seedLoggedIn();
-    await expect(spaceCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(spaceCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(
+      CommandExit,
+    );
     expect(stderr()).toContain("No space pinned");
   });
 
   it("exits 1 when the profile is unconfigured", async () => {
     const { io, stderr } = createMemoryIO();
-    await expect(spaceCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    await expect(spaceCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(
+      CommandExit,
+    );
     expect(stderr()).toContain('Profile "default" not configured');
   });
 });
@@ -242,7 +246,7 @@ describe("space switch", () => {
     });
 
     await expect(spaceSwitchCommand({ profile: "default" }, {}, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
     expect(stderr()).toContain("No spaces");
   });
@@ -260,7 +264,7 @@ describe("space switch", () => {
 
     await expect(
       spaceSwitchCommand({ profile: "default", ref: "nope" }, {}, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(await pinnedSpaceId()).toBe("spc_1"); // unchanged
   });
 
@@ -277,7 +281,7 @@ describe("space switch", () => {
 
     await expect(
       spaceSwitchCommand({ profile: "default" }, { pickSpace: async () => null }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("non-TTY");
     expect(await pinnedSpaceId()).toBe("spc_1"); // unchanged
   });
@@ -352,7 +356,7 @@ describe("space create", () => {
 
     await expect(
       spaceCreateCommand({ profile: "default" }, { promptCreateSpace: async () => null }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("non-TTY");
   });
 
@@ -360,7 +364,7 @@ describe("space create", () => {
     const { io, stderr } = createMemoryIO();
     await expect(
       spaceCreateCommand({ profile: "default", name: "X" }, {}, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
     expect(stderr()).toContain("not configured");
   });
 });

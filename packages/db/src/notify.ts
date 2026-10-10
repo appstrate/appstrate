@@ -2,6 +2,7 @@
 
 import { sql as drizzleSql } from "drizzle-orm";
 import type { Db } from "./client.ts";
+import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { PricingStatus } from "./pricing-status.ts";
 
 /**
@@ -36,12 +37,7 @@ export interface RunMetricNotifyPayload {
   /** Agent id, used by the per-agent runs SSE stream filter. */
   package_id: string;
   /** Cumulative token usage as last reported by the runner. */
-  token_usage: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  } | null;
+  token_usage: TokenUsage | null;
   /** Running aggregate of `llm_usage.cost_usd` for this run, in USD. */
   cost_so_far: number;
   /**
@@ -63,7 +59,8 @@ export interface RunMetricNotifyPayload {
  *
  * The payload is JSON-encoded inline; postgres truncates NOTIFY
  * payloads at 8 KB but ours is bounded by the four `token_usage`
- * integers, a float and a one-word status, well under that ceiling.
+ * integers (plus at most `MAX_TOKEN_USAGE_TIERS` five-number tier bands), a
+ * float and a one-word status, well under that ceiling.
  */
 export async function notifyRunMetric(db: Db, payload: RunMetricNotifyPayload): Promise<void> {
   await db.execute(drizzleSql`SELECT pg_notify('run_metric', ${JSON.stringify(payload)})`);
@@ -264,11 +261,9 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // integration detail, status cards). Without this, the badge only
   // refreshes on window-focus refetch and stays stale across tabs.
   //
-  // Tenant scope: the payload carries `space_id` only — the table
-  // has no `org_id` column (org is enforced via the `spaces` row).
-  // The realtime subscriber filter relies on the SSE auth gate
-  // (`validateSSEAuth`) having proven `spaceId ∈ orgId`, so this
-  // payload-side scope is sufficient.
+  // Tenant scope: `org_id` always, `space_id` NULL for an org-scoped
+  // connection, which reaches the spaces `connectionInSpace` admits —
+  // `origin_space_id` and the (integration, auth) pair are what it reads.
   //
   // DELETE branch carries the OLD row's identifiers so the frontend can
   // invalidate the right cache; `needs_reconnection` is NULL on delete
@@ -289,7 +284,9 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', OLD.auth_key,
           'user_id', OLD.user_id,
           'end_user_id', OLD.end_user_id,
+          'org_id', OLD.org_id,
           'space_id', OLD.space_id,
+          'origin_space_id', OLD.origin_space_id,
           'needs_reconnection', NULL,
           'deleted', TRUE
         )::text);
@@ -302,7 +299,9 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', NEW.auth_key,
           'user_id', NEW.user_id,
           'end_user_id', NEW.end_user_id,
+          'org_id', NEW.org_id,
           'space_id', NEW.space_id,
+          'origin_space_id', NEW.origin_space_id,
           'needs_reconnection', NEW.needs_reconnection,
           'deleted', FALSE
         )::text);

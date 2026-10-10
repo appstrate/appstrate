@@ -17,7 +17,7 @@
  *     in tier0/tier123 gets a stable cwd.
  */
 
-import { describe, it, expect, afterEach, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, afterEach, beforeEach } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -44,6 +44,7 @@ import {
   type InstallOptions,
 } from "../src/commands/install.ts";
 import type { RunningComposeProject } from "../src/lib/install/tier123.ts";
+import { CommandExit } from "../src/lib/io.ts";
 
 /** Fresh-install shape reused by the resolveAppUrl suite. */
 const NO_EXISTING = { hasEnv: false, hasCompose: false, existingEnv: {} };
@@ -293,22 +294,15 @@ describe("resolveTier (interactive)", () => {
   it("exits with 130 on cancel", async () => {
     const select = (async () =>
       Symbol("cancel-sentinel")) as unknown as typeof import("@clack/prompts").select;
-    const exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`exit:${code}`);
-    }) as never);
-    try {
-      await expect(
-        resolveTier(undefined, {
-          select,
-          isCancel: ((value: unknown) =>
-            typeof value === "symbol") as unknown as typeof import("@clack/prompts").isCancel,
-          note: () => {},
-          isDockerAvailable: async () => true,
-        }),
-      ).rejects.toThrow("exit:130");
-    } finally {
-      exitSpy.mockRestore();
-    }
+    const exit = await resolveTier(undefined, {
+      select,
+      isCancel: ((value: unknown) =>
+        typeof value === "symbol") as unknown as typeof import("@clack/prompts").isCancel,
+      note: () => {},
+      isDockerAvailable: async () => true,
+    }).catch((err: unknown) => err);
+    expect(exit).toBeInstanceOf(CommandExit);
+    expect((exit as CommandExit).code).toBe(130);
   });
 });
 
@@ -1822,9 +1816,8 @@ describe("installCommand tier inheritance", () => {
   }
 
   /**
-   * Run the real command against `dir` and report what it decided.
-   * `process.exit` is spied so an internal failure surfaces as a failing
-   * assertion instead of tearing down the test runner.
+   * Run the real command against `dir` and report what it decided. An
+   * internal failure ends it with a `CommandExit`, which fails the test.
    */
   async function runInstall(dir: string, opts: Partial<InstallOptions> = {}) {
     const captured = {
@@ -1833,33 +1826,26 @@ describe("installCommand tier inheritance", () => {
       infos: [] as string[],
       probeCalls: 0,
     };
-    const exitSpy = spyOn(process, "exit").mockImplementation(((code?: number) => {
-      throw new Error(`installCommand exited: ${code}`);
-    }) as never);
-    try {
-      await installCommand(
-        { dir, autoConfirm: true, ...opts },
-        {
-          installTier0: async () => {
-            captured.tier0Installed = true;
-          },
-          installDockerTier: async (_dir, tier) => {
-            captured.dockerTier = tier;
-          },
-          isDockerAvailable: async () => {
-            captured.probeCalls += 1;
-            return true;
-          },
-          findRunningComposeProject: async (name) => ({
-            name,
-            configFiles: [join(dir, "docker-compose.yml")],
-          }),
-          info: (message) => captured.infos.push(message),
+    await installCommand(
+      { dir, autoConfirm: true, ...opts },
+      {
+        installTier0: async () => {
+          captured.tier0Installed = true;
         },
-      );
-    } finally {
-      exitSpy.mockRestore();
-    }
+        installDockerTier: async (_dir, tier) => {
+          captured.dockerTier = tier;
+        },
+        isDockerAvailable: async () => {
+          captured.probeCalls += 1;
+          return true;
+        },
+        findRunningComposeProject: async (name) => ({
+          name,
+          configFiles: [join(dir, "docker-compose.yml")],
+        }),
+        info: (message) => captured.infos.push(message),
+      },
+    );
     return captured;
   }
 

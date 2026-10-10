@@ -95,13 +95,20 @@ export function createFakeOrchestrator(): RunOrchestrator {
   };
 }
 
-/** Inline agent manifest declaring one integration dependency per id. */
-export function inlineAgentManifest(integrations: string[] = []): Record<string, unknown> {
+/**
+ * Inline agent manifest declaring one integration dependency per id. An id in
+ * `opts.required` is marked `required`: no connection is then a 409, not a run
+ * started without it.
+ */
+export function inlineAgentManifest(
+  integrations: string[] = [],
+  opts: { required?: readonly string[] } = {},
+): Record<string, unknown> {
   const deps: Record<string, string> = {};
-  const config: Record<string, { tools: string[] }> = {};
+  const config: Record<string, { tools: string[]; required?: true }> = {};
   for (const id of integrations) {
     deps[id] = "^1.0.0";
-    config[id] = { tools: ["search"] };
+    config[id] = { tools: ["search"], ...(opts.required?.includes(id) ? { required: true } : {}) };
   }
   return {
     name: "@inline/ignored", // overridden by the platform
@@ -165,7 +172,7 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
 
 /**
  * Add one connection on the integration's `primary` auth, owned by the ctx
- * user. `label` is NOT NULL and unique per (space, integration), so it and
+ * user. `label` is NOT NULL and unique per owner, so it and
  * `accountId` default here to generated names. Pass them when the test asserts on them.
  */
 export async function seedIntegrationConnection(
@@ -179,6 +186,7 @@ export async function seedIntegrationConnection(
       integrationId,
       authKey: "primary",
       accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,

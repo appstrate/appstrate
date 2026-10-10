@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "14.0.0",
+  "version": "15.0.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -107,8 +107,8 @@
     "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.7.0",
-    "@appstrate/afps-shared": "^0.11.0",
+    "@afps-spec/schema": "^0.9.0",
+    "@appstrate/afps-shared": "^0.13.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
     "ajv": "^8.20.0",

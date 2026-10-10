@@ -607,6 +607,34 @@ describe("model-provider-credentials service — aggregator + inference loader",
       expect(await loadInferenceCredentials(ctx.orgId, apiKeyId)).toBeNull();
       expect(await loadInferenceCredentials(ctx.orgId, oauthId)).toBeNull();
     });
+
+    it("shows a credential under a missing kid as it is, 503s inference, and rotates its key", async () => {
+      // A missing key is the operator's to restore: no "reconnect" badge, but no secret either.
+      const ctx = await createTestContext({ orgSlug: "agg-list-missing-kid" });
+      const apiKeyId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        label: "OpenAI",
+        providerId: "openai",
+        apiKey: PLAINTEXT,
+      });
+      await db
+        .update(modelProviderCredentials)
+        .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+        .where(eq(modelProviderCredentials.id, apiKeyId));
+
+      const listed = (await listOrgModelProviderCredentials(ctx.orgId)).find(
+        (k) => k.id === apiKeyId,
+      );
+      expect(listed!.needs_reconnection).toBe(false);
+      await expect(loadInferenceCredentials(ctx.orgId, apiKeyId)).rejects.toMatchObject({
+        status: 503,
+        code: "encryption_key_unavailable",
+      });
+      // The repair gesture never reads the old blob.
+      await updateModelProviderCredential(ctx.orgId, apiKeyId, { apiKey: "sk-rotated" });
+      expect((await loadInferenceCredentials(ctx.orgId, apiKeyId))!.apiKey).toBe("sk-rotated");
+    });
   });
 
   describe("loadInferenceCredentials — DB path (api_key + OAuth)", () => {

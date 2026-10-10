@@ -49,7 +49,11 @@ import {
   extractRunStatus,
   isRunLaunchOp,
 } from "./run-events.ts";
-import { extractAuthOffers } from "./auth-offer.ts";
+import {
+  extractAuthOffers,
+  extractRunAndWaitAuthOffers,
+  isStartedRunResult,
+} from "./auth-offer.ts";
 import {
   asRecord,
   definedEntries,
@@ -450,22 +454,25 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // A launch refused for a missing connection (409) carries a ready-to-open
 // `connect_url` per actionable integration (#1207), so the connect cards render
 // UNDER the run panel and the user clicks straight through — the model is never
-// asked to kick a connect flow off, and never sees the link. Zero offers (every
-// other outcome, including a successful run) adds nothing: unlike the
-// invoke_operation connect branch there is no placeholder card here, because the
-// run panel already holds the block's geometry.
+// asked to kick a connect flow off, and never sees the link. A run that started
+// without an optional integration carries the same link on its warning, shown
+// once the call settles — by then it may have lapsed, so the card gets its expiry.
+// Zero offers adds nothing: unlike the invoke_operation connect branch there is
+// no placeholder card here, because the run panel already holds its geometry.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
   render: (props: AnyToolProps) => (
     <>
       <RunLaunchCard {...props} />
-      {extractAuthOffers(props.result).map((offer) => (
+      {extractRunAndWaitAuthOffers(props).map((offer) => (
         <OAuthConnectCard
           key={offer.authUrl}
           authUrl={offer.authUrl}
           state={offer.state}
           packageId={offer.packageId}
           toolCallId={props.toolCallId}
+          runStarted={isStartedRunResult(props.result)}
+          expiresAt={offer.expiresAt}
         />
       ))}
     </>

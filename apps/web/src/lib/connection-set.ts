@@ -12,17 +12,17 @@ export function toggleCapped(ids: string[], id: string): string[] {
   return [...ids, id];
 }
 
-/**
- * `picks` (integration id → set) with one integration's set replaced; an empty
- * set removes the key, since an empty set is refused on the wire.
- */
+/** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
+export type ConnectionSet = string[] | null;
+
+/** `picks` (integration id → set) with one integration's set replaced; `null` removes the key. */
 export function withConnectionPick(
   picks: Readonly<Record<string, string[]>>,
   integrationId: string,
-  connectionIds: string[],
+  connectionIds: ConnectionSet,
 ): Record<string, string[]> {
   const next = { ...picks };
-  if (connectionIds.length > 0) next[integrationId] = connectionIds;
+  if (connectionIds !== null) next[integrationId] = connectionIds;
   else delete next[integrationId];
   return next;
 }
@@ -31,7 +31,7 @@ export function withConnectionPick(
 export function withConnectionOverride(
   overrides: RunOverridesValue,
   integrationId: string,
-  connectionIds: string[],
+  connectionIds: ConnectionSet,
 ): RunOverridesValue {
   const { connection_overrides: picks, ...rest } = overrides;
   const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
@@ -62,36 +62,35 @@ export function keepAvailable(ids: string[], availableIds: string[]): string[] {
  */
 export function canApplyConnectionSet(
   checked: readonly { id: string }[],
-  explicitIds: string[],
+  explicitIds: ConnectionSet,
   touched: boolean,
 ): boolean {
   if (checked.length === 0) return false;
-  if (!touched && explicitIds.length === 0) return false;
+  if (!touched && explicitIds === null) return false;
   return !sameSet(
     checked.map((c) => c.id),
-    explicitIds,
+    explicitIds ?? [],
   );
 }
 
 /** Bound as displayed: an unpinned member still sees the cascade; an unpicked override inherits. */
 export function displayedConnectionIds(input: {
   overrideMode: boolean;
-  explicitIds: string[];
+  explicitIds: ConnectionSet;
   resolvedIds: string[];
 }): string[] {
-  if (input.explicitIds.length > 0) return input.explicitIds;
+  if (input.explicitIds !== null) return input.explicitIds;
   return input.overrideMode ? [] : input.resolvedIds;
 }
 
 /** The ticked set "Valider" writes. A tick the user cannot see is one they cannot remove. */
 export function checkedConnectionIds(input: {
   draft: string[] | null;
-  explicitIds: string[];
+  explicitIds: ConnectionSet;
   resolvedIds: string[];
   candidateIds: string[];
 }): string[] {
-  const base =
-    input.draft ?? (input.explicitIds.length > 0 ? input.explicitIds : input.resolvedIds);
+  const base = input.draft ?? input.explicitIds ?? input.resolvedIds;
   return keepAvailable(base, input.candidateIds);
 }
 
@@ -104,18 +103,24 @@ export function unavailableConnectionIds(explicitIds: string[], candidateIds: st
 }
 
 /**
- * Where a connection created from the picker goes. With no pick of the actor's own it becomes
- * the pick — never joined onto the cascade's fallback, which would freeze an org default into a
- * member pin. Beside an explicit pick it is only ticked: binding several connections is always
- * the actor's explicit "Valider".
+ * Where a connection created from the picker goes. With no pick of the actor's own (or a pick of
+ * none) it becomes the pick — never joined onto the cascade's fallback, which would freeze an org
+ * default into a member pin. Beside an explicit pick it is only ticked: binding several
+ * connections is always the actor's explicit "Valider". A connection created to replace a stored
+ * member (`replacing`) takes its place 1-for-1, which never grows the set.
  */
 export function placeCreatedConnection(input: {
-  explicitIds: string[];
+  explicitIds: ConnectionSet;
   checkedIds: string[];
   createdId: string;
+  replacing?: string;
 }): { persist: string[] } | { draft: string[] } {
-  if (input.explicitIds.length === 0) return { persist: [input.createdId] };
-  const { checkedIds, createdId } = input;
+  const { explicitIds, createdId, replacing } = input;
+  if (replacing && explicitIds?.includes(replacing)) {
+    return { persist: explicitIds.map((id) => (id === replacing ? createdId : id)) };
+  }
+  if (!explicitIds?.length) return { persist: [createdId] };
+  const checkedIds = input.checkedIds.filter((id) => id !== replacing);
   return {
     draft:
       checkedIds.includes(createdId) || checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION

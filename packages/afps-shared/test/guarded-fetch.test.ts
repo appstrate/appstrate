@@ -8,6 +8,7 @@ import {
   guardedFetchChain,
   SsrfBlockedError,
 } from "../src/guarded-fetch.ts";
+import { isLoopbackHost } from "../src/ssrf.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -64,6 +65,35 @@ describe("guardedFetch — SSRF", () => {
     expect(seenTls as { serverName?: string } | undefined).toEqual({
       serverName: "public.example",
     });
+  });
+
+  it("judges both layers with `blockedHost` instead of the blocklist, and still pins", async () => {
+    const seen: Array<{ url: string; tls: unknown }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, reqInit?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      seen.push({ url, tls: (reqInit as { tls?: unknown } | undefined)?.tls });
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+    const opts = (address: string) => ({
+      resolve: resolverFor({ "internal.example": [address] }),
+      blockedHost: isLoopbackHost,
+    });
+
+    expect((await guardedFetch("http://10.0.0.5/x", undefined, opts("10.0.0.5"))).status).toBe(200);
+    const res = await guardedFetch("https://internal.example/x", undefined, opts("10.0.0.5"));
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([
+      { url: "http://10.0.0.5/x", tls: undefined },
+      { url: "https://10.0.0.5/x", tls: { serverName: "internal.example" } },
+    ]);
+
+    await expect(guardedFetch("http://127.0.0.1/x", undefined, opts("10.0.0.5"))).rejects.toThrow(
+      /blocked-literal/,
+    );
+    await expect(
+      guardedFetch("https://internal.example/x", undefined, opts("127.0.0.1")),
+    ).rejects.toThrow(/blocked-resolved/);
+    expect(seen).toHaveLength(2);
   });
 
   it("does not pin when a fetchImpl transport seam is injected", async () => {

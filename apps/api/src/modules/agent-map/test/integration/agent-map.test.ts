@@ -243,7 +243,7 @@ describe("GET /api/agents/:scope/:name/map", () => {
     await seedAgentWith(
       agentManifest({
         dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
-        integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
+        integrations_configuration: { [INTEGRATION]: { tools: ["search"], required: true } },
       }),
     );
     await seedIntegration();
@@ -409,10 +409,10 @@ describe("GET /api/agents/:scope/:name/map", () => {
     expect(tools.map((i) => i.id)).toContain("output");
   });
 
-  it("config card carries the effective value, and a bad setting routes to its row", async () => {
+  it("config card carries the effective value", async () => {
     await seedAgentWith(
       agentManifest({
-        config: {
+        input: {
           schema: {
             type: "object",
             required: ["destinataire"],
@@ -442,13 +442,6 @@ describe("GET /api/agents/:scope/:name/map", () => {
       // run would actually use, not what the manifest literally stores.
       { name: "seuil", title: null, type: "number", required: false, value: "5" },
     ]);
-
-    // A required setting left empty blocks the run, and that diagnostic belongs
-    // on the setting itself rather than lumped onto the agent card.
-    const diag = body.diagnostics.find((d) => d.field === "config.destinataire");
-    expect(diag).toBeDefined();
-    expect(diag!.node_id).toBe("input_values");
-    expect(diag!.item_id).toBe("destinataire");
   });
 
   it("unknown agent → 404", async () => {

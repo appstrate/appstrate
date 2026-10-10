@@ -1,205 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { ChevronDown, Plug, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
-import { useIntegrationDetail } from "../../hooks/use-integrations";
 
 /**
- * Agent-driven inline connect/upgrade trigger.
- *
- * Every auth type (oauth2 / api_key / basic / mtls / custom) goes through the
- * unified hosted connect portal (issue #769): one `openPopup` call mints a
- * connect session and opens its `connect_url`, which dispatches server-side to
- * the provider OAuth screen or the hosted credential form. The button therefore
- * never branches on the auth type and the credential secret never touches this
- * bundle.
- *
- * Multi-auth integrations (GitHub: oauth + pat): same primary button
- * with a chevron that opens a dropdown listing every declared auth so
- * the user picks which method to connect with. Labels come from i18n
- * keyed on `auth.type` (`oauth2` → "OAuth", `api_key` → "Clé API", …) —
- * no per-integration label boilerplate, generic across the catalog.
- *
- * Used by:
- *   - AgentIntegrationsBlock (Connexions tab status cards)
- *   - MissingConnectionsModal (409 recovery surface)
- *
- * On success the integration's React Query keys are invalidated by the
- * underlying mutation hooks; the consuming card/row re-renders with
- * the new status.
+ * Reconnects one connection in place through the hosted connect portal (issue #769), so the
+ * credential secret never touches this bundle. It requests no scopes: the server re-consents
+ * what the row holds, which widens no agent bound to it.
  */
-
-interface InlineConnectButtonProps {
-  packageId: string;
-  /**
-   * Default authKey for the primary click action. When the integration
-   * declares multiple auths, the dropdown lets the user override.
-   */
-  authKey: string;
-  /**
-   * Scopes inferred from the agent's `tools[]` selection. Forwarded
-   * verbatim to the OAuth kickoff so the consent prompt asks for the
-   * minimum the agent needs. The backend requests `defaults ∪ these ∪
-   * what the target connection already granted` — it does NOT walk
-   * the org's agents, so omitting this (e.g. the integration page's "+
-   * Add account") connects with the manifest defaults only. Scope
-   * upgrades pass the missing scopes here explicitly.
-   */
-  scopes?: string[];
-  /**
-   * `connect` — first connection (no row yet).
-   * `reconnect` — connection exists but `needsReconnection=true`; user
-   *   re-runs the full OAuth dance, the upstream row is preserved
-   *   (upsert keyed by `(integration, authKey, accountId, app, owner)`).
-   * `upgrade` — connection exists with valid tokens but the agent's
-   *   selected tools require scopes the actor hasn't granted yet; OAuth
-   *   re-kickoff requests defaults + missing + already-granted so the
-   *   IdP shows an incremental-consent screen for the diff only.
-   */
-  intent: "connect" | "reconnect" | "upgrade";
-  size?: "sm" | "default";
-  /** Compact row-action trigger; the label remains available to assistive tech. */
-  iconOnly?: boolean;
-  /** Override button label entirely. */
-  label?: string;
-  /**
-   * Force the OAuth IdP to render its account picker (via
-   * `prompt=select_account`). Used on "add another" CTAs so the user
-   * can actually authenticate as a different upstream account; without
-   * it the IdP silently reuses the signed-in session.
-   */
-  forceAccountSelect?: boolean;
-  /**
-   * Existing connection id to UPDATE in place (reconnect / upgrade).
-   * Omitted on fresh-connect CTAs — the callback then INSERTs a new
-   * row. Threaded all the way through the OAuth state record.
-   */
-  connectionId?: string;
-  /**
-   * Force the primary single-button path bound to `authKey`, suppressing
-   * the multi-auth method-picker dropdown. Used on the integration detail
-   * page, where the button lives *inside* a per-auth section that already
-   * represents one method — offering the other methods there is nonsense.
-   */
-  lockToAuthKey?: boolean;
-  /**
-   * Fired after a connect/renew attempt resolves (OAuth popup closed or a
-   * fields connect succeeded). The OAuth popup can't distinguish success from
-   * a user cancel, so consumers should treat this as "re-read the truth"
-   * (e.g. refetch) rather than an assertion of success.
-   */
-  onConnected?: () => void;
-}
-
 export function InlineConnectButton({
   packageId,
-  authKey: defaultAuthKey,
-  scopes,
-  intent,
-  size = "sm",
-  iconOnly = false,
-  label,
-  forceAccountSelect,
+  authKey,
   connectionId,
-  lockToAuthKey,
-  onConnected,
-}: InlineConnectButtonProps) {
-  const { t } = useTranslation(["agents", "settings"]);
-  const { data: detail } = useIntegrationDetail(packageId);
+  iconOnly = false,
+}: {
+  packageId: string;
+  authKey: string;
+  connectionId: string;
+  /** Compact row-action trigger; the label remains available to assistive tech. */
+  iconOnly?: boolean;
+}) {
+  const { t } = useTranslation("agents");
   const { openPopup, isPending } = useHostedConnectPopup();
-
-  const auths = detail?.manifest?.auths ?? {};
-  const authKeys = Object.keys(auths);
-  // The method-picker dropdown only makes sense when one button stands in
-  // for the whole integration. When the button is locked to a section's
-  // authKey, render the single-button path bound to that method.
-  const showDropdown = authKeys.length > 1 && !lockToAuthKey;
-
-  // Guard: a fresh agent run might 409 before the integration manifest
-  // is in cache. Disable the trigger until the detail loads rather than
-  // opening a portal with no auth metadata.
-  const disabled = authKeys.length === 0 || isPending;
-
-  // Every auth type goes through the hosted connect portal — the openPopup
-  // call mints a session and opens its connect_url, which dispatches to the
-  // OAuth screen or the hosted credential form server-side.
-  const triggerConnect = (key: string) => {
-    if (!auths[key]) return;
-    // openPopup never rejects — every failure path surfaces its own toast and
-    // resolves — so a fired-and-forgotten `.then` is enough; `onConnected` means
-    // "re-read the truth", not "connect succeeded".
-    void openPopup({
-      packageId,
-      authKey: key,
-      ...(scopes ? { scopes } : {}),
-      ...(forceAccountSelect ? { forceAccountSelect: true } : {}),
-      ...(connectionId ? { connectionId } : {}),
-    }).then(() => onConnected?.());
-  };
-
-  const text =
-    label ??
-    (intent === "upgrade"
-      ? t("detail.integrationUpgrade")
-      : intent === "reconnect"
-        ? t("detail.integrationReconnect")
-        : t("detail.integrationConnect"));
-  const Icon = intent === "connect" ? Plug : RefreshCw;
-  const tooltip = intent === "upgrade" ? t("detail.integrationUpgradeTooltip") : undefined;
-
+  const label = t("detail.integrationReconnect");
   return (
-    <>
-      {showDropdown ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size={size}
-              disabled={disabled}
-              data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
-            >
-              <Icon className="mr-1 size-3" />
-              {text}
-              <ChevronDown className="ml-1 size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {authKeys.map((k) => {
-              const typeLabel = t(`settings:integration.auth.type.${auths[k]!.type}`);
-              return (
-                <DropdownMenuItem
-                  key={k}
-                  onSelect={() => triggerConnect(k)}
-                  data-testid={`inline-connect-pick-${packageId}-${k}`}
-                >
-                  {t("settings:integration.auth.connectVia", { label: typeLabel })}
-                </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : (
-        <Button
-          size={iconOnly ? "icon" : size}
-          variant={iconOnly ? "ghost" : "default"}
-          className={iconOnly ? "size-7" : undefined}
-          onClick={() => triggerConnect(defaultAuthKey)}
-          disabled={disabled}
-          title={tooltip ?? (iconOnly ? text : undefined)}
-          aria-label={iconOnly ? text : undefined}
-          data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
-        >
-          <Icon className={iconOnly ? "size-3.5" : "mr-1 size-3"} />
-          {!iconOnly && text}
-        </Button>
-      )}
-    </>
+    <Button
+      size={iconOnly ? "icon" : "sm"}
+      variant={iconOnly ? "ghost" : "default"}
+      className={iconOnly ? "size-7" : undefined}
+      // openPopup never rejects: every failure path toasts and resolves.
+      onClick={() => void openPopup({ packageId, authKey, connectionId })}
+      disabled={isPending}
+      title={iconOnly ? label : undefined}
+      aria-label={iconOnly ? label : undefined}
+      data-testid={`inline-connect-${packageId}-${authKey}`}
+    >
+      <RefreshCw className={iconOnly ? "size-3.5" : "mr-1 size-3"} />
+      {!iconOnly && label}
+    </Button>
   );
 }

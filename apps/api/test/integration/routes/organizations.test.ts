@@ -35,6 +35,8 @@ import {
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
 import { getOrgSettings, provisionMember } from "../../../src/services/organizations.ts";
 import { recordAudit } from "../../../src/services/audit.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
+import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
 
 const app = getTestApp();
 
@@ -191,6 +193,23 @@ describe("Organizations API", () => {
 
       // Verify org exists in DB
       await assertDbHas(organizations, eq(organizations.slug, "new-org"));
+    });
+
+    it("gives the new organization a starter agent whose published version runs (#1789)", async () => {
+      const testUser = await createTestUser();
+
+      const res = await app.request("/api/orgs", {
+        method: "POST",
+        headers: { Cookie: testUser.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Starter Org", slug: "starter-org" }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string };
+
+      const agent = await getPackage("@starter-org/hello-world", body.id);
+      expect(agent).not.toBeNull();
+      const resolved = await resolveAgentRunVersion(agent!, undefined);
+      expect(resolved.overrideVersionLabel).toBe("1.0.0");
     });
 
     it("rejects duplicate slug with 400", async () => {

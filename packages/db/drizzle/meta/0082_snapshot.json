@@ -1,5 +1,5 @@
 {
-  "id": "8d5cfbc7-5571-4c5b-8c60-65156b1e55ab",
+  "id": "5c9f6fd7-4985-4d59-977f-859982acd548",
   "prevId": "94d794fa-4ec3-44ac-aaa8-e24bfcbe039c",
   "version": "7",
   "dialect": "postgresql",
@@ -1513,12 +1513,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -5059,6 +5053,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "variables": {
+          "name": "variables",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "scopes_granted": {
           "name": "scopes_granted",
           "type": "text[]",
@@ -5075,6 +5075,12 @@
         },
         "client_ref": {
           "name": "client_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "oauth_resource": {
+          "name": "oauth_resource",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -5370,6 +5376,12 @@
           "notNull": true,
           "default": false
         },
+        "issuer": {
+          "name": "issuer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -5461,6 +5473,12 @@
               "expression": "auth_key",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"issuer\", '')",
+              "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
@@ -5584,6 +5602,10 @@
         "ioc_auto_provisioned_is_space": {
           "name": "ioc_auto_provisioned_is_space",
           "value": "NOT \"integration_oauth_clients\".\"auto_provisioned\" OR \"integration_oauth_clients\".\"space_id\" IS NOT NULL"
+        },
+        "ioc_issuer_is_auto": {
+          "name": "ioc_issuer_is_auto",
+          "value": "\"integration_oauth_clients\".\"issuer\" IS NULL OR (\"integration_oauth_clients\".\"auto_provisioned\" AND \"integration_oauth_clients\".\"issuer\" <> '')"
         }
       },
       "isRLSEnabled": false

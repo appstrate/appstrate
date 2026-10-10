@@ -263,6 +263,10 @@
           "auth_key": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Whether an execution of the agent needs a credential for this integration to start (default false). See AFPS §4.4."
           }
         },
         "additionalProperties": {}

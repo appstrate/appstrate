@@ -4,7 +4,7 @@
 /**
  * SSRF protection — blocks requests targeting private/internal networks.
  *
- * Canonical, zero-dependency source of truth. Re-exported verbatim by
+ * Canonical, zero-internal-dependency source of truth. Re-exported verbatim by
  * `@appstrate/core/ssrf` (so every existing platform consumer keeps its
  * import path) and consumed directly by the shared `api-call-engine` in
  * `@appstrate/afps-runtime` — which cannot depend on `@appstrate/core`
@@ -19,6 +19,9 @@
  * - IPv4 embedded in IPv6 (compatible, mapped, SIIT, NAT64, 6to4) is judged as that IPv4
  */
 
+/** Where a host leads: this machine, an internal network, or the public internet. */
+type HostClass = "loopback" | "internal" | "public";
+
 /**
  * Check whether a hostname resolves to a private/internal network address.
  * Normalizes through the WHATWG URL parser to defeat bypass techniques
@@ -27,29 +30,43 @@
  * @returns true if the host targets a private/internal network and should be blocked
  */
 export function isBlockedHost(hostname: string): boolean {
-  let h: string;
+  return classifyHost(hostname) !== "public";
+}
+
+/**
+ * Whether `hostname`, in any form {@link isBlockedHost} parses, is this machine; an unparseable
+ * hostname counts as loopback (fail closed).
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  return classifyHost(hostname) === "loopback";
+}
+
+/** The WHATWG-normalized host: lowercase, unbracketed, no trailing dot; null when unparseable. */
+function normalizeHost(hostname: string): string | null {
   try {
     const stripped = hostname.replace(/^\[|\]$/g, "");
     const urlStr = stripped.includes(":") ? `http://[${stripped}]/` : `http://${stripped}/`;
-    h = new URL(urlStr).hostname.toLowerCase();
     // Bun keeps brackets on IPv6 hostnames — strip them for uniform checks
-    h = h.replace(/^\[|\]$/g, "");
+    const h = new URL(urlStr).hostname.toLowerCase().replace(/^\[|\]$/g, "");
     // A trailing dot is a valid FQDN form that DNS resolves identically
     // (`metadata.google.internal.`, `localhost.`, `127.0.0.1.`) but would
     // slip past the exact-string host matches and the dotted-IP regex
     // below. Normalize it away so the blocklist can't be bypassed.
-    h = h.replace(/\.$/, "");
+    return h.replace(/\.$/, "");
   } catch {
-    return true; // Unparseable hostname = blocked
+    return null;
   }
+}
+
+function classifyHost(hostname: string): HostClass {
+  const h = normalizeHost(hostname);
+  if (h === null) return "loopback"; // Unparseable hostname = blocked, and loopback
 
   // --- Direct hostname matches ---
-  if (h === "localhost" || h === "sidecar" || h === "agent" || h === "host.docker.internal") {
-    return true;
-  }
   // Every `*.localhost` name is loopback (RFC 6761 §6.3).
-  if (h.endsWith(".localhost")) return true;
-  if (h === "metadata.google.internal") return true;
+  if (h === "localhost" || h.endsWith(".localhost")) return "loopback";
+  if (h === "sidecar" || h === "agent" || h === "host.docker.internal") return "internal";
+  if (h === "metadata.google.internal") return "internal";
 
   // --- IPv4 checks (URL parser normalizes all numeric formats to dotted-decimal) ---
   const ipv4Match = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
@@ -57,51 +74,52 @@ export function isBlockedHost(hostname: string): boolean {
     const a = parseInt(ipv4Match[1]!, 10);
     const b = parseInt(ipv4Match[2]!, 10);
     const c = parseInt(ipv4Match[3]!, 10);
-    if (a === 0) return true; // 0.0.0.0/8
-    if (a === 10) return true; // 10.0.0.0/8
-    if (a === 127) return true; // 127.0.0.0/8 (full loopback range)
-    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-    if (a === 192 && b === 168) return true; // 192.168.0.0/16
-    if (a === 169 && b === 254) return true; // 169.254.0.0/16 (link-local)
+    if (a === 0 || a === 127) return "loopback"; // 0.0.0.0/8, 127.0.0.0/8 (full loopback range)
+    if (a === 10) return "internal"; // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return "internal"; // 172.16.0.0/12
+    if (a === 192 && b === 168) return "internal"; // 192.168.0.0/16
+    if (a === 169 && b === 254) return "internal"; // 169.254.0.0/16 (link-local)
     // 100.64.0.0/10 — RFC 6598 shared/CGN space. Alibaba & Tencent Cloud expose
     // instance metadata at 100.100.100.200, and K8s/CGN route internal traffic
     // here; without this the whole cloud-metadata SSRF class stays open.
-    if (a === 100 && b >= 64 && b <= 127) return true;
-    if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 (benchmark)
-    if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 (IETF protocol assignments)
-    if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved + 255.255.255.255
-    return false;
+    if (a === 100 && b >= 64 && b <= 127) return "internal";
+    if (a === 198 && (b === 18 || b === 19)) return "internal"; // 198.18.0.0/15 (benchmark)
+    // 192.0.0.0/24 (IETF protocol assignments)
+    if (a === 192 && b === 0 && c === 0) return "internal";
+    // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved + 255.255.255.255
+    if (a >= 224) return "internal";
+    return "public";
   }
 
   // --- IPv6 checks ---
   if (h.includes(":")) {
     // Loopback (::1) and unspecified (::)
-    if (h === "::1" || h === "::") return true;
+    if (h === "::1" || h === "::") return "loopback";
 
     // Link-local (fe80::/10 — fe80:: through febf::)
-    if (/^fe[89ab][0-9a-f]:/.test(h)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(h)) return "internal";
 
     // Deprecated site-local (fec0::/10 — fec0:: through feff::)
-    if (/^fe[c-f][0-9a-f]:/.test(h)) return true;
+    if (/^fe[c-f][0-9a-f]:/.test(h)) return "internal";
 
     // Multicast (ff00::/8)
-    if (/^ff[0-9a-f]{2}:/.test(h)) return true;
+    if (/^ff[0-9a-f]{2}:/.test(h)) return "internal";
 
     // Unique local address (fc00::/7 — fc00:: through fdff::)
-    if (/^f[cd][0-9a-f]{2}:/.test(h)) return true;
+    if (/^f[cd][0-9a-f]{2}:/.test(h)) return "internal";
 
+    const groups = ipv6Groups(h);
+    if (!groups) return "loopback"; // unparseable, as above
     // 64:ff9b:1::/48 — RFC 8215 local-use translation prefix, not globally
     // reachable, and its operator picks the embedding length: blocked whole, like ULA.
-    const groups = ipv6Groups(h);
-    if (!groups) return true;
-    if (groups[0] === 0x64 && groups[1] === 0xff9b && groups[2] === 1) return true;
+    if (groups[0] === 0x64 && groups[1] === 0xff9b && groups[2] === 1) return "internal";
 
     // An IPv6 address that carries an IPv4 one reaches that IPv4 host: judge it as such.
     const ipv4 = embeddedIpv4(groups);
-    if (ipv4) return isBlockedHost(ipv4);
+    if (ipv4) return classifyHost(ipv4);
   }
 
-  return false;
+  return "public";
 }
 
 /** The eight 16-bit groups of a WHATWG-serialized (hex, `::`-compressed) IPv6 address, or null. */

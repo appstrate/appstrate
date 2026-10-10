@@ -1,17 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.5 — OAuth refresh for `integration_connections` rows.
- *
- * Reuses the OAuth2 refresh contract from `@appstrate/connect/token-refresh`
- * (in-memory dedup, the `revoked` vs `transient` RefreshError taxonomy,
- * write-on-success + clear-needsReconnection) but writes back to the
- * `integration_connections` table.
- *
- * Lives in apps/api rather than packages/connect because `integration_connections`
- * is platform-internal (the connect package intentionally stays free of
- * `@appstrate/db` to keep its surface light enough for the sidecar to
- * consume).
+ * OAuth2 token refresh for `integration_connections` rows ({@link refreshConnectionCredential}).
+ * Lives in apps/api: connect stays free of `@appstrate/db` so the sidecar can consume it.
  */
 
 import { eq } from "drizzle-orm";
@@ -23,144 +14,128 @@ import {
   performRefreshTokenExchange,
   decryptCredentialsToStringMap,
   resolveOAuthEndpoints,
+  UnknownKeyIdError,
 } from "@appstrate/connect";
 import type {
   RefreshContext as IntegrationRefreshContext,
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
+import type { Actor } from "../lib/actor.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { dedupedRefresh } from "../lib/deduped-refresh.ts";
-import { OAUTH_REFRESH_LEAD_MS } from "@appstrate/core/sidecar-types";
+import { encryptionKeyUnavailable } from "../lib/stored-credential.ts";
+import { OAUTH_REFRESH_LEAD_MS, type CredentialFailureCause } from "@appstrate/core/sidecar-types";
 import {
   persistCredentialBundle,
   markIntegrationConnectionNeedsReconnection,
   recordIntegrationRefreshFailure,
+  recordUnrefreshableRejection,
   resolveIntegrationClientById,
 } from "./integration-connections.ts";
+import { checkEgressUrl } from "../lib/egress-host-guard.ts";
 import { getEnv } from "@appstrate/env";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface IntegrationRefreshResult {
   /** Decrypted credentials — snake_case wire keys only (`projectToStringMap`). */
   fields: Record<string, string>;
   /** Parsed `expires_at` from the token response, or `null` if upstream did not return `expires_in`. */
   expiresAt: Date | null;
-  /**
-   * Niveau 2 Phase 6 — scope set the IdP authoritatively granted on this
-   * refresh (parsed from the response's `scope` field). `null` when the
-   * response omitted `scope` entirely — per OAuth 2 §5.1 that means
-   * "same scopes as previously issued", so the caller MUST NOT treat
-   * `null` as "no scopes granted".
-   */
-  scopesGranted: string[] | null;
-  /**
-   * `true` when {@link scopesGranted} is non-null AND strictly narrower
-   * than the connection's previously-stored `scopesGranted`. The IdP
-   * has shrunk the grant — caller should re-check the space's agents'
-   * required scopes and flip `needsReconnection` if the shrink dropped
-   * the actor below the minimum required set.
-   *
-   * `false` when scopes stayed the same, grew (creep), or the response
-   * omitted `scope`. Callers can fast-path: ignore the cross-check
-   * unless `shrinkDetected === true`.
-   */
-  shrinkDetected: boolean;
 }
 
-/**
- * Thrown when an oauth2 connection can never be refreshed as it stands, no
- * matter how many times the caller retries — currently the single case of a
- * stored credential bundle with no `refresh_token` at all. TERMINAL, and
- * distinct from `RefreshError(kind="revoked")`: the IdP never rejected
- * anything, so an operator reading "revoked" would go hunting upstream for a
- * revocation that never happened. `reason` is surfaced verbatim in the 410.
- */
-class UnrefreshableConnectionError extends Error {
-  constructor(readonly reason: string) {
-    super(reason);
-    this.name = "UnrefreshableConnectionError";
+/** A refresh's verdict, thrown out of `dedupedRefresh`. `flaggedBefore`: before the lock. */
+class RefreshVerdictError extends Error {
+  readonly flaggedBefore: boolean;
+  constructor(
+    readonly status: "retry" | "dead",
+    readonly failure: CredentialFailureCause,
+    options: { flaggedBefore?: boolean; cause?: unknown } = {},
+  ) {
+    super(`${status}: ${failure}`, { cause: options.cause });
+    this.name = "RefreshVerdictError";
+    this.flaggedBefore = options.flaggedBefore ?? false;
   }
 }
 
 /**
- * Refresh the OAuth2 access token for an integration connection.
- * No-op (returns current creds) when the manifest auth isn't OAuth2 or its
- * pinned OAuth client no longer resolves (`refreshContext` absent). When the auth
- * IS refreshable but the stored credentials carry no refresh_token, the token
- * is unrecoverable: flags needsReconnection AND throws
- * {@link UnrefreshableConnectionError} so the caller surfaces the same terminal
- * status it gives any other dead credential.
- *
- * On success: writes the new ciphertext + expiresAt + clears needsReconnection.
- * On `invalid_grant`: throws RefreshError(kind="revoked") AND flips
- * needsReconnection=true on the row (so the dashboard shows the re-connect
- * prompt at the next visit).
- * On any other failure: throws RefreshError(kind="transient") without
- * touching the row — caller fails the current request but the connection
- * stays usable for future calls.
- *
- * `options.force` defaults to TRUE: every caller reaching here has already
- * decided a refresh is warranted, and the one that is merely PROACTIVE (the
- * credentials resolver's lead-window branch) says so explicitly. Forced skips
- * the post-lock freshness short-circuit — see {@link dedupedRefresh}.
+ * A connection as its caller read it. The refresh context was built from its upstream (`clientRef`,
+ * `oauthResource`; a reconnect cannot move its variables to another instance, AFPS §7.12), so the
+ * refresh runs only while the row, re-read under the lock, still names that upstream.
  */
-export async function forceRefreshIntegrationConnection(
-  connectionId: string,
+export interface RefreshTarget {
+  id: string;
+  credentialsEncrypted: string;
+  clientRef: string | null;
+  oauthResource: string | null;
+}
+
+/** `forced` (an upstream 401) skips the freshness short-circuit after the lock. */
+async function refreshUnderLock(
+  connection: RefreshTarget,
   packageIdForLog: string,
   authKeyForLog: string,
-  credentialsEncrypted: string,
-  refreshContext?: IntegrationRefreshContext,
-  options: { force?: boolean } = {},
+  refreshContext: IntegrationRefreshContext,
+  forced: boolean,
 ): Promise<IntegrationRefreshResult> {
-  if (!refreshContext) {
-    return {
-      fields: decryptCredentialsToStringMap(credentialsEncrypted),
-      expiresAt: null,
-      scopesGranted: null,
-      shrinkDetected: false,
-    };
-  }
+  const { id: connectionId, credentialsEncrypted } = connection;
 
-  // Two dedup layers (in-process singleflight + cross-process Redis lock +
-  // post-acquire re-read), owned by `dedupedRefresh`. The re-read short-circuit
-  // returns the stored creds when a peer instance already refreshed; otherwise
-  // we refresh against the freshest stored ciphertext (a peer may have rotated
-  // the refresh_token even if the access token is near expiry).
   let freshCiphertext = credentialsEncrypted;
-  return dedupedRefresh<IntegrationRefreshResult>(connectionId, {
+  // Callers that read different upstreams of the row never share a flight's result.
+  const upstream = JSON.stringify([connection.clientRef, connection.oauthResource]);
+  return dedupedRefresh<IntegrationRefreshResult>(`${connectionId}:${upstream}`, {
     lockKey: `intg-refresh:${connectionId}`,
     lockLabel: "intg-refresh",
-    force: options.force ?? true,
+    force: forced,
     reReadFreshness: async ({ force }) => {
       const [row] = await db
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
           expiresAt: integrationConnections.expiresAt,
+          clientRef: integrationConnections.clientRef,
+          oauthResource: integrationConnections.oauthResource,
+          needsReconnection: integrationConnections.needsReconnection,
         })
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connectionId))
         .limit(1);
-      // The read happens even when forced — `doRefresh` must spend the
-      // freshest stored refresh_token, not the one the caller was holding.
-      if (row?.credentialsEncrypted) freshCiphertext = row.credentialsEncrypted;
+      if (row?.needsReconnection) {
+        // A flagged row's write-back cannot land: an exchange would only spend its refresh token.
+        throw new RefreshVerdictError("dead", "connection_flagged", { flaggedBefore: true });
+      }
+      if (
+        !row ||
+        row.clientRef !== connection.clientRef ||
+        row.oauthResource !== connection.oauthResource
+      ) {
+        throw new RefreshVerdictError("retry", "connection_changed");
+      }
+      // Read even when forced: the exchange must spend the freshest stored refresh_token.
+      freshCiphertext = row.credentialsEncrypted;
       if (force) return null;
-      if (row?.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
+      if (row.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
           expiresAt: row.expiresAt,
-          scopesGranted: null,
-          shrinkDetected: false,
         };
       }
       return null;
     },
     doRefresh: () =>
-      doRefresh(connectionId, packageIdForLog, authKeyForLog, freshCiphertext, refreshContext),
+      doRefresh(
+        { connectionId, clientRef: connection.clientRef },
+        packageIdForLog,
+        authKeyForLog,
+        freshCiphertext,
+        refreshContext,
+      ),
   });
 }
 
 async function doRefresh(
-  connectionId: string,
+  { connectionId, clientRef }: { connectionId: string; clientRef: string | null },
   packageId: string,
   authKey: string,
   credentialsEncrypted: string,
@@ -169,20 +144,8 @@ async function doRefresh(
   const current = decryptCredentialsToStringMap(credentialsEncrypted);
   const refreshToken = current.refresh_token;
   if (!refreshToken) {
-    // We only reach `doRefresh` when a refresh was actually warranted — the
-    // caller is either inside the proactive lead window (token expiring) or
-    // recovering from an upstream 401. With no refresh_token there is no way
-    // to recover: the access token is or will be dead. Flag the connection so
-    // the agent/dashboard surfaces a re-connect prompt instead of silently
-    // serving a token that 401s on every call. (Root cause for Google was a
-    // missing `access_type=offline` on the authorize URL — see
-    // `auths.{key}.authorizationParams` — so the IdP never issued one.)
-    //
-    // THROW, never return: a success shape carrying the dead token contradicts
-    // the flag we just wrote — the sidecar would inject the same credential
-    // that 401'd and report 200 to the run, exactly the "stale-200, no flag"
-    // no-op the 410 contract exists to forbid. The model-provider twin
-    // (`model-providers/token-resolver.ts`) has always thrown here.
+    // Throw rather than serve the stored token: the sidecar would re-inject the credential that
+    // 401'd and answer 200. (Google issues none without `access_type=offline`.)
     logger.warn(
       "Integration connection unrefreshable — no refresh_token; flagging needsReconnection",
       {
@@ -192,7 +155,7 @@ async function doRefresh(
       },
     );
     await markIntegrationConnectionNeedsReconnection(connectionId);
-    throw new UnrefreshableConnectionError("no stored refresh_token");
+    throw new RefreshVerdictError("dead", "refresh_token_missing");
   }
 
   let parsed: RefreshExchangeResult["parsed"];
@@ -202,38 +165,16 @@ async function doRefresh(
       label: `Integration token refresh for '${packageId}' auth '${authKey}'`,
     }));
   } catch (err) {
-    // Flip needsReconnection on a revoked refresh token so the dashboard
-    // prompts re-connect. The wire mechanics + classification live in the
-    // shared exchange; only the table write-back is integration-side.
     if (err instanceof ClientAuthInvariantError) {
-      // A contradictory (method, secret) pair is a configuration/programming
-      // fault, not an upstream blip. Counting it toward the transient-failure
-      // streak would spend a healthy connection's budget and eventually flag it
-      // `needs_reconnection` — user-visible damage from a code bug, with the
-      // real cause buried in the logs. Surface it and leave the row alone.
       logger.error("Integration refresh aborted — incoherent client auth", {
         packageId,
         authKey,
         connectionId,
         err: String(err),
       });
-    } else if (err instanceof RefreshError && err.kind === "revoked") {
-      await markIntegrationConnectionNeedsReconnection(connectionId);
-    } else {
-      // Transient failure (network / 5xx / parse). A single transient error is
-      // NOT terminal — the cached token may still be valid. But a token that is
-      // already expired AND keeps failing refresh is silently dead while the
-      // row still looks healthy (the original Gmail scheduled-run bug). Record
-      // the failure; `recordIntegrationRefreshFailure` escalates to
-      // needsReconnection only once the streak crosses the threshold AND the
-      // token is expired past the grace window, so a transient upstream blip on
-      // a still-valid token never bricks the connection.
-      const env = getEnv();
-      await recordIntegrationRefreshFailure(connectionId, env.INTEGRATION_REFRESH_MAX_FAILURES, {
-        graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS,
-      });
     }
-    throw err;
+    if (!(err instanceof RefreshError)) throw err;
+    throw await exchangeFailureVerdict(err, { packageId, authKey, connectionId });
   }
 
   // `parseTokenResponse` may return `undefined` for refreshToken on flows
@@ -242,13 +183,7 @@ async function doRefresh(
   const finalRefreshToken = parsed.refreshToken ?? refreshToken;
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
 
-  // Niveau 2 Phase 6 — only treat the response's `scope` as authoritative
-  // when the IdP echoed it explicitly. `parseTokenResponse` falls back to
-  // the requestedScopes (here `undefined` → `[]`) when the response omits
-  // `scope`; an empty array under that path would FALSELY signal a total
-  // revocation. Distinguish by checking the raw wire payload directly.
-  const responseHadScopeField = typeof tokenData.scope === "string" && tokenData.scope.length > 0;
-  const responseScopes = responseHadScopeField ? parsed.scopesGranted : null;
+  const responseScopes = parsed.scopesReturned;
 
   // The stored outputs, with what this response carries: a field the IdP does not
   // send again (`token_type`, `id_token`, `scope`) keeps the value the connect stored.
@@ -261,25 +196,13 @@ async function doRefresh(
     ...(responseScopes !== null ? { scope: responseScopes.join(" ") } : {}),
   };
 
-  // Read the existing `scopes_granted` so we can detect shrinkage. One
-  // extra SELECT per refresh is acceptable — refresh is the slow path.
-  const [prevRow] = await db
-    .select({ scopesGranted: integrationConnections.scopesGranted })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  const prevScopes = prevRow?.scopesGranted ?? [];
-  const shrinkDetected =
-    responseScopes !== null && responseScopes.length > 0
-      ? prevScopes.some((s) => !responseScopes.includes(s))
-      : false;
-
   // Converged write — the single credential writer. `scopesGranted` is passed
-  // only when the IdP authoritatively echoed a `scope` field; otherwise it is
-  // omitted so persistCredentialBundle leaves the high-water-mark untouched.
+  // only when the IdP authoritatively echoed a `scope` field (RFC 6749 §5.1: an
+  // omitted `scope` means unchanged), so persistCredentialBundle keeps the stored grant.
   // accountId/identityClaims are likewise omitted → never clobbered by refresh.
-  await persistCredentialBundle(
-    { kind: "update-by-id", connectionId },
+  // Compare-and-set: a row reconnected (or flagged) meanwhile keeps what it holds.
+  const written = await persistCredentialBundle(
+    { kind: "update-by-id", connectionId, expect: { clientRef, credentialsEncrypted } },
     {
       credentials: newCreds,
       expiresAt,
@@ -287,130 +210,211 @@ async function doRefresh(
       ...(responseScopes !== null ? { scopesGranted: responseScopes } : {}),
     },
   );
+  if (!written) {
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId))
+      .limit(1);
+    throw row?.needsReconnection
+      ? new RefreshVerdictError("dead", "connection_flagged")
+      : new RefreshVerdictError("retry", "connection_changed");
+  }
 
-  return { fields: newCreds, expiresAt, scopesGranted: responseScopes, shrinkDetected };
+  return { fields: newCreds, expiresAt };
+}
+
+async function exchangeFailureVerdict(
+  err: RefreshError,
+  log: { packageId: string; authKey: string; connectionId: string },
+): Promise<RefreshVerdictError> {
+  switch (err.kind) {
+    case "revoked":
+      await markIntegrationConnectionNeedsReconnection(log.connectionId);
+      return new RefreshVerdictError("dead", "refresh_token_revoked", { cause: err });
+    case "client_rejected":
+      logger.error("Integration refresh refused — the token endpoint rejected the OAuth client", {
+        ...log,
+        error: err.message,
+      });
+      return new RefreshVerdictError("retry", "oauth_client_rejected", { cause: err });
+    case "transient": {
+      const env = getEnv();
+      const counted = await recordIntegrationRefreshFailure(
+        log.connectionId,
+        env.INTEGRATION_REFRESH_MAX_FAILURES,
+        { graceSeconds: env.INTEGRATION_REFRESH_GRACE_SECONDS },
+      );
+      return counted?.needsReconnection
+        ? new RefreshVerdictError("dead", "refresh_failures_exhausted", { cause: err })
+        : new RefreshVerdictError("retry", "upstream_transient", { cause: err });
+    }
+  }
 }
 
 /**
- * Discriminated outcome of {@link refreshAndClassify}. Wraps the
- * {@link forceRefreshIntegrationConnection} call + the
- * `RefreshError && kind==="revoked"` classification that both integration
- * credential resolvers share, so each can map the outcome to its own
- * transport surface (the MITM resolver → 410/502 ApiError; the
- * credential-proxy resolver → `null`) without duplicating the try/catch
- * taxonomy.
+ * What {@link refreshConnectionCredential} concluded; callers only translate it, the row is
+ * already written. `refreshed`: the new credential; `kept`: the stored one stands; `retry`: still
+ * usable; `dead`: flagged. `detail` is for logs.
+ */
+type ConnectionRefreshOutcome =
+  | { status: "refreshed"; fields: Record<string, string>; expiresAt: Date | null }
+  | { status: "kept"; cause?: CredentialFailureCause; detail?: string }
+  | {
+      status: "retry";
+      cause: CredentialFailureCause;
+      detail?: string;
+      rejections?: { failures: number; maxFailures: number };
+    }
+  | { status: "dead"; cause: CredentialFailureCause; detail?: string };
+
+export type RefreshTrigger =
+  | { kind: "expiring" }
+  /** Upstream rejected the credential of `revision`; `null`: the one the connection holds. */
+  | { kind: "rejected"; revision: string | null };
+
+/**
+ * The one decision over a connection's credential. A rejection is evidence only against the
+ * credential it names: one the connection no longer holds is treated as a read, nothing counted.
+ * A narrowed grant is stored as is: run resolution refuses an agent it no longer covers.
  *
- * - `refreshed`: the refresh succeeded; `result` carries the new fields,
- *   expiresAt, and scope-shrink signals.
- * - `revoked`: the refresh token was revoked upstream (RFC 6749 §5.2
- *   `invalid_grant`); the helper has already flipped `needsReconnection`.
- * - `terminal`: the connection can never be refreshed as stored (no
- *   `refresh_token` at all). Also already flagged, but no upstream call was
- *   made — `reason` says so, instead of blaming a revocation that never
- *   happened.
- * - `transient`: any other failure (network, 5xx, parse). The cached
- *   credential may still be usable; the connection row is untouched.
+ * Throws only what is not a verdict on the connection (missing key id → 503, a database fault).
  */
-type RefreshClassification =
-  | { status: "refreshed"; result: IntegrationRefreshResult }
-  | { status: "revoked"; error: RefreshError }
-  | { status: "terminal"; reason: string }
-  | { status: "transient"; error: unknown };
+export async function refreshConnectionCredential(input: {
+  connection: RefreshTarget & {
+    authKey: string;
+    expiresAt: Date | null;
+    credentialRevision: string;
+  };
+  integrationId: string;
+  /** The declaration of the connection's auth in the caller's manifest. */
+  authDef: AfpsManifestAuth;
+  scope: SpaceScope;
+  actor: Actor;
+  trigger: RefreshTrigger;
+}): Promise<ConnectionRefreshOutcome> {
+  const { connection, integrationId, authDef, scope, actor, trigger } = input;
+  const { authKey } = connection;
+  const forced =
+    trigger.kind === "rejected" &&
+    (trigger.revision === null || trigger.revision === connection.credentialRevision);
+  if (!forced && !expiresWithinLeadWindow(connection.expiresAt)) return { status: "kept" };
 
-/**
- * Run {@link forceRefreshIntegrationConnection} and classify the outcome into
- * the {@link RefreshClassification} discriminated union. Never throws — the
- * caller maps each branch to its own transport error. Shared by the MITM
- * credentials resolver and the credential-proxy resolver.
- */
-export async function refreshAndClassify(
-  connectionId: string,
-  packageIdForLog: string,
-  authKeyForLog: string,
-  credentialsEncrypted: string,
-  refreshContext: IntegrationRefreshContext,
-  options: { force?: boolean } = {},
-): Promise<RefreshClassification> {
-  try {
-    const result = await forceRefreshIntegrationConnection(
-      connectionId,
-      packageIdForLog,
-      authKeyForLog,
-      credentialsEncrypted,
-      refreshContext,
-      options,
+  // One 401 can be a transient upstream fault, or a permission error the agent provoked, so a
+  // forced refresh nothing can perform is counted: `retry` until the threshold, then `dead`.
+  const unrefreshable = async (detail: string): Promise<ConnectionRefreshOutcome> => {
+    const cause = "unrefreshable";
+    if (!forced) return { status: "kept", cause, detail };
+    const counted = await recordUnrefreshableRejection(
+      connection.id,
+      integrationId,
+      { spaceId: scope.spaceId, actor },
+      connection.credentialRevision,
     );
-    return { status: "refreshed", result };
-  } catch (err) {
-    if (err instanceof RefreshError && err.kind === "revoked") {
-      return { status: "revoked", error: err };
-    }
-    if (err instanceof UnrefreshableConnectionError) {
-      return { status: "terminal", reason: err.reason };
-    }
-    return { status: "transient", error: err };
+    if (!counted) return { status: "kept" };
+    if (counted.needsReconnection) return { status: "dead", cause, detail };
+    const { failures, maxFailures } = counted;
+    return { status: "retry", cause, detail, rejections: { failures, maxFailures } };
+  };
+
+  if (authDef.type !== "oauth2") {
+    return unrefreshable(`auth type '${authDef.type}' is not refreshable`);
   }
+
+  let refreshContext: IntegrationRefreshContext | null;
+  try {
+    refreshContext = await buildIntegrationOAuthRefreshContext(
+      integrationId,
+      authKey,
+      authDef,
+      scope.spaceId,
+      connection,
+    );
+  } catch (err) {
+    if (!(err instanceof RefreshError && err.kind === "transient")) throw err;
+    // Never terminal; a proactive refresh has no evidence against the stored token.
+    return { status: forced ? "retry" : "kept", cause: "discovery_transient", detail: err.message };
+  }
+  if (!refreshContext) return unrefreshable("no OAuth client or token endpoint");
+
+  let refreshed: IntegrationRefreshResult;
+  try {
+    refreshed = await refreshUnderLock(connection, integrationId, authKey, refreshContext, forced);
+  } catch (err) {
+    if (err instanceof RefreshVerdictError) {
+      // A proactive refresh has no evidence against the token a flag set elsewhere left in place.
+      if (err.flaggedBefore && !forced) return { status: "kept", cause: err.failure };
+      return {
+        status: err.status,
+        cause: err.failure,
+        ...(err.cause !== undefined ? { detail: getErrorMessage(err.cause) } : {}),
+      };
+    }
+    if (err instanceof UnknownKeyIdError) {
+      throw encryptionKeyUnavailable(err, {
+        connectionId: connection.id,
+        packageId: integrationId,
+        authKey,
+      });
+    }
+    throw err;
+  }
+  return { status: "refreshed", fields: refreshed.fields, expiresAt: refreshed.expiresAt };
 }
 
-/**
- * Decrypt an integration connection's credential blob into a flat string
- * map, returning `null` (with a warning) on failure rather than throwing.
- * Shared by the MITM credentials resolver and the credential-proxy resolver.
- */
-export function decryptIntegrationConnectionFields(
-  ciphertext: string,
-  packageIdForLog: string,
-  authKeyForLog: string,
-): Record<string, string> | null {
-  try {
-    return decryptCredentialsToStringMap(ciphertext);
-  } catch (err) {
-    logger.warn("integration credential decrypt failed", {
-      packageId: packageIdForLog,
-      authKey: authKeyForLog,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+function expiresWithinLeadWindow(expiresAt: Date | null): boolean {
+  return expiresAt !== null && expiresAt.getTime() - Date.now() < OAUTH_REFRESH_LEAD_MS;
 }
 
 /**
  * Build the OAuth2 {@link IntegrationRefreshContext} for an integration
  * auth from the connection's pinned client (system, org or space). Returns
  * `null` (the auth is not refreshable) for: non-oauth2 auths, auths without a
- * `tokenUrl`, a pinned client that no longer resolves, and undecryptable client secret.
+ * `tokenUrl`, a pinned client that no longer resolves, and an unreadable client secret
+ * (a missing key throws the 503).
  *
  * Public clients (`token_endpoint_auth_method: "none"`, RFC 7591 §2) ARE
  * supported — the refresh helper sends `client_id` in the body with no
- * `client_secret` (RFC 6749 §6 + §3.2.1). Single source of truth shared by
- * both integration credential resolvers.
+ * `client_secret` (RFC 6749 §6 + §3.2.1). Single source of truth, read by
+ * {@link refreshConnectionCredential}.
  */
 export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
   authKey: string,
   authDef: AfpsManifestAuth,
   spaceId: string,
-  /**
-   * The minting client pinned on the connection
-   * (`integration_connections.client_ref`): a flat client id — the env id of a
-   * system client or the `integration_oauth_clients.id` of a custom client.
-   * Resolves WHICH client's credentials refresh the tokens — the same one that
-   * minted them. `null` only for non-oauth2 connections, which never reach this
-   * function (guarded below).
-   */
-  clientRef: string | null,
+  /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
+  connection: { clientRef: string | null; oauthResource: string | null },
+  /** Seam for tests. */
+  discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
   if (authDef.type !== "oauth2") return null;
-  // AFPS §7.3: refresh POSTs to `token_endpoint`. When the manifest declares
-  // only an `issuer` (Drive/OneDrive and other issuer-only providers), resolve
-  // the endpoint with the SAME OIDC/RFC-8414 discovery the authorize flow uses
-  // (`resolveOAuthEndpoints`, cached per-issuer). Without this, issuer-only
-  // connections connect fine but can NEVER refresh — they die when the access
-  // token expires (~1h) and the user is stuck re-connecting hourly.
-  const afpsAuth = authDef;
-  const { tokenEndpoint } = await resolveOAuthEndpoints({
-    issuer: afpsAuth.issuer,
-    tokenEndpoint: afpsAuth.token_endpoint,
+  const { clientRef, oauthResource } = connection;
+
+  // Resolve the SAME client that minted the connection by its pinned id (system
+  // env or space/org custom row), with the cross-scope escalation guard.
+  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
+  const client =
+    clientRef === null
+      ? null
+      : await resolveIntegrationClientById(
+          clientRef,
+          spaceId,
+          packageId,
+          authKey,
+          authDef.token_endpoint_auth_method,
+        );
+
+  // AFPS §7.3: refresh POSTs to the token endpoint of the server the connection was acquired from —
+  // the one its client is bound to (metadata only), else the manifest's, discovered from an
+  // issuer-only declaration (Drive/OneDrive). A templated issuer names no server by itself.
+  const boundIssuer = client?.issuer;
+  const issuer = boundIssuer ?? (isVariableTemplate(authDef.issuer) ? undefined : authDef.issuer);
+  const { tokenEndpoint } = await discover({
+    issuer,
+    ...(boundIssuer === undefined && !isVariableTemplate(authDef.issuer)
+      ? { tokenEndpoint: authDef.token_endpoint }
+      : {}),
   });
   if (!tokenEndpoint) {
     // An `issuer`-only manifest (Drive/OneDrive …) whose discovery yielded no
@@ -421,7 +425,7 @@ export async function buildIntegrationOAuthRefreshContext(
     // longer negatively-caches, so the next attempt re-discovers). Only a
     // manifest with neither `issuer` NOR `token_endpoint` is genuinely
     // unrefreshable (terminal → null).
-    if (afpsAuth.issuer) {
+    if (issuer) {
       throw new RefreshError(
         `Integration '${packageId}' auth '${authKey}' token_endpoint discovery yielded none (transient)`,
         "transient",
@@ -433,7 +437,27 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-  const manifestAuthMethod = afpsAuth.token_endpoint_auth_method;
+
+  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint is re-checked
+  // (its metadata may have changed). An unresolvable host is a blip; any other refusal is terminal.
+  if (boundIssuer !== undefined) {
+    const egress = await checkEgressUrl(tokenEndpoint, { requireHttpsForUntrustedHost: true });
+    if (!egress.ok) {
+      if (egress.detail === "resolution-failed") {
+        throw new RefreshError(
+          `Integration '${packageId}' auth '${authKey}' token endpoint did not resolve (transient)`,
+          "transient",
+        );
+      }
+      logger.warn("Integration auth refresh skipped — token endpoint refused by egress controls", {
+        packageId,
+        authKey,
+        tokenEndpoint,
+        reason: egress.reason,
+      });
+      return null;
+    }
+  }
 
   // INVARIANT: an oauth2 connection always pins its minting client. A null here
   // means a non-oauth2 row reached this oauth2-only path — a bug, not a state to
@@ -446,17 +470,6 @@ export async function buildIntegrationOAuthRefreshContext(
     });
     return null;
   }
-
-  // Resolve the SAME client that minted the connection by its pinned id (system
-  // env or space/org custom row), with the cross-scope escalation guard.
-  // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
-  const client = await resolveIntegrationClientById(
-    clientRef,
-    spaceId,
-    packageId,
-    authKey,
-    manifestAuthMethod,
-  );
   if (!client) {
     logger.info("Integration auth refresh skipped — pinned client unresolved", {
       packageId,
@@ -468,5 +481,10 @@ export async function buildIntegrationOAuthRefreshContext(
   // The resolver returns the method already paired with the secret it hands
   // back — a public client comes back as `"none"` with no secret — so refresh
   // posts what it was given rather than re-deriving from the manifest.
-  return { tokenEndpoint, ...client };
+  const { issuer: _boundIssuer, ...credentials } = client;
+  return {
+    tokenEndpoint,
+    ...credentials,
+    ...(oauthResource !== null ? { resource: oauthResource } : {}),
+  };
 }

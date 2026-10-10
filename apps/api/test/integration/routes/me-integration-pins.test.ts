@@ -16,7 +16,7 @@
  *   4. A delegated credential is capped by its scope ceiling: the read needs
  *      `integrations:read`, the writes `integrations:connect`.
  *
- * Service-layer behaviour (own vs other member's connection, sharedWithOrg
+ * Service-layer behaviour (own vs other member's connection, shared
  * fallback, the 6-layer cascade resolution) lives in
  * `services/integration-pins-service.test.ts` + `services/integration-
  * connection-resolver.test.ts`. This file pins the HTTP boundary only.
@@ -102,16 +102,18 @@ describe("/api/me/integration-pins", () => {
     userId: string | null,
     opts: { endUserId?: string; spaceId?: string; shared?: boolean } = {},
   ): Promise<string> {
+    const spaceId = opts.spaceId ?? ctx.defaultSpaceId;
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${(userId ?? opts.endUserId)!.slice(0, 6)}`,
-        spaceId: opts.spaceId ?? ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId,
         userId,
         endUserId: opts.endUserId ?? null,
-        sharedWithOrg: opts.shared ?? false,
+        sharedSpaceIds: opts.shared ? [spaceId] : [],
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
@@ -226,8 +228,7 @@ describe("/api/me/integration-pins", () => {
       expect(body.data.map((pin) => pin.connection_ids)).toEqual([[own]]);
     });
 
-    it("DENY: 400 on an empty set and on a set over the cap", async () => {
-      expect((await putPin([])).status).toBe(400);
+    it("DENY: 400 on a set over the cap", async () => {
       const over = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION + 1 }, () =>
         crypto.randomUUID(),
       );
@@ -235,6 +236,58 @@ describe("/api/me/integration-pins", () => {
       // Control: a legal singleton reaches the service and lands.
       const connId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connId])).status).toBe(200);
+    });
+
+    it("ALLOW: an empty set pins the caller to no connection", async () => {
+      const connId = await seedConnectionFor(ctx.user.id);
+      expect((await putPin([connId])).status).toBe(200);
+
+      const res = await putPin([]);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { connection_ids: string[] }).connection_ids).toEqual([]);
+      const [row] = await db
+        .select({ connectionIds: integrationPins.connectionIds })
+        .from(integrationPins)
+        .where(eq(integrationPins.userId, ctx.user.id));
+      expect(row!.connectionIds).toEqual([]);
+      // Audited as a set, not as the absence of a pin.
+      const [, cleared] = await pinAudits("integration.member_pin.upserted");
+      expect(cleared!.after).toEqual({ connectionIds: [] });
+    });
+
+    it("ALLOW: an empty set on a required integration — the run it governs is refused", async () => {
+      const REQUIRED_AGENT = "@pinorg/agent-required";
+      const manifest = buildAgentManifest();
+      await seedPackage({
+        id: REQUIRED_AGENT,
+        homeSpaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        type: "agent",
+        source: "local",
+        draftManifest: {
+          ...manifest,
+          name: REQUIRED_AGENT,
+          integrations_configuration: { [INTEGRATION]: { tools: ["search"], required: true } },
+        },
+      });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, REQUIRED_AGENT);
+
+      expect((await putPin([], authHeaders(ctx), REQUIRED_AGENT)).status).toBe(200);
+      const readiness = await app.request(`/api/agents/${REQUIRED_AGENT}/connection-readiness`, {
+        headers: authHeaders(ctx),
+      });
+      expect(((await readiness.json()) as { blocks_run: boolean }).blocks_run).toBe(true);
+
+      const run = await app.request(`/api/agents/${REQUIRED_AGENT}/run?version=draft`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(run.status).toBe(409);
+      const body = (await run.json()) as { errors: { field: string; code: string }[] };
+      expect(body.errors.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound"],
+      ]);
     });
 
     it("DENY: 400 when the body still names the ids the path now carries", async () => {
@@ -657,8 +710,7 @@ describe("/api/me/integration-pins", () => {
           "@pinorg/other-svc": [unknown],
         },
       });
-      // A stored empty set (no write accepts one): the delete drops it, so it disables the schedule
-      // though the connection's own set keeps a member.
+      // An explicit `[]` beside a set that only shrinks: the delete keeps it and the schedule armed.
       const emptySibling = await seedSchedule({
         packageId: AGENT,
         orgId: ctx.orgId,
@@ -765,9 +817,27 @@ describe("/api/me/integration-pins", () => {
         nextRunAt: null,
       });
       expect(schedulesAfter.get(emptySibling.id)).toMatchObject({
-        connectionOverrides: { [INTEGRATION]: [web!] },
-        enabled: false,
+        connectionOverrides: { [INTEGRATION]: [web!], "@pinorg/other-svc": [] },
+        enabled: true,
       });
+    });
+
+    // Only an explicit write pins to none: a set the delete empties drops its pin, and a pin to
+    // none, naming nothing, is left alone.
+    it("drops the pin a delete empties and keeps a pin to none", async () => {
+      const gone = await seedConnectionFor(ctx.user.id);
+      await pinSet([]);
+      await pinSet([gone], OTHER_AGENT);
+
+      const announced = await impactOf(gone);
+      expect(announced.pins.map((p) => p.agent_package_id)).toEqual([OTHER_AGENT]);
+
+      const del = await app.request(`/api/me/connections/${gone}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(204);
+      expect((await readPins()).map((p) => [p.agent, p.connectionIds])).toEqual([[AGENT, []]]);
     });
 
     it("is empty for a colleague's shared connection the caller pinned and scheduled, which the delete refuses", async () => {
@@ -787,7 +857,8 @@ describe("/api/me/integration-pins", () => {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(del.status).toBe(404);
+      // Same 204 as an unknown id: a probe learns nothing, and the row is untouched.
+      expect(del.status).toBe(204);
       expect(await readPins()).toEqual(pinsBefore);
       expect(await readSchedules()).toEqual(schedulesBefore);
     });
@@ -919,6 +990,44 @@ describe("/api/me/integration-pins", () => {
       });
       expect(del.status).toBe(409);
       expect(((await del.json()) as { code: string }).code).toBe("connection_pinned");
+    });
+
+    it("lists a key bound to a space only the pins of that space", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Bravo" });
+      const [row] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          accountId: "acct-org",
+          orgId: ctx.orgId,
+          spaceId: null,
+          originSpaceId: spaceB.id,
+          userId: ctx.user.id,
+          credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
+          scopesGranted: [],
+          label: "Org row",
+        })
+        .returning({ id: integrationConnections.id });
+      await db.insert(integrationPins).values(
+        [ctx.defaultSpaceId, spaceB.id].map((spaceId) => ({
+          spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: ctx.user.id,
+          connectionIds: [row!.id],
+        })),
+      );
+      const apiKey = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["integrations:read"],
+      });
+
+      expect((await impactOf(row!.id)).pins).toHaveLength(2);
+      const bound = await impactOf(row!.id, { Authorization: `Bearer ${apiKey.rawKey}` });
+      expect(bound.pins).toHaveLength(1);
     });
 
     it("is empty for an id that is not a UUID", async () => {

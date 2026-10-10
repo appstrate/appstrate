@@ -19,7 +19,9 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
-import { ConnectionSetChecklist } from "./connection-set-checklist";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { isSharedInSpace } from "../integration-connect/connection-ownership";
+import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
 
 /**
  * Org-wide default connections for this integration — the cross-agent
@@ -35,10 +37,11 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
   const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
   const { data: connections } = useIntegrationConnections(packageId);
+  const spaceId = useCurrentSpaceId();
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
-  const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
+  const shared = (connections ?? []).filter((c) => isSharedInSpace(c, spaceId));
   const sharedIds = shared.map((c) => c.id);
   const storedIds = orgDefault?.connection_ids ?? [];
   // Stored members no longer shared are named apart: every run falling back on
@@ -151,9 +154,12 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
               {connectionsLabel}
             </p>
             <ConnectionSetChecklist
-              connections={shared}
+              options={shared.map((c) => ({
+                id: c.id,
+                label: <ConnectionOptionLabel connection={c} />,
+              }))}
               value={connectionIds}
-              onChange={(next) => void save(next, mode === "forced", mode)}
+              onChange={(next) => void save(next ?? [], mode === "forced", mode)}
               idPrefix="org-default-connection"
               labelledBy="org-default-connections-label"
               unavailableIds={unavailableIds}

@@ -1613,6 +1613,36 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 9 October merge of main (35 commits, 29 conflicted files)**
+
+Same method, three Sonnet agents (API, integrations, schedules and runs) on
+one brief that also carried the redesign's patterns, then all 75 lab screens
+compared with the branch before the merge: the differences are main's
+features, the fixtures added to show them, and capture noise (durations, the
+Runs spinner). What main brought, and where it lives in the redesign:
+
+- A connection's scope is its OAuth client's (#1881): "Portée et partage"
+  column on an integration's connections (organization-wide or this space,
+  shared with several spaces), the same editor in Mes connexions.
+- Least-privilege connections (#1874): a "Permissions" column, "Ajouter une
+  connexion" asks which permissions (`?connectScopes=<auth>`), reconnecting
+  never widens a grant.
+- An integration binds 0..N connections, `required` makes it 1..N (#1835):
+  "Requise" badge, "Non liée" state, "Aucune connexion" in pins, defaults,
+  run options and a schedule's Connexions; a run or a schedule that starts
+  without an integration warns in a toast and its run card says "Non liée
+  pendant ce run". An optional unbound integration no longer blocks: the
+  agent's badge stays green and the warning moves to the Run button's dot.
+- Connection variables (#1811) under a connection's label; MCP one
+  connection per organization (#1826) in Préférences › Accès MCP.
+- Bun 1.4.2, and the migration trap a fourth time: `0082_org_logo` met main's
+  `0082`-`0086` and is now `0087_org_logo`.
+
+Kept from the redesign across main's rewrite: an enforced space default still
+refuses the creation of a personal connection
+(`isUserConnectionCreationBlocked`), since main's new `userConnectionsBlocked`
+predicate reads only the space's switch.
+
 **The 8 October merge of main (246 commits, 90 conflicted files)**
 
 Same method as on 30 September: one agent per domain on the rule "main's

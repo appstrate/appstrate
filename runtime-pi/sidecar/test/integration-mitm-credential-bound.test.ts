@@ -26,7 +26,7 @@ function source(authorizedUris: string[]): MitmCredentialSource {
   };
 }
 
-async function send(authorizedUris: string[]) {
+async function send(authorizedUris: string[], host = "attacker.example") {
   const sent: Headers[] = [];
   const events: MitmListenerEvent[] = [];
   const fetchFn = (async (_url: string, init?: RequestInit) => {
@@ -35,7 +35,7 @@ async function send(authorizedUris: string[]) {
   }) as unknown as typeof fetch;
   const res = await handleInnerRequest(
     new Request("https://127.0.0.1/v1/things"),
-    "attacker.example",
+    host,
     source(authorizedUris),
     fetchFn,
     1024,
@@ -55,6 +55,39 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
       url: "https://attacker.example/v1/things",
       reason: "credential not host-bounded",
     });
+  });
+
+  it("refuses to inject under a wildcard right under a public suffix", async () => {
+    const { res, sent, events } = await send(["https://*.github.io/**"], "someone.github.io");
+    expect(res.status).toBe(403);
+    expect(sent).toHaveLength(0);
+    expect(events).toContainEqual({
+      kind: "request-refused",
+      url: "https://someone.github.io/v1/things",
+      reason: "credential not host-bounded",
+    });
+  });
+
+  it("injects under a wildcard below a registrable domain", async () => {
+    const { res, sent } = await send(["https://*.example.co.uk/**"], "tenant.example.co.uk");
+    expect(res.status).toBe(200);
+    expect(sent[0]!.get("x-api-key")).toBe("k");
+  });
+
+  it("refuses to inject where a wildcard reaches past its registrable domain", async () => {
+    const authorizedUris = ["https://*.amazonaws.com/**"];
+    const beyond = await send(authorizedUris, "sqs.us-east-1.amazonaws.com");
+    expect(beyond.res.status).toBe(403);
+    expect(await beyond.res.text()).toContain("list that host in authorized_uris");
+    expect(beyond.sent).toHaveLength(0);
+    expect(beyond.events).toContainEqual({
+      kind: "request-refused",
+      url: "https://sqs.us-east-1.amazonaws.com/v1/things",
+      reason: "credential target beyond its wildcard's registrable domain",
+    });
+    const inside = await send(authorizedUris, "sts.amazonaws.com");
+    expect(inside.res.status).toBe(200);
+    expect(inside.sent[0]!.get("x-api-key")).toBe("k");
   });
 
   it("refuses the connect re-login replay once it would inject", async () => {
@@ -135,6 +168,40 @@ describe("MITM listener — injected credential needs a host-bounded allowlist",
     });
   });
 
+  it("refuses a login secret to a host past its wildcard's registrable domain", async () => {
+    const src: MitmCredentialSource = {
+      current: () => ({ auths: [] }),
+      deliveryPlans: () => ({}),
+      activeInputs: () => ({
+        inputs: { password: "pw" },
+        authorizedUris: ["https://*.amazonaws.com/**"],
+      }),
+    };
+    const events: MitmListenerEvent[] = [];
+    let fetched = 0;
+    const res = await handleInnerRequest(
+      new Request("https://127.0.0.1/login", { headers: { "x-pw": "{{password}}" } }),
+      "sqs.us-east-1.amazonaws.com",
+      src,
+      (async () => {
+        fetched += 1;
+        return new Response("ok");
+      }) as unknown as typeof fetch,
+      1024,
+      (e) => events.push(e),
+      allowAll,
+    );
+    expect(res.status).toBe(403);
+    const body = await res.text();
+    expect(body).toContain("sqs.us-east-1.amazonaws.com's registrable domain lies outside");
+    expect(fetched).toBe(0);
+    expect(events).toContainEqual({
+      kind: "request-refused",
+      url: "https://sqs.us-east-1.amazonaws.com/login",
+      reason: "credential target beyond its wildcard's registrable domain",
+    });
+  });
+
   it("forwards a request carrying no login placeholder under the same envelope", async () => {
     const src: MitmCredentialSource = {
       current: () => ({ auths: [] }),
@@ -190,11 +257,12 @@ describe("MITM listener — no value reaches a response or an event", () => {
     };
   }
 
-  function loginSource(password: string): MitmCredentialSource {
+  function loginSource(password: string, refused: string[] = []): MitmCredentialSource {
     return {
       current: () => ({ auths: [] }),
       deliveryPlans: () => ({}),
       activeInputs: () => ({ inputs: { password }, authorizedUris: ["https://api.example/**"] }),
+      refuseActiveInput: (field) => refused.push(field),
     };
   }
 
@@ -237,13 +305,40 @@ describe("MITM listener — no value reaches a response or an event", () => {
     });
   }
 
-  it("refuses a login input substituted into a header it cannot be in", async () => {
-    const { res, fetched } = await run(
-      loginSource(`${SECRET}€`),
-      new Request("https://127.0.0.1/login", { headers: { "x-pw": "{{password}}" } }),
+  for (const bad of ["€", "\r\nX-Evil: 1"]) {
+    it(`refuses a login input ending ${JSON.stringify(bad)} substituted into a header, naming the field to the source`, async () => {
+      const refused: string[] = [];
+      const { res, body, fetched } = await run(
+        loginSource(`${SECRET}${bad}`, refused),
+        new Request("https://127.0.0.1/login", { headers: { "x-pw": "{{password}}" } }),
+      );
+      expect(res.status).toBe(403);
+      expect(body).toBe(
+        "MITM listener: login input contains a character this request cannot carry where it is placed",
+      );
+      expect(fetched).toBe(0);
+      expect(refused).toEqual(["password"]);
+    });
+  }
+
+  it("encodes a login input for the request's own form body", async () => {
+    let sentBody = "";
+    const { res } = await run(
+      loginSource("p&ss=w+rd %x"),
+      new Request("https://127.0.0.1/login", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "username=alice&password={{password}}",
+      }),
+      (async (_url: string, init?: RequestInit) => {
+        sentBody = new TextDecoder().decode(init?.body as Uint8Array);
+        return new Response("ok");
+      }) as unknown as typeof fetch,
     );
-    expect(res.status).toBe(403);
-    expect(fetched).toBe(0);
+    expect(res.status).toBe(200);
+    const params = new URLSearchParams(sentBody);
+    expect([...params.keys()]).toEqual(["username", "password"]);
+    expect(params.getAll("password")).toEqual(["p&ss=w+rd %x"]);
   });
 
   it("names the path before login substitution and no query in its events", async () => {

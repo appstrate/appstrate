@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, integration) default connection SET — the org-wide baseline
+ * Per-(space, integration) default connection SET — the space-wide baseline
  * the resolver uses for EVERY agent that consumes the integration, unless a
  * more specific layer overrides it.
  *
@@ -17,7 +17,7 @@
  *     for the common case while still letting a member express a personal
  *     preference (a member pin wins over a soft default).
  *
- *   - `enforce = true` — **org-wide force**. Sits just below the per-agent
+ *   - `enforce = true` — **space-wide force**. Sits just below the per-agent
  *     admin pin: it locks the choice for every actor on every agent,
  *     beating the launch override (run or schedule) and member pins. A per-agent admin pin
  *     still wins (the agent-specific exception).
@@ -25,8 +25,8 @@
  * Resolver cascade: see `apps/api/src/services/integration-connection-resolver.ts`.
  *
  * Same invariants as admin pins: every referenced connection MUST be
- * `shared_with_org = true` (validation in the org-defaults service — an
- * admin can't coerce a member's personal connection), and `connection_ids`
+ * shared with this space (`shared_space_ids`, validated in the org-defaults
+ * service — an admin can't coerce a member's personal connection), and `connection_ids`
  * carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
  * FK on array elements, so deleting a named connection is refused by the
  * service (`assertConnectionsUnpinned`) and the resolver fails loudly on an id

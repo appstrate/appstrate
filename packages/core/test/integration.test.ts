@@ -902,6 +902,21 @@ describe("findUnboundedInjectedCredentials — write-path allowlist bound", () =
     );
   });
 
+  it("refuses a wildcard right under a public suffix, keeps one under a registrable domain", () => {
+    const authorized_uris = [
+      "https://*.zendesk.com/**",
+      "https://*.co.uk/**",
+      "https://*.example.co.uk/**",
+      "https://*.github.io/**",
+      "https://*.someone.github.io/**",
+      "https://{$credential.shop_domain}/**",
+    ];
+    expect(paths({ type: "api_key", authorized_uris })).toEqual([
+      "auths.primary.authorized_uris.1",
+      "auths.primary.authorized_uris.3",
+    ]);
+  });
+
   it("leaves an auth the proxy injects nothing for to the call-time guard", () => {
     for (const delivery of [undefined, { http: { name: "" } }]) {
       expect(
@@ -998,6 +1013,9 @@ describe("integrationManifestSchema — mtls + delivery.http install gate", () =
 // connect.login — outputs + §7.7 gating
 // ─────────────────────────────────────────────
 
+const unevaluablePaths = (manifest: unknown) =>
+  findUnevaluableExpressions(manifest).map((v) => v.path.join("."));
+
 function customWithConnect(connect: Record<string, unknown>, delivery?: Record<string, unknown>) {
   return baseManifest({
     source: { kind: "none" },
@@ -1073,23 +1091,23 @@ describe("integrationManifestSchema — connect.login", () => {
     ).toContain("auths.session.connect.login.expires_in_output");
   });
 
-  it("rejects a jsonpath output selector outside the subset at import", () => {
-    expect(
-      errorPaths(
-        customWithConnect({
-          login: {
-            request: { method: "POST", url: "https://x" },
-            outputs: {
-              token: { context: "$response.body", selector: "$..token", type: "jsonpath" },
-            },
-          },
-        }),
-      ),
-    ).toContain("auths.session.connect.login.outputs.token.selector");
+  it("refuses a jsonpath output selector outside the subset on write, not in the schema", () => {
+    const manifest = customWithConnect({
+      login: {
+        request: { method: "POST", url: "https://x" },
+        outputs: {
+          token: { context: "$response.body", selector: "$..token", type: "jsonpath" },
+        },
+      },
+    });
+    expect(errorPaths(manifest)).toEqual([]);
+    expect(unevaluablePaths(manifest)).toEqual([
+      "auths.session.connect.login.outputs.token.selector",
+    ]);
   });
 
-  it("rejects a jsonpath success criterion outside the subset, and leaves other types alone", () => {
-    const paths = errorPaths(
+  it("refuses a jsonpath success criterion outside the subset, and leaves other types alone", () => {
+    const paths = unevaluablePaths(
       customWithConnect({
         login: {
           request: { method: "POST", url: "https://x" },
@@ -1105,7 +1123,7 @@ describe("integrationManifestSchema — connect.login", () => {
         },
       }),
     );
-    expect(paths).toEqual(["auths.session.connect.login.success_criteria.1.condition"]);
+    expect(paths).toEqual(["auths.session.connect.login.success_criteria.1"]);
   });
 
   it("rejects identity_outputs that are not declared outputs", () => {
@@ -2454,5 +2472,139 @@ describe("selectedApiCallConfigs", () => {
     expect(authKeys(undefined)).toEqual([]);
     expect(authKeys([])).toEqual([]);
     expect(authKeys(["search"])).toEqual([]);
+  });
+});
+
+describe("connection variables (§7.12) — rule (1g) and the write-path rules", () => {
+  const bearer = {
+    http: {
+      in: "header",
+      name: "Authorization",
+      prefix: "Bearer ",
+      value: "{$credential.access_token}",
+    },
+  };
+  const variables = {
+    schema: {
+      type: "object",
+      properties: { base_url: { type: "string", format: "uri" }, tenant: { type: "string" } },
+      required: ["base_url", "tenant"],
+    },
+  };
+  function selfHosted(auth: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({
+      source: {
+        kind: "remote",
+        remote: { url: "{$variable.base_url}/api/v4/mcp", transport: "streamable-http" },
+      },
+      variables,
+      auths: { oauth: { type: "oauth2", delivery: bearer, ...auth } },
+    });
+  }
+  function apiKey(auth: Record<string, unknown>): Record<string, unknown> {
+    return baseManifest({
+      source: { kind: "none" },
+      variables,
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: {
+            schema: {
+              type: "object",
+              required: ["token"],
+              properties: { token: { type: "string" } },
+            },
+          },
+          delivery: {
+            http: { in: "header", name: "Authorization", value: "{$credential.token}" },
+          },
+          ...auth,
+        },
+      },
+    });
+  }
+  const messagesAt = (raw: Record<string, unknown>, path: string) =>
+    (integrationManifestSchema.safeParse(raw).error?.issues ?? [])
+      .filter((i) => i.path.join(".") === path)
+      .map((i) => i.message);
+
+  it("accepts an oauth2 authorized_uris entry on the variable choosing its upstream", () => {
+    const m = selfHosted({ authorized_uris: ["{$variable.base_url}/api/v4/**"] });
+    expect(errorPaths(m)).toEqual([]);
+    expect(findUnboundedInjectedCredentials(m)).toEqual([]);
+    expect(findUnevaluableExpressions(m)).toEqual([]);
+  });
+
+  it("still refuses a {$credential} entry on oauth2", () => {
+    const m = selfHosted({
+      authorized_uris: ["{$variable.base_url}/api/v4/**", "{$credential.site}/**"],
+    });
+    expect(messagesAt(m, "auths.oauth.authorized_uris.1")).toContainEqual(
+      expect.stringContaining("forbidden on an oauth2 auth"),
+    );
+    expect(messagesAt(m, "auths.oauth.authorized_uris.0")).toEqual([]);
+  });
+
+  it("accepts variable entries in the URL form and in the host of the authority form", () => {
+    const m = apiKey({
+      authorized_uris: ["{$variable.base_url}/**", "https://{$variable.tenant}.example.com/**"],
+    });
+    expect(errorPaths(m)).toEqual([]);
+    expect(findUnboundedInjectedCredentials(m)).toEqual([]);
+    expect(findUnevaluableExpressions(m)).toEqual([]);
+  });
+
+  it("leaves the form of a variable entry to @afps-spec/schema, once", () => {
+    const m = apiKey({
+      authorized_uris: [
+        "https://api.example.com/{$variable.tenant}/**",
+        "{$variable.tenant}.example.com/**",
+      ],
+    });
+    for (const i of [0, 1]) {
+      expect(messagesAt(m, `auths.key.authorized_uris.${i}`)).toEqual([
+        expect.stringContaining("takes the URL form or the authority form"),
+      ]);
+    }
+  });
+
+  it("findUnevaluableExpressions accepts declared variables and refuses undeclared ones", () => {
+    const m = apiKey({
+      authorized_uris: ["{$variable.base_url}/**", "{$variable.other}/**"],
+      delivery: {
+        env: {
+          BASE: { value: "{$variable.base_url}" },
+          OTHER: { value: "{$variable.missing}" },
+          BAD: { value: "{$variables.base_url}" },
+        },
+      },
+    });
+    expect(findUnevaluableExpressions(m).map((v) => [v.path.join("."), v.message])).toEqual([
+      ["auths.key.delivery.env.OTHER", expect.stringContaining("{$variable.missing}")],
+      ["auths.key.delivery.env.BAD", expect.stringContaining("'{$variables.base_url}'")],
+      ["auths.key.authorized_uris.1", expect.stringContaining("{$variable.other}")],
+    ]);
+    const { variables: _, ...undeclared } = m;
+    expect(findUnevaluableExpressions(undeclared).map((v) => v.path.join("."))).toEqual([
+      "auths.key.delivery.env.BASE",
+      "auths.key.delivery.env.OTHER",
+      "auths.key.delivery.env.BAD",
+      "auths.key.authorized_uris.0",
+      "auths.key.authorized_uris.1",
+    ]);
+  });
+
+  it("findUnevaluableExpressions refuses a variable in a login request url", () => {
+    const login = {
+      login: {
+        request: { method: "POST", url: "{$variable.base_url}/login", body: "p={{password}}" },
+        outputs: { token: "$response.body#/token" },
+      },
+    };
+    expect(
+      findUnevaluableExpressions({ ...customWithConnect(login), variables }).map((v) =>
+        v.path.join("."),
+      ),
+    ).toEqual(["auths.session.connect.login.request.url"]);
   });
 });

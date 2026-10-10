@@ -2,13 +2,18 @@
 
 /**
  * Shared token utilities.
- * Used by both oauth.ts (initial token exchange) and token-refresh.ts (refresh flow).
+ * Used by both token-exchange.ts (initial token exchange) and token-refresh.ts (refresh flow).
  *
  * `OAuthTokenAuthMethod` (= AFPS `token_endpoint_auth_method`) is the single
  * source of truth in @appstrate/core/validation.
  */
 
 import type { OAuthTokenAuthMethod } from "@appstrate/core/validation";
+import { MAX_TOKEN_BODY_BYTES, parseJsonUnder, readTextUnder } from "./bounded-body.ts";
+
+function formUrlEncode(value: string): string {
+  return new URLSearchParams([["", value]]).toString().slice(1);
+}
 
 /**
  * Build headers for an OAuth2 token endpoint request.
@@ -25,11 +30,9 @@ export function buildTokenHeaders(
     Accept: "application/json",
   };
   if (tokenAuthMethod === "client_secret_basic") {
-    // RFC 6749 §2.3.1: credentials MUST be URL-encoded before base64
-    const encoded = Buffer.from(
-      `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`,
-    ).toString("base64");
-    headers["Authorization"] = `Basic ${encoded}`;
+    // RFC 6749 §2.3.1: each credential is form-urlencoded (Appendix B), leaving ASCII for `btoa`.
+    headers["Authorization"] =
+      `Basic ${btoa(`${formUrlEncode(clientId)}:${formUrlEncode(clientSecret)}`)}`;
   }
   return headers;
 }
@@ -45,31 +48,37 @@ export interface ParsedTokenResponse {
   accessToken: string;
   refreshToken?: string;
   expiresAt: string | null;
-  scopesGranted: string[];
+  /** `null` when the response omits `scope`: unchanged (RFC 6749 §5.1), never "no scopes". */
+  scopesReturned: string[] | null;
 }
 
 /**
- * Classified outcome of a non-2xx OAuth2 token endpoint response.
+ * Classified outcome of an OAuth2 token endpoint response that yielded no
+ * access token: a non-2xx, or a 2xx whose JSON body carries an RFC 6749 §5.2
+ * error object (some IdPs answer `200 {"error":"invalid_grant"}`).
  *
- * Per RFC 6749 §5.2, a dead authorization code or refresh token is signaled by
- * `{ "error": "invalid_grant" }` on `HTTP 400` — or on `HTTP 401`, which the
- * same section mandates whenever the client authenticated through the
- * `Authorization` header. Any other failure (network, 5xx, non-JSON body, other
- * 4xx, other OAuth error codes) is treated as transient because the credential
- * might still be valid.
+ * A dead authorization code or refresh token is signaled by
+ * `{ "error": "invalid_grant" }` (RFC 6749 §5.2). Any other failure (network,
+ * 5xx, non-JSON body, other 4xx, other OAuth error codes, a 2xx with neither
+ * `access_token` nor `error`) is treated as transient because the credential
+ * might still be valid — except a refused client (`"client_rejected"`).
  *
- * Both the initial token exchange (oauth.ts) and the refresh flow (token-refresh.ts)
- * MUST classify errors through this helper so that revocation handling stays
- * symmetric — historically only the refresh path detected revocation, leaving the
- * initial callback path to bubble up a generic 400 with no actionable signal.
+ * Both the initial token exchange (token-exchange.ts) and the refresh flow
+ * (token-refresh.ts) read the response through {@link readTokenResponse} so
+ * that revocation handling stays symmetric.
  */
-export type TokenErrorKind = "revoked" | "transient";
+export type TokenErrorKind = "revoked" | "client_rejected" | "transient";
+
+const CLIENT_REJECTED_ERRORS: ReadonlySet<string> = new Set([
+  "invalid_client",
+  "unauthorized_client",
+]);
 
 interface TokenErrorClassification {
   kind: TokenErrorKind;
   /** OAuth2 error code from the response body (e.g. "invalid_grant") if parseable. */
   error?: string;
-  /** Human-readable description from the response body if present. */
+  /** Redacted human-readable description from the response body if present. */
   errorDescription?: string;
 }
 
@@ -78,13 +87,11 @@ interface TokenErrorClassification {
  * into an `Error.message` a logger or UI might surface.
  *
  * RFC 6749 §5.2 `error_description` is free text, but several IdPs echo the
- * rejected authorization code / refresh token back inside it — and both the
- * initial-exchange and refresh paths concatenate this field into the thrown
- * error's `message`. This strips long unbroken credential-like runs (≥20 chars
- * of the token / JWT / base64url / hex alphabet) to `[redacted]` and caps the
- * overall length. The full untouched body stays available on the typed `body`
- * field of the thrown error for authorized diagnostics — only the
- * human-readable summary carried in the message is sanitized here.
+ * rejected authorization code / refresh token back inside it — and the
+ * failure summary of {@link readTokenResponse} folds this field into the
+ * thrown error's `message`. This strips long unbroken credential-like runs
+ * (≥20 chars of the token / JWT / base64url / hex alphabet) to `[redacted]`
+ * and caps the overall length.
  */
 const CREDENTIAL_LIKE_RUN = /[A-Za-z0-9._~+/=-]{20,}/g;
 const MAX_ERROR_DESCRIPTION_LEN = 200;
@@ -97,24 +104,47 @@ function redactErrorDescription(description: string): string {
 }
 
 /**
- * Classify an HTTP error response from an OAuth2 token endpoint.
+ * Classify a parsed token endpoint body as an RFC 6749 §5.2 error object.
+ *
+ * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
+ * refresh token, where retrying is pointless and the stored PKCE state should
+ * be dropped. `invalid_client` / `unauthorized_client` map to `"client_rejected"`:
+ * the grant is untouched, only fixing the client registration helps. Any other
+ * code or a body with no string `error` stays `"transient"`: an ambiguous signal
+ * never declares a credential dead.
+ *
+ * `error_description` is redacted here, at the source, so every consumer that
+ * folds it into `Error.message` gets the sanitized value.
+ */
+export function classifyTokenErrorBody(body: unknown): TokenErrorClassification {
+  if (!body || typeof body !== "object") {
+    return { kind: "transient" };
+  }
+  const parsed = body as { error?: unknown; error_description?: unknown };
+  const error = typeof parsed.error === "string" ? parsed.error : undefined;
+  const errorDescription =
+    typeof parsed.error_description === "string"
+      ? redactErrorDescription(parsed.error_description)
+      : undefined;
+  const kind: TokenErrorKind =
+    error === "invalid_grant"
+      ? "revoked"
+      : error !== undefined && CLIENT_REJECTED_ERRORS.has(error)
+        ? "client_rejected"
+        : "transient";
+  return { kind, error, errorDescription };
+}
+
+/**
+ * Classify a non-2xx response from an OAuth2 token endpoint.
  *
  * Both 400 and 401 bodies are parsed. RFC 6749 §5.2 lets an authorization
  * server answer `invalid_client` with EITHER status ("If the client attempted
  * to authenticate via the Authorization request header field, the
  * authorization server MUST respond with an HTTP 401"), and providers split
- * roughly evenly on which they pick. Parsing only 400 dropped the error code
- * of every 401 on the floor, which is exactly the client-authentication
- * failure an operator most needs named: a wrong
- * `token_endpoint_auth_method` in a manifest surfaces as `invalid_client`,
- * and without the code the whole class is indistinguishable from a network
- * blip in the logs.
- *
- * Only `invalid_grant` maps to `"revoked"` — a dead authorization code or
- * refresh token, where retrying is pointless and the stored PKCE state should
- * be dropped. `invalid_client` stays `"transient"`: the grant is untouched, it
- * is the client credentials that are wrong, and an operator fixing the
- * registration makes the same connect attempt work.
+ * roughly evenly on which they pick — and a wrong `token_endpoint_auth_method`
+ * in a manifest surfaces exactly as `invalid_client`, which an operator needs
+ * named. Other statuses (5xx, 403, …) are `"transient"` without parsing.
  *
  * @param status - HTTP status code of the response
  * @param body - Raw response body (text)
@@ -124,25 +154,92 @@ export function parseTokenErrorResponse(status: number, body: string): TokenErro
     return { kind: "transient" };
   }
   try {
-    const parsed = JSON.parse(body) as { error?: unknown; error_description?: unknown };
-    if (!parsed || typeof parsed !== "object") {
-      return { kind: "transient" };
-    }
-    const error = typeof parsed.error === "string" ? parsed.error : undefined;
-    // Redact at the source so both consumers (token-exchange.ts,
-    // token-refresh.ts) that fold this into `Error.message` get the sanitized
-    // value; the raw body remains on the error's typed `body` field.
-    const errorDescription =
-      typeof parsed.error_description === "string"
-        ? redactErrorDescription(parsed.error_description)
-        : undefined;
-    if (error === "invalid_grant") {
-      return { kind: "revoked", error, errorDescription };
-    }
-    return { kind: "transient", error, errorDescription };
+    return classifyTokenErrorBody(JSON.parse(body));
   } catch {
     return { kind: "transient" };
   }
+}
+
+/** A token endpoint body that carries a non-empty string `access_token`. */
+type TokenResponseBody = Record<string, unknown> & { access_token: string };
+
+/** A token endpoint response that yielded no access token, ready for the caller's error class. */
+interface TokenResponseFailure extends TokenErrorClassification {
+  ok: false;
+  status: number;
+  /**
+   * The OAuth error code plus its redacted description, or a fallback naming
+   * the case (`non-JSON response` covers a 2xx body past the cap too).
+   */
+  summary: string;
+  /**
+   * The body as received (non-2xx, JSON or not) or re-serialized (2xx JSON);
+   * absent when a 2xx body is not JSON or is past the cap.
+   */
+  body?: string;
+  /**
+   * Why a 2xx body could not be read: the `SyntaxError` of a non-JSON body or
+   * the `RangeError` of the size cap. The read consumed the stream, so it is
+   * all that is left of what came back.
+   */
+  cause?: unknown;
+}
+
+type TokenResponseRead = { ok: true; raw: TokenResponseBody } | TokenResponseFailure;
+
+function hasAccessToken(tokenData: unknown): tokenData is TokenResponseBody {
+  const accessToken = (tokenData as { access_token?: unknown } | null)?.access_token;
+  return typeof accessToken === "string" && accessToken !== "";
+}
+
+function classifiedFailure(
+  classification: TokenErrorClassification,
+  status: number,
+  body: string,
+  fallback: string,
+): TokenResponseFailure {
+  const { error, errorDescription } = classification;
+  let summary = fallback;
+  if (error !== undefined) summary = errorDescription ? `${error} — ${errorDescription}` : error;
+  return { ok: false, ...classification, status, summary, body };
+}
+
+/**
+ * Read an OAuth2 token endpoint response (under {@link MAX_TOKEN_BODY_BYTES})
+ * and classify every way it can fail to carry an access token:
+ *
+ *   - a non-2xx, classified by {@link parseTokenErrorResponse};
+ *   - a 2xx whose body is not JSON (or is past the cap): `"transient"`, the
+ *     parse error as `cause`;
+ *   - a 2xx JSON body without `access_token`, classified by
+ *     {@link classifyTokenErrorBody}. It is a failed grant, never a success:
+ *     some IdPs answer one with a 2xx RFC 6749 §5.2 error object
+ *     (`200 {"error":"invalid_grant"}`, GitHub's `bad_refresh_token`).
+ *
+ * The failure's `summary` is the only part meant for `Error.message`: it never
+ * holds the raw body, because IdPs echo the rejected code or token back in
+ * error bodies and a generic catcher logs `err.message`. The raw body rides on
+ * `body`, for the caller's typed error field.
+ */
+export async function readTokenResponse(response: Response): Promise<TokenResponseRead> {
+  const { status } = response;
+  if (!response.ok) {
+    const body = (await readTextUnder(response, MAX_TOKEN_BODY_BYTES)) ?? "";
+    return classifiedFailure(parseTokenErrorResponse(status, body), status, body, `HTTP ${status}`);
+  }
+  let raw: unknown;
+  try {
+    raw = await parseJsonUnder(response, MAX_TOKEN_BODY_BYTES);
+  } catch (cause) {
+    return { ok: false, kind: "transient", status, summary: "non-JSON response", cause };
+  }
+  if (hasAccessToken(raw)) return { ok: true, raw };
+  return classifiedFailure(
+    classifyTokenErrorBody(raw),
+    status,
+    JSON.stringify(raw),
+    `HTTP ${status} without access_token`,
+  );
 }
 
 /**
@@ -155,19 +252,13 @@ export function parseTokenErrorResponse(status: number, body: string): TokenErro
  * manifest's `scope_catalog[].implies` aliases (e.g. Google echoing `email` as
  * `…/auth/userinfo.email`), which only the platform layer knows.
  *
- * @param tokenData - Raw JSON response from the token endpoint
- * @param requestedScopes - Scopes that were sent in the authorize / refresh call. Used
- *   as the granted set when the response omits `scope` (RFC 6749 §5.1).
+ * @param tokenData - Token endpoint body, as narrowed by {@link readTokenResponse}
  * @param fallbackRefreshToken - Refresh token to preserve if not present in response
  */
 export function parseTokenResponse(
-  tokenData: Record<string, unknown>,
-  requestedScopes?: string[],
+  tokenData: TokenResponseBody,
   fallbackRefreshToken?: string,
 ): ParsedTokenResponse {
-  if (typeof tokenData.access_token !== "string" || !tokenData.access_token) {
-    throw new Error("No (string) access_token in token response");
-  }
   const accessToken = tokenData.access_token;
 
   const refreshToken =
@@ -188,22 +279,23 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
-  const scopeStr = typeof tokenData.scope === "string" ? tokenData.scope : "";
-  const responseScopes = scopeStr ? scopeStr.split(/[\s,]+|%20/).filter(Boolean) : [];
-  const scopesGranted = responseScopes.length > 0 ? responseScopes : (requestedScopes ?? []);
+  const scopes =
+    typeof tokenData.scope === "string" ? tokenData.scope.split(/[\s,]+|%20/).filter(Boolean) : [];
 
-  return { accessToken, refreshToken, expiresAt, scopesGranted };
+  return {
+    accessToken,
+    refreshToken,
+    expiresAt,
+    scopesReturned: scopes.length > 0 ? scopes : null,
+  };
 }
 
 /**
  * A client-authentication pair that cannot be correct — thrown by
  * {@link assertClientAuthCoherent}.
  *
- * A distinct type because the refresh path classifies anything that is not a
- * `RefreshError` as a transient upstream failure and counts it toward the
- * streak that eventually flags a connection `needs_reconnection`. A
- * configuration/programming fault must not spend a user's connection health
- * budget, and must not read in the logs like someone else's outage.
+ * A distinct type: the refresh path counts only a `RefreshError` toward the
+ * `needs_reconnection` streak, so a configuration fault never spends it.
  */
 export class ClientAuthInvariantError extends Error {
   constructor(message: string) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * E2 — live integration credentials resolver (`resolveLiveIntegrationCredentials`).
+ * Live integration credentials resolver (`resolveLiveIntegrationCredentials`).
  *
  * This is the sidecar `/internal/integration-credentials` backing: it decrypts
  * the per-run connection's credentials and proactively refreshes OAuth2 tokens.
@@ -9,7 +9,7 @@
  * Refresh seam used by these tests
  * --------------------------------
  * The resolver does NOT take an injectable refresh function. It calls
- * `forceRefreshIntegrationConnection` directly, which in turn builds a
+ * `refreshConnectionCredential`, which in turn builds a
  * `RefreshContext` from the manifest's `auths.{key}.tokenUrl` + the seeded
  * per-space `integration_oauth_clients` row, then POSTs the
  * `refresh_token` to that token URL via the shared
@@ -18,13 +18,13 @@
  * So the lowest injectable boundary is the **token endpoint URL itself**:
  * each test stands up a controllable `Bun.serve` and points
  * `manifest.auths.primary.tokenUrl` at it. The server's response shape drives
- * the `RefreshError` taxonomy and the scope-shrink path:
+ * the `RefreshError` taxonomy and the narrowed-grant path:
  *   - HTTP 400 + `{ "error": "invalid_grant" }` → RefreshError(kind="revoked") → 410
  *   - HTTP 500 (or any non-400)                 → RefreshError(kind="transient") → 502
- *   - HTTP 200 + narrowed `scope`               → shrinkDetected → scope-floor check
+ *   - HTTP 200 + narrowed `scope`               → stored grant narrowed, connection unflagged
  *
- * Refresh is triggered deterministically via `options.forceRefresh = true`
- * (no clock games needed for the lead window).
+ * Refresh is triggered deterministically by a rejection trigger ({@link REJECTED}),
+ * with no clock games for the lead window.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -36,8 +36,10 @@ import { integrationConnections, integrationOauthClients, packages } from "@apps
 import { eq, sql } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
 import { resolveLiveIntegrationCredentials } from "../../../src/services/integration-credentials-resolver.ts";
+import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import {
   clearUpstreamRejections,
+  readCredentialRevision,
   recordUnrefreshableRejection,
   saveIntegrationConnection,
 } from "../../../src/services/integration-connections.ts";
@@ -48,6 +50,9 @@ import {
 } from "../../helpers/integration-manifests.ts";
 
 const INTEGRATION_ID = "@official/gmail";
+
+/** An upstream 401 on the credential the connection holds. */
+const REJECTED = { kind: "rejected", revision: null } as const;
 
 /** A well-formed connection uuid that no row carries — for the pre-lookup refusals. */
 const NO_SUCH_CONNECTION_ID = "00000000-0000-4000-8000-000000000000";
@@ -226,6 +231,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         authKey: "primary",
         accountId: opts.accountId ?? "acct-1",
         label: opts.accountId ?? "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
@@ -269,16 +275,13 @@ describe("resolveLiveIntegrationCredentials", () => {
     // RFC 6749 §5.2 revocation.
     token.setResponse({ error: "invalid_grant", error_description: "token revoked" }, 400);
 
-    let status: number | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-        forceRefresh: true,
-      });
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-    }
-    expect(status).toBe(410);
+    await expect(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+    ).rejects.toMatchObject({
+      status: 410,
+      code: "integration_connection_needs_reconnection",
+      extensions: { cause: "refresh_token_revoked" },
+    });
     expect(await needsReconnection(connId)).toBe(true);
   });
 
@@ -286,17 +289,35 @@ describe("resolveLiveIntegrationCredentials", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "temporarily_unavailable" }, 500);
 
-    let status: number | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-        forceRefresh: true,
-      });
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-    }
-    expect(status).toBe(502);
+    await expect(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+    ).rejects.toMatchObject({ status: 502, extensions: { cause: "upstream_transient" } });
     expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("throws 410 and flags the connection when this transient failure escalates the streak", async () => {
+    const { INTEGRATION_REFRESH_MAX_FAILURES: max, INTEGRATION_REFRESH_GRACE_SECONDS: grace } =
+      getEnv();
+    const connId = await seedConnection({
+      userId: ctx.user.id,
+      expiresAt: new Date(Date.now() - (grace + 3600) * 1000),
+    });
+    await db
+      .update(integrationConnections)
+      .set({ refreshFailureCount: max - 1 })
+      .where(eq(integrationConnections.id, connId));
+    token.setResponse({ error: "temporarily_unavailable" }, 500);
+
+    const refused = resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(connId),
+      REJECTED,
+    );
+    await expect(refused).rejects.toMatchObject({
+      status: 410,
+      extensions: { cause: "refresh_failures_exhausted" },
+    });
+    expect(await needsReconnection(connId)).toBe(true);
   });
 
   it("does NOT flag an unrefreshable oauth2 auth on a PROACTIVE read (no forced refresh)", async () => {
@@ -305,11 +326,61 @@ describe("resolveLiveIntegrationCredentials", () => {
       .delete(integrationOauthClients)
       .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
 
-    // No forceRefresh + the seeded token has no expiry → outside the lead
+    // A read + the seeded token has no expiry → outside the lead
     // window → no refresh attempt → a still-valid token must NOT be flagged
     // merely because it lacks a refresh client.
-    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {});
+    await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId));
     expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("a PROACTIVE read of a credential nothing can refresh, inside the lead window, serves it uncounted", async () => {
+    async function refreshFailureCount(connId: string): Promise<number> {
+      const [row] = await db
+        .select({ count: integrationConnections.refreshFailureCount })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      return row!.count;
+    }
+    // Expiry 1 min out → inside OAUTH_REFRESH_LEAD_MS → the proactive branch runs.
+    const soon = () => new Date(Date.now() + 60_000);
+
+    // oauth2 whose minting client is gone.
+    const oauthId = await seedConnection({ userId: ctx.user.id, expiresAt: soon() });
+    await db
+      .delete(integrationOauthClients)
+      .where(eq(integrationOauthClients.integrationId, INTEGRATION_ID));
+    const oauth = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(oauthId));
+    expect(oauth.auths[0]!.fields.access_token).toBe("old-access");
+    expect(await refreshFailureCount(oauthId)).toBe(0);
+    expect(await needsReconnection(oauthId)).toBe(false);
+
+    // A non-oauth2 auth.
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION_ID,
+          serverName: "@official/gmail-server",
+          auths: { primary: { type: "api_key", credentialFields: ["api_key"] } },
+        }) as unknown as Record<string, unknown>,
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const apiKeyId = await seedConnection({
+      userId: ctx.user.id,
+      accountId: "acct-api-key",
+      expiresAt: soon(),
+    });
+    await db
+      .update(integrationConnections)
+      .set({ clientRef: null })
+      .where(eq(integrationConnections.id, apiKeyId));
+    const apiKey = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(apiKeyId),
+    );
+    expect(apiKey.auths[0]!.fields.access_token).toBe("old-access");
+    expect(await refreshFailureCount(apiKeyId)).toBe(0);
+    expect(await needsReconnection(apiKeyId)).toBe(false);
   });
 
   // ── Invariant matrix ──
@@ -448,9 +519,7 @@ describe("resolveLiveIntegrationCredentials", () => {
             result: await resolveLiveIntegrationCredentials(
               INTEGRATION_ID,
               resolverContext(connId),
-              {
-                forceRefresh: true,
-              },
+              REJECTED,
             ),
             status: undefined,
           };
@@ -502,6 +571,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         authKey: "primary",
         accountId: "acct-1",
         label: "Connexion 1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({
@@ -513,12 +583,67 @@ describe("resolveLiveIntegrationCredentials", () => {
     const result = await resolveLiveIntegrationCredentials(
       INTEGRATION_ID,
       resolverContext(conn!.id),
-      {},
     );
     expect(result.auths[0]!.authorizedUris).toEqual([
       "https://tenant.example.com/**",
       "https://static.example/**",
     ]);
+  });
+
+  it("renders authorized_uris and the delivery value from the connection's variables (§7.12)", async () => {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          ...(localIntegrationManifest({
+            name: INTEGRATION_ID,
+            serverName: "@official/gmail-server",
+            auths: {
+              primary: {
+                type: "api_key",
+                authorizedUris: ["{$variable.base_url}/api/v4/**"],
+                credentialFields: ["api_key"],
+                delivery: {
+                  http: {
+                    in: "header",
+                    name: "X-Forge-Key",
+                    value: "{$variable.base_url}|{$credential.api_key}",
+                  },
+                },
+              },
+            },
+          }) as unknown as Record<string, unknown>),
+          variables: {
+            schema: {
+              type: "object",
+              properties: { base_url: { type: "string" } },
+              required: ["base_url"],
+            },
+          },
+        },
+      })
+      .where(eq(packages.id, INTEGRATION_ID));
+    const [conn] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION_ID,
+        authKey: "primary",
+        accountId: "acct-1",
+        label: "Connexion 1",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        variables: { base_url: "https://forge.example.com/" },
+      })
+      .returning({ id: integrationConnections.id });
+
+    const result = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(conn!.id),
+    );
+    expect(result.auths[0]!.authorizedUris).toEqual(["https://forge.example.com/api/v4/**"]);
+    expect(result.deliveryPlans.primary?.value).toBe("https://forge.example.com/|k");
   });
 
   it("a reconnect resets the rejection count of an unrefreshable auth", async () => {
@@ -534,9 +659,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       .where(eq(packages.id, INTEGRATION_ID));
     const connId = await seedConnection({ userId: ctx.user.id });
     const forced = () =>
-      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-        forceRefresh: true,
-      }).then(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED).then(
         () => undefined,
         (err: { status?: number; message?: string }) => err,
       );
@@ -556,7 +679,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     );
     // The count restarts from the reconnect, and the 502 says so.
     const afterReconnect = await forced();
-    expect(afterReconnect?.status).toBe(502);
+    expect(afterReconnect).toMatchObject({ status: 502, extensions: { cause: "unrefreshable" } });
     expect(afterReconnect?.message).toContain(
       `1/${max} consecutive upstream rejections before it is flagged`,
     );
@@ -582,9 +705,7 @@ describe("resolveLiveIntegrationCredentials", () => {
         .set({ clientRef: null })
         .where(eq(integrationConnections.id, connId));
       const forced = () =>
-        resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-          forceRefresh: true,
-        }).then(
+        resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED).then(
           () => undefined,
           (err: { status?: number; message?: string }) => err,
         );
@@ -620,7 +741,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       const { connId, forced } = await apiKeyConnection();
       const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
       for (let run = 1; run < max; run++) expect((await forced())?.status).toBe(502);
-      expect((await forced())?.status).toBe(410);
+      expect(await forced()).toMatchObject({ status: 410, extensions: { cause: "unrefreshable" } });
       expect(await needsReconnection(connId)).toBe(true);
     });
 
@@ -695,7 +816,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       const current = await resolveLiveIntegrationCredentials(
         INTEGRATION_ID,
         resolverContext(connId),
-        { forceRefresh: true, heldRevision: held },
+        { kind: "rejected", revision: held },
       );
       expect(current.auths[0]!.fields.api_key).toBe("key-b");
       expect(current.credentialRevision).not.toBe(held);
@@ -713,7 +834,10 @@ describe("resolveLiveIntegrationCredentials", () => {
 
       await clearUpstreamRejections(connId, INTEGRATION_ID, lostReach);
       expect((await storedCredential(connId)).count).toBe(2);
-      await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach);
+      const revision = (await readCredentialRevision(connId))!;
+      expect(await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach, revision)).toBe(
+        null,
+      );
       expect((await storedCredential(connId)).count).toBe(2);
     });
 
@@ -760,7 +884,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     const result = await resolveLiveIntegrationCredentials(
       INTEGRATION_ID,
       resolverContext(connId),
-      { forceRefresh: true },
+      REJECTED,
     );
 
     const primary = result.auths.find((a) => a.authKey === "primary");
@@ -778,21 +902,11 @@ describe("resolveLiveIntegrationCredentials", () => {
     // the missing refresh_token, not from an upstream failure.
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    let status: number | undefined;
-    let message: string | undefined;
-    try {
-      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-        forceRefresh: true,
-      });
-      throw new Error("expected resolveLiveIntegrationCredentials to throw");
-    } catch (err) {
-      status = (err as { status?: number }).status;
-      message = (err as Error).message;
-    }
-    expect(status).toBe(410);
-    // Named for what it is — not "refresh token revoked", which would send an
-    // operator hunting upstream for a revocation that never happened.
-    expect(message).toContain("no stored refresh_token");
+    // Named for what it is — not a revocation, which would send an operator
+    // hunting upstream for one that never happened.
+    await expect(
+      resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+    ).rejects.toMatchObject({ status: 410, extensions: { cause: "refresh_token_missing" } });
     expect(await needsReconnection(connId)).toBe(true);
   });
 
@@ -824,15 +938,10 @@ describe("resolveLiveIntegrationCredentials", () => {
         .where(eq(packages.id, INTEGRATION_ID));
       const connId = await seedConnection({ userId: ctx.user.id });
 
-      let status: number | undefined;
-      try {
-        await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-          forceRefresh: true,
-        });
-      } catch (err) {
-        status = (err as { status?: number }).status;
-      }
-      expect(status).toBe(502); // transient — NOT 410
+      // transient — NOT 410
+      await expect(
+        resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), REJECTED),
+      ).rejects.toMatchObject({ status: 502, extensions: { cause: "discovery_transient" } });
       expect(await needsReconnection(connId)).toBe(false); // row untouched
     } finally {
       failing.stop();
@@ -869,11 +978,10 @@ describe("resolveLiveIntegrationCredentials", () => {
         expiresAt: new Date(Date.now() + 60_000),
       });
 
-      // No forceRefresh → proactive path.
+      // A read → proactive path.
       const result = await resolveLiveIntegrationCredentials(
         INTEGRATION_ID,
         resolverContext(connId),
-        {},
       );
       const primary = result.auths.find((a) => a.authKey === "primary");
       expect(primary?.fields.access_token).toBe("old-access"); // cached, un-rotated
@@ -883,56 +991,42 @@ describe("resolveLiveIntegrationCredentials", () => {
     }
   });
 
-  it("flips needsReconnection when a scope shrink drops below the installed-agent floor", async () => {
-    // Agent requires `delete`; the refresh narrows the grant to read+send only.
-    await seedPackage({
-      id: "@creds/agent-deleter",
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "agent",
-      draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
-    });
-    await activatePackage(
-      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      "@creds/agent-deleter",
-    );
+  it("stores a narrowed grant unflagged; resolution refuses only the agent needing the dropped scope", async () => {
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
     });
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
 
-    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-      forceRefresh: true,
-    });
-    // Credentials still resolve (the refresh succeeded) ...
-    expect(out.auths.length).toBe(1);
-    // ... but the connection is flagged because `delete` is now missing.
-    expect(await needsReconnection(connId)).toBe(true);
-  });
+    const out = await resolveLiveIntegrationCredentials(
+      INTEGRATION_ID,
+      resolverContext(connId),
+      REJECTED,
+    );
+    expect(out.auths.find((a) => a.authKey === "primary")?.fields.access_token).toBe("new-access");
+    const [row] = await db
+      .select({
+        scopesGranted: integrationConnections.scopesGranted,
+        needsReconnection: integrationConnections.needsReconnection,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row).toEqual({ scopesGranted: ["read", "send"], needsReconnection: false });
 
-  it("absorbs a scope shrink silently when it still covers the required floor", async () => {
-    // Agent requires only `read`; the refresh shrinks delete away but keeps read.
-    await seedPackage({
-      id: "@creds/agent-reader",
-      homeSpaceId: ctx.defaultSpaceId,
-      orgId: ctx.orgId,
-      type: "agent",
-      draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
-    });
-    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
-    const connId = await seedConnection({
-      userId: ctx.user.id,
-      scopes: ["read", "send", "delete"],
-    });
-    // Shrinks delete+send away but keeps read (the required floor).
-    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read" });
-
-    const out = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(connId), {
-      forceRefresh: true,
-    });
-    expect(out.auths.length).toBe(1);
-    expect(await needsReconnection(connId)).toBe(false);
+    const resolveFor = (name: string, tools: string[]) =>
+      resolveConnectionsForRun({
+        agentManifest: agentManifest(name, tools),
+        packageId: name,
+        actor: { type: "user", id: ctx.user.id },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      });
+    const deleter = await resolveFor("@creds/agent-deleter", ["delete_message"]);
+    expect(deleter.errors).toMatchObject([
+      { code: "insufficient_scopes", connectionId: connId, missingScopes: ["delete"] },
+    ]);
+    const sender = await resolveFor("@creds/agent-sender", ["send_message"]);
+    expect(sender.errors).toEqual([]);
+    expect(sender.resolved[INTEGRATION_ID]?.map((c) => c.connectionId)).toEqual([connId]);
   });
 
   it("does not resolve another actor's connection — 404, never a silent empty payload", async () => {

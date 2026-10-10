@@ -14,7 +14,7 @@ import type { Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
-import { collectAgentReadinessErrors } from "./agent-readiness.ts";
+import { collectAgentReadiness } from "./agent-readiness.ts";
 import { resolveAgentRunVersion, VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
 import { resolveModel } from "./org-models.ts";
@@ -135,6 +135,19 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
   };
 }
 
+/**
+ * Readiness minus connections: bundle, skills and manifest-health errors only.
+ * `collectAgentReadiness` always resolves connections for its actor, and those
+ * verdicts already arrive, richer, through `resolveAgentConnectionReadiness`;
+ * the resolver's errors are pushed last, so dropping that tail keeps the rest.
+ */
+export async function collectBundleReadinessErrors(
+  params: Parameters<typeof collectAgentReadiness>[0],
+): Promise<ValidationFieldError[]> {
+  const { errors, resolutionErrors } = await collectAgentReadiness(params);
+  return errors.slice(0, errors.length - resolutionErrors.length);
+}
+
 export async function getAgentDiagnostics(args: {
   scope: SpaceScope;
   agent: LoadedPackage;
@@ -142,22 +155,23 @@ export async function getAgentDiagnostics(args: {
   /** The connect routes' own guards, so a diagnostic cannot promise what they refuse. */
   canConnect: boolean;
   canConfigureIntegrations: boolean;
+  /** A user credential reaches the connections of every space it belongs to; a delegated one only this space. */
+  wholeReach: boolean;
   version?: string;
 }): Promise<AgentDiagnosticsResult> {
-  const { scope, actor, canConnect, canConfigureIntegrations } = args;
+  const { scope, actor, canConnect, canConfigureIntegrations, wholeReach } = args;
   const versionRef = args.version?.trim() || VERSION_SELECTOR_DRAFT;
   const { agent } = await resolveAgentRunVersion(args.agent, versionRef);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
 
-  // Connections are resolved once through their dedicated bulk service. The
-  // core readiness pass therefore runs without an actor to avoid duplicating
-  // that query and producing duplicate diagnostics.
+  // Connections are reported by their dedicated bulk service; the core
+  // readiness pass keeps only its non-connection errors to avoid duplicates.
   const [readinessErrors, connections, model, schedules] = await Promise.all([
-    collectAgentReadinessErrors({
+    collectBundleReadinessErrors({
       agent,
       orgId: scope.orgId,
       spaceId: scope.spaceId,
-      actor: null,
+      actor,
     }),
     resolveAgentConnectionReadiness({
       scope,
@@ -165,6 +179,7 @@ export async function getAgentDiagnostics(args: {
       actor,
       canConnect,
       canConfigureIntegrations,
+      wholeReach,
       version: versionRef,
     }),
     resolveModel(scope.orgId, agent.id, packageConfig.modelId),

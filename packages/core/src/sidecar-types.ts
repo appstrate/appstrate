@@ -422,8 +422,9 @@ export interface IntegrationSpawnSpec {
    * Local runner egress policy (#1458), enforced by the one listener (MITM or
    * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
    * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
+   * `declaredUris`: the manifest's own list; only a host it names literally skips the floor.
    */
-  egress?: { authorizedUris: string[]; allowAllUris: boolean };
+  egress?: { authorizedUris: string[]; declaredUris: string[]; allowAllUris: boolean };
   /**
    * R8a defensive filter — names from `manifest.hidden_tools` (AFPS
    * §3.4 / `integration.schema.json`). Install-time validation already
@@ -490,6 +491,8 @@ export interface IntegrationSpawnSpec {
     authorizedUris: readonly string[];
     /** Manifest `delivery.http` block used to render the session header. */
     deliveryHttp: ManifestDeliveryHttp;
+    /** Connection variables (AFPS §7.12) for `{$variable.<name>}`. */
+    variables: Record<string, string>;
     /** Decrypted login secret — sidecar-only, used for proxy-side substitution. */
     inputs: Record<string, string>;
     /**
@@ -726,6 +729,22 @@ export interface OAuthTokenResponse {
  * when the token expires.
  */
 export const OAUTH_REFRESH_LEAD_MS = 5 * 60_000;
+
+/** The `cause` extension member (RFC 9457 §3.2) of the internal credential endpoints' 410/502. */
+export const CREDENTIAL_FAILURE_CAUSES = [
+  "connection_flagged",
+  "refresh_token_revoked",
+  "refresh_token_missing",
+  "refresh_failures_exhausted",
+  "unrefreshable",
+  "credentials_undecryptable",
+  "upstream_transient",
+  "discovery_transient",
+  "connection_changed",
+  "oauth_client_rejected",
+] as const;
+
+export type CredentialFailureCause = (typeof CREDENTIAL_FAILURE_CAUSES)[number];
 
 /**
  * Prefix the sidecar's connect-login puts on the ONE error class written for

@@ -25,7 +25,7 @@
 
 /**
  * Resolver config consumed by `resolveHttpDelivery`
- * (`@appstrate/afps-runtime/resolvers`). This zero-dep package is the single
+ * (`@appstrate/afps-runtime/resolvers`). This zero-internal-dependency package is the single
  * source of truth for the shape; afps-runtime re-exports it.
  */
 export interface HttpDeliveryConfig {

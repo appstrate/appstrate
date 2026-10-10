@@ -12,11 +12,12 @@ Core code: `apps/api/src/routes/spaces.ts` (routes), `apps/api/src/services/spac
 
 ```
 Organization ──┬── space_roles (org-defined permission bundles)
+               ├── Integrations (org-scoped connections and OAuth clients, space_id NULL)
                ├── Space ──┬── space_members (explicit role per user)
                │           ├── Agents (via space_packages)
                │           ├── Runs ── Files
                │           ├── Schedules
-               │           ├── Integrations (connections, OAuth clients, pins, org defaults)
+               │           ├── Integrations (space-scoped connections and OAuth clients, pins, org defaults)
                │           ├── End-users
                │           ├── API keys
                │           ├── Webhooks (level = "space")
@@ -102,17 +103,16 @@ The list is core-only by design: a module owns space-scoping for its own routes 
 
 Resolution order, symmetric with `requireOrgContext`:
 
-| #   | Source                                         | Who uses it                                   |
-| --- | ---------------------------------------------- | --------------------------------------------- |
-| 1   | a `spaceId` already pinned by an auth strategy | API key, OIDC JWT, module strategies          |
-| 2   | the `X-Space-Id` request header                | session auth — dashboard users                |
-| 3   | the org's **default** space                    | the in-process MCP re-entry, and nothing else |
+| #   | Source                                         | Who uses it                                 |
+| --- | ---------------------------------------------- | ------------------------------------------- |
+| 1   | a `spaceId` already pinned by an auth strategy | API key, OIDC JWT, module strategies        |
+| 2   | the `X-Space-Id` request header                | session auth, and every in-process re-entry |
 
 **A pinned space beats the header, and a disagreement is a 403** (`space-context.ts`). Without that check, a holder of a bearer token scoped to space A could send `X-Space-Id: B` for a second space in the same org and reach its data. Session callers never pin a space, so their header stays the primary signal.
 
-**The default-space fallback is gated on the internal-dispatch marker** (`space-context.ts`). It exists solely for the MCP sub-dispatch: a per-org MCP bearer token pins the org but reaches a space-scoped route through an in-process `app.fetch()` re-entry that carries no `X-Space-Id`, so it resolves to the org's default space. That re-entry is identified by an unguessable per-process secret header (`x-appstrate-internal-dispatch`, 256 bits of CSPRNG minted once per boot, compared in constant time — `apps/api/src/lib/internal-dispatch.ts`). A direct caller — SPA or CLI — that omits the header gets a **400**, not a silent fallback to the default space (`space-context.ts`), which would weaken space isolation. It is the HEADER-LESS re-entry that falls back: the chat module's in-process loopback re-entry sends the session's `X-Space-Id` and so resolves at step 2, and its bearer declares `principalKind: "user"` (RBAC spec §7.4), so a turn started from the caller's personal space stays there instead of landing on the default one. The MCP router applies the same order for its own session scope (`apps/api/src/modules/mcp/router.ts`).
+**There is no default-space fallback.** A caller that names no space gets a **400** (`space-context.ts`), never a silent landing on the default space, which would weaken space isolation. That holds for the in-process re-entries too: the MCP router forwards the space it entered on every re-entry (the pinned space, or the space an org-wide call names, `docs/plans/mcp-org-wide-spaces.md`), and the chat module's loopback sends the session's `X-Space-Id`, with a bearer declaring `principalKind: "user"` (RBAC spec §7.4) so a turn started from the caller's personal space stays there. The re-entries are identified by an unguessable per-process secret header (`x-appstrate-internal-dispatch`, 256 bits of CSPRNG minted once per boot, compared in constant time — `apps/api/src/lib/internal-dispatch.ts`), which vouches for the caller's audience-bound token and never picks a space for it.
 
-**Every path a space id can enter a request funnels through `validateSpaceInOrg` or `loadSpaceAccess`** (`apps/api/src/lib/space-lookup.ts`) — SSE auth calls the second; the middleware, the module applier, the spaces router and the MCP router enter through `enterSpaceById` (`space-context.ts`), which calls the second when it reads the caller's membership anyway (an org role, no preview) and the first otherwise — and both carry the shape guard, which is why it lives there rather than at each call site. The shape check runs **before** the SELECT: a `spc_` id that does not exist is a 404; a retired `app_` id is not a missing row, it is un-migrated data, and `assertSpaceId` says so. The paths that never pass through either are the three default-space fallbacks — `requireSpaceContext`, the module applier behind `enterSpaceContext` (both `space-context.ts`) and the MCP router's — where the id comes straight off the row, so each calls `assertSpaceId` explicitly, which is where an un-migrated `spaces` table would otherwise slip in unnoticed.
+**Every path a space id can enter a request funnels through `validateSpaceInOrg` or `loadSpaceAccess`** (`apps/api/src/lib/space-lookup.ts`) — SSE auth calls the second; the middleware, the module applier, the spaces router and the MCP router enter through `enterSpaceById` (`space-context.ts`), which calls the second when it reads the caller's membership anyway (an org role, no preview) and the first otherwise — and both carry the shape guard, which is why it lives there rather than at each call site. The shape check runs **before** the SELECT: a `spc_` id that does not exist is a 404; a retired `app_` id is not a missing row, it is un-migrated data, and `assertSpaceId` says so.
 
 On success the middleware sets `c.set("spaceId", …)`, and the admission (`enterSpaceById`, or `applySpacePermissions` for a row already in hand) sets `c.set("space", row)` — the `SpaceContextRow` (`apps/api/src/lib/space-lookup.ts`) it judged the caller's role on, so a service deciding for the caller takes the row that authorized the request rather than re-SELECTing it. A reader resolving OTHER users' roles (`listSpaceMembers`) re-reads the space with their rows in one statement instead (RBAC spec §4.4).
 
@@ -178,6 +178,27 @@ Member mutations record `space.member_added` / `space.member_role_changed` / `sp
 
 Mutations record audit events with `resourceType: "space"` and actions `space.created` / `space.updated` / `space.deleted` (`apps/api/src/routes/spaces.ts`).
 
+## Connections
+
+A connection (`integration_connections`, `packages/db/src/schema/integrations.ts`) is never wider than the OAuth client that minted it: a refresh token is bound to the client that obtained it (RFC 6749 §6). `org_id` is NOT NULL; `space_id IS NULL` is an org-scoped row.
+
+| Minted by                                                                                                                 | Scope                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| the system client, an org client (the auto-provisioned DCR/CIMD client included), or none (API key, basic, fields, login) | the org — `space_id` NULL, `origin_space_id` the space it was connected from     |
+| a space's own client, registered by hand                                                                                  | that space                                                                       |
+| an end user, whatever the client                                                                                          | that space, never shared (CHECKs `…_end_user_is_space`, `…_end_user_not_shared`) |
+| a delegated credential (API key, third-party token), whatever the client                                                  | its space — its owner's session widens it on a reconnect                         |
+
+Promoting a space client to the org widens its rows in the same transaction (`widenConnectionsToOrgScope`, `apps/api/src/services/integration-connections.ts`); an org-scoped row reconnects through an org or system client, never its space's own — with neither, `409 connection_scope_narrowing`. Rows connected before `0086` stay space-scoped until the operator script `scripts/migration/0041-widen-connections-to-org-scope.ts` widens them.
+
+**Where a row binds** — one predicate, `apps/api/src/services/connection-reach.ts`, behind the resolver, the pickers, pins and defaults, schedules and the credential proxy. With the integration active in space S, a row reaches S when it belongs to S's org and either `space_id = S`, or it is org-scoped and S's default OAuth client for the row's integration and auth is not a manual (not auto-provisioned) one of its own — a space defaulting to its own app or tenant isolates it — unless the row was connected from S (`origin_space_id = S`). Within that reach an actor binds their own rows and the rows shared into S. When S blocks user connections for the integration (`space_packages.block_user_connections`), an own row binds in S only when it is shared into S or was made in S (`coalesce(space_id, origin_space_id) = S`): a row made in S passed the creation gate there, one made elsewhere would go around it.
+
+**Fallback.** With no pin, default or override, the actor's one own serving row binds; with several, those made in S are the candidates when there are any (else all of them): one binds; several `oauth2` rows of one known account, auth and instance bind the least-privileged covering the agent (#1871, `docs/architecture/INTEGRATIONS_RUNTIME.md`); otherwise `must_choose_connection`. A shared row never binds by fallback.
+
+**Sharing** is a set of target spaces, `shared_space_ids`; a space-scoped row may name only its own space (CHECK `integration_connections_space_shares_own`). Only the owner adds a target, a space of the org they reach (`409 connection_owner_without_access`) where they hold `integrations:connect`; adding a space that blocks user connections for the integration also takes `integrations:configure` there. The owner, or an `integrations:configure` holder in the target, removes it — `409 connection_pinned` while an admin pin or default of that target names the row. A share grants use, never the secret, and each add or removal is audited in the target space (`integration.connection.share_added` / `share_removed`). The owner edits label and targets through `PATCH /api/integrations/{packageId}/connections/{connectionId}` or `PATCH /api/me/connections/{connectionId}`; renaming an org-scoped row is the owner's alone, a governor renames only a row scoped to their space. A credential bound to a space (API key, space-bound token) changes only that space's share, renames only that space's rows, and cannot delete or reconnect an org-scoped row. Labels are unique per owner, `(org, scope, integration, owner)`; two owners' equal labels in one bound set are told apart by the resolver (` (2)`, in set order).
+
+**Access loss and deletion.** An owner who stops reaching T — removed from T, demoted, T closed, or the org left — loses the share into T only, in the same transaction, and other actors' schedules of T naming the row are disabled (`connection_unshared`, `unshareConnectionsOfOwnersWithoutAccess`, `apps/api/src/services/space-members.ts`). Deleting a space withdraws it from every share, nulls `origin_space_id` and cascades its space-scoped rows ("Delete cascade" below).
+
 ## Delete cascade
 
 `deleteSpace` (`apps/api/src/services/spaces.ts`) runs the whole teardown in one transaction, in this order:
@@ -186,7 +207,8 @@ Mutations record audit events with `resourceType: "space"` and actions `space.cr
 2. **Refuse the default space** — `409 default_space_not_deletable`. An org always has one.
 3. **Enumerate the owned storage** before the FK cascade removes the rows that name it: `files`, `uploads`, and every run's workspace, each turned into a `storage_deletion_jobs` row with reason `space_deleted`.
 4. **Account the bytes** — the freed `files.size` sum is decremented off `organizations.files_bytes_used` synchronously, under the org lock.
-5. **Delete the row.** Postgres cascades the rest.
+5. **Withdraw the space from every connection's `shared_space_ids`** — no foreign key covers an array element.
+6. **Delete the row.** Postgres cascades the rest.
 
 **Package artifacts are deliberately not enumerated**: `packages` is org-scoped and carries no `space_id`, so this cascade drops only the `space_packages` join rows — the package objects stay owned by the org and are purged by `deleteOrganization`.
 
@@ -204,7 +226,7 @@ Everything else follows the FK — except the last row, which since `0055` no lo
 | `files`                                 | NOT NULL      | cascade (+ storage job)                  |
 | `uploads`                               | NOT NULL      | cascade (+ storage job)                  |
 | `notifications`                         | NOT NULL      | cascade                                  |
-| `integration_connections`               | NOT NULL      | cascade                                  |
+| `integration_connections`               | nullable      | cascade (`origin_space_id`: set null)    |
 | `integration_oauth_clients`             | nullable      | cascade                                  |
 | `integration_pins`                      | NOT NULL      | cascade                                  |
 | `integration_org_defaults`              | NOT NULL      | cascade                                  |
@@ -214,7 +236,7 @@ Everything else follows the FK — except the last row, which since `0055` no lo
 | `oauth_clients` (`referenced_space_id`) | nullable      | cascade                                  |
 | `audit_events`                          | nullable      | **no FK** — the value outlives the space |
 
-Three of those columns are nullable because the row can be scoped at either level. `webhooks` and `oauth_clients` tie a discriminator to the id with a CHECK: `webhooks` requires `(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)` (`packages/db/src/schema/webhooks.ts`), and `oauth_clients` carries the three-way `org` / `space` / `instance` version of the same rule (`packages/db/src/schema/oidc.ts`). `integration_oauth_clients` has no discriminator: `org_id` is NOT NULL and `space_id IS NULL` is the org-level row, inherited by every space of the org; a space row's `org_id` is its space's org, kept equal by the service (`packages/db/src/schema/integrations.ts`). `audit_events.space_id` is nullable for a different reason: it is not a foreign key at all (`packages/db/src/schema/audit.ts`), the same denormalised posture `org_id` has always had. It used to be one, with `ON DELETE SET NULL`, and that blanked the attribution of every historical row for a space the instant the space was deleted — the failure the table's own doc argues against, applied to the other tenancy column. `0055` dropped the constraint; the value now survives the delete, naming a space that no longer exists. Deleting a space must not erase the record that it was deleted.
+Four of those columns are nullable because the row can be scoped at either level. `webhooks` and `oauth_clients` tie a discriminator to the id with a CHECK: `webhooks` requires `(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)` (`packages/db/src/schema/webhooks.ts`), and `oauth_clients` carries the three-way `org` / `space` / `instance` version of the same rule (`packages/db/src/schema/oidc.ts`). `integration_oauth_clients` has no discriminator: `org_id` is NOT NULL and `space_id IS NULL` is the org-level row, inherited by every space of the org; a space row's `org_id` is its space's org, kept equal by the service (`packages/db/src/schema/integrations.ts`). `integration_connections` has the same shape, its tier set by its minting client ("Connections" above). An auto-provisioned client — one the platform registered itself through RFC 7591 Dynamic Client Registration for a remote MCP auth — is an org row: the first connect from any space of the org registers it and every other space reuses it, so the connections it mints serve the whole org. Its `issuer` column names the authorization server it was registered with when that server is chosen per connection (AFPS §7.3: an oauth2 `issuer` or a `source.remote.url` templated over connection variables, §7.12). `NULL` means the manifest's fixed authorization server, and only an auto-provisioned row may set it (CHECK `ioc_issuer_is_auto`). The unique index `idx_ioc_one_auto` therefore keys on `(org_id, coalesce(space_id, ''), integration_package_id, auth_key, coalesce(issuer, ''))` where `auto_provisioned`: one machine client per authorization server per org, so two connections of `@appstrate/gitlab-mcp` to `gitlab.com` share one client while a connection to a self-managed instance registers its own, and a client is never presented to an issuer other than its own. The service never creates one at the space tier; space rows registered before `0086` keep refreshing the space-scoped connections they minted, a reconnect moves such a connection onto the org client and widens it to the org, and promoting such a row moves it to the org unless the org already holds the client of its server (409 `auto_client_exists_at_org`). Such an auth takes no org or space client an admin registers by hand: each connection names its own server, so no single registration could serve them. `audit_events.space_id` is nullable for a different reason: it is not a foreign key at all (`packages/db/src/schema/audit.ts`), the same denormalised posture `org_id` has always had. It used to be one, with `ON DELETE SET NULL`, and that blanked the attribution of every historical row for a space the instant the space was deleted — the failure the table's own doc argues against, applied to the other tenancy column. `0055` dropped the constraint; the value now survives the delete, naming a space that no longer exists. Deleting a space must not erase the record that it was deleted.
 
 ## Deploying the rename
 

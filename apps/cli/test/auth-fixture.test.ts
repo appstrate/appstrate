@@ -71,11 +71,12 @@ describe("installFakeKeyring", () => {
     //    work: `_setKeyringFactoryForTesting(null)` reinstalls a new closure
     //    over `new Entry(...)` rather than clearing the variable;
     //  - probing through `loadTokens` after the restore and expecting a miss.
-    //    That version passed locally and SEGFAULTED CI (Bun 1.3.14, exit 132):
-    //    the read reaches `@napi-rs/keyring` for real, and on a Linux runner
-    //    with no keyring daemon the native call crashes the process before any
-    //    JS runs. `APPSTRATE_ALLOW_PLAINTEXT_TOKENS` does not help — it gates a
-    //    thrown error, and a segfault is not one. A unit test has no business
+    //    The read reaches `@napi-rs/keyring` for real, so its outcome is the
+    //    host's: a macOS keychain answers, a daemon-less container throws
+    //    `PermissionDenied`, and on the GitHub Linux runner the native call
+    //    crashed the process (exit 132) before any JS ran.
+    //    `APPSTRATE_ALLOW_PLAINTEXT_TOKENS` does not help — it gates a thrown
+    //    error, and a native crash is not one. A unit test has no business
     //    touching the host's credential store at all.
     //
     // So ask `keyring.ts` directly, through the read half of the same seam.

@@ -35,6 +35,27 @@ interface Keyring {
 
 let cachedKeyring: Keyring | null = null;
 
+/**
+ * The ciphertext names a key id the keyring does not hold. Operator configuration, not bad
+ * data: the blob decrypts again once the key is put back, so no caller may treat it as dead.
+ */
+export class UnknownKeyIdError extends Error {
+  constructor(readonly kid: string) {
+    super(
+      `No encryption key registered for kid '${kid}'. Add it to CONNECTION_ENCRYPTION_KEYS or set it as CONNECTION_ENCRYPTION_KEY.`,
+    );
+    this.name = "UnknownKeyIdError";
+  }
+}
+
+/** The stored blob itself is unreadable: malformed envelope, failed GCM check, wrong plaintext. */
+export class CredentialDecryptError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CredentialDecryptError";
+  }
+}
+
 function loadKeyring(): Keyring {
   if (cachedKeyring) return cachedKeyring;
 
@@ -79,6 +100,21 @@ function loadKeyring(): Keyring {
   return cachedKeyring;
 }
 
+/** Every kid this process can decrypt with: the active one and the retired ones. */
+export function keyringKids(): ReadonlySet<string> {
+  return new Set(loadKeyring().keys.keys());
+}
+
+/** Whether the keyring opens `ciphertext` — a probe; the plaintext is discarded. */
+export function opensWithKeyring(ciphertext: string): boolean {
+  try {
+    decrypt(ciphertext);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Reset the cached keyring. Test-only — production callers should never
  * mutate the keyring at runtime; rotation is a deploy-time operation.
@@ -90,11 +126,7 @@ export function _resetKeyringForTesting(): void {
 function getKey(kid: string): Buffer {
   const keyring = loadKeyring();
   const key = keyring.keys.get(kid);
-  if (!key) {
-    throw new Error(
-      `No encryption key registered for kid '${kid}'. Add it to CONNECTION_ENCRYPTION_KEYS or set it as CONNECTION_ENCRYPTION_KEY.`,
-    );
-  }
+  if (!key) throw new UnknownKeyIdError(kid);
   return key;
 }
 
@@ -121,12 +153,14 @@ export function encrypt(plaintext: string): string {
  */
 export function decrypt(ciphertext: string): string {
   const parsed = parseEnvelope(ciphertext);
+  // Key first: whatever the payload looks like, a blob under an unknown kid is a keyring gap.
+  const key = getKey(parsed.kid);
 
   if (parsed.packed.length < IV_LENGTH + AUTH_TAG_LENGTH) {
-    throw new Error("Invalid encrypted data: too short");
+    throw new CredentialDecryptError("Invalid encrypted data: too short");
   }
 
-  return decryptWithKey(parsed.packed, getKey(parsed.kid));
+  return decryptWithKey(parsed.packed, key);
 }
 
 function decryptWithKey(packed: Buffer, key: Buffer): string {
@@ -134,11 +168,15 @@ function decryptWithKey(packed: Buffer, key: Buffer): string {
   const authTag = packed.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
   const encrypted = packed.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
 
-  const decipher = createDecipheriv(ALGO, key, iv);
-  decipher.setAuthTag(authTag);
-
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return decrypted.toString("utf8");
+  try {
+    const decipher = createDecipheriv(ALGO, key, iv);
+    decipher.setAuthTag(authTag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  } catch (err) {
+    throw new CredentialDecryptError("Invalid encrypted data: integrity check failed", {
+      cause: err,
+    });
+  }
 }
 
 interface ParsedEnvelope {
@@ -148,17 +186,19 @@ interface ParsedEnvelope {
 
 function parseEnvelope(ciphertext: string): ParsedEnvelope {
   if (!ciphertext.startsWith(`${ENVELOPE_VERSION}:`)) {
-    throw new Error(`Invalid envelope: expected '${ENVELOPE_VERSION}:' prefix`);
+    throw new CredentialDecryptError(`Invalid envelope: expected '${ENVELOPE_VERSION}:' prefix`);
   }
   const rest = ciphertext.slice(ENVELOPE_VERSION.length + 1);
   const sepIdx = rest.indexOf(":");
   if (sepIdx === -1) {
-    throw new Error("Invalid v1 envelope: missing kid separator");
+    throw new CredentialDecryptError("Invalid v1 envelope: missing kid separator");
   }
   const kid = rest.slice(0, sepIdx);
   const payload = rest.slice(sepIdx + 1);
   if (!KID_PATTERN.test(kid)) {
-    throw new Error(`Invalid v1 envelope: kid '${kid}' does not match ${KID_PATTERN.source}`);
+    throw new CredentialDecryptError(
+      `Invalid v1 envelope: kid '${kid}' does not match ${KID_PATTERN.source}`,
+    );
   }
   return { kid, packed: Buffer.from(payload, "base64") };
 }
@@ -175,7 +215,13 @@ export function encryptCredentials(credentials: Record<string, unknown>): string
  */
 export function decryptCredentials<T = Record<string, string>>(encryptedStr: string): T {
   const json = decrypt(encryptedStr);
-  return JSON.parse(json) as T;
+  try {
+    return JSON.parse(json) as T;
+  } catch (err) {
+    throw new CredentialDecryptError("Invalid encrypted data: plaintext is not JSON", {
+      cause: err,
+    });
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -241,7 +287,7 @@ export function decryptCredentialEnvelope(ciphertext: string): CredentialEnvelop
       inputs: isPlainObject(inputs) ? inputs : {},
     };
   }
-  throw new Error("Credential blob is not a structured v2 envelope");
+  throw new CredentialDecryptError("Credential blob is not a structured v2 envelope");
 }
 
 /**

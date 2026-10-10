@@ -37,6 +37,8 @@ import {
 } from "../../../../../test/helpers/seed.ts";
 import {
   MCP_ACCEPT,
+  inSpace,
+  mcpHeaders,
   mcpPath,
   mcpRpc,
   type JsonRpcEnvelope,
@@ -57,7 +59,7 @@ const rpc = mcpRpc(app);
 function initializeAs(headers: Record<string, string>) {
   return app.request(mcpPath(headers), {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
   });
 }
@@ -176,7 +178,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["agents:read"]);
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
     });
     expect(res.status).toBe(403);
@@ -188,12 +190,11 @@ describe("mcp discovery + auth gate", () => {
   });
 
   it("403s a guest with no space row and serves the same caller once a row exists", async () => {
-    // RBAC spec §7.3: the per-org endpoint pins an org, resolves the ORG'S
-    // DEFAULT SPACE, and reads the caller's role there. `mcp` is a space-level
-    // resource, so a `guest` — implicit in no space — cannot pass its guard.
-    // A session caller is used because it takes the same `enterMcpSpace` →
-    // `applySpacePermissions` path a per-org bearer does; only the credential
-    // that resolved the org role differs.
+    // RBAC spec §7.3: an unpinned connection reaches the spaces where the
+    // caller holds a role with `mcp:read`. A `guest` — implicit in no space —
+    // reaches none and is refused. A session caller is used because it takes
+    // the same path a per-org bearer does; only the credential that resolved
+    // the org role differs.
     const owner = await createTestContext();
     const guest = await createTestUser();
     await addOrgMember(owner.orgId, guest.id, "guest");
@@ -214,8 +215,8 @@ describe("mcp discovery + auth gate", () => {
     expect((listed.envelope.result?.tools as unknown[]).length).toBeGreaterThan(0);
   });
 
-  it("enters an X-Space-Id space with the middleware's refusals, byte for byte", async () => {
-    // `enterMcpSpace` → `enterSpaceById`, the door `requireSpaceContext` uses:
+  it("enters a URL-pinned space with the middleware's refusals, byte for byte", async () => {
+    // The URL's space enters through `enterSpaceById`, the door `requireSpaceContext` uses:
     // a malformed id is a 400 before any lookup; a missing id, a space of
     // another org and a private one the caller is not in are the SAME 404; a
     // closed one is the 403; a row lets the same caller in.
@@ -226,7 +227,7 @@ describe("mcp discovery + auth gate", () => {
     const priv = await seedSpace({ orgId: owner.orgId, visibility: "private" });
     const closed = await seedSpace({ orgId: owner.orgId, visibility: "closed" });
     const initialize = (spaceId: string) =>
-      initializeAs({ Cookie: member.cookie, "X-Org-Id": owner.orgId, "X-Space-Id": spaceId });
+      initializeAs(inSpace({ Cookie: member.cookie, "X-Org-Id": owner.orgId }, spaceId));
 
     const malformed = await initialize("spc_1");
     expect(malformed.status).toBe(400);
@@ -258,21 +259,41 @@ describe("mcp discovery + auth gate", () => {
     const headers = { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": owner.orgId };
 
     expect((await initializeAs(headers)).status).toBe(200);
-    const spoofed = await initializeAs({ ...headers, "X-Space-Id": sibling.id });
+    const spoofed = await initializeAs(inSpace(headers, sibling.id));
     expect(spoofed.status).toBe(403);
     expect(((await spoofed.json()) as { detail: string }).detail).toBe(
-      "X-Space-Id does not match authenticated space",
+      "The space in the URL is not the credential's space",
     );
   });
 
+  it("refuses X-Space-Id, naming the URL that pins a space", async () => {
+    const owner = await createTestContext();
+    const res = await app.request(`/api/mcp/o/${owner.orgId}`, {
+      method: "POST",
+      headers: {
+        Cookie: owner.cookie,
+        "X-Org-Id": owner.orgId,
+        "X-Space-Id": owner.defaultSpaceId,
+        "content-type": "application/json",
+        Accept: MCP_ACCEPT,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { param?: string; detail: string };
+    expect(body.param).toBe("X-Space-Id");
+    expect(body.detail).toContain("/api/mcp/o/<org>/s/<space>");
+  });
+
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
-    // Stateless transport (no session id, JSON response mode) does not serve a
-    // standalone SSE stream, so GET is Method Not Allowed. This is the
+    // Stateless transport (no session id; a POST is answered as JSON unless it
+    // carries a progressToken, then over SSE) does not serve a standalone SSE
+    // stream, so GET is Method Not Allowed. This is the
     // behaviour the OpenAPI spec documents; assert it rather than trust it.
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "GET",
-      headers: { ...headers, Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), Accept: MCP_ACCEPT },
     });
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
@@ -284,7 +305,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
     });
     expect(res.status).toBe(202);
@@ -297,7 +318,7 @@ describe("mcp discovery + auth gate", () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "notifications/initialized",
@@ -309,7 +330,10 @@ describe("mcp discovery + auth gate", () => {
 
   it("rejects DELETE on the per-org endpoint with 405 (no session to terminate in stateless mode)", async () => {
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
-    const res = await app.request(mcpPath(headers), { method: "DELETE", headers });
+    const res = await app.request(mcpPath(headers), {
+      method: "DELETE",
+      headers: mcpHeaders(headers),
+    });
     expect(res.status).toBe(405);
     expect(res.headers.get("Allow")).toBe("POST");
   });
@@ -397,8 +421,8 @@ describe("mcp tool round-trip", () => {
   });
 
   it("narrows the advertised surface to the caller's space role", async () => {
-    // The per-org endpoint resolves the org's default space and reads the
-    // caller's role there (RBAC spec §7.3), and the two presets differ exactly
+    // The endpoint reads the caller's role in the space the request enters
+    // (RBAC spec §7.3), and the two presets differ exactly
     // where this matters: `viewer` holds neither `agents:run` nor the mcp
     // module's `invoke` contribution, `builder` holds both. Same user shape,
     // same request — only the space row's preset differs.
@@ -628,7 +652,11 @@ describe("mcp tool round-trip", () => {
     const runs = await seedSpace({ orgId: owner.orgId, name: "Runs", visibility: "closed" });
     await seedSpaceMember({ spaceId: runs.id, userId: caller.user.id, presetRole: "admin" });
     const foreign = await seedSpace({ orgId: owner.orgId, name: "Foreign", visibility: "closed" });
-    const headers = { Cookie: caller.cookie, "X-Org-Id": owner.orgId };
+    // Pinned on A: an unpinned connection would require `space_id` on each call.
+    const headers = inSpace(
+      { Cookie: caller.cookie, "X-Org-Id": owner.orgId },
+      owner.defaultSpaceId,
+    );
 
     const call = async (id: number, name: string, args: Record<string, unknown>) => {
       const { envelope } = await rpc(headers, {
@@ -909,7 +937,7 @@ describe("mcp audit + rate limiting", () => {
     const post = () =>
       app.request(mcpPath(headers), {
         method: "POST",
-        headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+        headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
         body: JSON.stringify(init),
       });
 
@@ -969,11 +997,7 @@ async function endUserHeaders(scope: string): Promise<Record<string, string>> {
     .setIssuedAt()
     .setExpirationTime("2m")
     .sign(endUserSigningKey);
-  return {
-    Authorization: `Bearer ${token}`,
-    "X-Org-Id": ctx.orgId,
-    "X-Space-Id": ctx.defaultSpaceId,
-  };
+  return inSpace({ Authorization: `Bearer ${token}`, "X-Org-Id": ctx.orgId }, ctx.defaultSpaceId);
 }
 
 describe("mcp tools/list for an OIDC end-user", () => {

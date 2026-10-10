@@ -967,7 +967,8 @@ an ActiveCampaign account on another API domain than `api-us1.com` edits its `ap
 **Not a runbook, and it writes nothing.** The manifest write paths refuse each template or runtime
 expression the platform does not evaluate (`findUnevaluableExpressions`): in a delivery template
 (`http`, `env`, `files`) or in `authorized_uris`, any `{$…}` but `{$credential.<field>}`; in
-`connect.login`, what `loginBlockIssues` lists. A stored manifest holding one still loads, and
+`connect.login`, what `loginBlockIssues` lists (since #1773, every form outside the AFPS §7.7
+evaluation profile). A stored manifest holding one still loads, and
 fails at connect (`invalid_config`) or when the delivery renders. `0035` also lists each
 `{{field}}` in a delivery template: it is sent as literal text. Separately, a run refuses as
 `exfiltration` an auth that injects a credential without an `authorized_uris` list bounding its
@@ -1001,6 +1002,117 @@ with their org, for each org's admins. Member pins and other actors' schedule ov
 are left failing loudly until re-picked, and counted (`*_kept`). An admin pin or org default
 naming an id earlier deletions left dangling is counted, not rewritten: it fails its runs with
 `pinned_connection_unavailable` until an admin edits it.
+
+## Detail — Wildcards a public suffix leaves open, Shopify domains (script `0037`)
+
+**Not a runbook, and it writes nothing.** `isHostUnboundedUriPattern` now judges a wildcard host
+with the Public Suffix List, ICANN and private sections (#1656): a wildcard is bounded only under a
+registrable domain written literally in the entry. `https://*.zendesk.com/**` and
+`https://*.amazonaws.com/**` still pass; `https://*.co.uk/**`, `https://*.github.io/**` and, the
+likeliest in an organization's integrations, `https://*.googleapis.com/**`,
+`https://*.supabase.co/**` or `https://*.workers.dev/**` no longer do. A manifest whose injecting
+auth lists one is refused on its next write, and every call carrying its credential is refused at
+run time (`exfiltration`, the MITM listener's `credential not host-bounded`). On an auth that
+injects nothing (a `custom` auth without `delivery.http`) the write passes, but every call that
+substitutes a credential (`{{token}}` in a header, the URL or the body) is refused. `0037` prints
+each such entry, on every auth of every org integration draft and published version, suffixing
+the second kind `(refused when a credential is substituted)`. `0035` reports the injected ones
+among its `[exfiltration]` hits; `0037` covers both and is the one pre-flight for this change
+(`0035` need not be rerun). The fix is to list the hosts the integration calls literally
+(`https://sheets.googleapis.com/**`) or to render a per-connection host
+(`https://{$credential.host}/**`), then, as for `0035`: edit the draft, publish a version every
+range reaching the old one accepts, then delete the old one.
+
+`0037` cannot list the run-time refusals, which depend on the target: under an accepted
+`https://*.amazonaws.com/**`, every `*.us-east-1.amazonaws.com` host and every S3 host is refused
+(see the CHANGELOG); list such hosts literally.
+
+`@appstrate/shopify` 1.0.3 replaces `https://*.myshopify.com/**` with
+`https://{$credential.shop_domain}/**` and requires `shop_domain` to be `<store>.myshopify.com`.
+`0037` decrypts each Shopify connection, inspects `shop_domain` alone and lists every connection
+whose value is missing, does not render a host, or is not such a host — by id and reason, never
+the value. Its owner updates the connection with the store's myshopify.com domain; until then
+every call to the store is refused. `@appstrate/github` 1.0.6 lists its `githubusercontent.com`
+hosts by name and needs nothing.
+
+System integrations are not listed: the platform runs the version it ships, whatever an agent
+pins, so the older `shopify` and `github` versions left in `package_versions` authorize nothing.
+
+`set -a && . ./.env && set +a && bun scripts/migration/0037-verify-authorized-uri-host-bounds.ts`.
+Exit 1 while a hit remains.
+
+## Detail — Connection labels the database holds to the label rule (script `0038`, drizzle `0083`)
+
+**Not a runbook.** A label reaches the model verbatim, as a value of the tools' `connection` enum
+(#1786). `0083` replaces `integration_connections_label_not_empty` with the CHECK
+`integration_connections_label_normalized` — the rule of `apps/api/src/lib/connection-label.ts`
+in SQL — and refuses the boot, naming `0038`, while a label violates it. A database that ran `0032`
+before `0077` holds none (production did); one that applied `0077` without `0032` may still carry
+a provider identity stored raw before #1611, and `0032` can no longer run there.
+
+Run the read-only pre-flight in the file header. At 0 there is nothing to run; otherwise, before
+the deploy and with the app container stopped (`docker stop`, not a Coolify stop): `pg_dump`, then
+`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0038-normalize-connection-labels.sql`,
+then deploy. Only a refused label is rewritten: normalized as `0032` normalizes it, renamed
+`<base> (n)` when another connection of the same (space, integration) keeps that label or an older
+rewrite takes it, minted `Connexion N` when nothing is left. Every rewrite is listed with its label
+before and after, so the owners can be told.
+
+## Detail — Integrations an agent no longer requires by default (script `0039`)
+
+**Not a runbook, and it writes nothing.** From this release a declared integration is optional
+unless the agent sets `integrations_configuration.<id>.required: true` (#1830): a run whose
+optional integration has no usable connection, is pinned to none or is switched off in the space
+starts without it, with a launch warning, where it used to be refused. Ambiguity and breakage
+still refuse. `0039` lists the agents this touches — draft, `latest` published version and the
+version an enabled schedule's `version_override` pins, each declared integration printed
+`required` or `optional` — and the enabled schedules firing them, so the authors who need a
+refusal can mark the integration `required` before the deploy. It also counts the enabled
+schedules whose `connection_overrides` hold an empty set, which no write could store before this
+release: expected 0.
+`DATABASE_URL=<platform> bun scripts/migration/0039-report-integration-deps.ts`. Exit 0.
+
+## Detail — Stored token usage brought to the token-usage rule (script `0040`)
+
+**Not a runbook.** From this release a run's `token_usage` is published as the strict `TokenUsage`
+component (#1846): the four counters as non-negative integers, `tiers`, and no other key. Every
+ingestion seam stores usage through `parseTokenUsage`, but the run read paths return the column
+verbatim, so a row stored before that rule reaches clients as it is. `0040` lists every run whose
+stored value `parseTokenUsage` keeps only in part, with the value before and after, and `--apply`
+writes what it keeps back in one transaction.
+
+`--apply` only drops what the rule drops without loss: undeclared keys and malformed `tiers` bands.
+No counter is changed or invented, and the `llm_usage` ledger, which `runs.cost` sums, is not
+touched. A row written after the scan is left alone: the update matches the value it read. A row
+malformed as a whole — not an object, or a counter that is not a non-negative integer, such as a
+fraction the earlier rule accepted — is listed `MALFORMED` and never rewritten: its counters may be
+real history, so an operator decides what it becomes. While one remains the script exits 1, in
+both modes. `DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts` is the dry
+run; `--apply` commits, before the deploy.
+
+## Detail — Connections widened to org scope (script `0041`, drizzle `0086`)
+
+**Not a runbook.** From this release a connection's scope is the tier of the OAuth client that
+minted it (#1870): a system or org client, or none, gives an org-scoped row (`space_id` NULL); a
+space's own client, or an end user, keeps the row in its space. `0086` leaves every existing row
+space-scoped. `0041` widens the user-owned rows whose client is not a space client with
+`widenConnectionsToOrgScope`, the function the promotion of a space client uses: `space_id` NULL,
+`origin_space_id` the old space, shares kept, a label the owner already holds at org scope renamed
+`<label> (n)`. End users' rows and space clients' rows (a space-tier auto client's included) are
+left as they are. A widened row stays usable in its origin space; no other member gains it.
+
+It prints the rows to widen, then widens one organization per transaction (its widened and
+relabeled rows printed); a failure rolls that organization back and exits 1 — on `--apply` the
+ones before it stay committed and a re-run widens what is left. With `--apply`, the rows left to
+widen must then be 0. Run it after the deploy, app up, `pg_dump` first: `set -a && . ./.env && set +a && bun scripts/migration/0041-widen-connections-to-org-scope.ts`
+is the dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
+
+Rollback:
+
+| File   | Before its script                                                                                                                                                | After its script                                                                                                                        |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `0086` | **One-way at boot**: it drops `shared_with_org` and sets `org_id` NOT NULL, which an older build reads and omits. Restore the `pg_dump` taken before the deploy. | Same.                                                                                                                                   |
+| `0041` | n/a — it is a script, not a migration.                                                                                                                           | Re-runnable: a second run finds nothing. Reverting it would narrow rows back into their origin space; no script does, restore the dump. |
 
 ## Log
 
@@ -1041,3 +1153,8 @@ naming an id earlier deletions left dangling is counted, not rewritten: it fails
 | 0034 | not applied         | ActiveCampaign connections without `api_url`: `api_url` derived from `account_name` (`https://<account_name>.api-us1.com`), `account_name` kept; then a READ-ONLY audit of `@appstrate/{activecampaign,wordpress,woocommerce,webhooks}` connections whose URL field no longer renders an allowlist (#1627, #1628) — **`--apply` just BEFORE the deploy, dry run again after it**, env loaded (it decrypts); `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                | rehearsed 2026-10-07 on a production dump: 1.3 s, a second `--apply` rewrites nothing — prints every rewritten id and every refused id with its reason, exit 1 while any is refused; idempotent, a second run rewrites nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 0035 | not applied         | READ-ONLY pre-flight: org integration drafts and published versions holding a template or runtime expression the platform does not evaluate (`findUnevaluableExpressions`), a `{{field}}` in a delivery template, or an injected credential runs will refuse as `exfiltration` (`findUnboundedInjectedCredentials`, filtered to what `credentialUrlPolicy` refuses) (#1641) — **run BEFORE deploying; exits non-zero while a hit remains** (a range resolves older versions too)                                                                                                                                          | read-only — prints every hit and the per-kind totals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 0036 | not applied         | end users' connections removed from admin pins and org defaults (a set emptied → its row deleted), then unshared (#1775) — **run before deploying the release carrying drizzle `0080`, app container stopped, on a database at `0078` (beta.65 deployed)**, only when the first three counts of the header's pre-flight are not 0 / 0 / 0 (its two dangling-id counts are informational: those pins and defaults are not rewritten); `0080` refuses the boot while an end user's connection is shared or named by an admin pin or an org default                                                                          | unmeasured — measured on the production database before the release, with the header's read-only pre-flight; prints before/after counts, every pin and default it rewrites and every connection it unshares, aborts unless all after counts are 0; idempotent                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 0037 | not applied         | READ-ONLY pre-flight: `authorized_uris` entries of any auth of an org integration draft or published version whose wildcard is not under a literal registrable domain (Public Suffix List), and `@appstrate/shopify` connections whose `shop_domain` is not a `<store>.myshopify.com` host (#1656) — **run BEFORE deploying, env loaded (it decrypts); exits non-zero while a hit remains**                                                                                                                                                                                                                               | read-only — prints every hit (never a value) and the totals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 0038 | not applied         | connection labels the `integration_connections_label_normalized` CHECK refuses, normalized as `0032` does (line breaks → space, control, invisible and bidi code points dropped, edges trimmed, cut to 80 UTF-16 units); a resulting duplicate per (space, integration) renamed `<base> (n)`, an emptied one minted `Connexion N` (#1786) — **run before deploying the release carrying drizzle `0083`, app container stopped, on a database with `0077`**, only when the header's read-only pre-flight count is not 0; `0083` refuses the boot while a label violates the CHECK                                          | unmeasured — production expected at 0 (it ran `0032`), measured with the header's pre-flight before the release; prints before/after counts and every label it rewrites (before, after), aborts unless the after count is 0; idempotent                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 0039 | not applied         | READ-ONLY report: per organization and home space, every agent (draft and `latest` version) declaring integrations with each one's `required` flag, and every ENABLED schedule firing one (`version_override` included) (#1830) — **run before deploying the release where a declared integration is optional unless `required`**; an `optional` one stops refusing runs that lack a connection                                                                                                                                                                                                                           | read-only — prints both tables and the totals; exits 0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0040 | not applied         | runs whose `token_usage` `parseTokenUsage` keeps only in part rewritten to what it keeps — undeclared keys and malformed `tiers` bands dropped; a value malformed as a whole (not an object, a counter that is not a non-negative integer) listed and left as is (#1846) — **dry run, then `--apply` before deploying the release that publishes `token_usage` as the strict `TokenUsage` component**                                                                                                                                                                                                                     | each run listed with its value before and after, malformed ones apart, then the totals; exits 1 while a malformed row remains                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 0041 | not applied         | user-owned connections minted by a system or org OAuth client, or by none, widened to org scope (`space_id` NULL, `origin_space_id` the old space, shares kept, a duplicate owner label renamed `<label> (n)`); end users' and space clients' rows left as they are (#1870) — **run after deploying the release carrying drizzle `0086`, app up**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                                                                                         | rows to widen, then per organization (one transaction each, rolled back on a dry run) the widened/relabeled counts and each relabel; on `--apply`, the rows left to widen, which must be 0 (exit 1 otherwise; earlier organizations stay committed and a re-run widens the rest)                                                                                                                                                                                                                                                                                                                                                                                                                             |

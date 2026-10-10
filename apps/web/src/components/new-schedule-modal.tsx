@@ -35,12 +35,13 @@ import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choic
 import { ErrorState, LoadingState } from "./page-states";
 import { useModalParam } from "../hooks/use-modal-param";
 import { usePermissions } from "../hooks/use-permissions";
-import { useAgents } from "../hooks/use-packages";
+import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { withConnectionOverride } from "../lib/connection-set";
 import { browserTimezone } from "../lib/cron-frequency";
+import { VERSION_PUBLISHED } from "../lib/version-selector";
 
 /** The URL parameter that opens the modal; its value is the agent to preselect, or `1`. */
 export const NEW_SCHEDULE_PARAM = "newSchedule";
@@ -165,6 +166,10 @@ function ScheduleFieldsReady({
   // refuses over it, the choice is made here, in the same write.
   const choices = scheduleConnectionChoices(create.error);
   const [picks, setPicks] = useState<Record<string, string[]>>({});
+  // A new schedule inherits the version: the latest published one is what fires. Its `required`
+  // flags tell which integrations may run with "Aucune connexion".
+  const firedIntegrations = usePackageDetail("agent", agentId, { version: VERSION_PUBLISHED }).data
+    ?.dependencies.integrations;
 
   const submit = () => {
     if (!cron) return;
@@ -223,6 +228,7 @@ function ScheduleFieldsReady({
       {choices.length > 0 && (
         <ScheduleActorConnectionChoice
           choices={choices}
+          integrations={firedIntegrations ?? []}
           value={picks}
           onChange={(integrationId, connectionIds) =>
             setPicks(

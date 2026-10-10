@@ -12,7 +12,7 @@
  *                  consumes the already-exchanged result.
  *
  * Re-acquisition (refresh) is not a strategy method — the live resolvers call
- * `forceRefreshIntegrationConnection` directly, since only `oauth2` refreshes.
+ * `refreshConnectionCredential`, since only `oauth2` refreshes.
  *
  * Behaviour is unchanged from the inline route logic it replaces.
  */
@@ -25,15 +25,26 @@ import {
   SsrfBlockedError,
 } from "@appstrate/connect";
 import { invalidRequest } from "../../lib/errors.ts";
-import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
+import {
+  authorizationServerTag,
+  integrationCallbackUrl,
+} from "../../lib/integration-callback-url.ts";
+import {
+  getRemoteSource,
+  hasPerConnectionAuthServer,
+  type AfpsManifestAuth,
+} from "../integration-manifest-helpers.ts";
+import { resolveConnectionVariables } from "./connection-variables.ts";
 import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
+  assertEndpointsMatchMetadata,
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
   extractIdentity,
   getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
+  isOrgScopedConnection,
   resolveConnectClient,
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
@@ -77,8 +88,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.integrationId,
       ctx.authKey,
     );
-    const auth =
-      rawAuth as unknown as import("../integration-manifest-helpers.ts").AfpsManifestAuth;
+    const auth = rawAuth as unknown as AfpsManifestAuth;
+    // AFPS §7.12: validated before anything leaves the platform; carried in the OAuth state and
+    // persisted with the credential at the callback.
+    const variables = await resolveConnectionVariables(manifest, auth, ctx.variables);
+    const perConnection = hasPerConnectionAuthServer(manifest, auth);
     // AFPS §7.3 / §7.4: `authorization_endpoint`, `token_endpoint`,
     // `resource`, `token_endpoint_auth_method`, `default_scopes`,
     // `code_challenge_methods_supported` (PKCE), `issuer` (discovery).
@@ -86,13 +100,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
       { scope_separator?: string } | undefined;
     // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery fills the
-    // endpoints in) OR explicit `authorization_endpoint` + `token_endpoint`.
-    // Today this holds for remote MCP connectors too — they declare an `issuer`
-    // (the AFPS schema still requires issuer-or-endpoints). A future schema
-    // relaxation for `source.kind: "remote"` (afps-spec) would let them omit it
-    // and rely on connect-time discovery; that change ships together with the
-    // exemption here, so no speculative dead branch is carried now.
-    if (!auth.issuer && (!auth.authorization_endpoint || !auth.token_endpoint)) {
+    // endpoints in) OR explicit `authorization_endpoint` + `token_endpoint` —
+    // except on a `remote` source, whose authorization server is discovered
+    // from `source.remote.url` at connect time.
+    if (
+      !auth.issuer &&
+      !getRemoteSource(manifest) &&
+      (!auth.authorization_endpoint || !auth.token_endpoint)
+    ) {
       throw invalidRequest(
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
@@ -113,6 +128,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       manifest,
       auth,
       redirectUri,
+      variables ?? {},
     );
     // Client selection (multi-client) — full precedence lives in
     // `resolveConnectClient`. New connections always use the default (the
@@ -123,14 +139,31 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       clientId,
       redirectUri: clientRedirectUri,
       clientRef,
-    } = resolveConnectClient(ctx.integrationId, ctx.authKey, manifest, auth, resolved);
+    } = resolveConnectClient(
+      ctx.integrationId,
+      ctx.authKey,
+      manifest,
+      auth,
+      resolved,
+      ctx.connectionId !== undefined && (await isOrgScopedConnection(ctx.connectionId)),
+    );
     const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
     // Threaded endpoints/resource: discovery result wins, manifest is the
     // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
     const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
-    const resource = resolved.resource ?? auth.resource;
+    // A server chosen per connection takes no declared resource.
+    const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
+    // AFPS §7.3 client binding on a remote source, a manually registered client included.
+    if (getRemoteSource(manifest) && !perConnection && issuer) {
+      assertEndpointsMatchMetadata(
+        ctx.integrationId,
+        ctx.authKey,
+        auth,
+        await resolveOAuthEndpoints({ issuer }),
+      );
+    }
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -154,6 +187,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       actor: ctx.actor,
       forceAccountSelect: opts.forceAccountSelect ?? false,
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
+      ...(perConnection && issuer ? { redirectTag: authorizationServerTag(issuer) } : {}),
+      ...(variables ? { variables } : {}),
     });
     return { redirectUrl: result.authUrl, state: result.state };
   }
@@ -167,6 +203,18 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     }
     const result = input.result;
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
+    // A server chosen per connection (AFPS §7.3) is the validated issuer the state carried, the one
+    // the minting client is bound to, with no manifest endpoint beside it.
+    const perConnection = hasPerConnectionAuthServer(manifest, auth as AfpsManifestAuth);
+    const issuer = perConnection ? result.issuer : auth.issuer;
+    const declaredEndpoints = perConnection
+      ? {}
+      : {
+          ...(auth.authorization_endpoint
+            ? { authorizationEndpoint: auth.authorization_endpoint }
+            : {}),
+          ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+        };
 
     // Build the identity source for `extractIdentity`. Three layers, applied
     // in order so later layers don't overwrite earlier ones:
@@ -192,17 +240,13 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     //   2. Discovery-projected `userinfo_endpoint` (a manifest that only
     //      declares an `issuer` rides on whatever the IdP advertises).
     //   3. undefined — caller skips userinfo enrichment.
-    const manifestUserinfo = (auth as { userinfo_endpoint?: string }).userinfo_endpoint;
+    const manifestUserinfo = perConnection
+      ? undefined
+      : (auth as { userinfo_endpoint?: string }).userinfo_endpoint;
     let discoveredUserinfo: string | undefined;
-    if (!manifestUserinfo && auth.issuer) {
+    if (!manifestUserinfo && issuer) {
       try {
-        const discovered = await resolveOAuthEndpoints({
-          issuer: auth.issuer,
-          ...(auth.authorization_endpoint
-            ? { authorizationEndpoint: auth.authorization_endpoint }
-            : {}),
-          ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
-        });
+        const discovered = await resolveOAuthEndpoints({ issuer, ...declaredEndpoints });
         discoveredUserinfo = discovered.userinfoEndpoint;
       } catch (err) {
         // Best-effort: discovery failures fall through to "no userinfo".
@@ -305,15 +349,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       // the connection, so a manifest could pass CI and fail at consent.
       if (refreshTokenIssuance(auth) === "not_supported") {
         refreshGrantSupported = false;
-      } else if (auth.issuer) {
+      } else if (issuer) {
         try {
-          const disc = await resolveOAuthEndpoints({
-            issuer: auth.issuer,
-            ...(auth.authorization_endpoint
-              ? { authorizationEndpoint: auth.authorization_endpoint }
-              : {}),
-            ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
-          });
+          const disc = await resolveOAuthEndpoints({ issuer, ...declaredEndpoints });
           if (disc.grantTypesSupported) {
             refreshGrantSupported = disc.grantTypesSupported.includes("refresh_token");
           }
@@ -373,7 +411,10 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
       clientRef: result.clientRef,
+      variables: result.variables ?? null,
+      ...(result.resource ? { oauthResource: result.resource } : {}),
     });
   }
 }

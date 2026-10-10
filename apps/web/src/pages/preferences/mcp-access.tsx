@@ -31,10 +31,7 @@ export function PreferencesMcpAccessPage() {
     <SettingsGroup title={t("orgSettings.mcpTitle")}>
       <div className="pb-8">
         <p className="text-muted-foreground mb-4 text-sm">{t("orgSettings.mcpDesc")}</p>
-        <McpClientConnect
-          serverName={`appstrate-${currentOrg.slug}`}
-          url={`${window.location.origin}/api/mcp/o/${currentOrg.id}`}
-        />
+        <McpClientConnect orgId={currentOrg.id} orgSlug={currentOrg.slug} />
       </div>
     </SettingsGroup>
   );

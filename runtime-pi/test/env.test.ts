@@ -153,21 +153,24 @@ describe("parseRuntimeEnv — non-fatal warnings", () => {
     expect(env.warnings).toEqual([]);
   });
 
-  it("drops MODEL_COST price tiers, like the server's runner row (RUN_COST.md)", () => {
-    const base = { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 0 };
-    const tiers = [
-      { inputTokensAbove: 272000, input: 5, output: 22.5, cacheRead: 0.5, cacheWrite: 0 },
-    ];
+  it("keeps MODEL_COST price tiers, which Pi prices each request at (RUN_COST.md)", () => {
+    const cost = {
+      input: 2.5,
+      output: 15,
+      cacheRead: 0.25,
+      cacheWrite: 0,
+      tiers: [{ inputTokensAbove: 272000, input: 5, output: 22.5, cacheRead: 0.5, cacheWrite: 0 }],
+    };
     const env = parseRuntimeEnv({
       ...VALID,
       MODEL_API: "openai-responses",
       MODEL_PROVIDER: "openai",
       MODEL_DIALECT: "null",
       MODEL_ID: "gpt-5.5",
-      MODEL_COST: JSON.stringify({ ...base, tiers }),
+      MODEL_COST: JSON.stringify(cost),
     });
-    expect(env.modelCost).toEqual(base);
-    expect(buildPiModelFromEnv(env).cost).toEqual(base);
+    expect(env.modelCost).toEqual(cost);
+    expect(buildPiModelFromEnv(env).cost).toEqual(cost);
   });
 
   it("keeps a malformed MODEL_COST FATAL — a present-but-broken value is a contract violation", () => {
@@ -268,6 +271,15 @@ describe("parseRuntimeEnv — fail-fast errors", () => {
         MODEL_COST: '{"input":-1,"output":0,"cacheRead":0,"cacheWrite":0}',
       }),
     ).toThrow(/MODEL_COST.input/);
+  });
+
+  it("rejects a malformed MODEL_COST price tier", () => {
+    expect(() =>
+      parseRuntimeEnv({
+        ...VALID,
+        MODEL_COST: '{"input":1,"output":2,"tiers":[{"inputTokensAbove":0,"input":1}]}',
+      }),
+    ).toThrow(/MODEL_COST\.tiers\.0\.inputTokensAbove/);
   });
 
   it("rejects malformed MODEL_INPUT", () => {

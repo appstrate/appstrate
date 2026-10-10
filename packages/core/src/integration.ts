@@ -50,6 +50,7 @@ import {
 } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
+import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
 import { z } from "zod";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
@@ -239,7 +240,7 @@ export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifes
       found.push({
         authKey,
         path: ["auths", authKey, "authorized_uris", index],
-        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**, https://*.example.com/**) or use "{$credential.<field>}/**"`,
+        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**), keep a wildcard under a registrable domain (https://*.example.com/**, not https://*.github.io/**), or render the host from the connection (https://{$credential.<field>}/**, "{$credential.<field>}/**")`,
       });
     });
   }
@@ -332,9 +333,9 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       }
     }
 
-    // (1f) §7.4 + §7.7 install gate — every manifest JSONPath the shared
-    // evaluator reads later is parsed here, so an unsupported form fails the
-    // import instead of the first connect.
+    // (1f) §7.4 install gate — an `identity_claims` JSONPath is parsed here, so an unsupported
+    // form fails the import instead of the first connect. The `connect.login` ones are
+    // `loginBlockIssues`' (write paths and connect start).
     const checkJsonPath = (path: string, at: (string | number)[]) => {
       try {
         parseJsonPath(path);
@@ -351,29 +352,12 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     for (const [claim, path] of Object.entries(identityClaims ?? {})) {
       checkJsonPath(path, ["identity_claims", claim]);
     }
-    const login = auth.connect?.login;
-    for (const [name, output] of Object.entries(login?.outputs ?? {})) {
-      const selector = output as { type?: unknown; selector?: unknown };
-      if (selector.type === "jsonpath" && typeof selector.selector === "string") {
-        checkJsonPath(selector.selector, ["connect", "login", "outputs", name, "selector"]);
-      }
-    }
-    (login?.success_criteria ?? []).forEach((criterion, index) => {
-      if (criterion.type === "jsonpath") {
-        checkJsonPath(criterion.condition, [
-          "connect",
-          "login",
-          "success_criteria",
-          index,
-          "condition",
-        ]);
-      }
-    });
 
-    // (1g) Templated authorized_uris entries (#1458) reference declared, required fields, in the
-    // authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden with `connect`
-    // (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only tokens in the
-    // bundle). Allowed on api_call: its consumers pin only the declared literal entries.
+    // (1g) Entries templated with `{$credential.<field>}` (#1458) reference declared, required
+    // fields, in the authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden
+    // with `connect` (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only
+    // tokens in the bundle). Allowed on api_call: its consumers pin only the declared literal
+    // entries. Entries carrying `{$variable.<name>}` are `@afps-spec/schema`'s (§7.9, §7.12).
     const credentialFields = credentialsSchema as
       { properties?: Record<string, unknown>; required?: unknown } | undefined;
     const declaredFields = new Set(Object.keys(credentialFields?.properties ?? {}));
@@ -441,6 +425,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
     // surface here).
+    const login = auth.connect?.login;
     if (login) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {
@@ -669,13 +654,19 @@ interface DeliveryView {
 
 /**
  * List the templates and runtime expressions the platform cannot evaluate: a `{$…}` other than
- * `{$credential.<field>}` in a delivery template (http, env, files) or in `authorized_uris`, and a
- * `connect.login` expression outside {@link loginBlockIssues}. A WRITE-path policy, not part of
+ * `{$credential.<field>}` or a declared `{$variable.<name>}` in a delivery template (http, env,
+ * files) or in `authorized_uris`, and a `connect.login` expression outside
+ * {@link loginBlockIssues}. A WRITE-path policy, not part of
  * {@link integrationManifestSchema}; rendering and the login engine refuse the same at run time.
  */
 export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue[] {
-  const auths = (manifest as { auths?: unknown } | null)?.auths;
+  const m = manifest as { auths?: unknown; variables?: { schema?: { properties?: unknown } } };
+  const auths = m?.auths;
   if (typeof auths !== "object" || auths === null) return [];
+  const properties = m.variables?.schema?.properties;
+  const declaredVariables = new Set(
+    typeof properties === "object" && properties !== null ? Object.keys(properties) : [],
+  );
   const found: AuthManifestIssue[] = [];
   for (const [authKey, raw] of Object.entries(auths)) {
     const auth = (raw ?? {}) as {
@@ -704,12 +695,20 @@ export function findUnevaluableExpressions(manifest: unknown): AuthManifestIssue
         ["authorized_uris", i],
       ]),
     ];
+    const login = auth.connect?.login;
+    const undeclaredVariables = (template: string | undefined, at: IssuePath) => {
+      for (const name of variableRefs(template ?? "")) {
+        if (!declaredVariables.has(name)) {
+          push(`'{$variable.${name}}' names no declared connection variable`, at);
+        }
+      }
+    };
     for (const [template, at] of templates) {
       for (const expr of unsupportedTemplateExpressions(template ?? "")) {
-        push(`'${expr}' is not a {$credential.<field>} reference`, at);
+        push(`'${expr}' is neither a {$credential.<field>} nor a {$variable.<name>} reference`, at);
       }
+      undeclaredVariables(template, at);
     }
-    const login = auth.connect?.login;
     for (const issue of login ? loginBlockIssues(login) : []) {
       push(issue.message, ["connect", "login", ...issue.path]);
     }
@@ -1544,6 +1543,7 @@ export interface ResolvedConnection {
 /**
  * Snapshot of the resolver output for one run. Persisted on
  * `runs.resolved_connections`. Shape: `{ "@scope/integration": ResolvedConnection[] }`.
+ * No key: nothing to start (inert); `[]`: started without it (no connection bound, or off in the space).
  */
 export type ResolvedConnectionMap = Record<string, ResolvedConnection[]>;
 
@@ -1575,10 +1575,28 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "auth_key_mismatch",
   "auth_serves_no_selected_tool",
   "auth_key_serves_no_selected_tool",
+  "required_integration_unbound",
+  "integration_not_active",
 ] as const;
 
 /** Error codes the resolver emits per integration. */
 export type ConnectionResolutionErrorCode = (typeof CONNECTION_RESOLUTION_ERROR_CODES)[number];
+
+export const INTEGRATION_MANIFEST_FAILURE_CODES = [
+  "integration_not_found",
+  "integration_wrong_type",
+  "integration_invalid_manifest",
+] as const;
+
+/** Every code an `errors[]` item of a `409 missing_integration_connection` carries. */
+export const MISSING_INTEGRATION_CONNECTION_CODES = [
+  ...CONNECTION_RESOLUTION_ERROR_CODES,
+  ...INTEGRATION_MANIFEST_FAILURE_CODES,
+  "remote_binds_one_connection",
+] as const;
+
+export type MissingIntegrationConnectionCode =
+  (typeof MISSING_INTEGRATION_CONNECTION_CODES)[number];
 
 /**
  * One connection carried by `must_choose_connection`.
@@ -1612,7 +1630,7 @@ export interface ConnectionResolutionError {
   candidateConnections?: ConnectionCandidate[];
   /**
    * The connection the error is bound to:
-   *   - `insufficient_scopes` → the under-scoped connection (target of OAuth upgrade).
+   *   - `insufficient_scopes` → the under-scoped connection (target of an upgrade, if chosen).
    *   - `needs_reconnection` → the dead connection (target of OAuth reconnect).
    *   - `auth_serves_no_selected_tool` → the member to take out of the set.
    * Threaded into the OAuth re-kickoff `state` so the callback UPDATEs the
@@ -1625,9 +1643,10 @@ export interface ConnectionResolutionError {
   /**
    * The FULL set of oauth scopes the run's selected tools require on
    * {@link authKey} — not the diff. `insufficient_scopes` also carries
-   * {@link missingScopes} (required minus granted); `not_connected` and
-   * `needs_reconnection` end at a consent that has to stand on its own, so
-   * the full set is the only thing it can be built from. The caller forwards
+   * {@link missingScopes} (required minus granted); `not_connected` ends at a
+   * consent that has to stand on its own, so the full set is the only thing it
+   * can be built from. Never on `needs_reconnection`: a reconnect re-consents
+   * what the row holds plus `default_scopes`, adding no agent's scopes. The caller forwards
    * it as the connect kickoff's `scopes` body field, which unions it with the
    * auth's `default_scopes` and anything already granted. Omitted when the
    * auth is not `oauth2`, when the agent's selection requires no scopes, or
@@ -1636,25 +1655,22 @@ export interface ConnectionResolutionError {
   requiredScopes?: string[];
   /**
    * The integration manifest auth the connect flow must target
-   * (`/auths/{authKey}/connect/...`), for the three codes a connect flow can
-   * clear: `insufficient_scopes` and `needs_reconnection` (the resolved
-   * connection's own auth) and `not_connected` (the dep's `auth_key`, else the single serving
-   * `oauth2` auth; omitted when ambiguous — the user then chooses).
+   * (`/auths/{authKey}/connect/...`), for the {@link CONNECT_FLOW_CODES}. On `not_connected`:
+   * the dep's `auth_key`, else the single serving `oauth2` auth; omitted when ambiguous.
    */
   authKey?: string;
   /**
-   * The cascade layer whose set failed, on every layer-bound code; absent when no layer bound
-   * anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`,
-   * `auth_key_serves_no_selected_tool`).
+   * The cascade layer whose set failed, on every layer-bound code, and the layer that chose `[]`
+   * on an `integration_unbound` warning; absent when no layer bound anything (`not_connected`,
+   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`).
    */
   source?: ConnectionResolutionSource;
   /** The failing layer's whole set, in its order. */
   boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
-   * the two connection-bound connect-flow codes — `insufficient_scopes` and
-   * `needs_reconnection` — because both remedies re-consent THAT row, which is
-   * its owner's to do.
+   * the two connection-bound codes — `insufficient_scopes` and `needs_reconnection` —
+   * because re-consenting THAT row (a reconnect, or a chosen upgrade) is its owner's to do.
    */
   ownedByActor?: boolean;
   /**
@@ -1672,8 +1688,65 @@ export interface ConnectionResolutionError {
   message: string;
 }
 
+/**
+ * The warning codes the resolver emits per integration. Severity is the array (`errors` /
+ * `warnings`), never the code; `integration_unbound` alone has no error twin.
+ */
+export const CONNECTION_RESOLUTION_WARNING_CODES = [
+  "not_connected",
+  "must_choose_connection",
+  "auth_key_mismatch",
+  "integration_not_active",
+  "integration_unbound",
+] as const satisfies readonly (ConnectionResolutionErrorCode | "integration_unbound")[];
+
+export type ConnectionResolutionWarningCode = (typeof CONNECTION_RESOLUTION_WARNING_CODES)[number];
+
+/** A non-required integration the run starts without; fields as on {@link ConnectionResolutionError}. */
+export interface ConnectionResolutionWarning extends Pick<
+  ConnectionResolutionError,
+  | "integrationId"
+  | "authKey"
+  | "requiredScopes"
+  | "requiredAuthKey"
+  | "availableAuthKeys"
+  | "candidateConnections"
+  | "source"
+  | "message"
+> {
+  code: ConnectionResolutionWarningCode;
+}
+
+/**
+ * Why a run started without an integration (`runs.integrations_unbound`). No candidate
+ * connections or auth detail: the run is readable by more members than its launcher.
+ */
+export interface RunIntegrationUnbound {
+  integrationId: string;
+  code: ConnectionResolutionWarningCode;
+  /** The layer that chose `[]`, on `integration_unbound` only. */
+  source?: ConnectionResolutionSource;
+}
+
+export const runIntegrationsUnboundSchema: z.ZodType<RunIntegrationUnbound[]> = z.array(
+  z.object({
+    integrationId: z.string(),
+    code: z.enum(CONNECTION_RESOLUTION_WARNING_CODES),
+    source: z.enum(CONNECTION_RESOLUTION_SOURCES).optional(),
+  }),
+);
+
+/** The resolution codes a connect flow can clear, so the ones carrying the `auth_key` relay. */
+export const CONNECT_FLOW_CODES = [
+  "not_connected",
+  "auth_key_mismatch",
+  "needs_reconnection",
+  "insufficient_scopes",
+] as const satisfies readonly ConnectionResolutionErrorCode[];
+
 /** Full resolver output. */
 export interface ConnectionResolutionResult {
   resolved: ResolvedConnectionMap;
   errors: ConnectionResolutionError[];
+  warnings: ConnectionResolutionWarning[];
 }

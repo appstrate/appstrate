@@ -17,7 +17,6 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { buildGenerationLabels } from "@appstrate/ui/components/model-generation-labels";
-import { reasoningOffSendsNothing } from "@appstrate/ui/components/reasoning-off";
 import {
   MODEL_REASONING_LEVELS,
   type ModelGenerationSettings,
@@ -53,12 +52,8 @@ export function GenerationSettingRows({
     model?.generation?.reasoning.supported === "unsupported" ||
     supportedReasoningLevels.length === 0;
   // The level names, the default level and the `off` of a model that sends
-  // nothing for it, worded once for every surface that offers the choice.
-  const labels = buildGenerationLabels(
-    t,
-    model?.generation,
-    !!model && reasoningOffSendsNothing(model),
-  );
+  // nothing for it (the API's `reasoning.off`), worded once for every surface.
+  const labels = buildGenerationLabels(t, model?.generation);
   const temperatureOptions = [
     { value: INHERIT, label: inheritLabels?.temperature ?? t("models.generation.inherit") },
     { value: "0", label: t("detail.configuration.temperature.precise", { ns: "agents" }) },

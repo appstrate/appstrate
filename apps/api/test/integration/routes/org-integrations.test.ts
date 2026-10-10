@@ -305,6 +305,7 @@ describe("/api/org-integrations — org-level OAuth clients", () => {
         authKey: "google",
         accountId: "a@x.test",
         label: "Connexion 1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",

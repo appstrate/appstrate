@@ -121,6 +121,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
       authKey: "primary",
       accountId: "acct-schedpin",
       label: "acct-schedpin",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
@@ -137,6 +138,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
   async function preflight(extra: Partial<PreflightArgs> = {}) {
     return resolveRunPreflight({
       agent,
+      versionRef: "draft",
       spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
@@ -148,9 +150,9 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
     // `scheduler.ts:triggerScheduledRun` passes no memo. Unseeded, the draft's
     // `write` requirement wins and this throws 409 — which the scheduler
     // converts into `failSchedule(...)`, permanently stopping a schedule whose
-    // pinned version is perfectly runnable. The preflight returns nothing —
-    // passing IS resolving.
-    await expect(preflight()).resolves.toBeUndefined();
+    // pinned version is perfectly runnable. Passing IS resolving: the one
+    // connection binds, so there is nothing to warn about either.
+    await expect(preflight()).resolves.toEqual([]);
   });
 
   it("a caller-supplied memo is the one seeded — no second Map behind its back", async () => {

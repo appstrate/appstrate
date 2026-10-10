@@ -7,6 +7,7 @@ import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { ResolvedModel } from "../org-models.ts";
 import type { ResolvedAgentResources } from "../run-limits.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { DroppedIntegration } from "../integration-spawn-resolver.ts";
 
 export type { ToolMeta, TokenUsage };
 
@@ -107,4 +108,6 @@ export interface AppstrateRunPlan {
    * agent declares no integrations or none are connected.
    */
   integrations?: ReadonlyArray<import("@appstrate/core/sidecar-types").IntegrationSpawnSpec>;
+  /** Declared integrations (or connections) the run starts without — named in the prompt. */
+  droppedIntegrations?: ReadonlyArray<DroppedIntegration>;
 }

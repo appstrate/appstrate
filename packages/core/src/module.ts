@@ -12,6 +12,7 @@
 
 import { z } from "zod";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { MAX_TOKEN_USAGE_TIERS } from "@appstrate/afps-shared/token-usage";
 import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
@@ -26,6 +27,7 @@ import type {
   EnforcedChatSkillRef,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
+import type { RunIntegrationUnbound } from "./integration.ts";
 import type { TerminalRunStatus } from "./run-status.ts";
 
 // ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ import type { TerminalRunStatus } from "./run-status.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "14.0.0";
+export const CORE_VERSION = "15.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -615,7 +617,7 @@ export interface ModelCostTier {
 }
 
 const modelCostTierSchema = z.object({
-  inputTokensAbove: z.number().positive(),
+  inputTokensAbove: z.number().int().positive(),
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
   cacheRead: z.number().nonnegative(),
@@ -624,14 +626,22 @@ const modelCostTierSchema = z.object({
 
 /**
  * Zod validator for {@link ModelCost}. `cacheRead` / `cacheWrite` are optional —
- * providers without prompt caching simply omit them.
+ * providers without prompt caching simply omit them. Tiers follow the rule of
+ * the usage bands they price (`isTokenUsageTiers`), or every band would drop.
  */
 export const modelCostSchema = z.object({
   input: z.number().nonnegative(),
   output: z.number().nonnegative(),
   cacheRead: z.number().nonnegative().optional(),
   cacheWrite: z.number().nonnegative().optional(),
-  tiers: z.array(modelCostTierSchema).optional(),
+  tiers: z
+    .array(modelCostTierSchema)
+    .max(MAX_TOKEN_USAGE_TIERS)
+    .refine(
+      (tiers) => new Set(tiers.map((t) => t.inputTokensAbove)).size === tiers.length,
+      "tier thresholds must be unique",
+    )
+    .optional(),
 });
 
 /** Input modalities a model can declare — exactly what the Pi runtime accepts. */
@@ -1189,6 +1199,8 @@ export interface RunStatusChangeParams {
    * round-trip.
    */
   packageEphemeral?: boolean;
+  /** On `started` only; omitted when not recorded, `[]` when every integration is bound. */
+  integrationsUnbound?: RunIntegrationUnbound[];
   /** Additional data for webhook payloads (result, error, etc.). */
   extra?: Record<string, unknown>;
 }

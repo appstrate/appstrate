@@ -24,7 +24,6 @@ import {
 import { isSelectableRuntimeTool } from "@appstrate/core/runtime-tools-catalog";
 import {
   dropRetiredDependencyKeys,
-  isToolsWildcard,
   parseManifestIntegrations,
   writeManifestIntegrations,
 } from "@appstrate/core/dependencies";
@@ -262,25 +261,9 @@ export function getResourceEntries(
   m: Record<string, unknown>,
   type: "skills" | "integrations",
 ): ResourceEntry[] {
-  // Integrations: the version comes from `dependencies.integrations.<id>`
-  // (a bare semver string, §4.1) and the tool/scope/auth selection from the
-  // top-level `integrations_configuration.<id>` map (§4.4). `auth_key`
-  // selects which `auths.<key>` entry on the depended-on integration this
-  // agent uses, when the integration declares multiple auths.
-  if (type === "integrations") {
-    return parseManifestIntegrations(m).map((e) => ({
-      id: e.id,
-      version: e.version,
-      // AFPS §4.4 wildcard — preserve the `"*"` literal verbatim instead of
-      // spreading it as a string into `["*"]` (which would corrupt the
-      // round-trip back to `writeManifestIntegrations`).
-      ...(e.tools !== undefined
-        ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
-        : {}),
-      ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
-      ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
-    }));
-  }
+  // Integrations: version from `dependencies.integrations` (§4.1), selection from
+  // `integrations_configuration` (§4.4); entries pass through whole, so no key is lost on save.
+  if (type === "integrations") return parseManifestIntegrations(m);
   const deps = getDeps(m);
   const record = (deps[type] ?? {}) as Record<string, string>;
   return Object.entries(record).map(([id, version]) => ({ id, version }));
@@ -296,18 +279,7 @@ export function setResourceEntries(
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
-      entries
-        .filter((e) => e.id)
-        .map((e) => ({
-          id: e.id,
-          version: e.version ?? "*",
-          // AFPS §4.4 wildcard — preserve `"*"` literal; never spread.
-          ...(e.tools !== undefined
-            ? { tools: isToolsWildcard(e.tools) ? e.tools : [...e.tools] }
-            : {}),
-          ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
-          ...(e.auth_key !== undefined ? { auth_key: e.auth_key } : {}),
-        })),
+      entries.map((e) => ({ ...e, version: e.version ?? "*" })),
     );
     return;
   }

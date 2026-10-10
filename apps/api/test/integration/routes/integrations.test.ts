@@ -18,15 +18,17 @@ import {
   authHeaders,
   createTestUser,
   addOrgMember,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace, seedUnreachableSpace } from "../../helpers/seed.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections,
   integrationOauthClients,
+  integrationPins,
   spacePackages,
 } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -1047,6 +1049,7 @@ describe("OAuth client CRUD", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "a@x.test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
@@ -1057,6 +1060,7 @@ describe("OAuth client CRUD", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "b@x.test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
@@ -1067,6 +1071,7 @@ describe("OAuth client CRUD", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "c@x.test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "enc",
@@ -1638,7 +1643,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
   });
 
-  /** Insert a connection owned by the org owner. `shared` toggles sharedWithOrg. */
+  /** Insert a connection owned by the org owner. `shared` shares it into the default space. */
   async function seedConn(shared: boolean): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
@@ -1646,11 +1651,12 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedWithOrg: shared,
+        sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
@@ -1744,7 +1750,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
     ]);
   });
 
-  it("refuses a connection that is not sharedWithOrg (404)", async () => {
+  it("refuses a connection that is not shared into the space (404)", async () => {
     const connId = await seedConn(false);
     const res = await app.request("/api/integrations/@myorg/gmail/default", {
       method: "PUT",
@@ -1788,6 +1794,202 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       body: JSON.stringify({ connection_ids: [connId] }),
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("PATCH /api/integrations/:packageId/connections/:connectionId (share targets)", () => {
+  let ctx: TestContext;
+  let spaceB: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"), ctx.defaultSpaceId);
+    spaceB = (await seedSpace({ orgId: ctx.orgId, name: "B" })).id;
+  });
+
+  /** Org-scoped (connected from the default space) unless `spaceId` scopes it to one space. */
+  async function seedConn(opts: {
+    userId: string;
+    sharedSpaceIds?: string[];
+    spaceId?: string;
+  }): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: "@myorg/gmail",
+        authKey: "api",
+        accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+        orgId: ctx.orgId,
+        spaceId: opts.spaceId ?? null,
+        originSpaceId: opts.spaceId ? null : ctx.defaultSpaceId,
+        userId: opts.userId,
+        credentialsEncrypted: "x",
+        sharedSpaceIds: opts.sharedSpaceIds ?? [],
+        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
+      })
+      .returning({ id: integrationConnections.id });
+    return row!.id;
+  }
+
+  function patch(headers: Record<string, string>, connectionId: string, body: unknown) {
+    return app.request(`/api/integrations/@myorg/gmail/connections/${connectionId}`, {
+      method: "PATCH",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function sharesOf(connectionId: string): Promise<string[]> {
+    const [row] = await db
+      .select({ shared: integrationConnections.sharedSpaceIds })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    return row!.shared.toSorted();
+  }
+
+  async function shareAudits(connectionId: string) {
+    return db
+      .select({ action: auditEvents.action, after: auditEvents.after })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.resourceId, connectionId),
+          eq(auditEvents.resourceType, "integration_connection"),
+        ),
+      )
+      .orderBy(asc(auditEvents.id));
+  }
+
+  it("lets the owner replace the whole target set, one audit row per space", async () => {
+    const id = await seedConn({ userId: ctx.user.id });
+
+    const res = await patch(authHeaders(ctx), id, {
+      shared_space_ids: [ctx.defaultSpaceId, spaceB],
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scope: string; shared_space_ids: string[] };
+    expect(body.scope).toBe("org");
+    expect(body.shared_space_ids.toSorted()).toEqual([ctx.defaultSpaceId, spaceB].toSorted());
+
+    expect((await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] })).status).toBe(200);
+    expect(await sharesOf(id)).toEqual([spaceB]);
+
+    const audits = await shareAudits(id);
+    expect(audits.filter((a) => a.action === "integration.connection.share_added")).toHaveLength(2);
+    expect(audits.filter((a) => a.action === "integration.connection.share_removed")).toEqual([
+      { action: "integration.connection.share_removed", after: { spaceId: ctx.defaultSpaceId } },
+    ]);
+    // Each recorded in the space it opens or closes, not the one the edit was made from.
+    const recorded = await db
+      .select({
+        action: auditEvents.action,
+        spaceId: auditEvents.spaceId,
+        after: auditEvents.after,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, id));
+    for (const row of recorded.filter((a) => a.action.includes(".share_"))) {
+      expect(row.spaceId).toBe((row.after as { spaceId: string }).spaceId);
+    }
+  });
+
+  it("lets a governor withdraw a member's connection from this space only", async () => {
+    const member = await memberContext(ctx, "member");
+    const id = await seedConn({
+      userId: member.user.id,
+      sharedSpaceIds: [ctx.defaultSpaceId, spaceB],
+    });
+
+    const res = await patch(authHeaders(ctx), id, { shared_space_ids: [] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { shared_space_ids: string[]; identity_claims: unknown };
+    // The governor reads the projection: no longer shared here, the rest is not theirs to see.
+    expect(body.shared_space_ids).toEqual([]);
+    expect(body.identity_claims).toBeNull();
+    expect(await sharesOf(id)).toEqual([spaceB]);
+  });
+
+  it("refuses a governor anything but withdrawing this space (403)", async () => {
+    const member = await memberContext(ctx, "member");
+    const id = await seedConn({ userId: member.user.id, sharedSpaceIds: [ctx.defaultSpaceId] });
+
+    expect((await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] })).status).toBe(403);
+    expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId]);
+  });
+
+  it("refuses a governor renaming an org-scoped connection, allows a space-scoped one (U9)", async () => {
+    const member = await memberContext(ctx, "member");
+    const orgRow = await seedConn({ userId: member.user.id, sharedSpaceIds: [ctx.defaultSpaceId] });
+    const spaceRow = await seedConn({
+      userId: member.user.id,
+      spaceId: ctx.defaultSpaceId,
+      sharedSpaceIds: [ctx.defaultSpaceId],
+    });
+
+    expect((await patch(authHeaders(ctx), orgRow, { label: "Renamed" })).status).toBe(403);
+    expect((await patch(authHeaders(ctx), spaceRow, { label: "Renamed" })).status).toBe(200);
+  });
+
+  it("refuses a target outside the org, or another space for a space-scoped row (400)", async () => {
+    const otherOrg = await createTestContext({ orgSlug: "otherorg" });
+    const orgRow = await seedConn({ userId: ctx.user.id });
+    const spaceRow = await seedConn({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
+
+    const outside = await patch(authHeaders(ctx), orgRow, {
+      shared_space_ids: [otherOrg.defaultSpaceId],
+    });
+    expect(outside.status).toBe(400);
+    expect(((await outside.json()) as { code: string }).code).toBe("invalid_share_target");
+    const foreign = await patch(authHeaders(ctx), spaceRow, { shared_space_ids: [spaceB] });
+    expect(foreign.status).toBe(400);
+    expect(await sharesOf(orgRow)).toEqual([]);
+    expect(await sharesOf(spaceRow)).toEqual([]);
+  });
+
+  it("refuses a target space the owner does not reach (409)", async () => {
+    const id = await seedConn({ userId: ctx.user.id });
+    const unreachable = await seedUnreachableSpace(ctx.orgId);
+
+    const res = await patch(authHeaders(ctx), id, { shared_space_ids: [unreachable] });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("connection_owner_without_access");
+  });
+
+  it("refuses removing a space whose admin pin names the connection, not another (409)", async () => {
+    const id = await seedConn({
+      userId: ctx.user.id,
+      sharedSpaceIds: [ctx.defaultSpaceId, spaceB],
+    });
+    await seedPackage({ id: "@myorg/agent", orgId: ctx.orgId, type: "agent", source: "local" });
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: "@myorg/agent",
+      integrationId: "@myorg/gmail",
+      userId: null,
+      connectionIds: [id],
+    });
+
+    const locked = await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB] });
+    expect(locked.status).toBe(409);
+    expect(((await locked.json()) as { code: string }).code).toBe("connection_pinned");
+    expect(
+      (await patch(authHeaders(ctx), id, { shared_space_ids: [ctx.defaultSpaceId] })).status,
+    ).toBe(200);
+    expect(await sharesOf(id)).toEqual([ctx.defaultSpaceId]);
+  });
+
+  it("answers 404 for a connection that does not reach this space", async () => {
+    const id = await seedConn({ userId: ctx.user.id, spaceId: spaceB });
+    expect((await patch(authHeaders(ctx), id, { label: "x" })).status).toBe(404);
+  });
+
+  it("refuses an empty body and a repeated space id (400)", async () => {
+    const id = await seedConn({ userId: ctx.user.id });
+    expect((await patch(authHeaders(ctx), id, {})).status).toBe(400);
+    expect((await patch(authHeaders(ctx), id, { shared_space_ids: [spaceB, spaceB] })).status).toBe(
+      400,
+    );
   });
 });
 

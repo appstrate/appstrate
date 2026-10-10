@@ -28,6 +28,7 @@ import { invalidRequest } from "../../lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   getAppstrateConnectMeta,
+  type AfpsManifestAuth,
   type AfpsManifestConnect,
 } from "../integration-manifest-helpers.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -45,6 +46,7 @@ import type {
   IntegrationConnectStrategy,
 } from "./strategy.ts";
 import { assertFieldsInput, requireNonEmptyCredentials, connectionTarget } from "./strategy.ts";
+import { resolveConnectionVariables } from "./connection-variables.ts";
 
 /** One connect-tool login run, handed to the {@link ConnectToolExecutor}. */
 export interface ConnectToolExecution {
@@ -97,6 +99,11 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       throw invalidRequest(`Auth '${ctx.authKey}' has no connect.tool declaration`);
     }
     requireNonEmptyCredentials(credentials);
+    const variables = await resolveConnectionVariables(
+      manifest,
+      auth as unknown as AfpsManifestAuth,
+      ctx.variables,
+    );
 
     const bundle = await this.executor.run({
       scope: ctx.scope,
@@ -129,6 +136,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       scopesGranted: bundle.scopesGranted ?? [],
       expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
       needsReconnection: false,
+      variables,
       ...(ctx.connectionId ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });
     // insert / update-owned always return a summary (or throw).

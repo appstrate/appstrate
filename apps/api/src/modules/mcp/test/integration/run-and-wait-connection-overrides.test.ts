@@ -32,11 +32,7 @@ import { eq } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../../../../test/helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
 import {
   createFakeOrchestrator,
   inlineAgentManifest,
@@ -47,7 +43,16 @@ import {
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
+import {
+  MCP_ACCEPT,
+  mcpHeaders,
+  mcpPath,
+  type JsonRpcEnvelope,
+  mcpAuthHeaders,
+} from "../../../../../test/helpers/mcp.ts";
+import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
+import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
+import { activatePackage } from "../../../../services/space-packages.ts";
 
 const app = getTestApp();
 // Wire in-process dispatch to the test app — without it `run_and_wait` has no
@@ -62,10 +67,11 @@ async function callTool(
   headers: Record<string, string>,
   name: string,
   args: Record<string, unknown>,
+  query = "",
 ): Promise<{ isError: boolean; data: Record<string, unknown> }> {
-  const res = await app.request(`/api/mcp/o/${headers["X-Org-Id"]}`, {
+  const res = await app.request(`${mcpPath(headers)}${query}`, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -120,7 +126,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.
     ctx = await createTestContext({ orgSlug: "mcpconn" });
-    headers = authHeaders(ctx);
+    headers = mcpAuthHeaders(ctx);
   });
 
   // Drain in `afterEach`, never at the tail of a test body: the trigger is
@@ -244,4 +250,114 @@ describe("mcp run_and_wait — connection_overrides", () => {
     expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
+
+  // `[]` is "use none of them": an optional integration launches unbound, its key kept as `[]` in
+  // the snapshot (declared, not inert); a required one is refused before any run exists.
+  it("launches with an optional integration bound to none when the override is []", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest: inlineAgentManifest([INTEGRATION]),
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [] },
+    });
+
+    expect(result.data.body).toBeUndefined();
+    const runId = result.data.id as string;
+    expect(runId).toStartWith("run_");
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId));
+    expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
+    expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
+  }, 60_000);
+
+  it("refuses [] for an integration the agent marks required, without launching", async () => {
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    const manifest = inlineAgentManifest([INTEGRATION]);
+    (manifest.integrations_configuration as Record<string, Record<string, unknown>>)[
+      INTEGRATION
+    ]!.required = true;
+
+    const result = await callTool(headers, "run_and_wait", {
+      kind: "inline",
+      manifest,
+      prompt: "do the thing",
+      connection_overrides: { [INTEGRATION]: [] },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.data.status).toBe(400);
+    expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
+    expect(await db.select().from(runs)).toHaveLength(0);
+  });
+
+  // The in-app chat launches through its own extension, never this handler, and whoever reaches
+  // it may persist what it returns: a started run's warnings carry no link, under either context.
+  // The 409 that blocks a launch keeps its link — that remedy is the tool's to hand over.
+  it("drops a started run's warning links, keeps the blocking 409's", async () => {
+    const OAUTH = "@mcpconn/oauth-svc";
+    const manifest = localIntegrationManifest({
+      name: OAUTH,
+      serverName: `${OAUTH}-server`,
+      version: "1.0.0",
+      auths: {
+        primary: {
+          type: "oauth2",
+          authorizationEndpoint: "https://provider.example.com/authorize",
+          tokenEndpoint: "https://provider.example.com/token",
+          defaultScopes: ["base"],
+        },
+      },
+      tools_policy: { search: { required_scopes: { primary: ["search.read"] } } },
+    }) as unknown as Record<string, unknown>;
+    await seedPackage({
+      id: OAUTH,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPackageVersion({ packageId: OAUTH, version: "1.0.0", manifest });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH);
+    await seedDefaultOrgModel(ctx);
+
+    const launch = (query: string, required: boolean) => {
+      const agent = inlineAgentManifest([OAUTH]);
+      if (required) {
+        (agent.integrations_configuration as Record<string, Record<string, unknown>>)[
+          OAUTH
+        ]!.required = true;
+      }
+      return callTool(
+        headers,
+        "run_and_wait",
+        { kind: "inline", manifest: agent, prompt: "do the thing" },
+        query,
+      );
+    };
+
+    for (const query of ["?context=injected", ""]) {
+      const result = await launch(query, false);
+      expect(result.data.done).toBe(true);
+      const warnings = result.data.warnings as Array<Record<string, unknown>>;
+      const warning = warnings.find((w) => w.field === `integrations.${OAUTH}`)!;
+      expect(warning).toMatchObject({ code: "not_connected", auth_key: "primary" });
+      expect(warning).not.toHaveProperty("connect_url");
+      expect(warning).not.toHaveProperty("expiresAt");
+    }
+
+    const blocked = await launch("", true);
+    expect(blocked.isError).toBe(true);
+    expect(blocked.data.status).toBe(409);
+    const errors = (blocked.data.body as ProblemDetails).errors ?? [];
+    const item = errors.find((e) => e.field === `integrations.${OAUTH}`) as
+      (ValidationFieldError & { connect_url?: string }) | undefined;
+    expect(item?.connect_url).toStartWith("http");
+  }, 60_000);
 });

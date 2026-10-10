@@ -9,20 +9,35 @@ import {
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
 import { runStatusValues } from "@appstrate/core/run-status";
+import {
+  RUN_AND_WAIT_RESUME_INSTRUCTION,
+  RUN_RESULT_INLINE_MAX_BYTES,
+} from "@appstrate/core/run-and-wait-client";
 import { SPACE_ROLE_PRESETS, SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { MODEL_INPUT_MODALITIES } from "@appstrate/core/module";
 import {
   MODEL_REASONING_LEVELS,
+  MODEL_REASONING_OFF_BEHAVIOURS,
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
 import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
+import { MAX_TOKEN_USAGE_TIERS, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_SOURCES,
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  CONNECT_FLOW_CODES,
+  INTEGRATION_MANIFEST_FAILURE_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
+  MISSING_INTEGRATION_CONNECTION_CODES,
 } from "@appstrate/core/integration";
-import { connectionIdSetJsonSchema } from "./paths/integrations.ts";
+import {
+  connectionIdSetJsonSchema,
+  connectionScopeSchema,
+  originSpaceIdSchema,
+  sharedSpaceIdsSchema,
+} from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -40,6 +55,10 @@ export const SPACE_ROLE_ID_PATTERN = "^srl_";
  * reason to import anything but the catalog itself.
  */
 const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
+
+const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
+  TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
+);
 
 /**
  * The org-settings members, shared by the READ component (`OrgSettings`, below)
@@ -132,6 +151,27 @@ export const AGENT_INPUT_SETTINGS_PROPERTIES = {
   },
 };
 
+/** What every `run_and_wait` result carries, whether the run ended or the wait did. */
+const RUN_AND_WAIT_REQUIRED = ["id", "packageId", "status", "done", "warnings"];
+const RUN_AND_WAIT_COMMON_PROPERTIES = {
+  id: { type: ["string", "null"], description: "The run id." },
+  packageId: { type: ["string", "null"], description: "The run's agent (`@scope/name`)." },
+  status: { type: ["string", "null"], enum: [...runStatusValues, null] },
+  warnings: {
+    type: "array",
+    description: "The launch's `warnings` (see LaunchWarnings); `[]` when none.",
+    items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
+  },
+  space: {
+    type: "object",
+    description:
+      "The space the run was launched in. Present on an org-wide MCP connection only, where each call names its space.",
+    required: ["id", "name"],
+    additionalProperties: false,
+    properties: { id: { type: "string" }, name: { type: "string" } },
+  },
+};
+
 /**
  * All OpenAPI schema definitions (components/schemas).
  */
@@ -142,7 +182,7 @@ export const schemas = {
   // @appstrate/core/api-errors). Extracted into one component so every
   // consumer (ProblemDetail.errors, and any future readiness DTO) shares one
   // shape and can't drift. The base four (`field`/`code`/`message`/`title`)
-  // come from ValidationFieldError; the eleven snake_case extras are each
+  // come from ValidationFieldError; the extras are each
   // populated only for the matching resolution `code`(s) and so are all optional.
   ResolutionFieldError: {
     type: "object",
@@ -151,7 +191,7 @@ export const schemas = {
       field: { type: "string" },
       code: {
         type: "string",
-        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On any other validation item, the validator's own code.`,
+        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or one of ${INTEGRATION_MANIFEST_FAILURE_CODES.map((c) => `\`${c}\``).join(", ")} (the declared integration's manifest could not be loaded; no extras), or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's \`warnings[]\` item, one of ${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")} (see ConnectionResolutionWarning). On any other validation item, the validator's own code.`,
       },
       message: { type: "string" },
       title: {
@@ -179,7 +219,7 @@ export const schemas = {
             owned_by_actor: {
               type: "boolean",
               description:
-                "True when the connection is the caller's own, false when inherited via org sharing.",
+                "True when the connection is the caller's own, false when another member shared it in the space.",
             },
             needs_reconnection: {
               type: "boolean",
@@ -189,34 +229,33 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
+          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections that do not share one oauth2 account, auth and instance, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
       },
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. Forward as `connectionId` on the OAuth re-kickoff so the callback UPDATEs the existing row in place (avoids duplicate INSERT — single-writer contract in `integration-connections.ts:persistCredentialBundle`). Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks; forwarded to the OAuth re-consent prompt.",
+          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names. When `source` is `admin_pin`, `org_default_enforced` or `schedule_override`, an admin, or the schedule's owner, must switch that binding instead.",
       },
       owned_by_actor: {
         type: "boolean",
         description:
-          "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection to repair belongs to the calling actor (UI offers the upgrade/reconnect) vs. a foreign shared row (read-only error).",
+          "Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection belongs to the calling actor, who alone may reconnect or upgrade it; false for another member's shared row.",
       },
       required_scopes: {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting the connect flow so the consent covers them.",
+          "Populated on `not_connected`, `auth_key_mismatch` and `insufficient_scopes` (never on `needs_reconnection`, whose reconnect re-consents what the connection holds plus the auth's `default_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting a new connection so the consent covers them.",
       },
       auth_key: {
         type: "string",
-        description:
-          "Populated on the codes a connect flow can clear (`not_connected`, `needs_reconnection`, `insufficient_scopes`). Auth key of the integration manifest the connect flow must target (`/auths/{authKey}/connect/...`).",
+        description: `Populated on the codes a connect flow can clear (${CONNECT_FLOW_CODES.map((c) => `\`${c}\``).join(", ")}). Auth key of the integration manifest the connect flow must target (\`/auths/{authKey}/connect/...\`).`,
       },
       required_auth_key: {
         type: "string",
@@ -229,11 +268,17 @@ export const schemas = {
         description:
           "Populated on `auth_key_mismatch`. Auth keys the actor's existing connections use; helps the UI route to the correct connect method.",
       },
+      source: {
+        type: "string",
+        enum: [...CONNECTION_RESOLUTION_SOURCES],
+        description:
+          "The cascade layer the item is about: the one whose set failed (`pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, and a member failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), or the one that chose `[]` (`required_integration_unbound`, `integration_unbound`). Absent when no layer bound anything.",
+      },
       connect_url: {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected`, or `insufficient_scopes`/`needs_reconnection` on a connection the actor owns). Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",
@@ -273,6 +318,119 @@ export const schemas = {
       },
     },
   },
+  /** One `errors[]` item of a `409 missing_integration_connection`. */
+  ConnectionResolutionItem: {
+    allOf: [
+      { $ref: "#/components/schemas/ResolutionFieldError" },
+      {
+        type: "object",
+        properties: {
+          code: { type: "string", enum: [...MISSING_INTEGRATION_CONNECTION_CODES] },
+        },
+      },
+    ],
+  },
+  MissingIntegrationConnectionProblem: {
+    description:
+      "`missing_integration_connection`: one `errors[]` item per integration that blocks the launch (`field: integrations.<id>`).",
+    allOf: [
+      { $ref: "#/components/schemas/ProblemDetail" },
+      {
+        type: "object",
+        required: ["errors"],
+        properties: {
+          code: { type: "string", enum: ["missing_integration_connection"] },
+          errors: {
+            type: "array",
+            items: { $ref: "#/components/schemas/ConnectionResolutionItem" },
+          },
+          version_ref: {
+            type: "string",
+            description:
+              "On every run launch refusal: the definition judged, in `Run.version_ref` terms — `draft` or a concrete semver. An omitted `version` launches the latest published version, while connection readiness reads the draft for a caller who can write the agent, so re-check readiness with `version=<version_ref>`. Absent on a schedule write, which is judged against its `version_override`.",
+          },
+        },
+      },
+    ],
+  },
+  ConnectionResolutionWarning: {
+    description:
+      "A declared, non-required integration the run starts without (its agent is told). Its `code` is the one the same state raises as a 409 item on a `required` integration, with the same fields: `not_connected` (`auth_key`, `required_scopes`, and a `connect_url` only on an agent-run or inline-run launch that sends `X-Appstrate-Connect-Offers` — never on a schedule write, a validation or a remote run), `must_choose_connection` (only other members' shared connections serve; `candidate_connections`), `auth_key_mismatch` (`required_auth_key` + `available_auth_keys`, and the `auth_key` to connect when the dep's own auth serves the selection), `integration_not_active` (switched off in the space). `integration_unbound` alone has no error twin: the layer named by `source` chose `[]`.",
+    allOf: [
+      { $ref: "#/components/schemas/ResolutionFieldError" },
+      {
+        type: "object",
+        properties: {
+          code: { type: "string", enum: [...CONNECTION_RESOLUTION_WARNING_CODES] },
+        },
+      },
+    ],
+  },
+  // `allOf`-merged into every launch success body.
+  LaunchWarnings: {
+    type: "object",
+    required: ["warnings"],
+    properties: {
+      warnings: {
+        type: "array",
+        description:
+          "Declared, non-required integrations the run starts without. Always present. A `required` integration in the same state is a 409 instead.",
+        items: { $ref: "#/components/schemas/ConnectionResolutionWarning" },
+      },
+    },
+  },
+  // The `structuredContent` of the MCP `run_and_wait` tool, and its declared `outputSchema`.
+  RunAndWaitResult: {
+    type: "object",
+    description: `The \`run_and_wait\` MCP tool's result. \`done\` is its only discriminant: \`true\` once the run reached a terminal status, \`false\` when the wait ended first — the run is still going, and the payload carries no outcome. ${RUN_AND_WAIT_RESUME_INSTRUCTION}`,
+    oneOf: [
+      { $ref: "#/components/schemas/RunAndWaitPending" },
+      { $ref: "#/components/schemas/RunAndWaitTerminal" },
+    ],
+  },
+  RunAndWaitPending: {
+    type: "object",
+    required: RUN_AND_WAIT_REQUIRED,
+    properties: { ...RUN_AND_WAIT_COMMON_PROPERTIES, done: { type: "boolean", const: false } },
+    additionalProperties: false,
+  },
+  RunAndWaitTerminal: {
+    type: "object",
+    required: RUN_AND_WAIT_REQUIRED,
+    properties: {
+      ...RUN_AND_WAIT_COMMON_PROPERTIES,
+      done: { type: "boolean", const: true },
+      result: {
+        description: "The run's output payload. Absent when `truncated` replaces it.",
+      },
+      error: { type: "string", description: "The run's own failure; never a wait outcome." },
+      files: {
+        type: "array",
+        description: "Files the run published; absent when it published none.",
+        items: {
+          type: "object",
+          required: ["id", "uri", "name", "mime", "size"],
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            uri: { type: "string", description: "`appfile://` URI." },
+            name: { type: "string" },
+            mime: { type: "string" },
+            size: { type: "integer", minimum: 0 },
+          },
+        },
+      },
+      truncated: {
+        type: "boolean",
+        const: true,
+        description: `\`result\` was over ${RUN_RESULT_INLINE_MAX_BYTES} bytes of JSON: \`result_head\` holds its prefix, \`getRun\` the whole of it.`,
+      },
+      result_size_bytes: { type: "integer", minimum: 0 },
+      result_head: { type: "string" },
+      message: { type: "string", description: "How to read a truncated result." },
+    },
+    additionalProperties: false,
+  },
   ModelGenerationSettings: {
     type: "object",
     additionalProperties: false,
@@ -298,13 +456,40 @@ export const schemas = {
     type: "object",
     required: ["inputTokensAbove", "input", "output", "cacheRead", "cacheWrite"],
     description:
-      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request.",
+      "A request-wide price tier (USD per 1M tokens). When a request's input — input + cache-read + cache-write tokens — exceeds `inputTokensAbove`, the highest such tier prices the whole request. Thresholds are unique within a card.",
     properties: {
-      inputTokensAbove: { type: "number" },
+      inputTokensAbove: { type: "integer", minimum: 1 },
       input: { type: "number" },
       output: { type: "number" },
       cacheRead: { type: "number" },
       cacheWrite: { type: "number" },
+    },
+  },
+  TokenUsage: {
+    type: "object",
+    additionalProperties: false,
+    description:
+      "Cumulative token usage in the AFPS wire format. `input_tokens` is net of cache: a request's whole prompt is `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.",
+    properties: {
+      ...TOKEN_USAGE_COUNTER_PROPERTIES,
+      tiers: {
+        type: "array",
+        description:
+          "Per price tier, the share of the counters priced at it, one band per `input_tokens_above` (thresholds are unique). Absent when no request reached a tier.",
+        maxItems: MAX_TOKEN_USAGE_TIERS,
+        items: { $ref: "#/components/schemas/TokenUsageTier" },
+      },
+    },
+  },
+  TokenUsageTier: {
+    type: "object",
+    additionalProperties: false,
+    required: ["input_tokens_above"],
+    description:
+      "The tokens of the requests priced at the tier above `input_tokens_above` — a subset of the usage's counters, which count every request. The threshold is compared to a request's whole prompt (input + cache read + cache write) and matches a rate card tier's `inputTokensAbove`; the band's counters stay net of cache.",
+    properties: {
+      input_tokens_above: { type: "integer", minimum: 1 },
+      ...TOKEN_USAGE_COUNTER_PROPERTIES,
     },
   },
   ModelGenerationCapabilities: {
@@ -337,6 +522,12 @@ export const schemas = {
             propertyNames: {
               enum: [...MODEL_REASONING_LEVELS],
             },
+          },
+          off: {
+            type: "string",
+            enum: [...MODEL_REASONING_OFF_BEHAVIOURS],
+            description:
+              "What level `off` puts on the wire. `disables`: an explicit reasoning-off parameter. `unsent`: no reasoning parameter, so the server keeps its own default and some models still reason. Absent when the model does not reason, does not take `off`, or when what it sends is not known. An alias never reports it: it would identify the backing model.",
           },
         },
       },
@@ -822,6 +1013,16 @@ export const schemas = {
                   items: { type: "string" },
                   description: "Niveau 2 explicit scope escape hatch (optional)",
                 },
+                auth_key: {
+                  type: "string",
+                  description:
+                    "AFPS §4.4 — which of the integration's `auths` the agent uses (optional; absent lets any serving auth bind).",
+                },
+                required: {
+                  type: "boolean",
+                  description:
+                    "AFPS §4.4 — `true`: a run refuses to start unless a connection binds. Absent or `false`: the run starts without it, reported in the launch response's `warnings`.",
+                },
               },
             },
           },
@@ -1087,6 +1288,7 @@ export const schemas = {
       "api_key_name",
       "schedule_name",
       "connections_used",
+      "integrations_unbound",
       "package_ephemeral",
       "unread",
       "file_counts",
@@ -1162,19 +1364,9 @@ export const schemas = {
       checkpoint: { type: ["object", "null"], additionalProperties: true },
       error: { type: ["string", "null"] },
       token_usage: {
-        type: ["object", "null"],
         description:
-          "Snapshot of token consumption for the run. Snake-case keys match the AFPS wire format emitted by every runner (PiRunner / remote CLI / GitHub Action) and stored verbatim in JSONB.",
-        properties: {
-          input_tokens: { type: "integer", minimum: 0 },
-          output_tokens: { type: "integer", minimum: 0 },
-          cache_creation_input_tokens: { type: "integer", minimum: 0 },
-          cache_read_input_tokens: { type: "integer", minimum: 0 },
-        },
-        // Stored verbatim from the runner's JSONB — a runner may emit provider-
-        // specific extra keys beyond the four documented above. additionalProperties
-        // stays `true` so those pass-through keys don't fail spec==runtime validation.
-        additionalProperties: true,
+          "Snapshot of token consumption for the run, as every runner (PiRunner / remote CLI / GitHub Action) reports it, parsed on ingestion before it is stored. `null` until the run reports usage.",
+        oneOf: [{ $ref: "#/components/schemas/TokenUsage" }, { type: "null" }],
       },
       started_at: { type: ["string", "null"], format: "date-time" },
       completed_at: { type: ["string", "null"], format: "date-time" },
@@ -1337,7 +1529,7 @@ export const schemas = {
       },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 1..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration; each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks for this run (cascade layer 3, the launch override). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration (\`[]\` = none, see the set schema); each chosen connection carries its own authKey. Loses to an admin pin and an enforced org default; beats member pins, a soft org default and the fallback.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1364,6 +1556,29 @@ export const schemas = {
               type: "string",
               enum: [...CONNECTION_RESOLUTION_SOURCES],
               description: "The cascade layer that bound the connection.",
+            },
+          },
+        },
+      },
+      integrations_unbound: {
+        type: ["array", "null"],
+        description:
+          "Declared integrations this run started without, and why — the launch `warnings` recorded at kickoff, without their candidate or auth detail. In declaration order; empty when every one was bound; null when the run recorded none (no connection resolution ran, or the run predates the record).",
+        items: {
+          type: "object",
+          required: ["integration_package_id", "code", "source"],
+          properties: {
+            integration_package_id: { type: "string" },
+            code: {
+              type: "string",
+              enum: [...CONNECTION_RESOLUTION_WARNING_CODES],
+              description: "The launch warning's code (see ConnectionResolutionWarning).",
+            },
+            source: {
+              type: ["string", "null"],
+              enum: [...CONNECTION_RESOLUTION_SOURCES, null],
+              description:
+                "The cascade layer that chose no connection, on `integration_unbound`; null otherwise.",
             },
           },
         },
@@ -1458,7 +1673,7 @@ export const schemas = {
       version_override: { type: ["string", "null"] },
       connection_overrides: {
         type: ["object", "null"],
-        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 1..${MAX_CONNECTIONS_PER_INTEGRATION} per integration. Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
+        description: `Per-integration connection picks frozen on the schedule row (cascade layer 3, the launch override of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration (\`[]\` = none, see the set schema). Replayed on every fire; loses to an admin pin and an enforced org default, beats member pins, a soft org default and the fallback.`,
         additionalProperties: connectionIdSetJsonSchema,
       },
       dependency_overrides: {
@@ -1804,7 +2019,11 @@ export const schemas = {
           output: { type: "number" },
           cacheRead: { type: "number" },
           cacheWrite: { type: "number" },
-          tiers: { type: "array", items: { $ref: "#/components/schemas/ModelCostTier" } },
+          tiers: {
+            type: "array",
+            maxItems: MAX_TOKEN_USAGE_TIERS,
+            items: { $ref: "#/components/schemas/ModelCostTier" },
+          },
         },
       },
       created_by: { type: ["string", "null"] },
@@ -1904,10 +2123,11 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding only the caller's single own connection, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source` + `error_code`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
+      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection`, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
     required: [
       "source",
       "error_code",
+      "warning",
       "resolved_connection_ids",
       "resolved_missing_scopes",
       "admin_pinned_connection_ids",
@@ -1922,20 +2142,25 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_SOURCES, null],
         description:
-          "The cascade layer that bound the set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
+          "The cascade layer that bound a non-empty set, or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside the governing set — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
       error_code: {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_ERROR_CODES, null],
         description:
-          "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds, and when there is no verdict.",
+          "Why a run would be refused on this integration — the same code the run-kickoff 409 carries. `null` when the set binds (`[]` included), for a non-required integration switched off in the space, and when there is no verdict.",
+      },
+      warning: {
+        anyOf: [{ $ref: "#/components/schemas/ConnectionResolutionWarning" }, { type: "null" }],
+        description:
+          "Why the next run would start without this integration — its launch `warnings[]` item. `null` when the resolver emits no warning for it.",
       },
       resolved_connection_ids: {
         type: "array",
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
         description:
-          "The set the next run binds. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty otherwise.",
+          "The set the next run binds — empty when it binds none. When a member fails its health check (`needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`), the whole set that layer tried to bind; empty on any other error.",
       },
       resolved_missing_scopes: {
         type: "array",
@@ -1944,19 +2169,23 @@ export const schemas = {
           "Missing scopes on the one connection an `insufficient_scopes` verdict names; empty otherwise.",
       },
       admin_pinned_connection_ids: {
-        type: "array",
+        type: ["array", "null"],
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description: "`null` when no admin pin exists; `[]` when it pins none.",
       },
       member_pinned_connection_ids: {
-        type: "array",
+        type: ["array", "null"],
         items: { type: "string" },
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description: "`null` when the caller has no member pin; `[]` when it pins none.",
       },
       org_default_connection_ids: {
-        type: "array",
+        type: ["array", "null"],
         items: { type: "string" },
+        minItems: 1,
         maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+        description: "`null` when no org default exists; an org default is never empty.",
       },
       org_default_enforced: { type: "boolean" },
       can_add_connection: {
@@ -1979,7 +2208,9 @@ export const schemas = {
             "owner_end_user_id",
             "owner_name",
             "scopes_granted",
-            "shared_with_org",
+            "scope",
+            "shared_space_ids",
+            "origin_space_id",
             "needs_reconnection",
             "missing_scopes",
             "is_own",
@@ -1997,7 +2228,9 @@ export const schemas = {
             owner_end_user_id: { type: ["string", "null"] },
             owner_name: { type: ["string", "null"] },
             scopes_granted: { type: "array", items: { type: "string" } },
-            shared_with_org: { type: "boolean" },
+            scope: connectionScopeSchema,
+            shared_space_ids: sharedSpaceIdsSchema,
+            origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },
             missing_scopes: { type: "array", items: { type: "string" } },
             is_own: { type: "boolean" },
@@ -2040,12 +2273,18 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_package_id", "run_blocking", "resolution"],
+          required: ["integration_package_id", "required", "run_blocking", "resolution"],
           properties: {
             integration_package_id: { type: "string" },
+            required: {
+              type: "boolean",
+              description:
+                "The agent's `integrations_configuration.<id>.required`: whether a run refuses to start without a connection here.",
+            },
             run_blocking: {
               type: "boolean",
-              description: "True iff this integration is one of the run-blocking `errors`.",
+              description:
+                "True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning`).",
             },
             resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
           },
@@ -2188,7 +2427,8 @@ export const schemas = {
       integration_package_id: { type: "string" },
       connection_ids: {
         ...connectionIdSetJsonSchema,
-        description: "The whole pinned set, in the order it was written. A write replaces it.",
+        description:
+          "The whole pinned set, in the order it was written — `[]` pins none. A write replaces it.",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },

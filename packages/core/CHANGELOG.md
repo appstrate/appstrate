@@ -9,6 +9,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
+  **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
+  catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
+  inventory of every tool the integration names, each with its `origin`
+  (`mcp_package`, `manifest`, `appstrate`), its `exposure` (`available`,
+  `hidden`, `not_in_catalog`) and why it is hidden. Read by an integration's
+  Outils tab; never an agent allowlist.
+- **`required?: boolean`** on `ManifestIntegrationEntry` and
+  `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
+  afps-spec#28): the agent needs at least one connection of that integration
+  to run. Read by `parseManifestIntegrations`, written by
+  `writeManifestIntegrations`. Unrelated to an integration auth's
+  `_meta["dev.appstrate/auth"].required`. (#1830)
+- **`CONNECTION_RESOLUTION_WARNING_CODES`** (`not_connected`,
+  `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`,
+  `integration_unbound`), **`ConnectionResolutionWarningCode`** and
+  **`ConnectionResolutionWarning`** (`@appstrate/core/integration`): a
+  declared, non-required integration the run starts without carries the code
+  the same state raises as an error on a `required` integration, with the same
+  fields. Only `integration_unbound` has no error twin: a cascade layer
+  (`source`) chose `[]`. (#1830, #1848)
+- **`CONNECT_FLOW_CODES`** (`@appstrate/core/integration`; `not_connected`,
+  `auth_key_mismatch`, `needs_reconnection`, `insufficient_scopes`): the codes
+  a connect flow resolves. An `auth_key_mismatch` item carries `auth_key` and
+  `required_scopes`, the agent's own auth to connect. (#1848)
+- **`INTEGRATION_MANIFEST_FAILURE_CODES`**,
+  **`MISSING_INTEGRATION_CONNECTION_CODES`** and
+  **`MissingIntegrationConnectionCode`** (`@appstrate/core/integration`): every
+  code an `errors[]` item of a `409 missing_integration_connection` carries —
+  resolution errors, manifest failures and `remote_binds_one_connection`.
+  (#1848)
+- **`RunIntegrationUnbound`** (`{ integrationId, code, source? }`) and
+  **`runIntegrationsUnboundSchema`** (`@appstrate/core/integration`): every
+  read of `runs.integrations_unbound` parses with it. (#1849)
+- **`RunStatusChangeParams.integrationsUnbound?: RunIntegrationUnbound[]`**,
+  set on `started` when the run recorded its connection resolution. (#1849)
+- **`CREDENTIAL_FAILURE_CAUSES`** and **`CredentialFailureCause`**
+  (`@appstrate/core/sidecar-types`): why the platform did not return a
+  refreshed credential, carried as the RFC 9457 `cause` extension member of the
+  internal credential `410`/`502`. (#1853)
+- **The run-and-wait client (`@appstrate/core/run-and-wait-client`) carries
+  the launch's `warnings`** onto every payload it returns (preliminary,
+  terminal and timed out), `[]` when none, as REST `LaunchWarnings` does.
+  The documented payload becomes
+  `{ id, packageId, status, done, result?, error?, warnings }`. (#1830, #1851)
+- **`enrichTerminalRunAndWaitStep`** and **`RUN_AND_WAIT_RESUME_INSTRUCTION`**
+  (`@appstrate/core/run-and-wait-client`): the files and truncation of a
+  terminal step (applied only when `done`), and the next-step instruction of a
+  `done: false` step. (#1851)
+
+- **`ALIAS_BACKING_API_SHAPES`** (`@appstrate/core/model-swap`): every
+  `AliasBackingApiShape`, the vendor protocols a provider can declare. (#1846)
+- **`releaseVersion`** (`@appstrate/core/image-ref`) is exported: the
+  release-version predicate of the runtime-image trio rule (normalizes a
+  leading `v`; `undefined` for `dev`, build stamps and alias tag families). The
+  Firecracker runner handshake applies the same rule through it. (#1852)
+
+- **`ChatUsageRecord.tiers`** (`@appstrate/core/chat-contract`), optional: the
+  per-tier bands (`TokenUsage.tiers`) of a chat turn summed over several model
+  calls, so the platform prices each call at its tier instead of the base
+  rate. (#1552)
+
+- **`ModelGenerationCapabilities.reasoning.off`**, **`MODEL_REASONING_OFF_BEHAVIOURS`**
+  and **`ModelReasoningOff`**
+  (`@appstrate/core/model-generation`): what reasoning level `off` puts on the
+  wire — `disables` (an explicit reasoning-off parameter) or `unsent` (no
+  reasoning parameter; the server keeps its own default, and some models still
+  reason). Optional: absent when the model does not reason, does not take
+  `off`, or when what it sends is not known. (#1774)
+
+### Changed
+
+- **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
+  (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
+  manifest declares them, which the sidecar's runner egress listeners read to
+  exempt an `EGRESS_ALLOW_INTERNAL_HOSTS` host
+  (`docs/architecture/SIDECAR.md`, "Runner egress allowlist"). (#1819)
+- **Requires `@afps-spec/schema` `^0.9.0`** (was `^0.8.0`), which declares
+  `integrations_configuration.<id>.required` as a boolean (afps-spec#28): a
+  manifest whose `required` is not a boolean fails validation. (#1830)
+- **BREAKING: `ConnectionResolutionErrorCode` gains
+  `required_integration_unbound` and `integration_not_active`**
+  (`@appstrate/core/integration`, both in `CONNECTION_RESOLUTION_ERROR_CODES`):
+  an integration the agent marks `required` whose winning cascade layer binds
+  no connection (`[]`), or which is switched off in the space. Exhaustive
+  switches over the union must handle both. (#1830)
+- **BREAKING: `ConnectionResolutionResult` gains a required `warnings`**
+  (`ConnectionResolutionWarning[]`, `@appstrate/core/integration`), and a
+  `ResolvedConnectionMap` may map an integration to `[]`: declared, bound to no
+  connection (a non-required integration switched off in the space included).
+  A missing key still means inert. A producer of the result must set
+  `warnings`. (#1830)
+- **`writeManifestIntegrations` (`@appstrate/core/dependencies`) merges each
+  configuration onto the one already in the manifest**: keys it does not
+  model (`_meta`, extensions) are kept instead of dropped. (#1830)
+- **`ResolutionFieldError` (`@appstrate/core/api-errors`) gains `source?`**,
+  the cascade layer concerned, and also describes a launch response's
+  `warnings` items. (#1830, #1848)
+- **`gone()`** and **`badGateway()`** (`@appstrate/core/api-errors`) take an
+  optional `extensions` argument, like `conflict()`. (#1853)
+
+- **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) validates
+  the optional `tiers` of a `TokenUsage` (`@appstrate/afps-shared`
+  `TokenUsage.tiers`) with afps-shared's `isTokenUsageTiers` (at most 16 bands,
+  strict keys, a positive integer `input_tokens_above` unique across bands,
+  non-negative integer counters). It previously stripped the field. Malformed
+  bands are dropped and the counters kept: the snapshot still parses. (#1552)
+- **BREAKING: `tokenUsageSchema`** (`@appstrate/core/token-usage`) is a Zod
+  pipe over afps-shared's `parseTokenUsage` (`z.unknown().transform(...)`), no
+  longer a `z.object`: `.shape`, `.extend()` and `.strict()` are gone, and a
+  fractional counter now fails the parse. (#1846)
+
+- **BREAKING: `modelCostSchema`** (`@appstrate/core/module`) refuses a rate
+  card whose tiers break the rule its usage bands follow: `inputTokensAbove` must be an
+  integer (was any positive number), and `tiers` holds at most
+  `MAX_TOKEN_USAGE_TIERS` (16) entries with unique thresholds. Such a card
+  would otherwise have every band of its usage dropped and price at the base
+  rate. (#1552)
+
+- **Requires `@appstrate/afps-shared` `^0.13.0`** (was `^0.12.0`): the
+  `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`
+  is its own. (#1552, #1846)
+
+- **BREAKING: a `done: false` step carries no `error`**
+  (`waitForRunAndWaitCompletion`, `projectRunAndWaitPayload`,
+  `@appstrate/core/run-and-wait-client`). `done` is the only discriminant:
+  `result` and `error` are set only when `done`, and `error` only reports the
+  run's failure. The old "run_and_wait timed out …" error read like the run's
+  own `timeout` status, and a caller that relaunched on it duplicated a run
+  still going. (#1844, #1851)
+- **The wait poll sends the remaining seconds and the server clamps them**
+  (`@appstrate/core/run-and-wait-client`). (#1851)
+
+## [15.0.0] — 2026-10-08
+
+### Added
+
+- **Connection variables (AFPS §7.12)** in `findUnevaluableExpressions`
+  (`@appstrate/core/integration`): a `{$variable.<name>}` naming a declared
+  variable is evaluable in a delivery template and in `authorized_uris`; an
+  undeclared variable is reported there, and a login request still refuses
+  every `{$…}`. The credential rules of
+  `integrationManifestSchema` (declared, required, refused on oauth2 and
+  `connect`) stay on `{$credential.<field>}` references.
+
 - **`PiModelDialect`** and **`isPiModelDialect`**
   (`@appstrate/core/sidecar-types`): what of a Pi registry record shapes a
   request beyond the resolved values, as the platform hands it to a model
@@ -19,19 +164,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Requires `@appstrate/afps-shared` `^0.11.0`** (was `^0.10.1`): the
-  `authorized_uris` rules moved to its `./authorized-uris` subpath. No core
-  export changes. (#1763)
+- **Requires `@appstrate/afps-shared` `^0.12.0`** (14.0.0 declared `^0.10.0`): the
+  `authorized_uris` rules moved to its `./authorized-uris` subpath (0.11.0),
+  and connection variables arrived (0.12.0). No core export changes. (#1763)
+- **`findUnboundedInjectedCredentials` (`@appstrate/core/integration`)
+  refuses an `authorized_uris` wildcard that is not under a literal
+  registrable domain**, judged with the Public Suffix List (ICANN and private
+  sections), through `@appstrate/afps-shared` 0.11.0: `https://*.co.uk/**`
+  and `https://*.github.io/**` are refused, `https://*.example.com/**` and
+  `https://*.example.co.uk/**` still pass. No API change; a behaviour change:
+  a manifest that passed may be refused on its next write. (#1656)
+- **`findUnevaluableExpressions` (`@appstrate/core/integration`) refuses
+  every `connect.login` form `@appstrate/afps-shared`'s `loginBlockIssues`
+  now refuses** (see its CHANGELOG; AFPS §7.7 evaluation profile).
+  No API change; a behaviour change: a manifest that passed may be refused on
+  its next write. (#1773)
+- **`integrationManifestSchema` no longer checks the jsonpath subset of
+  `connect.login` selectors and criteria**: `findUnevaluableExpressions` (write
+  paths) and the login engine (connect start) refuse them, so a stored manifest
+  holding one still parses. `identity_claims` is still checked by the schema.
+  (#1773)
 
 - **`MAX_CONNECTIONS_PER_INTEGRATION`** (`@appstrate/core/integration`) is
   now `20` (was `10`): the cap on the connections one declared integration
-  binds in a run.
+  binds in a run. (#1804)
 
 - **BREAKING: `ModelSwapBacking` gains a required `dialect`**
   (`PiModelDialect | null`, `@appstrate/core/sidecar-types`): the
   sidecar builds the backing from it and no longer reads a record by
   `providerId`. A producer of `ModelSwap` descriptors must set it, `null`
   when Pi keeps no record of the backing. (#1706)
+- **BREAKING: each `IntegrationSpawnSpec` auth entry gains a required
+  `variables`** (`Record<string, string>`, `@appstrate/core/sidecar-types`):
+  the connection's variables (AFPS §7.12), which the sidecar substitutes for
+  `{$variable.<name>}`. A producer of spawn specs must set it, `{}` when the
+  connection has none. (#1811)
 
 ### Fixed
 

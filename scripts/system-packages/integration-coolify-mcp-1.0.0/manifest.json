@@ -1,0 +1,118 @@
+{
+  "name": "@appstrate/coolify-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Coolify",
+  "icon": "simple-icons:coolify",
+  "description": "Coolify integration backed by the MCP server built into Coolify ({instance}/mcp). Coolify is self-hosted, so the instance URL is a connection variable with no default: one package serves every instance and each connection reaches only its own. The sidecar opens a Streamable HTTP MCP client and injects a team API token as `Authorization: Bearer …` — Coolify's MCP accepts no OAuth. Every tool is scoped to the token's team, and the token's permissions bound what an agent can do: `read` serves the inventory and status tools, `read:sensitive` adds `get_logs` and deployment log summaries, `deploy` adds the lifecycle tools (`deploy`, `cancel_deployment`, `control` — start, stop, restart). Environment variable values, configuration snapshots and full deployment logs are never returned. The MCP server is off by default: an instance administrator turns it on, and a team can turn it off for itself. The tool set grows with each Coolify release, so the catalogue below is the current one and `allow_undeclared_tools` lets an agent take whatever its instance advertises.",
+  "keywords": ["devops", "hosting", "deployment"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "{$variable.base_url}/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "variables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "title": "URL de l'instance Coolify",
+          "description": "Adresse de votre tableau de bord Coolify, sans chemin (ex. https://coolify.example.com). Un administrateur de l'instance doit avoir activé le serveur MCP (Settings → Advanced), et votre équipe ne doit pas l'avoir désactivé."
+        }
+      },
+      "required": ["base_url"]
+    }
+  },
+  "allow_undeclared_tools": true,
+  "auths": {
+    "api_key": {
+      "type": "api_key",
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "title": "Jeton d'API",
+              "description": "Jeton créé dans Keys & Tokens → API Tokens, pour l'équipe dont l'agent doit voir les ressources, collé tel qu'affiché (identifiant, « | », secret). Permission read pour consulter ; ajoutez read:sensitive pour lire les logs et deploy pour déployer, démarrer, arrêter ou redémarrer."
+            }
+          },
+          "required": ["token"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "cancel_deployment": {},
+    "control": {},
+    "coolify_help": {},
+    "deploy": {},
+    "get_application": {},
+    "get_current_team": {},
+    "get_database": {},
+    "get_deployment": {},
+    "get_destination": {},
+    "get_environment": {},
+    "get_infrastructure_overview": {},
+    "get_logs": {},
+    "get_project": {},
+    "get_server": {},
+    "get_server_domains": {},
+    "get_server_resources": {},
+    "get_service": {},
+    "get_service_application": {},
+    "get_service_database": {},
+    "list_application_previews": {},
+    "list_applications": {},
+    "list_backup_executions": {},
+    "list_database_backups": {},
+    "list_databases": {},
+    "list_deployments": {},
+    "list_destinations": {},
+    "list_env_keys": {},
+    "list_github_apps": {},
+    "list_github_branches": {},
+    "list_github_repositories": {},
+    "list_projects": {},
+    "list_resource_tags": {},
+    "list_resources": {},
+    "list_scheduled_task_executions": {},
+    "list_scheduled_tasks": {},
+    "list_servers": {},
+    "list_service_applications": {},
+    "list_service_databases": {},
+    "list_services": {},
+    "list_shared_env_keys": {},
+    "list_storages": {},
+    "list_tags": {},
+    "list_team_members": {},
+    "list_unhealthy_resources": {},
+    "search_resources": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

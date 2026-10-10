@@ -49,12 +49,18 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Unit tests need PostgreSQL + Redis because bunfig.toml preload starts
       # docker-compose unconditionally. Services start fast with tmpfs + fsync=off.
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
+
+      # scripts/test/ssh-mcp.test.ts runs an unprivileged sshd on the loopback
+      # and fails on CI without one; the runner image ships the ssh client only.
+      # Which slice holds that file is decided at run time, so every slice installs it.
+      - name: Install sshd
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends openssh-server
 
       # Every `bun test` in this workflow names its per-test timeout: bunfig has no
       # such key, so without `--timeout` Bun applies its own 5 s. The runner passes
@@ -187,16 +193,27 @@ jobs:
 
   # The required status check. A matrix job reports one check per slice, named
   # after the slice, so the check the branch ruleset requires is this one: it
-  # passes only when every slice did.
+  # passes only when every slice did, or when a newer run on the same commit
+  # superseded this one (`scripts/ci-gate.sh`).
   unit-gate:
     name: Unit tests
     if: always()
     needs: unit
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci-gate.sh
+          sparse-checkout-cone-mode: false
+
       - name: Every unit slice passed
-        run: test "${{ needs.unit.result }}" = success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-gate.sh "${{ needs.unit.result }}" success
 
   integration:
     name: Integration tests (${{ matrix.partition }}/2)
@@ -258,7 +275,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
@@ -294,20 +311,27 @@ jobs:
   # The required status check, as for the unit slices. The integration slices
   # are skipped on a PR without the `integration` label, and a skipped required
   # check reads as passed — so the gate accepts `skipped`, and only that, on
-  # top of `success`. A failed or cancelled slice fails it.
+  # top of `success`. A failed or cancelled slice fails it (superseded run:
+  # see `unit-gate`).
   integration-gate:
     name: Integration tests
     if: always()
     needs: integration
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci-gate.sh
+          sparse-checkout-cone-mode: false
+
       - name: Every integration slice passed, or the suite was not requested
-        run: |
-          case "${{ needs.integration.result }}" in
-            success|skipped) ;;
-            *) echo "integration slices: ${{ needs.integration.result }}"; exit 1 ;;
-          esac
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-gate.sh "${{ needs.integration.result }}" success skipped
 
   platform-container-e2e:
     name: Platform container health e2e
@@ -352,7 +376,7 @@ jobs:
       # the default MODULES set off the env schema rather than restating it, and
       # `packages/env` imports zod.
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Same image, same compose topology, booted with @appstrate/module-ee on
       # top of the schema's default MODULES — so the single image is proven to
@@ -411,7 +435,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Build the agent runtime image the e2e launches, on the runner's native
       # platform — the test gates on the image matching the engine's platform
@@ -457,7 +481,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build frontend
         run: cd apps/web && bun run build
@@ -465,8 +489,15 @@ jobs:
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
 
-      - name: Prepare data directory for PGlite
-        run: mkdir -p data/pglite data/storage
+      # When Bun's crash report has no stack trace (#1710), a core dump is the
+      # only stack data. Ubuntu's default core_pattern pipes cores to apport;
+      # write them as files next to the server log instead. The bun binary is
+      # not uploaded: it is the version pinned in bun-setup, re-downloadable
+      # from Bun's GitHub releases.
+      - name: Write core dumps to data/e2e/cores
+        run: |
+          mkdir -p data/e2e/cores
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/data/e2e/cores/%e.%p"
 
       - name: Run E2E tests
         run: bun run test:e2e
@@ -502,10 +533,31 @@ jobs:
           # called because RUN_ADAPTER=process doesn't actually hit the LLM.
           SYSTEM_PROVIDER_KEYS: '[{"id":"e2e","label":"E2E","providerId":"anthropic","apiKey":"e2e-dummy","models":[{"modelId":"claude-sonnet-4-5","label":"E2E Default","isDefault":true}]}]'
 
+      # `cancelled()` too: a hang that never aborts ends at `timeout-minutes`.
       - name: Upload test report
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: e2e/playwright-report/
+          retention-days: 7
+
+      # Cores are sparse (GBs apparent, MBs on disk); upload-artifact would read
+      # the holes as zeros, so pack them with GNU tar's hole detection first.
+      - name: Pack core dumps
+        if: failure() || cancelled()
+        run: |
+          if [ -n "$(ls -A data/e2e/cores 2>/dev/null)" ]; then
+            tar -cSzf data/e2e/cores.tar.gz -C data/e2e cores
+          fi
+
+      # Server output (see `webServer` in e2e/playwright.config.ts) plus any cores.
+      - name: Upload API server log and cores
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-server-log
+          path: |
+            data/e2e/server.log
+            data/e2e/cores.tar.gz
           retention-days: 7

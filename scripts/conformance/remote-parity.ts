@@ -26,6 +26,8 @@ import { resolveAccessToken } from "./creds.ts";
 import { ssrfGuardedFetch } from "./ssrf-fetch.ts";
 import { listAllTools, type LiveTool } from "./mcp-list.ts";
 import { writeSnapshot } from "./snapshot.ts";
+import { renderForConformance } from "./variables.ts";
+import { applyAuth, firstAuthKey } from "./auth-live.ts";
 
 const CHECK = "mcp-remote-parity";
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -59,6 +61,23 @@ export function allowsUndeclared(manifest: Record<string, unknown>): boolean {
   return manifest.allow_undeclared_tools === true;
 }
 
+/**
+ * The credential header for `token`, delivered per the manifest's FIRST auth
+ * (the auth-live probe's default) through the runtime's own resolver — so an
+ * `X-Browser-Use-API-Key` api_key goes out bare in that header, an oauth2 as
+ * `Authorization: Bearer`. Only the credential header: the MCP transport sets
+ * its own `Accept`. Empty when that auth delivers no HTTP header.
+ */
+export function credentialHeaders(
+  manifest: Record<string, unknown>,
+  token: string,
+): Record<string, string> {
+  const authKey = firstAuthKey(manifest);
+  const request = authKey ? applyAuth("", manifest, token, authKey) : null;
+  if (!request) return {};
+  return { [request.credentialHeader]: request.headers[request.credentialHeader]! };
+}
+
 function isSsrfError(err: unknown): boolean {
   return err instanceof Error && err.message.includes("SSRF guard");
 }
@@ -69,8 +88,8 @@ export async function checkMcpRemoteParity(
   opts: RemoteParityOptions = {},
 ): Promise<Finding[]> {
   const manifest = entry.manifest;
-  const url = remoteUrl(manifest);
-  if (!url) {
+  const declaredUrl = remoteUrl(manifest);
+  if (!declaredUrl) {
     return [
       {
         packageId: entry.packageId,
@@ -80,6 +99,14 @@ export async function checkMcpRemoteParity(
       },
     ];
   }
+
+  // A URL template (AFPS §7.12) is tested against one instance: the variables' defaults or
+  // CONFORMANCE_VARIABLES. Without one there is nothing to contact — a "couldn't test".
+  const rendered = renderForConformance(entry, declaredUrl);
+  if ("skip" in rendered) {
+    return [{ packageId: entry.packageId, check: CHECK, severity: "warn", message: rendered.skip }];
+  }
+  const url = rendered.url;
 
   const declared = toolsPolicyKeys(manifest);
   const allowUndeclared = allowsUndeclared(manifest);
@@ -114,7 +141,7 @@ export async function checkMcpRemoteParity(
     client = await createMcpHttpClient(url, {
       fetch: ssrfGuardedFetch,
       defaultTimeoutMs: CONNECT_TIMEOUT_MS,
-      ...(token ? { bearerToken: token } : {}),
+      ...(token ? { extraHeaders: credentialHeaders(manifest, token) } : {}),
     });
   } catch (err) {
     if (isSsrfError(err)) {

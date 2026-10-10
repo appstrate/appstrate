@@ -54,11 +54,16 @@ export {
 // integration resolver.
 export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 
+// `{{name}}` into a whole HTTP request, each value encoded for its place: the login paths.
+export { headerNamed, substituteRequest, UnencodableInputError } from "./request-template.ts";
+
 // The caller half of an `api_call` (target, headers, body templates), one preparation for every path.
 export { prepareApiCallRequest, type PreparedApiCallRequest } from "./api-call-request.ts";
 
 // The pre-send URL policy shared by the three `api_call` paths.
 export {
+  beyondBoundReason,
+  credentialStaysWithinBound,
   credentialUrlPolicy,
   redactionFields,
   urlPolicyRefusalMessage,

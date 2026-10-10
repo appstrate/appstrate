@@ -36,7 +36,7 @@ Use the [feature request template](https://github.com/appstrate/appstrate/issues
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) (v1.3.14+) — that's it for Tier 0
+- [Bun](https://bun.sh/) (v1.4.2+) — that's it for Tier 0
 - [Docker](https://docs.docker.com/get-docker/) (with Compose v2) — only needed for Tier 1+ or testing Docker agent execution
 
 ### Development Setup

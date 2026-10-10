@@ -382,11 +382,9 @@ describe("ProcessOrchestrator", () => {
       expect(await waitForExit(capturedPid!)).toBe(true);
     }, 10_000);
 
-    it("defaults the sidecar's integration runtime adapter to 'process'", async () => {
-      // A non-containerized (process) run must not let the sidecar auto-select
-      // the Docker integration adapter (which needs the per-language runner
-      // images). The orchestrator pins INTEGRATION_RUNTIME_ADAPTER=process so
-      // integrations spawn as host subprocesses, matching the run itself.
+    it("pins the sidecar's integration runtime adapter to 'process'", async () => {
+      // The sidecar picks its integration runtime only from this variable, so a
+      // process run pins it: integrations spawn as host subprocesses, like the run.
       const runId = "test-run-integ-adapter";
       const boundary = await orchestrator.createIsolationBoundary(runId);
       const fakeSidecar = join(boundary.id, "fake-sidecar.ts");

@@ -154,6 +154,10 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
   { route: "GET /api/auth/*", why: "Better Auth's handler answers its whole family" },
   { route: "POST /api/auth/*", why: "Better Auth's handler answers its whole family" },
   { route: "ALL /api/mcp/o/:org", why: "405 `Allow: POST` for every verb the POST route leaves" },
+  {
+    route: "ALL /api/mcp/o/:org/s/:space",
+    why: "405 `Allow: POST` for every verb the POST route leaves",
+  },
   { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
 ];
 
@@ -188,6 +192,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   {
     path: "/api/integrations/callback",
     why: "the provider's OAuth redirect — the PKCE `state` it echoes is the credential",
+  },
+  {
+    path: "/api/integrations/callback/{tag}",
+    why: "the per-authorization-server OAuth redirect (AFPS §7.3) — the echoed `state` is the credential, and its tag must match",
   },
   {
     path: "/api/model-providers-oauth/pair/redeem",

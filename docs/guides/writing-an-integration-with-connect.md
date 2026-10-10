@@ -6,7 +6,7 @@ selects a strategy purely from the manifest. This guide maps each declaration to
 strategy it selects, shows the minimal manifest for each, and covers the surrounding
 v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 
-> Spec: [`afps-spec/spec.md`](../../../afps-spec/spec.md) §3.5 + §7.1–§7.10.
+> Spec: [`afps-spec/spec.md`](../../../afps-spec/spec.md) §3.5 + §7.1–§7.12.
 > Canonical examples: [`afps-spec/examples/integration-oauth2`](../../../afps-spec/examples/integration-oauth2/manifest.json),
 > [`integration-apikey`](../../../afps-spec/examples/integration-apikey/manifest.json),
 > [`integration-basic`](../../../afps-spec/examples/integration-basic/manifest.json).
@@ -17,7 +17,8 @@ v2 model (sources, delivery vocabulary, per-tool policy, scope catalog).
 All manifest field names below are **snake_case** — the AFPS wire convention.
 All value templates use the Arazzo runtime-expression grammar `{$credential.<field>}`.
 A `connect` block's outputs are the connection's credential fields, so they are
-referenced as `{$credential.<name>}` too.
+referenced as `{$credential.<name>}` too. An integration that declares connection
+variables also references them as `{$variable.<name>}` ([Connection variables](#connection-variables-variables)).
 
 ```jsonc
 {
@@ -65,6 +66,9 @@ reached. The authentication layer (`auths`) is applied on top, regardless of sou
 
 // remote — hosted MCP endpoint
 "source": { "kind": "remote", "remote": { "url": "https://gmailmcp.googleapis.com/mcp/v1", "transport": "streamable-http" } }
+
+// remote — one endpoint per connection (self-hosted instance): see "Connection variables"
+"source": { "kind": "remote", "remote": { "url": "{$variable.base_url}/api/v4/mcp", "transport": "streamable-http" } }
 
 // none — serverless: no MCP server
 "source": { "kind": "none" }
@@ -124,9 +128,11 @@ defined; an auth method MUST NOT mix `http` with `env` / `files`.
 | `files` | Map of `<path> → { value, mode? }` (octal string, default `"0400"`) | Kubernetes-style file mount                              | Tooling that reads a cert / key from disk (`mtls`, gcloud service-account JSON, …)            |
 
 Value templates use the Arazzo runtime-expression grammar embedded as `{$expr}` —
-e.g. `{$credential.access_token}`. Any other `{$…}` expression (`{$outputs.token}`, …)
-is refused when the manifest is saved or imported, since the platform does not evaluate
-it.
+e.g. `{$credential.access_token}`, or `{$variable.<name>}` for a declared
+[connection variable](#connection-variables-variables) (on an `oauth2` or `connect` auth,
+only one the [origin rule](#authorized_uris-and-delivery-the-origin-rule) allows). Any other `{$…}` expression
+(`{$outputs.token}`, an undeclared variable, …) is refused when the manifest is saved or
+imported, since the platform does not evaluate it.
 
 ```jsonc
 // http — Bearer (OAuth2 / API key)
@@ -294,9 +300,31 @@ An agent that declares `dependencies.integrations["@me/svc"].scopes: ["read"]` a
 connection granted only `["admin"]` is treated as satisfying the requirement — `admin`
 implies `read`. Useful when an IdP exposes umbrella scopes that subsume finer ones.
 
-The agent-install scope union is computed from `default_scopes ∪ per-agent scopes
-∪ tools_policy[t].required_scopes` over the agent's selected tools. The platform's
-incremental-consent flow re-requests the union when an installed agent grows.
+An agent requires its own `scopes ∪ tools_policy[t].required_scopes` over its
+selected tools (the auth's `default_scopes` under `tools: "*"`). A new connection
+requests that set plus `default_scopes`. An existing connection is never widened
+on its own when an agent asks for more: the run answers `insufficient_scopes`, and
+the remedy is a new connection (below).
+
+### Least privilege with connections
+
+An integration (Gmail, GitHub, …) is the generic connector. A **connection**
+is one consent to it: one account, with its own granted scopes. An integration
+holds as many connections as you need.
+
+- Every connection of an auth gets its `default_scopes`: the identity, refresh
+  and least-capability baseline. The scopes you request widen it.
+- Manifest authors: keep `default_scopes` to identity, refresh and the
+  least-privileged capability, because every connection requests it. Declare
+  write scopes in `scope_catalog` and let the agents that need them ask.
+- An agent declares what it needs, through the tools it selects or
+  `integrations_configuration.<id>.scopes`. Pick a connection whose granted
+  scopes cover them, or create one with exactly those scopes.
+- Upgrading a connection widens every agent that uses it. To give one agent
+  more rights, create a new connection for it instead of upgrading a shared
+  one.
+- Never duplicate an integration to vary its scopes: create another connection
+  of the same integration.
 
 ---
 
@@ -461,9 +489,9 @@ Each `outputs` entry is one of:
 
 - **Arazzo runtime-expression string** (Arazzo §5.9) — `$statusCode`, `$response.body`,
   `$response.body#/{json-pointer}` (RFC 6901), `$response.header.{name}`;
-- **Arazzo Selector Object** (Arazzo 1.1 §5.8.13) — `{ context, selector, type }` with
-  `type ∈ "jsonpath" | "xpath" | "jsonpointer"` (resolved per RFC 9535 / XML Path 3.1 /
-  RFC 6901);
+- **Arazzo Selector Object** (Arazzo 1.1 §5.8.13) — `{ context: "$response.body", selector, type }`
+  with `type ∈ "jsonpath" | "jsonpointer"` (RFC 9535 / RFC 6901). AFPS also lists `xpath`;
+  Appstrate does not evaluate it and refuses it at import;
 - **AFPS extractor object** — `{ from: "cookie", name }`, `{ from: "jwt", token, path }`,
   `{ from: "regex", source, pattern, group }` (extensions Arazzo cannot express). A jwt
   `token` names another, non-jwt output as `{$credential.<name>}`; a regex `source` is
@@ -472,17 +500,113 @@ Each `outputs` entry is one of:
 The login request's `url`, `body` and `headers` carry the user's login inputs as
 `{{name}}` (a field of `credentials.schema`); a `{$…}` expression there is refused at
 import, as is a runtime expression or selector `context` the login engine cannot
-evaluate.
+evaluate. That includes `{$variable.<name>}`: a login request takes no connection
+variable, so a declarative login cannot target a per-connection upstream.
+
+Each `{{name}}` value is encoded for the place it takes, so a value never adds a
+parameter, a member, a part or a header line (the sidecar does the same for the
+`{{name}}` a `connect.tool` login tool writes into its own requests, by their
+`Content-Type`):
+
+- `url` — a placeholder that starts the template is a base URL, inserted as is; the
+  resulting URL must still match `authorized_uris`. Every other value is percent-encoded
+  as one component wherever it sits — a path segment, a query component, a fragment, but
+  also a port, a userinfo or a value right after the host or the base. Write the `/` a
+  URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
+  never `https://example.com{{path}}`, whose `/` would be encoded. A URL refused for its
+  host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request` naming
+  the inputs in its authority.
+- `body` — by the media type of the `Content-Type` header, else of `content_type`:
+  - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
+  - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a
+    value inside a string literal. A bare `{{name}}` is one JSON value of the input's
+    type: the submitted credentials are first typed by `credentials.schema`, so a field
+    declared `number` goes as a number (`"1234"` → `1234`) and a field declared `string`
+    as a JSON string whatever it spells (`"0123"`, `"true"`). A `connect.tool` login
+    tool's inputs are strings: a bare position takes them as JSON strings;
+  - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
+    in a CDATA section;
+  - `multipart/*` refuses a value carrying CR or LF, so a value adds no part. A value
+    inside a part's own headers (a `Content-Disposition` `filename="{{name}}"`) is not
+    escaped: keep placeholders in part bodies;
+  - any other body takes the value as is.
+- header values — the value as is; one carrying a line break, another control character
+  or a character above U+00FF is refused, and in a `Cookie` header any character outside
+  RFC 6265 `cookie-octet` too (`;`, `,`, space, `"`, `\`).
+
+A value refused where it is placed is a `400 invalid_request` naming `credentials.<name>`.
+
+A login the service refuses is a `400 invalid_request` on `credentials` whose detail
+starts `Login failed:`, as for a `connect.tool` login: the declared `success_criteria`
+failed on an answer below 500, or, with none declared, the service answered 400, 401,
+403 or 422. A 404, 405 or 410 (whatever the criteria) and any other answer below 500
+that no criterion judges (a 302) are a defect of the integration, a `500`. A service
+that cannot be reached, answers 429 or answers 5xx is a `502 bad_gateway`, and one that
+does not answer within `request_timeout_ms` a `504 timeout`.
+
+**A form login should declare `success_criteria`.** AFPS makes them optional, and without
+them any 2xx counts as success — but most web apps answer a wrong password with `200` and
+the login page again, so the connection is stored with a dead session. Declare what only
+the logged-in answer has: the session cookie set, the redirect target, a marker in the
+body. The import warns on a form login with none.
+
+```jsonc
+"request": {
+  "method": "POST",
+  "url": "https://app.example.com/login",
+  "content_type": "application/x-www-form-urlencoded",
+  "body": "username={{username}}&password={{password}}"
+},
+// The app redirects a successful login to /home and a failed one back to /login.
+"success_criteria": [
+  { "condition": "$statusCode == 302" },
+  { "condition": "/home", "type": "regex", "context": "$response.header.Location" }
+],
+"outputs": { "sid": { "from": "cookie", "name": "JSESSIONID" } }
+```
 
 `success_criteria` is an array of Arazzo Criterion objects (`{ condition, context?, type? }`).
 When omitted, success defaults to HTTP 2xx (AFPS-defined; Arazzo leaves HTTP success
-undefined).
+undefined). Appstrate evaluates exactly the AFPS §7.7 evaluation profile. Every other form
+is refused when the manifest is written (a dependency imported in a bundle gets a warning
+instead) and at connect start (`invalid_config`), before any login request is sent:
+
+- `simple` (or `type` omitted): one `<expr> == <operand>` comparison — exactly one `==`;
+  no other `=`, `!`, `<`, `>`, `&&`, `||`, `(`, `)` outside a quoted literal; each side a
+  runtime expression or a literal, at least one side an expression. A literal is a JSON
+  number (`200`, `-1.5`, `2e2`; not `+5`, `.5`, `5.`, `01`, `0x10`), `true`, `false`,
+  `null`, or a single-quoted string with `''` for a quote (`'O''Brien'`). Quote every
+  string (`$response.body#/status == 'ok'`). Strings compare case-insensitively, as Arazzo
+  requires; a number equals a string only when the string is the same JSON number (`'200'`,
+  not `' 200'`); an absent value (a missing header or body key) equals nothing. Quotes pair
+  across the whole condition, so a JSON pointer key or header name holding an operator
+  character, or a quote a later one closes (`$response.body#/it's == 'a'`), is refused:
+  check such a key with a `regex` criterion. Appstrate also accepts a double-quoted string
+  holding no double quote, which is outside the portable profile. Declare one criterion per comparison (all must pass), omit `success_criteria` to require
+  HTTP 2xx, or use `regex` / `jsonpath` for a check an equality cannot express;
+- `jsonpath` on `$response.body`, a singular query (`$`, `.name`, `['name']`, `[0]`, `[-1]`);
+- `regex` (an ECMA-262 regular expression that must compile) on `$response.body` or one
+  `$response.header.<name>`;
+- `xpath` is refused.
+
+The same check refuses an output the engine would only find wrong after the login request
+is sent: a `regex` pattern that does not compile or does not capture its `group`
+(default 1), a `jsonpointer` selector or jwt `path` that is not an RFC 6901 pointer,
+and an output that carries both `from` and a Selector field (`context`, `selector`,
+`type`): an output is a Selector Object or an extractor, never both.
 
 **Gating rule** (§7.7): a `delivery.*` value template MAY only reference declared
-`connect.outputs` (or, for the orchestrated `tool` mode, its declared `produces`).
+`connect.outputs` (or, for the orchestrated `tool` mode, its declared `produces`), and
+only those connection variables the [origin rule](#authorized_uris-and-delivery-the-origin-rule)
+allows — none when the auth's upstream is fixed.
 Referencing a bootstrap login secret like `{$credential.password}` directly in
 `delivery.http.value` is a manifest error — the platform decouples acquisition from
 delivery.
+
+A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
+like a pasted credential, by the one required string field of `credentials.schema` that
+is not a secret (`format: "password"` or `writeOnly`), masked (`al****.com`), else
+`Connexion N`. Mark the password field as a secret so the username names the connection.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).
@@ -529,9 +653,9 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
     },
     "delivery": {
       "http": {
-        "in": "cookie",
-        "name": "JSESSIONID",
-        "value": "{$credential.JSESSIONID}"
+        "in": "header",
+        "name": "Cookie",
+        "value": "JSESSIONID={$credential.JSESSIONID}"
       }
     },
     "authorized_uris": ["https://app.example.com/**"]
@@ -551,6 +675,9 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
 - `outputs` (array of strings) — the authoritative set of injectable names the tool
   produces. These are the names you can reference in `delivery.*.value` as
   `{$credential.<name>}`.
+- `delivery.http` — a session cookie is sent as a `Cookie` header whose value names the
+  cookie. AFPS also defines `in: "cookie"` and `in: "query"`; the import refuses both,
+  only `in: "header"` is implemented.
 
 > **Either-or form — but only one of the two is executed today.** The
 > spec-natural location `connect.tool.name` is where the name BELONGS, and it is
@@ -605,9 +732,9 @@ down.
     },
     "delivery": {
       "http": {
-        "in": "cookie",
-        "name": "session",
-        "value": "{$credential.session_cookie}"
+        "in": "header",
+        "name": "Cookie",
+        "value": "session={$credential.session_cookie}"
       }
     },
     "authorized_uris": ["https://app.example.com/**"]
@@ -681,7 +808,7 @@ Every auth method MAY restrict which upstream URIs the integration may send
 credentials to (§7.9):
 
 - `authorized_uris` (array of strings) — allowed upstream URI patterns. Glob: `*`
-  (single segment), `**` (multi-segment).
+  matches within one path segment, and in the host it spans dots; `**` (multi-segment).
 - `allow_all_uris` (boolean, default `false`) — explicit override permitting any
   upstream URI. Treated as **security-sensitive** by consumers; surface a warning to
   the user. Appstrate honours it only on a call that carries no credential (below).
@@ -699,6 +826,29 @@ resolver and the platform proxy share this rule (`credentialUrlPolicy`); the sid
 MITM listener refuses the same calls. An auth that declares no `authorized_uris` and
 not `allow_all_uris` has every `api_call` refused, credential or not: an empty
 authorized set authorizes nothing.
+
+A wildcard in the host is bounded only when it sits under a registrable domain written
+literally in the entry, judged with the [Public Suffix List](https://publicsuffix.org/)
+(its ICANN and private sections): `https://*.zendesk.com/**` and
+`https://*.example.co.uk/**` are bounded; `https://*.co.uk/**`, `https://*.github.io/**`,
+`https://*.googleapis.com/**`, `https://*.supabase.co/**` and `https://*.workers.dev/**`
+are not, since the list makes those suffixes public. List such hosts literally
+(`https://sheets.googleapis.com/**`), or, when each customer's host sits under such a
+suffix, render it from the connection: `https://{$credential.shop_domain}/**`, with the
+field validated in `credentials.schema` (a `pattern`) so the rendered host is the one the
+API serves. A literal host is bounded whatever its suffix.
+
+Since a host `*` also matches dots, each target is judged as well: a credential reaches a
+host a wildcard matched only when that host's own registrable domain lies inside the
+literal part of the entry. `https://*.amazonaws.com/**` carries it to
+`sts.amazonaws.com` or `iam.amazonaws.com`, but never to a host of a whole region the list
+names (every `*.us-east-1.amazonaws.com`, `dynamodb.us-east-1.amazonaws.com` included) nor
+to any S3 host (`s3.amazonaws.com`, `bucket.s3.eu-west-1.amazonaws.com`): list those hosts
+literally.
+The list bounds only the suffixes their operators declare there: the same wildcard still
+reaches customer-named endpoints AWS has not listed
+(`search-<domain>.eu-west-1.es.amazonaws.com`, a regional search domain), so list hosts
+literally wherever that matters.
 
 An integration whose endpoint is per-connection declares it as a URL-form entry
 instead of `allow_all_uris`: `"{$credential.site_url}/**"`, or
@@ -754,10 +904,236 @@ connection field with `{$credential.<field>}`:
 The field must be declared and listed in `credentials.schema.required`, and the entry
 must start with `scheme://` with its placeholders in the host and port only (never in
 the path or query) — or be a URL-form entry (`{$credential.site_url}/**`, above).
-Templates are refused on an `oauth2` auth and on an auth that declares `connect`. At run
+Credential templates are refused on an `oauth2` auth and on an auth that declares
+`connect`, whose credential the user does not supply; such an auth bounds a per-connection
+upstream with a [connection variable](#connection-variables-variables) instead. At run
 time a host or port value containing anything but letters, digits, `.` and `-`, or made
 only of dots, drops the pattern, so a user cannot add a wildcard, a separator or another
 host.
+
+---
+
+## Connection variables (`variables`)
+
+Use connection variables when **where** the integration connects depends on the
+connection: a product offered both as a hosted service and self-hosted (GitLab, Twenty),
+a product that is only ever self-hosted (Coolify), a tenant subdomain. The user enters the
+values when creating the connection, **before** any authorization step, and every auth of
+the integration shares them — so one package serves every instance, and each connection
+reaches only its own (AFPS §7.12).
+
+Variables are not credentials. The platform stores them in plaintext, shows them on the
+connection and may log them; never declare a secret as a variable — a token belongs in
+`credentials.schema`. Prefer a variable over a `{$credential.<field>}` URL as soon as the
+value must choose the MCP endpoint or the OAuth authorization server: a credential
+field can do neither, and is not allowed at all on an `oauth2` auth.
+
+```jsonc
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^https?://",
+        "title": "URL de l'instance GitLab",
+        "description": "Racine de votre instance, sans chemin (ex. https://gitlab.example.com).",
+        "default": "https://gitlab.com"
+      }
+    },
+    "required": ["base_url"]
+  }
+}
+```
+
+- `variables.schema` is a self-contained JSON Schema 2020-12 object (local `$ref` only)
+  with at least one property. Each property is a variable: its name matches
+  `^[a-z][a-z0-9_]*$`, its `type` is `"string"`, and it is listed in `required` — which
+  names nothing else. Constrain the value with `format`, `pattern` or `enum`.
+- `title` and `description` label the form field (French for an Appstrate system
+  package, like every other user-facing string). `default` only prefills the form; a
+  connection's value is always one the user submitted.
+- Variables and credential fields are separate namespaces and may share a name.
+
+### Where a variable may appear
+
+`{$variable.<name>}` is accepted in exactly these places, and every reference must name a
+declared variable — anything else is refused when the manifest is saved, published or
+imported:
+
+| Field                                                                                   | Form                               |
+| --------------------------------------------------------------------------------------- | ---------------------------------- |
+| `source.remote.url`                                                                     | URL template                       |
+| `auths.<key>.issuer` (`oauth2`)                                                         | URL template                       |
+| `auths.<key>.authorized_uris[i]`                                                        | URL form or authority form (below) |
+| `auths.<key>.delivery.http.value`, `delivery.env.<n>.value`, `delivery.files.<p>.value` | value template, raw substitution   |
+
+Endpoints (`authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`), `resource`,
+`setup_guide` and every other field stay literal: an endpoint chosen apart from the
+issuer would receive the client credentials of the issuer's client.
+
+### URL templates: URL form vs host form
+
+A URL template takes one of two forms:
+
+- **URL form** — the placeholder, then nothing or a path: `{$variable.base_url}/api/v4/mcp`.
+  The value is a whole URL: absolute, `http` or `https`, a host, no userinfo, no query
+  (not even an empty `?`), no fragment, no `*`. With a path, the template renders as the
+  value's origin and path with every trailing `/` removed, followed by the template's
+  path: `https://git.example.com/gitlab/` renders
+  `https://git.example.com/gitlab/api/v4/mcp`. Without one, it renders as the value
+  itself, normalised (`https://gitlab.com` → `https://gitlab.com/`). Use it when users
+  type an address — it covers a server under a path prefix.
+- **Host form** — `https://`, the placeholder, literal labels, then nothing or a path:
+  `https://{$variable.tenant}.example.com/mcp`. The value is one or more labels of
+  letters, digits and `-` (no leading or trailing `-`); the rendered host is at most 253
+  characters, and is lowercased like every rendered host (the platform uses the WHATWG
+  serialisation). Use it for a tenant name on the vendor's
+  own domain.
+
+A path is `/`-prefixed segments of letters, digits and `-._~!$&'()+,;=:@` (no empty,
+`.` or `..` segment), optionally ending with `/`. Rendering is plain concatenation,
+never relative resolution.
+
+The value must be `https` in practice: the platform's egress check refuses a rendered
+`http` URL unless the operator lists its host in `EGRESS_ALLOW_INTERNAL_HOSTS`, and
+refuses a private, loopback or metadata address whatever the scheme. Declaring
+`"pattern": "^https?://"` keeps that operator option open; `"^https://"` closes it in
+the form.
+
+A connection whose values would leave a template its auth uses unrenderable is refused
+when it is created (400 `validation_failed` on `variables.<name>`), and a value can only
+change through a reconnect, which acquires a new credential for the new upstream.
+
+### `authorized_uris` and delivery: the origin rule
+
+An `authorized_uris` entry carrying a variable takes the URL form
+(`{$variable.base_url}/api/v4/**`, rendered like a URL template followed by the suffix)
+or the authority form with the variable filling the host, alone or before literal labels,
+and no port (`https://{$variable.tenant}.example.com/**`).
+
+On an `oauth2` auth, or one that declares `connect`, the credential is issued for an
+upstream, and a URL template may choose it:
+
+| Auth                       | Template that chooses the upstream                                        |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `oauth2`                   | a templated `source.remote.url` (the resource), else a templated `issuer` |
+| `custom` + `connect.tool`  | a templated `source.remote.url`                                           |
+| `custom` + `connect.login` | none — a login request takes no variable, so its upstream is fixed        |
+
+Two rules follow, both so that a credential reaches only the origin it was issued for:
+
+- each `authorized_uris` entry carrying a variable must **share that template's origin**:
+  the same leading placeholder in the URL form; in the authority form, the same scheme
+  and host as a host-form template. With `"url": "{$variable.base_url}/api/v4/mcp"`,
+  `{$variable.base_url}/api/v4/**` qualifies and `https://{$variable.base_url}/**` or an
+  entry over another variable does not;
+- a `delivery` value template may reference only the variables of that template.
+
+When the upstream is fixed — no templated remote URL or issuer, or a `connect.login`
+auth — neither an entry nor a delivery template of the auth may carry a variable: it
+would send a fixed issuer's credential wherever the user points. On an `api_key`,
+`basic`, `mtls` or `custom` auth without `connect` the user supplies the credential
+itself, and any declared variable may bound or shape it.
+
+### OAuth against the server the user named
+
+When `source.remote.url` (or an `oauth2` `issuer`) is a template, the authorization
+server is the user's choice, not yours. Declare no endpoint and no `resource`. For a
+templated remote URL the platform fetches the RFC 9728 protected-resource metadata of the
+rendered URL in the MCP order — the `resource_metadata` of a `WWW-Authenticate`
+challenge, the path-inserted well-known location, the root one — and uses a document only
+when its `resource` is the identifier that location was derived from (the rendered URL,
+or its origin for the root location), trying the next location otherwise. It then takes
+the entry of `authorization_servers` equal to the rendered `issuer` when you declare one
+— a template over the remote URL's variables — and otherwise one with the rendered URL's
+origin, and refuses the connection when there is none. Endpoints come from RFC 8414
+discovery of that server alone, and the RFC 8707 `resource` is always sent for a remote
+source. The client is registered by RFC 7591 Dynamic Client Registration as a public
+client, one per authorization server and integration (and space), and the redirect URI
+is distinct per server.
+
+Declare `issuer` when the product may be served under a path prefix: its authorization
+server is then `https://host/prefix`, which does not have the origin of the rendered URL.
+`@appstrate/gitlab-mcp` declares `"issuer": "{$variable.base_url}"` for that reason.
+
+A server without dynamic client registration cannot be connected: an admin cannot
+register a client by hand for an auth whose server each connection names. Declare
+`token_endpoint_auth_method: "none"` and the scopes the server expects in
+`default_scopes`.
+
+### Examples
+
+GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by URL
+(`scripts/system-packages/integration-gitlab-mcp-1.0.0/manifest.json`):
+
+```jsonc
+"source": {
+  "kind": "remote",
+  "remote": { "url": "{$variable.base_url}/api/v4/mcp", "transport": "streamable-http" }
+},
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": { "type": "string", "format": "uri", "pattern": "^https?://", "default": "https://gitlab.com" }
+    },
+    "required": ["base_url"]
+  }
+},
+"auths": {
+  "oauth": {
+    "type": "oauth2",
+    "issuer": "{$variable.base_url}",                // the instance, path prefix included
+    "token_endpoint_auth_method": "none",
+    "code_challenge_methods_supported": ["S256"],
+    "default_scopes": ["mcp"],
+    "authorized_uris": ["{$variable.base_url}/api/v4/**"],
+    "delivery": {
+      "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.access_token}" }
+    }
+  }
+}
+```
+
+Coolify — always self-hosted, so no `default`, and a team token the user pastes
+(`scripts/system-packages/integration-coolify-mcp-1.0.0/manifest.json`):
+
+```jsonc
+"source": {
+  "kind": "remote",
+  "remote": { "url": "{$variable.base_url}/mcp", "transport": "streamable-http" }
+},
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": { "type": "string", "format": "uri", "pattern": "^https?://" }
+    },
+    "required": ["base_url"]
+  }
+},
+"auths": {
+  "api_key": {
+    "type": "api_key",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "properties": { "token": { "type": "string" } },
+        "required": ["token"]
+      }
+    },
+    "authorized_uris": ["{$variable.base_url}/**"],
+    "delivery": {
+      "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.token}" }
+    }
+  }
+}
+```
+
+`@appstrate/twenty-mcp` combines both shapes: one OAuth auth and one API-key auth over
+the same `base_url`.
 
 ---
 
@@ -775,6 +1151,13 @@ OAuth client.
   ]
 }
 ```
+
+Steps are static: a step's `label` and `url` cannot reference a connection variable.
+They are admin setup for registering an OAuth app, so a remote MCP integration whose
+client is registered dynamically, or one with no OAuth auth, ships none. What a user
+needs while connecting — where to find the instance URL, which screen creates the token,
+what the server's administrator must enable first — goes in the `description` of the
+variable or credential field, which the connect form renders next to its input.
 
 `callback_url_hint` is auth-method-scoped (`auths.<key>.callback_url_hint`), since the
 callback URL depends on the OAuth client registered with the IdP. Use the
@@ -820,6 +1203,10 @@ rejects it.
   source server has no business reading the credential.
 - For OAuth discovery, the consumer MUST validate `issuer` equality before using any
   endpoint from a `.well-known/` document (§7.3, §8.7).
+- A URL rendered from connection variables is chosen by the user who creates the
+  connection, not by the author (§7.12, §8.6): the platform egress-checks it like any
+  user-supplied URL, and treats every URL a response to it hands back (discovery
+  documents, `WWW-Authenticate`, redirects) the same way.
 
 ## What changed since 1.x
 

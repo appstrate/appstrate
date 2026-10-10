@@ -9,13 +9,15 @@ import { spaceMemberRemoval } from "../org-settings/rbac-deeds.ts";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
-import { i18nReady } from "../../i18n.ts";
+import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 // `RouteGate` reads the module flags off `window.__APP_CONFIG__`.
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
+// The assertions read French copy: pin it rather than inherit a neighbour's language.
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 function pageFor(
   permissions: string[],

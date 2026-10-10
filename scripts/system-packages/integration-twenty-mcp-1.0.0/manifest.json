@@ -1,0 +1,117 @@
+{
+  "name": "@appstrate/twenty-mcp",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Twenty",
+  "icon": "simple-icons:twenty",
+  "description": "Twenty CRM integration backed by Twenty's own MCP server ({server}/mcp), for Twenty Cloud (api.twenty.com) and for any self-hosted server: the server URL is a connection variable, so one package serves every deployment and each connection reaches only its own. The sidecar opens a Streamable HTTP MCP client and injects the selected credential as `Authorization: Bearer …`. Two interchangeable auths. (1) OAuth, chosen per connection against the server the user named: RFC 9728 protected-resource discovery on the rendered MCP URL, whose authorization server must be that server's origin, RFC 8414 metadata, RFC 7591 Dynamic Client Registration as a public client (`token_endpoint_auth_method: none`), RFC 7636 PKCE (S256) and the RFC 9207 `iss` response parameter, one client per server and space; the `api` scope reaches the workspace data and `profile` the user's identity, and Twenty issues a refresh token with every authorization code. (2) API key — a workspace key created under Settings → APIs & Webhooks, whose access is the role it is assigned. Twenty's MCP is a tool catalogue rather than one tool per object: `get_tool_catalog` and `learn_tools` describe the workspace's tools — generated from its own data model, custom objects included — and `execute_tool` runs one of them, so every record operation goes through `execute_tool` and the role behind the credential is the only bound on it. `allow_undeclared_tools` lets an agent take whatever a server's version advertises.",
+  "keywords": ["crm", "sales"],
+  "license": "Apache-2.0",
+  "source": {
+    "kind": "remote",
+    "remote": {
+      "url": "{$variable.base_url}/mcp",
+      "transport": "streamable-http"
+    }
+  },
+  "variables": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://",
+          "title": "URL du serveur Twenty",
+          "description": "Adresse de l'API de votre serveur, sans chemin (ex. https://crm.example.com) ; gardez https://api.twenty.com pour Twenty Cloud.",
+          "default": "https://api.twenty.com"
+        }
+      },
+      "required": ["base_url"]
+    }
+  },
+  "allow_undeclared_tools": true,
+  "auths": {
+    "oauth": {
+      "type": "oauth2",
+      "token_endpoint_auth_method": "none",
+      "code_challenge_methods_supported": ["S256"],
+      "default_scopes": ["api", "profile"],
+      "scope_catalog": [
+        {
+          "value": "api",
+          "label": "Workspace data",
+          "description": "Read and write the workspace's records and metadata through the MCP server, within the user's role."
+        },
+        {
+          "value": "profile",
+          "label": "Profile",
+          "description": "The connected user's identity."
+        }
+      ],
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/oauth": {
+          "scope_separator": " ",
+          "refresh_token_issuance": "default"
+        },
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    },
+    "api_key": {
+      "type": "api_key",
+      "authorized_uris": ["{$variable.base_url}/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "api_key": {
+              "type": "string",
+              "title": "Clé d'API",
+              "description": "Clé créée dans Settings → APIs & Webhooks → Create key, affichée une seule fois. Elle agit avec le rôle qui lui est attribué (Settings → Members → Roles) : choisissez-en un qui limite ce que l'agent peut lire et modifier."
+            }
+          },
+          "required": ["api_key"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.api_key}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "tools_policy": {
+    "execute_tool": {},
+    "get_tool_catalog": {},
+    "learn_tools": {},
+    "list_object_metadata_names": {},
+    "list_skills": {},
+    "load_skills": {},
+    "search_help_center": {}
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    }
+  }
+}

@@ -72,10 +72,12 @@ import {
   peerAdmitted,
   readRequestBodyBounded,
   resolveAndCheckHost,
+  ssrfFloorFor,
   API_CALL_TIMEOUT_MS,
   type AuthorityPolicy,
   type HostResolver,
   type PeerCheck,
+  type RunnerEgressPolicy,
 } from "./helpers.ts";
 import type {
   HttpDeliveryPlan,
@@ -87,8 +89,14 @@ import {
   type MitmRequestContext,
 } from "@appstrate/connect/integration-mitm-planner";
 import type { CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { substituteVars } from "@appstrate/connect/proxy-primitives";
-import { HOP_BY_HOP_HEADERS, unresolvedPlaceholders } from "@appstrate/afps-runtime/resolvers";
+import {
+  beyondBoundReason,
+  credentialStaysWithinBound,
+  HOP_BY_HOP_HEADERS,
+  substituteRequest,
+  UnencodableInputError,
+  unresolvedPlaceholders,
+} from "@appstrate/afps-runtime/resolvers";
 import {
   isHostUnboundedUriPattern,
   matchesAuthorizedUriSpec,
@@ -167,6 +175,8 @@ export interface MitmCredentialSource {
    * {@link ActiveConnectInputs}).
    */
   activeInputs?(): ActiveConnectInputs | null;
+  /** Input `field` of a login request to `url` could not be encoded: recorded for the login. */
+  refuseActiveInput?(field: string, url: string): void;
 }
 
 interface CreateMitmListenerOptions {
@@ -187,7 +197,7 @@ interface CreateMitmListenerOptions {
   /** Telemetry sink — non-fatal events surface here. */
   onEvent?: (event: MitmListenerEvent) => void;
   /** The connection's egress allowlist — SNI at TLS level, the full URL per request. */
-  egressPolicy: EgressPolicy;
+  egressPolicy: RunnerEgressPolicy;
   /** Only the owning runner may connect (#1458). */
   isPeerAllowed: PeerCheck;
 }
@@ -247,12 +257,17 @@ export function createIntegrationMitmListener(
   const maxRequestBytes = 10 * 1024 * 1024; // 10 MiB inner-request body cap.
   // Each upstream request connects to the address the guard validated for it, the name kept on
   // `Host` and the TLS identity. An injected `fetch` (tests) owns its transport: checked, not pinned.
-  const fetchFn: UpstreamFetch = (url, init) =>
-    guardedFetch(url, init, {
+  const fetchFn: UpstreamFetch = (url, init) => {
+    // No redirect is followed, so `url` is the only hop the guard judges: the floor is its own.
+    const target = new URL(url);
+    const targetPort = Number(target.port) || 443;
+    return guardedFetch(url, init, {
       followRedirects: false,
       fetchImpl: options.fetch,
       resolve: options.resolveHostFn,
+      blockedHost: ssrfFloorFor(options.egressPolicy, target.hostname, targetPort, isBlockedHost),
     });
+  };
   const emit = options.onEvent ?? (() => {});
 
   // Inner servers keyed by upstream authority: the inner request carries no
@@ -530,8 +545,10 @@ async function handleInboundConnection(
   // host network + cloud metadata — so this must run BEFORE any cert mint.
   // Mirrors the credential-proxy SSRF guard.
   //
-  // Literal layer first (cheap, no DNS) …
-  if (isBlockedHost(sniHost)) {
+  // Literal layer first (cheap, no DNS) … an exempt target fails both layers only if it is the
+  // sidecar itself.
+  const ssrfFloor = ssrfFloorFor(deps.egressPolicy, sniHost, result.port, isBlockedHost);
+  if (ssrfFloor(sniHost)) {
     emit({ kind: "tls-error", error: `SNI host blocked by SSRF policy: ${sniHost}` });
     rawSocket.destroy();
     return;
@@ -547,7 +564,10 @@ async function handleInboundConnection(
   // record points inside must not get a minted leaf either. Fail closed on
   // resolution failure. This check gates the leaf only: each upstream request
   // resolves again and connects to the address it validated (`guardedFetch`).
-  const sniCheck = await resolveAndCheckHost(sniHost, { resolve: resolveHostFn });
+  const sniCheck = await resolveAndCheckHost(sniHost, {
+    resolve: resolveHostFn,
+    isBlockedHostFn: ssrfFloor,
+  });
   if (sniCheck.blocked) {
     const why =
       sniCheck.reason === "resolution-failed"
@@ -609,7 +629,10 @@ export async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Pr
     };
     rawSocket.on("data", onData);
     rawSocket.on("error", reject);
-    rawSocket.once("close", () => reject(new Error("socket closed before SNI")));
+    // A FIN ends the preamble as surely as a close: no SNI will follow.
+    for (const event of ["end", "close"]) {
+      rawSocket.once(event, () => reject(new Error("socket closed before SNI")));
+    }
   });
 }
 
@@ -732,19 +755,22 @@ export function extractSni(buf: Buffer): string | null {
 /**
  * Result of {@link applyConnectInputSubstitution}: either the substituted
  * request parts, or a fail-closed marker carrying the first unresolved
- * placeholder name.
+ * placeholder name (`failed`) or the input that cannot be encoded (`refused`).
  */
 type ConnectInputSubstitutionResult =
-  { url: string; bodyText: string | null; headers: Record<string, string> } | { failed: string };
+  | { url: string; bodyText: string | null; headers: Record<string, string> }
+  | { failed: string }
+  | { refused: string };
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
- * substitution: {@link substituteVars} over the URL, body, and each header
+ * substitution: `substituteRequest` over the URL, body, and each header
  * value using `inputs`.
  *
  * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
  * `{ failed: <name> }` rather than forwarding a half-substituted request
- * upstream. A request with no placeholders is returned verbatim.
+ * upstream; a value the request cannot carry returns `{ refused: <name> }`.
+ * A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(
   parts: { url: string; bodyText: string | null; headers: Record<string, string> },
@@ -754,13 +780,16 @@ export function applyConnectInputSubstitution(
     const [missing] = unresolvedPlaceholders(template, inputs);
     if (missing !== undefined) return { failed: missing };
   }
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(parts.headers)) headers[k] = substituteVars(v, inputs);
-  return {
-    url: substituteVars(parts.url, inputs),
-    bodyText: parts.bodyText === null ? null : substituteVars(parts.bodyText, inputs),
-    headers,
-  };
+  try {
+    const { url, headers, body } = substituteRequest(
+      { url: parts.url, headers: parts.headers, body: parts.bodyText },
+      inputs,
+    );
+    return { url, bodyText: body, headers };
+  } catch (err) {
+    if (err instanceof UnencodableInputError) return { refused: err.field };
+    throw err;
+  }
 }
 
 /**
@@ -903,23 +932,27 @@ async function forwardInnerRequest(
       emit({ kind: "request-refused", url, reason: "unresolved login placeholder" });
       return new Response("MITM listener: unresolved login placeholder", { status: 400 });
     }
+    if ("refused" in result) {
+      credentials.refuseActiveInput?.(result.refused, targetUrl);
+      emit({ kind: "request-refused", url, reason: LOGIN_INPUT_NOT_CARRIED });
+      return new Response(`MITM listener: ${LOGIN_INPUT_NOT_CARRIED}`, { status: 403 });
+    }
     const substituted =
       result.url !== targetUrl ||
       result.bodyText !== bodyText ||
       Object.entries(result.headers).some(([k, v]) => v !== inboundHeaders[k]);
-    if (substituted && active.authorizedUris.some(isHostUnboundedUriPattern)) {
-      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
-      return new Response("MITM listener: credential allowlist leaves the host open", {
-        status: 403,
-      });
+    const refusal = substituted
+      ? credentialBoundRefusal(result.url, active.authorizedUris, url)
+      : null;
+    if (refusal) {
+      emit({ kind: "request-refused", url, reason: refusal.reason });
+      return new Response(refusal.body, { status: 403 });
     }
     targetUrl = result.url;
     if (result.bodyText !== null) body = Buffer.from(result.bodyText, "utf-8");
+    // Field values all: the literal parts passed Bun's parser, `substituteRequest` checked the rest.
     const subbed = new Headers();
-    for (const [k, v] of Object.entries(result.headers)) {
-      if (!isHttpFieldValue(v)) return refuseInvalidCredential(url, emit);
-      subbed.set(k, v);
-    }
+    for (const [k, v] of Object.entries(result.headers)) subbed.set(k, v);
     headersForOutbound = subbed;
   }
 
@@ -933,10 +966,10 @@ async function forwardInnerRequest(
   const callerHeaderNames: string[] = [];
   headersForOutbound.forEach((_v, k) => callerHeaderNames.push(k));
 
-  // The api_call rule (`credentialUrlPolicy`): an injected credential goes only to hosts its
-  // auth's allowlist names, never to one an entry leaves to the caller. Applied to every build,
-  // the first attempt and the post-refresh replay alike; `null` = refused.
-  const buildAction = (): (MitmAction & { credentialRevision: string | undefined }) | null => {
+  // The api_call rule (`credentialUrlPolicy`), applied to every build: the first attempt and the
+  // post-refresh replay alike.
+  type PlannedAction = MitmAction & { credentialRevision: string | undefined };
+  const buildAction = (): { action: PlannedAction } | { refusal: BoundRefusal } => {
     const ctx: MitmRequestContext = {
       url: targetUrl,
       headerNames: callerHeaderNames,
@@ -944,22 +977,19 @@ async function forwardInnerRequest(
     };
     const held = credentials.current();
     const planned = { ...planMitmAction(ctx, held), credentialRevision: held.credentialRevision };
-    if (
-      planned.injectedHeader &&
-      planned.matchedAuth?.authorizedUris.some(isHostUnboundedUriPattern)
-    ) {
-      emit({ kind: "request-refused", url, reason: "credential not host-bounded" });
-      return null;
+    const bound = planned.matchedAuth?.authorizedUris;
+    const refusal =
+      planned.injectedHeader && bound ? credentialBoundRefusal(targetUrl, bound, url) : null;
+    if (refusal) {
+      emit({ kind: "request-refused", url, reason: refusal.reason });
+      return { refusal };
     }
-    return planned;
+    return { action: planned };
   };
 
-  const action = buildAction();
-  if (!action) {
-    return new Response("MITM listener: credential allowlist leaves the host open", {
-      status: 403,
-    });
-  }
+  const built = buildAction();
+  if ("refusal" in built) return new Response(built.refusal.body, { status: 403 });
+  const { action } = built;
 
   const outboundHeaders = buildOutboundHeaders(
     headersForOutbound,
@@ -1028,8 +1058,9 @@ async function forwardInnerRequest(
   // re-login, identical for a same-credential replay) and re-issue the request
   // once. Returns the new response, or null if the rebuild was refused or the retry threw.
   const refetch = async (): Promise<Response | null> => {
-    const a = buildAction();
-    if (!a) return null;
+    const rebuilt = buildAction();
+    if ("refusal" in rebuilt) return null;
+    const a = rebuilt.action;
     lastAction = a;
     const outbound = buildOutboundHeaders(
       headersForOutbound,
@@ -1088,6 +1119,31 @@ async function forwardInnerRequest(
 }
 
 const INVALID_CREDENTIAL = "credential is not a valid header value";
+const LOGIN_INPUT_NOT_CARRIED =
+  "login input contains a character this request cannot carry where it is placed";
+
+interface BoundRefusal {
+  reason: string;
+  body: string;
+}
+
+const HOST_OPEN: BoundRefusal = {
+  reason: "credential not host-bounded",
+  body: "MITM listener: credential allowlist leaves the host open",
+};
+/** `credentialUrlPolicy`'s rule; the body names `shownUrl`'s host, never a substituted one. */
+function credentialBoundRefusal(
+  url: string,
+  uris: readonly string[],
+  shownUrl: string,
+): BoundRefusal | null {
+  if (uris.some(isHostUnboundedUriPattern)) return HOST_OPEN;
+  if (credentialStaysWithinBound(url, uris)) return null;
+  return {
+    reason: "credential target beyond its wildcard's registrable domain",
+    body: `MITM listener: ${beyondBoundReason(new URL(shownUrl).hostname)}`,
+  };
+}
 
 /** A credential `Headers` would refuse in a TypeError quoting it: refused before it is set. */
 function refuseInvalidCredential(url: string, emit: (event: MitmListenerEvent) => void): Response {

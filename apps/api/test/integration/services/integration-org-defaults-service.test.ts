@@ -3,18 +3,18 @@
 /**
  * E-extra — integration org-defaults service.
  *
- * Org-wide default connection per (space, integration): the cross-agent
+ * Default connection set per (space, integration): the cross-agent
  * governance baseline. CRUD round-trip + org isolation.
  *
  * `upsertOrgDefault` delegates target validation to `validatePinTargets`
- * (shared-only), so the seeded connection must be `sharedWithOrg=true`,
- * belong to the space, and reference the integration.
+ * (shared-only), so the seeded connection must serve the space, be shared
+ * into it, and reference the integration.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -65,10 +65,11 @@ describe("integration-org-defaults-service", () => {
     });
   });
 
-  /** Seed a sharedWithOrg connection (the only valid org-default target). */
+  /** Seed an org-scope connection connected from `originSpaceId`, shared into `sharedSpaceIds`. */
   async function seedSharedConnection(
-    spaceId = ctx.defaultSpaceId,
+    originSpaceId = ctx.defaultSpaceId,
     label: string | null = null,
+    sharedSpaceIds = [originSpaceId],
   ): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
@@ -76,16 +77,38 @@ describe("integration-org-defaults-service", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-shared",
-        spaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
-        sharedWithOrg: true,
+        sharedSpaceIds,
         label: label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
   }
+
+  it("names a row shared here from any origin, never one shared only elsewhere", async () => {
+    const other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
+    const sharedHere = await seedSharedConnection(other, null, [ctx.defaultSpaceId]);
+    const sharedElsewhere = await seedSharedConnection(ctx.defaultSpaceId, null, [other]);
+
+    const { orgDefault } = await upsertOrgDefault(scope, INTEGRATION_ID, {
+      connectionIds: [sharedHere],
+      enforce: false,
+      createdBy: ctx.user.id,
+    });
+    expect(orgDefault.connection_ids).toEqual([sharedHere]);
+    await expect(
+      upsertOrgDefault(scope, INTEGRATION_ID, {
+        connectionIds: [sharedElsewhere],
+        enforce: false,
+        createdBy: ctx.user.id,
+      }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
 
   it("round-trips upsert → get → resolver-shape → delete (idempotent)", async () => {
     const connId = await seedSharedConnection();

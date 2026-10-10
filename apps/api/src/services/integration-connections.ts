@@ -26,9 +26,13 @@ import {
   arrayOverlaps,
   asc,
   eq,
+  getTableColumns,
   gt,
   inArray,
+  isNotNull,
   isNull,
+  lt,
+  notExists,
   or,
   sql,
   type SQL,
@@ -54,9 +58,16 @@ import {
   discoverProtectedResourceMetadata,
   registerDynamicClient,
   DynamicClientRegistrationError,
+  OAUTH_STATE_TTL_SECONDS,
+  sameUrlIdentifier,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
-import { guardedFetch, isBlockedUrl } from "@appstrate/core/ssrf";
+import {
+  isVariableTemplate,
+  renderUrlTemplate,
+  variableRefs,
+} from "@appstrate/afps-shared/connection-variables";
+import { egressGuardedFetch, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -73,20 +84,42 @@ import {
   type Tx,
 } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
-import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import {
+  decryptForDisplay,
+  decryptStoredCredential,
+  encryptionKeyUnavailable,
+  KEY_UNAVAILABLE,
+} from "../lib/stored-credential.ts";
+import {
+  ApiError,
+  notFound,
+  conflict,
+  invalidRequest,
+  forbidden,
+  validationFailed,
+} from "../lib/errors.ts";
 import {
   evaluateJsonPath,
   JsonPathSyntaxError,
   parseJsonPath,
 } from "@appstrate/afps-shared/jsonpath";
-import type { ActorScope, OrgScope, SpaceScope } from "../lib/scope.ts";
-import { actorFromIds, actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
+import type { OrgScope, SpaceScope } from "../lib/scope.ts";
+import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.ts";
+import {
+  meConnectionAuthorityFilter,
+  ownRowInSpace,
+  usableInSpace,
+  type MeConnectionAuthority,
+} from "./connection-reach.ts";
 import {
   getPackageDisplayName,
   notEphemeralFilter,
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
-import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
+import {
+  integrationCallbackUrl,
+  integrationCallbackUrlFor,
+} from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
@@ -101,9 +134,18 @@ import {
   type IntegrationToolInspection,
 } from "@appstrate/core/integration";
 import type { IntegrationToolCatalogEntry } from "@appstrate/shared-types";
+import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
+import {
+  PLACEHOLDER_ACCOUNT_ID,
+  connectionVariablesOf,
+  displayAccountId,
+  sameConnectionVariables,
+} from "../lib/connection-identity.ts";
 import {
   getLocalServerRef,
   getRemoteSource,
+  hasPerConnectionAuthServer,
+  renderRemoteSource,
   toSupportedTokenEndpointAuthMethod,
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest } from "./integration-service.ts";
@@ -153,6 +195,10 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   isDefault: boolean;
   /** `true` for a DCR/CIMD-minted machine client (remote MCP public client). */
   autoProvisioned: boolean;
+  /** Server chosen per connection the client is bound to (AFPS §7.3); null = the manifest's. */
+  issuer: string | null;
+  /** The secret is under a key id the keyring lacks: connecting answers a 503. */
+  secretKeyUnavailable: boolean;
 }
 
 // ─────────────────────────────────────────────
@@ -206,6 +252,9 @@ interface ActorConnectionRow {
    */
   clientRef: string | null;
   refreshFailureCount: number;
+  /** Read with `credentialsEncrypted`: the upstream that credential is for. */
+  variables: ConnectionVariables;
+  oauthResource: string | null;
 }
 
 /**
@@ -215,13 +264,49 @@ interface ActorConnectionRow {
  */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
+  /** {@link credentialRevision} of `credentialsEncrypted`, read in the same statement. */
+  credentialRevision: string;
 }
 
-/** `account_id` of an identity-less connection ({@link extractIdentity} found no claim). */
-const PLACEHOLDER_ACCOUNT_ID = "default";
+// IDOR guard on a client-supplied reconnect target. Ownership, not usability:
+// `block_user_connections` never stops a renewal.
+export async function assertConnectionBelongsToActor(
+  connectionId: string,
+  spaceId: string,
+  actor: Actor,
+  delegated: boolean,
+): Promise<void> {
+  const [owned] = await db
+    .select({ spaceId: integrationConnections.spaceId })
+    .from(integrationConnections)
+    .where(and(eq(integrationConnections.id, connectionId), ownRowInSpace(spaceId, actor)))
+    .limit(1);
+  if (!owned) throw notFound("Connection not found");
+  if (delegated && owned.spaceId !== spaceId) throw delegatedReconnectRefused();
+}
 
-export function displayAccountId(accountId: string | null | undefined): string | null {
-  return accountId && accountId !== PLACEHOLDER_ACCOUNT_ID ? accountId : null;
+/** A delegated credential (API key, third-party token) acts from its space only. */
+function delegatedReconnectRefused(): ApiError {
+  return forbidden(
+    "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
+  );
+}
+
+function scopeNarrowingRefused(remedy: string): ApiError {
+  return conflict(
+    "connection_scope_narrowing",
+    `This connection serves the whole organization, and the OAuth client that would reconnect it belongs to one space only. ${remedy}`,
+  );
+}
+
+/** Whether `connectionId` serves its whole org: its reconnect resolves no space client. */
+export async function isOrgScopedConnection(connectionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ spaceId: integrationConnections.spaceId })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row !== undefined && row.spaceId === null;
 }
 
 /**
@@ -236,8 +321,7 @@ function reachableConnection(
   return and(
     eq(integrationConnections.id, connectionId),
     eq(integrationConnections.integrationId, integrationId),
-    eq(integrationConnections.spaceId, context.spaceId),
-    actorOrSharedFilter(context.actor, integrationConnections),
+    usableInSpace(context.spaceId, context.actor),
   )!;
 }
 
@@ -277,7 +361,7 @@ export async function loadAccessibleConnectionById(
   integrationId: string,
   expectedAuthKey: string | null,
   context: { spaceId: string; actor: Actor },
-): Promise<(ResolvedConnectionRow & { credentialRevision: string }) | null> {
+): Promise<ResolvedConnectionRow | null> {
   const [row] = await db
     .select({
       id: integrationConnections.id,
@@ -289,6 +373,8 @@ export async function loadAccessibleConnectionById(
       scopesGranted: integrationConnections.scopesGranted,
       clientRef: integrationConnections.clientRef,
       refreshFailureCount: integrationConnections.refreshFailureCount,
+      variables: integrationConnections.variables,
+      oauthResource: integrationConnections.oauthResource,
     })
     .from(integrationConnections)
     .where(
@@ -313,8 +399,8 @@ export async function loadAccessibleConnectionById(
         (expectedAuthKey !== null ? ` auth '${expectedAuthKey}'` : ""),
     );
   }
-  const { integrationId: _integrationId, ...resolved } = row;
-  return resolved;
+  const { integrationId: _integrationId, variables, ...resolved } = row;
+  return { ...resolved, variables: connectionVariablesOf(variables) };
 }
 
 /** The `X-Run-Id` run; `boundSet` re-checks it on every selection, the 401 refresh included. */
@@ -377,7 +463,8 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    // No agent selection: every declared auth serves, no scope is required.
+    // No agent selection: every declared auth serves, no scope is required. `required`: a proxy
+    // call cannot proceed without a connection, so nothing usable is an error (→ null below).
     requirements: [
       {
         integrationId: packageId,
@@ -385,12 +472,15 @@ export async function selectAccessibleConnection(
         hasSelectedTools: true,
         agentTools: [],
         agentScopes: [],
+        required: true,
+        noAgentSelection: true,
       },
     ],
     accessibleConnections: rows,
     pins: [],
     orgDefaults,
     launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
+    spaceId: context.spaceId,
     ...identity,
   });
   const error = errors[0];
@@ -424,38 +514,43 @@ export async function selectAccessibleConnection(
 /** The actor's accessible rows (own + shared) of `packageId` in the space, in a stable order. */
 function loadSelectableRows(packageId: string, context: { spaceId: string; actor: Actor }) {
   return db
-    .select()
+    .select({ ...getTableColumns(integrationConnections), credentialRevision })
     .from(integrationConnections)
     .where(
       and(
         eq(integrationConnections.integrationId, packageId),
-        eq(integrationConnections.spaceId, context.spaceId),
-        actorOrSharedFilter(context.actor, integrationConnections),
+        usableInSpace(context.spaceId, context.actor),
       ),
     )
     .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
 }
 
-type SelectableRow = typeof integrationConnections.$inferSelect;
+type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
 
 function toResolvedRow(row: SelectableRow): ResolvedConnectionRow {
   const {
     id,
     authKey,
     credentialsEncrypted,
+    credentialRevision,
     expiresAt,
     scopesGranted,
     clientRef,
     refreshFailureCount,
+    variables,
+    oauthResource,
   } = row;
   return {
     id,
     authKey,
     credentialsEncrypted,
+    credentialRevision,
     expiresAt,
     scopesGranted,
     clientRef,
     refreshFailureCount,
+    variables: connectionVariablesOf(variables),
+    oauthResource,
   };
 }
 
@@ -621,40 +716,22 @@ type IntegrationOAuthClientRow = typeof integrationOauthClients.$inferSelect;
  * `has_client_secret: true` from the column — the persisted, machine-readable
  * marker that says "this row holds a secret nobody can read".
  *
- * The path that would ACT on that client refuses it BY NAME:
- * `assertConnectClientUsable`, before the connect redirect, in a 403 that names
- * `CONNECTION_ENCRYPTION_KEY` and the re-registration. The refresh path does
- * not, and deliberately: `resolveIntegrationClientById` logs the decrypt
- * failure and returns `null`, so the token silently stops being renewed and the
- * connection surfaces as `needs_reconnection` at expiry — the cause is named
- * only in that server log. Refresh is machine-driven with nobody watching, and
- * the recovery it pushes the user toward (reconnect) is the very path that
- * DOES name the key, so the diagnosis is one click away rather than lost.
- * Neither state is inferred away here — this function reports what the row says
- * and nothing more.
+ * The path that would ACT on that client refuses it: `assertConnectClientUsable`,
+ * before the connect redirect — the 503 for a key id missing from the keyring
+ * (`secretKeyUnavailable`), else a 403 naming the key and the re-registration.
  */
 function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAuthClientWithSecret {
-  let secret = "";
-  // A public client stores no ciphertext at all, so there is nothing to
-  // decrypt — and nothing that could fail to decrypt.
-  try {
-    secret =
-      row.clientSecretEncrypted === ""
-        ? ""
-        : (decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted)
-            .client_secret ?? "");
-  } catch (err) {
-    // Logged, not tracked in a flag: `has_client_secret` below reads the
-    // column, so an unreadable ciphertext needs no in-band marker to be
-    // reported as the secret it is. The warning is what tells the operator
-    // WHICH row stopped opening.
-    logger.warn("integration_oauth_client: client_secret decrypt failed", {
-      packageId: row.integrationId,
-      authKey: row.authKey,
-      clientId: row.id,
-      err: String(err),
-    });
-  }
+  // A public client stores no ciphertext at all, so there is nothing to decrypt.
+  const stored =
+    row.clientSecretEncrypted === ""
+      ? null
+      : decryptForDisplay(
+          () => decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted),
+          { packageId: row.integrationId, authKey: row.authKey, clientId: row.id },
+        );
+  const secretKeyUnavailable = stored === KEY_UNAVAILABLE;
+  // Unreadable: "" here, while `has_client_secret` below still reads the column.
+  const secret = stored && stored !== KEY_UNAVAILABLE ? (stored.client_secret ?? "") : "";
   return {
     id: row.id,
     spaceId: row.spaceId,
@@ -681,6 +758,8 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     redirect_uri: row.redirectUri,
     isDefault: row.isDefault,
     autoProvisioned: row.autoProvisioned,
+    issuer: row.issuer,
+    secretKeyUnavailable,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -692,6 +771,8 @@ export function toPublicClient(client: IntegrationOAuthClientWithSecret): Integr
     clientSecret: _clientSecret,
     isDefault: _isDefault,
     autoProvisioned: _auto,
+    issuer: _issuer,
+    secretKeyUnavailable: _secretKeyUnavailable,
     ...rest
   } = client;
   return rest;
@@ -752,6 +833,11 @@ function assertClientAuth(
   if (auth.type !== "oauth2") {
     throw invalidRequest(
       `Auth '${authKey}' is type '${auth.type}', not oauth2: it has no OAuth clients`,
+    );
+  }
+  if (!autoProvisioned && hasPerConnectionAuthServer(manifest, auth)) {
+    throw invalidRequest(
+      `Integration '${manifest.name}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically with each server (DCR); a manual client, bound to one server, must not be registered.`,
     );
   }
   if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
@@ -825,22 +911,27 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
 }
 
 /**
- * Load the single auto-provisioned (DCR/CIMD) client for `(packageId, authKey)`,
- * if any. The partial unique `idx_ioc_one_auto` guarantees at most one — this is
- * the find half of the DCR find-or-create.
+ * Load the auto-provisioned (DCR/CIMD) client for `(packageId, authKey, issuer)`, if any (`null`
+ * issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find half of
+ * the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
-  scope: SpaceScope,
+  org: OrgScope,
   packageId: string,
   authKey: string,
+  issuer: string | null,
+  executor: DbOrTx = db,
 ): Promise<IntegrationOAuthClientWithSecret | null> {
-  const [row] = await db
+  const [row] = await executor
     .select()
     .from(integrationOauthClients)
     .where(
       and(
-        tierAuthFilter(scope, packageId, authKey),
+        tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
         eq(integrationOauthClients.autoProvisioned, true),
+        issuer === null
+          ? isNull(integrationOauthClients.issuer)
+          : eq(integrationOauthClients.issuer, issuer),
       ),
     )
     .limit(1);
@@ -974,15 +1065,18 @@ export async function createIntegrationOAuthClient(
     /** Explicit `token_endpoint_auth_method` for this client; `"none"` = public. */
     tokenEndpointAuthMethod?: string;
   },
-  opts: { autoProvisioned?: boolean } = {},
+  opts: { autoProvisioned?: boolean; issuer?: string | null } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const autoProvisioned = opts.autoProvisioned ?? false;
+  const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
 
-  // An auto-provisioned client is the sole client for its auth → default. A
-  // classic client wins the default only when none already holds it.
-  const isDefault = autoProvisioned ? true : !(await hasTierDefault(owner, packageId, authKey));
+  // An auto-provisioned client of the manifest's server is the default; one per issuer is selected
+  // by its issuer (several coexist). A classic client wins the default only when none holds it.
+  const isDefault = autoProvisioned
+    ? issuer === null
+    : !(await hasTierDefault(owner, packageId, authKey));
 
   // Creation always supplies the field (blank means "register a public
   // client"), so the encoder never returns the preserve sentinel here.
@@ -1002,6 +1096,7 @@ export async function createIntegrationOAuthClient(
         redirectUri: input.redirectUri ?? null,
         isDefault: asDefault,
         autoProvisioned,
+        issuer,
         createdAt: now,
         updatedAt: now,
       })
@@ -1055,7 +1150,7 @@ export async function updateIntegrationOAuthClient(
   // (it would point the DCR find-or-create at hand-entered credentials).
   if (existing.autoProvisioned) {
     throw invalidRequest(
-      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; delete it to re-trigger registration.`,
+      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; an org administrator deletes it to re-trigger registration.`,
     );
   }
   // `null` = the secret field was not submitted → keep the stored credential
@@ -1153,19 +1248,27 @@ function moveClientToOrg(
     if (!existing) {
       throw notFound(`OAuth client '${clientId}' not found`);
     }
-    if (existing.autoProvisioned) {
-      throw invalidRequest(
-        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot leave its space.`,
+    if (existing.spaceId) await lockSpacesForKeyShare(tx, [existing.spaceId]);
+    if (
+      existing.autoProvisioned &&
+      (await getAutoProvisionedClient(scope, packageId, existing.authKey, existing.issuer, tx))
+    ) {
+      throw conflict(
+        "auto_client_exists_at_org",
+        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
       );
     }
+    // An auto client of a server chosen per connection is picked by its issuer, never the default.
     const isDefault =
       mayDefault &&
+      !(existing.autoProvisioned && existing.issuer !== null) &&
       !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
     const [row] = await tx
       .update(integrationOauthClients)
       .set({ spaceId: null, isDefault, updatedAt: new Date() })
       .where(eq(integrationOauthClients.id, existing.id))
       .returning();
+    await widenConnectionsToOrgScope(tx, eq(integrationConnections.clientRef, existing.id));
     return projectClientWithSecret(row!);
   });
 }
@@ -1218,6 +1321,13 @@ function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedCo
  * `projectClientWithSecret`): the admin has to see the broken row to fix it.
  */
 function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): void {
+  if (client.secretKeyUnavailable) {
+    throw encryptionKeyUnavailable(null, {
+      packageId: client.integration_package_id,
+      authKey: client.auth_key,
+      clientId: client.id,
+    });
+  }
   const where = `'${client.integration_package_id}' auth '${client.auth_key}'`;
   if (client.has_client_secret && client.clientSecret === "") {
     throw forbidden(
@@ -1245,8 +1355,8 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * single home for the client-selection precedence (previously inlined in
  * `OAuth2Strategy.begin`). New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths (DCR/CIMD) keep their own (custom) client
- * and are never served by a system or org entry. Throws the operator-facing error when
+ * Auto-provisioned remote-MCP auths (DCR/CIMD) use the org's machine client
+ * and are never served by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
  * connection so token refresh resolves the same credentials. The choice of
  * which client is the default is an admin action (`setDefaultIntegrationClient`,
@@ -1258,12 +1368,23 @@ export function resolveConnectClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   resolved: ResolvedOAuthConnect,
+  reconnectsOrgRow = false,
 ): ResolvedConnectClient {
   const autoProvisioned = usesAutoProvisionedClient(manifest, auth);
   const system = autoProvisioned ? null : getDefaultSystemIntegrationClient(integrationId, authKey);
-  const picked = pickDefault(resolved.spaceClients, resolved.orgClients, system);
+  // An org-scoped row is never narrowed onto a space client.
+  const picked = pickDefault(
+    reconnectsOrgRow ? [] : resolved.spaceClients,
+    resolved.orgClients,
+    system,
+  );
   if (picked) {
     return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
+  }
+  if (reconnectsOrgRow && resolved.spaceClients.length > 0) {
+    throw scopeNarrowingRefused(
+      "Ask an administrator to register an organization OAuth client for it, or create a new connection here.",
+    );
   }
 
   if (autoProvisioned) {
@@ -1313,8 +1434,9 @@ export function resolveConnectClient(
  * row does not declare one; `toSupportedTokenEndpointAuthMethod` narrows it as on the callback.
  *
  * `null` is reserved for "no such client here" (since-removed, remapped,
- * cross-scope) and for a ciphertext that will not open — the caller skips the
- * refresh, which surfaces as `needs_reconnection` at expiry.
+ * cross-scope) and for an unreadable ciphertext — the caller skips the
+ * refresh, which surfaces as `needs_reconnection` at expiry. A ciphertext under
+ * a key id the keyring lacks throws the 503 instead.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
@@ -1355,6 +1477,7 @@ export async function resolveIntegrationClientById(
       clientId: integrationOauthClients.clientId,
       clientSecretEncrypted: integrationOauthClients.clientSecretEncrypted,
       tokenEndpointAuthMethod: integrationOauthClients.tokenEndpointAuthMethod,
+      issuer: integrationOauthClients.issuer,
     })
     .from(integrationOauthClients)
     .where(
@@ -1373,6 +1496,8 @@ export async function resolveIntegrationClientById(
     )
     .limit(1);
   if (!row) return null;
+  const bound = (client: ResolvedOAuthClient | null): ResolvedOAuthClient | null =>
+    client && row.issuer !== null ? { ...client, issuer: row.issuer } : client;
 
   // The row's declaration wins; the manifest stands in when it has none.
   const method = row.tokenEndpointAuthMethod ?? manifestAuthMethod;
@@ -1382,21 +1507,15 @@ export async function resolveIntegrationClientById(
   // with any other declared method unrepresentable, so emptiness here always
   // arrives as `"none"`.
   if (method === "none") {
-    return resolved(row.clientId, "", "none");
+    return bound(resolved(row.clientId, "", "none"));
   }
 
-  let clientSecret: string;
-  try {
-    clientSecret =
-      decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted).client_secret ?? "";
-  } catch (err) {
-    logger.warn("Integration custom client_secret decrypt failed", {
-      integrationId,
-      authKey,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
+  const stored = decryptStoredCredential(
+    () => decryptCredentials<{ client_secret?: string }>(row.clientSecretEncrypted),
+    { integrationId, authKey, clientRef },
+  );
+  if (!stored) return null;
+  const clientSecret = stored.client_secret ?? "";
   // A ciphertext that opens to an EMPTY secret is not normalised to `"none"`
   // here — that inference is what sent `client_secret=` (present but empty) to
   // providers that reject it. The pair travels on as it was stored, and the
@@ -1404,7 +1523,7 @@ export async function resolveIntegrationClientById(
   // method to `client_secret_basic` before calling `assertClientAuthCoherent`,
   // so a secret-based (or unstated) method with no secret throws
   // `ClientAuthInvariantError` before anything reaches the wire.
-  return resolved(row.clientId, clientSecret, method);
+  return bound(resolved(row.clientId, clientSecret, method));
 }
 
 /**
@@ -1570,14 +1689,9 @@ export async function setDefaultIntegrationClient(
  * the caller falls back to the manifest's declared values.
  */
 export interface ResolvedOAuthConnect {
-  /**
-   * The space's custom (BYO-app) clients for this auth — N for an oauth2-classic
-   * auth, 0..1 for an auto-provisioned (DCR/CIMD) auth. Empty when none is
-   * registered and dynamic registration is either not opted-in or unavailable —
-   * the caller then falls back to the org and system clients.
-   */
+  /** The space's custom (BYO-app) clients — none for an auto-provisioned auth. */
   spaceClients: IntegrationOAuthClientWithSecret[];
-  /** The org's clients the space inherits — empty for an auto-provisioned auth. */
+  /** The org's clients the space inherits — its one machine client for an auto-provisioned auth. */
   orgClients: IntegrationOAuthClientWithSecret[];
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
@@ -1623,41 +1737,60 @@ export function usesAutoProvisionedClient(
   return (
     auth.type === "oauth2" &&
     auth.token_endpoint_auth_method === "none" &&
-    getRemoteSource(manifest) !== null
+    (getRemoteSource(manifest) !== null || hasPerConnectionAuthServer(manifest, auth))
   );
 }
 
-/**
- * `fetch` wrapper that refuses SSRF-unsafe targets before every request. The
- * remote-MCP discovery chain probes manifest- and *server*-derived URLs (RFC
- * 9728 well-known + the `WWW-Authenticate` challenge's `resource_metadata`,
- * then RFC 8414 metadata), so each GET must be guarded — not just the
- * registration POST.
- *
- * Delegates to the shared {@link guardedFetch} primitive, which does per-hop
- * DNS resolution + blocklist checks and follows redirects MANUALLY (each hop
- * re-checked), strips userinfo/fragment, and rejects non-http(s) schemes. This
- * is strictly stronger than the previous literal-only `isBlockedUrl` + raw
- * `fetch` posture, which resolved no DNS (a public host with an A record
- * pointing at `169.254.169.254`/RFC1918 sailed through) and left `redirect`
- * unpinned (Bun follows 3xx by default, so a `302` to a private host was
- * followed unchecked — SSRF + DNS-rebind). `discoverProtectedResourceMetadata`
- * is best-effort (swallows fetch errors → returns `null`), so a blocked URL
- * cleanly degrades to "discovery failed" rather than throwing.
- */
-const ssrfGuardedFetch = (async (
-  input: Parameters<typeof fetch>[0],
-  init?: Parameters<typeof fetch>[1],
-) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  return guardedFetch(url, init, { logger });
-  // `preconnect` is never invoked by the discovery helpers; cast to satisfy the
-  // `typeof fetch` shape Bun's lib declares.
-}) as typeof fetch;
+/** Discovery and DCR URLs are manifest-, user- (AFPS §8.7) and server-derived: every hop guarded. */
+const egressFetch = (opts?: { maxRedirects: number }) =>
+  ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    egressGuardedFetch(
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      init,
+      opts,
+    )) as typeof fetch;
+const ssrfGuardedFetch = egressFetch();
+/** The DCR POST is never redirected (a 3xx bounces the registration). */
+const dcrGuardedFetch = egressFetch({ maxRedirects: 0 });
 
 /** Drop a URL that targets a blocked (loopback/RFC1918/link-local/metadata) host. */
 function safeUrl(url: string | undefined): string | undefined {
-  return url && !isBlockedUrl(url) ? url : undefined;
+  return url && !isBlockedEgressUrl(url) ? url : undefined;
+}
+
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * AFPS §7.3 *Client binding*: refuse a manifest-declared endpoint that the validated metadata of
+ * the auth's authorization server contradicts — its client is presented to that server only.
+ */
+export function assertEndpointsMatchMetadata(
+  packageId: string,
+  authKey: string,
+  auth: Pick<AfpsManifestAuth, "authorization_endpoint" | "token_endpoint">,
+  metadata: { issuer?: string; authorizationEndpoint?: string; tokenEndpoint?: string },
+): void {
+  if (metadata.issuer === undefined) return;
+  const contradicted = (
+    [
+      ["authorization_endpoint", auth.authorization_endpoint, metadata.authorizationEndpoint],
+      ["token_endpoint", auth.token_endpoint, metadata.tokenEndpoint],
+    ] as const
+  ).find(
+    ([, declared, validated]) =>
+      declared !== undefined && validated !== undefined && declared !== validated,
+  )?.[0];
+  if (contradicted) {
+    throw invalidRequest(
+      `Integration '${packageId}' auth '${authKey}' declares a ${contradicted} that the metadata of its authorization server (${metadata.issuer}) contradicts; its OAuth client is presented only to that server's own endpoints.`,
+    );
+  }
 }
 
 /**
@@ -1667,15 +1800,14 @@ function safeUrl(url: string | undefined): string | undefined {
  * the connector, the first actor clicks Connect, and Appstrate self-registers
  * — no hand-created OAuth app, no client secret.
  *
- * Discovery chain (when the manifest doesn't declare endpoints):
+ * Discovery chain:
  *   `source.remote.url` → RFC 9728 protected-resource metadata
  *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
  *   (`authorization_endpoint` / `token_endpoint` / `registration_endpoint`).
  *
- * Best-effort: any discovery/registration failure returns the existing client
- * (or `null`), letting the caller fall back to the classic "register a client"
- * error. Never throws for the dynamic path — classic (non-remote) integrations
- * are unaffected: they early-return with the existing lookup.
+ * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
+ * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
+ * Classic (non-auto) auths early-return with the existing lookup.
  */
 export async function ensureIntegrationOAuthClient(
   scope: SpaceScope,
@@ -1684,7 +1816,11 @@ export async function ensureIntegrationOAuthClient(
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
   redirectUri: string,
+  variables: ConnectionVariables = {},
 ): Promise<ResolvedOAuthConnect> {
+  if (hasPerConnectionAuthServer(manifest, auth)) {
+    return ensurePerConnectionOAuthClient(scope, packageId, authKey, manifest, auth, variables);
+  }
   // Classic path: not a remote MCP oauth2 auth — load ALL space and org clients (the
   // connect resolver picks the default among the N); endpoints come from the
   // manifest in the caller.
@@ -1694,7 +1830,7 @@ export async function ensureIntegrationOAuthClient(
   }
 
   // Auto-provisioned path: there is exactly one machine client (DCR/CIMD).
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey);
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
   // (RFC 9728) is authoritative for the canonical `resource` (the token's
@@ -1724,7 +1860,7 @@ export async function ensureIntegrationOAuthClient(
   // at internal infra. `resolveOAuthEndpoints` fetches the well-known on the
   // issuer host, so guarding the issuer host guards those probes; a blocked
   // issuer degrades to "no discovery".
-  if (issuer && isBlockedUrl(issuer)) {
+  if (issuer && isBlockedEgressUrl(issuer)) {
     logger.warn("auto-DCR: discovered issuer blocked by SSRF guard", {
       packageId,
       authKey,
@@ -1733,20 +1869,21 @@ export async function ensureIntegrationOAuthClient(
     issuer = undefined;
   }
 
-  // Fill authorize/token/registration endpoints from issuer discovery
-  // (RFC 8414). Manifest endpoints, when declared, win.
-  const endpoints = await resolveOAuthEndpoints({
-    ...(issuer ? { issuer } : {}),
-    ...(auth.authorization_endpoint ? { authorizationEndpoint: auth.authorization_endpoint } : {}),
-    ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
-  });
+  // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
+  const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
+  assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
+  const endpoints = {
+    ...discovered,
+    authorizationEndpoint: discovered.authorizationEndpoint ?? auth.authorization_endpoint,
+    tokenEndpoint: discovered.tokenEndpoint ?? auth.token_endpoint,
+  };
 
   // SSRF: a discovery document is server-controlled and can advertise endpoints
   // on internal hosts. The token endpoint is fetched server-side at exchange,
   // so drop any blocked endpoint before threading it into the connect state.
   const resolved: ResolvedOAuthConnect = {
-    spaceClients: existing ? [existing] : [],
-    orgClients: [],
+    spaceClients: [],
+    orgClients: existing ? [existing] : [],
     ...(issuer ? { issuer } : {}),
     ...(safeUrl(endpoints.authorizationEndpoint)
       ? { authorizationEndpoint: endpoints.authorizationEndpoint }
@@ -1758,16 +1895,208 @@ export async function ensureIntegrationOAuthClient(
   // Client already registered — nothing to mint; just return discovered config.
   if (existing) return resolved;
 
+  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
+    registrationEndpoint: endpoints.registrationEndpoint,
+    grantTypesSupported: endpoints.grantTypesSupported,
+    redirectUri,
+    issuer: null,
+    resolved,
+  });
+}
+
+/**
+ * The OAuth connect config of an auth whose authorization server is chosen per connection (AFPS
+ * §7.3). Every URL here is rendered from the user's variables or learned from a response to one,
+ * so it is egress-checked, never trusted as author-declared (§8.6, §8.7):
+ *
+ *   - remote source: RFC 9728 metadata of the rendered URL; the advertised server must equal the
+ *     rendered `issuer`, else share the URL's origin — never another provider's server. Its
+ *     `resource` is sent (RFC 8707).
+ *   - otherwise the rendered `issuer`, no resource.
+ *   - endpoints from that server's RFC 8414 metadata only; a public DCR client per issuer with a
+ *     redirect URI of its own (`<callback>/<tag>`).
+ *
+ * A failure the user's choice explains is a 400 on the variable that chose it.
+ */
+async function ensurePerConnectionOAuthClient(
+  scope: SpaceScope,
+  packageId: string,
+  authKey: string,
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+  variables: ConnectionVariables,
+): Promise<ResolvedOAuthConnect> {
+  if (auth.token_endpoint_auth_method !== "none") {
+    throw invalidRequest(
+      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically as a public client (RFC 7591): the auth must declare token_endpoint_auth_method 'none'.`,
+    );
+  }
+  const remoteTemplate = getRemoteSource(manifest)?.url;
+  // The template the user's server is chosen by: the remote URL when it is one, else the issuer.
+  const chooser = isVariableTemplate(remoteTemplate) ? remoteTemplate : auth.issuer!;
+  const refuse = (code: string, message: string): ApiError => {
+    const [name] = variableRefs(chooser);
+    return validationFailed([
+      { field: `variables.${name}`, code, title: "Invalid Connection Variable", message },
+    ]);
+  };
+  // Both render: the caller's `resolveConnectionVariables` refused any value that would not.
+  const remote = renderRemoteSource(manifest, variables);
+  const declaredIssuer =
+    auth.issuer === undefined ? undefined : renderUrlTemplate(auth.issuer, variables)!;
+
+  let candidate: string;
+  let resource: string | undefined;
+  if (remote) {
+    const md = await discoverProtectedResourceMetadata({
+      resourceServerUrl: remote.url,
+      fetchImpl: ssrfGuardedFetch,
+    });
+    if (!md) {
+      throw refuse(
+        "authorization_server_unavailable",
+        `the server at ${remote.url} publishes no OAuth protected-resource metadata for it (RFC 9728)`,
+      );
+    }
+    const named = md.authorizationServers.find((advertised) =>
+      declaredIssuer === undefined
+        ? sameOrigin(advertised, remote.url)
+        : sameUrlIdentifier(advertised, declaredIssuer),
+    );
+    if (named === undefined) {
+      throw refuse(
+        "authorization_server_mismatch",
+        `the server at ${remote.url} names no authorization server ${
+          declaredIssuer === undefined
+            ? `on ${new URL(remote.url).origin}`
+            : `equal to ${declaredIssuer}`
+        } (it names ${md.authorizationServers.join(", ")})`,
+      );
+    }
+    candidate = named;
+    resource = md.resource;
+  } else {
+    candidate = declaredIssuer!;
+  }
+
+  if (!(await isUserUrlReachable(candidate))) {
+    throw refuse(
+      "egress_blocked",
+      `names the authorization server ${candidate}, which this platform does not reach`,
+    );
+  }
+  const endpoints = await resolveOAuthEndpoints({ issuer: candidate });
+  if (!endpoints.issuer || !endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
+    throw refuse(
+      "authorization_server_unavailable",
+      `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
+    );
+  }
+  for (const url of [
+    endpoints.authorizationEndpoint,
+    endpoints.tokenEndpoint,
+    ...(endpoints.registrationEndpoint ? [endpoints.registrationEndpoint] : []),
+  ]) {
+    if (!(await isUserUrlReachable(url))) {
+      throw refuse(
+        "egress_blocked",
+        `the authorization server ${candidate} advertises the endpoint ${url}, which this platform does not reach`,
+      );
+    }
+  }
+
+  const issuer = endpoints.issuer;
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
+  const resolved: ResolvedOAuthConnect = {
+    spaceClients: [],
+    orgClients: existing ? [existing] : [],
+    issuer,
+    authorizationEndpoint: endpoints.authorizationEndpoint,
+    tokenEndpoint: endpoints.tokenEndpoint,
+    ...(resource ? { resource } : {}),
+  };
+  if (existing) {
+    // A reuse renews the client's lease against {@link pruneUnusedPerConnectionClients}.
+    await db
+      .update(integrationOauthClients)
+      .set({ updatedAt: new Date() })
+      .where(eq(integrationOauthClients.id, existing.id));
+    return resolved;
+  }
+  await pruneUnusedPerConnectionClients(scope, packageId, authKey);
+  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
+    registrationEndpoint: endpoints.registrationEndpoint,
+    grantTypesSupported: endpoints.grantTypesSupported,
+    redirectUri: integrationCallbackUrlFor(issuer),
+    issuer,
+    resolved,
+  });
+}
+
+/**
+ * Delete the org's per-connection-server clients of this auth that minted no connection: whoever
+ * opens a connect flow chooses the server. One used within an OAuth state's lifetime may await it.
+ */
+async function pruneUnusedPerConnectionClients(
+  org: OrgScope,
+  packageId: string,
+  authKey: string,
+): Promise<void> {
+  await db.delete(integrationOauthClients).where(
+    and(
+      tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
+      eq(integrationOauthClients.autoProvisioned, true),
+      isNotNull(integrationOauthClients.issuer),
+      lt(integrationOauthClients.updatedAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
+      notExists(
+        db
+          .select({ id: integrationConnections.id })
+          .from(integrationConnections)
+          .where(eq(integrationConnections.clientRef, sql`${integrationOauthClients.id}::text`)),
+      ),
+    ),
+  );
+}
+
+/**
+ * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer` (`null` =
+ * the manifest's server). Every failure comes back as `resolved.provisioningFailure`.
+ */
+async function registerAutoProvisionedClient(
+  org: OrgScope,
+  packageId: string,
+  authKey: string,
+  auth: AfpsManifestAuth,
+  input: {
+    registrationEndpoint: string | undefined;
+    grantTypesSupported: string[] | undefined;
+    redirectUri: string;
+    issuer: string | null;
+    resolved: ResolvedOAuthConnect;
+  },
+): Promise<ResolvedOAuthConnect> {
+  const { registrationEndpoint, redirectUri, issuer, resolved } = input;
+  // A server chosen per connection takes no manual client: the remedy is on its side.
+  const manualRemedy =
+    issuer === null
+      ? "register an OAuth client manually for this integration"
+      : "a server chosen per connection must support it";
+
   // No registration endpoint discovered — can't auto-register; let the caller
   // surface the existing "register a client" error.
-  const registrationEndpoint = endpoints.registrationEndpoint;
   if (!registrationEndpoint) {
-    logger.warn("auto-DCR: no registration_endpoint discovered", { packageId, authKey, issuer });
+    logger.warn("auto-DCR: no registration_endpoint discovered", {
+      packageId,
+      authKey,
+      issuer: resolved.issuer,
+    });
     return {
       ...resolved,
       provisioningFailure: {
         message:
-          "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it",
+          issuer === null
+            ? "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it"
+            : `the authorization server ${issuer} does not advertise dynamic client registration (RFC 7591), which a server chosen per connection requires`,
       },
     };
   }
@@ -1775,11 +2104,8 @@ export async function ensureIntegrationOAuthClient(
   // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
   // it. This LITERAL check (no DNS) exists to surface the friendly
   // provisioningFailure below for obviously-internal targets; the authoritative
-  // guard is `registerDynamicClient` itself, whose default transport is
-  // `guardedFetch` (per-hop DNS resolution + blocklist, `maxRedirects: 0`), so
-  // a public hostname rebinding to an internal address is refused at connect
-  // time even though it passes this literal check.
-  if (isBlockedUrl(registrationEndpoint)) {
+  // guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS, no redirect).
+  if (isBlockedEgressUrl(registrationEndpoint)) {
     logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
       packageId,
       authKey,
@@ -1788,16 +2114,15 @@ export async function ensureIntegrationOAuthClient(
     return {
       ...resolved,
       provisioningFailure: {
-        message:
-          "the discovered registration endpoint was refused as an unsafe (loopback/internal) target; register an OAuth client manually instead",
+        message: `the discovered registration endpoint was refused as an unsafe (loopback/internal) target; ${manualRemedy}`,
       },
     };
   }
 
   // Narrow the concurrency window: re-check in case a parallel Connect just
-  // registered a client for the same (space, package, authKey).
-  const racedClient = await getAutoProvisionedClient(scope, packageId, authKey);
-  if (racedClient) return { ...resolved, spaceClients: [racedClient] };
+  // registered a client for the same (org, package, authKey, issuer).
+  const racedClient = await getAutoProvisionedClient(org, packageId, authKey, issuer);
+  if (racedClient) return { ...resolved, orgClients: [racedClient] };
 
   const host = (() => {
     try {
@@ -1821,7 +2146,7 @@ export async function ensureIntegrationOAuthClient(
     // token (Claude Code #7744) and the connection can't self-renew. Conditional,
     // not unconditional: a server that lacks the grant (e.g. ClickUp MCP) may
     // reject a registration that requests it.
-    const grantTypes = endpoints.grantTypesSupported?.includes("refresh_token")
+    const grantTypes = input.grantTypesSupported?.includes("refresh_token")
       ? ["authorization_code", "refresh_token"]
       : ["authorization_code"];
     const registration = await registerDynamicClient({
@@ -1833,6 +2158,7 @@ export async function ensureIntegrationOAuthClient(
         ? { scopes: auth.default_scopes }
         : {}),
       ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
+      fetchImpl: dcrGuardedFetch,
     });
     // RFC 7591 §3.2.1: the RESPONSE, not the request, states what the server
     // registered — an AS "MAY replace any invalid values with suitable default
@@ -1879,14 +2205,14 @@ export async function ensureIntegrationOAuthClient(
           message:
             `the authorization server ${did} although Appstrate requested a public client ` +
             `(token_endpoint_auth_method='none' + PKCE — the only shape automatic registration drives); ` +
-            `register an OAuth client manually for this integration`,
+            manualRemedy,
         },
       };
     }
     let client: IntegrationOAuthClientWithSecret;
     try {
       client = await createIntegrationOAuthClient(
-        scope,
+        org,
         packageId,
         authKey,
         {
@@ -1900,29 +2226,25 @@ export async function ensureIntegrationOAuthClient(
           tokenEndpointAuthMethod: "none",
           redirectUri,
         },
-        { autoProvisioned: true },
+        { autoProvisioned: true, issuer },
       );
     } catch (insertErr) {
-      // Concurrent auto-DCR: a parallel Connect for the same (space, package,
-      // authKey) registered its client between our `racedClient` re-check above
+      // Concurrent auto-DCR: a parallel Connect for the same (org, package,
+      // authKey, issuer) registered its client between our `racedClient` re-check above
       // and this insert. The partial unique `idx_ioc_one_auto` rejects the
       // second auto-provisioned row (Postgres 23505) — catch it and re-select
       // the winner instead of surfacing a 500. Our own upstream registration is
       // abandoned (harmless: an unused DCR client), the connection proceeds on
       // the winning client.
-      if (
-        insertErr instanceof Error &&
-        "code" in insertErr &&
-        (insertErr as { code: string }).code === "23505"
-      ) {
-        const winner = await getAutoProvisionedClient(scope, packageId, authKey);
+      if (isUniqueViolation(insertErr)) {
+        const winner = await getAutoProvisionedClient(org, packageId, authKey, issuer);
         if (winner) {
           logger.info("auto-DCR: lost registration race, reusing concurrently-registered client", {
             packageId,
             authKey,
             clientId: winner.client_id,
           });
-          return { ...resolved, spaceClients: [winner] };
+          return { ...resolved, orgClients: [winner] };
         }
       }
       throw insertErr;
@@ -1931,8 +2253,9 @@ export async function ensureIntegrationOAuthClient(
       packageId,
       authKey,
       clientId: registration.clientId,
+      ...(issuer ? { issuer } : {}),
     });
-    return { ...resolved, spaceClients: [client] };
+    return { ...resolved, orgClients: [client] };
   } catch (err) {
     if (err instanceof DynamicClientRegistrationError) {
       logger.warn("auto-DCR: dynamic client registration failed", {
@@ -2003,11 +2326,15 @@ export async function deleteIntegrationOAuthClient(
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
-    : inArray(
-        integrationConnections.spaceId,
-        db.select({ id: spaces.id }).from(spaces).where(eq(spaces.orgId, owner.orgId)),
-      );
+    : eq(integrationConnections.orgId, owner.orgId);
   return db.transaction(async (tx) => {
+    // The client, then its rows — the order a connect and a promote take.
+    const [client] = await tx
+      .select({ id: integrationOauthClients.id })
+      .from(integrationOauthClients)
+      .where(clientByIdFilter(owner, packageId, clientId))
+      .for("update");
+    if (!client) throw notFound(`OAuth client '${clientId}' not found`);
     // Locked as read, in id order: the rows checked below are exactly the rows deleted.
     const minted = await tx
       .select({ id: integrationConnections.id })
@@ -2022,11 +2349,8 @@ export async function deleteIntegrationOAuthClient(
     );
     const [deleted] = await tx
       .delete(integrationOauthClients)
-      .where(clientByIdFilter(owner, packageId, clientId))
+      .where(eq(integrationOauthClients.id, client.id))
       .returning();
-    if (!deleted) {
-      throw notFound(`OAuth client '${clientId}' not found`);
-    }
     // Cascade: every connection pinned to this client is now dead — the
     // client_id/secret that minted its tokens is gone, so it can never refresh
     // again (resolveIntegrationClientById → null → needs_reconnection forever).
@@ -2084,7 +2408,7 @@ export async function deleteIntegrationOAuthClient(
       disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
     }
     return {
-      client: toPublicClient(projectClientWithSecret(deleted)),
+      client: toPublicClient(projectClientWithSecret(deleted!)),
       deletedConnections: deletedConns.length,
       disabledScheduleIds,
     };
@@ -2258,6 +2582,11 @@ interface StoreConnectionInput {
    * connect; absent for non-oauth2 auths (persists NULL — no OAuth client).
    */
   clientRef?: string | null;
+  /** See {@link PersistCredentialInput}. */
+  variables?: Record<string, string> | null;
+  oauthResource?: string;
+  /** See {@link PersistTarget}. */
+  delegated?: boolean;
 }
 
 /**
@@ -2266,18 +2595,25 @@ interface StoreConnectionInput {
  *
  *   - `insert`       — first acquisition (OAuth2 callback / fields submit).
  *   - `update-owned` — user-initiated reconnect / scope upgrade. Owner-scoped
- *                      WHERE (id + spaceId + actor identity + the
+ *                      WHERE (id + the actor's own row reaching the space + the
  *                      (packageId, authKey) the credentials belong to); throws
  *                      `notFound` when the row isn't the caller's OR belongs to
  *                      a different integration/auth (a caller-supplied id can
  *                      never overwrite an unrelated connection of theirs).
- *   - `update-by-id` — system write-back (proactive token refresh). Keyed by
- *                      id only — the id came from an already-authorized
- *                      resolution — and silently no-ops when the row is gone
- *                      (matches the pre-convergence refresh behaviour).
+ *   - `update-by-id` — system write-back (token refresh). Keyed by id — the id
+ *                      came from an already-authorized resolution — and a
+ *                      compare-and-set on `expect`, the client and ciphertext
+ *                      the refresh spent: it writes nothing when the row is
+ *                      gone or was reconnected meanwhile.
  */
 export type PersistTarget =
-  | { kind: "insert"; scope: SpaceScope; actor: Actor }
+  | {
+      kind: "insert";
+      scope: SpaceScope;
+      actor: Actor;
+      /** Written by a delegated credential (API key, third-party token): scoped to the space. */
+      delegated?: boolean;
+    }
   | {
       kind: "update-owned";
       scope: SpaceScope;
@@ -2287,8 +2623,14 @@ export type PersistTarget =
        * the WHERE so a mismatched `connectionId` matches zero rows. */
       packageId: string;
       authKey: string;
+      /** A delegated credential's write: the row must be scoped to `scope.spaceId`, never widened. */
+      delegated?: boolean;
     }
-  | { kind: "update-by-id"; connectionId: string };
+  | {
+      kind: "update-by-id";
+      connectionId: string;
+      expect: { clientRef: string | null; credentialsEncrypted: string };
+    };
 
 /**
  * Persist input for the credential columns.
@@ -2304,7 +2646,7 @@ export type PersistTarget =
  *   - `accountId`, `identityClaims`, `scopesGranted` are written ONLY when
  *     provided (`undefined` = leave untouched). The refresh write-back relies
  *     on this: it must not clobber the identity, nor — when the IdP omits
- *     `scope` — the scope high-water-mark.
+ *     `scope` — the stored grant.
  */
 interface PersistCredentialInput {
   credentials: Record<string, unknown>;
@@ -2334,39 +2676,155 @@ interface PersistCredentialInput {
    * non-oauth2 writes → persists NULL.
    */
   clientRef?: string | null;
+  /** AFPS §7.12, written with the credential they were acquired with; the refresh omits it. */
+  variables?: Record<string, string> | null;
+  /** RFC 8707 `resource` of the oauth2 token: every acquisition writes it, the refresh leaves it. */
+  oauthResource?: string;
+}
+
+/** `idx_integration_conn_owner_label`'s key; `spaceId` `null` is org scope. */
+export interface ConnectionLabelKey {
+  orgId: string;
+  spaceId: string | null;
+  integrationId: string;
+  ownerId: string;
+}
+
+function labelLockKey(key: ConnectionLabelKey): string {
+  return `ic_label:${key.orgId}:${key.spaceId ?? ""}:${key.integrationId}:${key.ownerId}`;
+}
+
+function labelKeyFilter(key: ConnectionLabelKey): SQL {
+  const c = integrationConnections;
+  return and(
+    eq(c.orgId, key.orgId),
+    key.spaceId === null ? isNull(c.spaceId) : eq(c.spaceId, key.spaceId),
+    eq(c.integrationId, key.integrationId),
+    sql`coalesce(${c.userId}, ${c.endUserId}) = ${key.ownerId}`,
+  )!;
 }
 
 /**
- * Serialise the label writes of one (space, integration) — an insert picking a free label and a
- * rename — so a pick cannot be taken between its read and its write.
+ * Serialise the label writes (insert, rename, widening) of each key, in {@link labelLockKey} order,
+ * so a pick cannot be taken between its read and its write.
  */
-export async function lockConnectionLabels(
-  tx: Tx,
-  spaceId: string,
-  integrationId: string,
-): Promise<void> {
-  const key = `ic_label:${spaceId}:${integrationId}`;
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key})::bigint)`);
+export async function lockLabelKeys(tx: Tx, keys: ConnectionLabelKey[]): Promise<void> {
+  for (const lockKey of [...new Set(keys.map(labelLockKey))].sort()) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
+  }
 }
 
-/** Call under {@link lockConnectionLabels}. */
-async function firstFreeLabel(
-  tx: Tx,
-  spaceId: string,
-  integrationId: string,
-  label: string,
-): Promise<string> {
+async function takenLabels(tx: Tx, key: ConnectionLabelKey): Promise<string[]> {
   const rows = await tx
     .select({ label: integrationConnections.label })
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.spaceId, spaceId),
-        eq(integrationConnections.integrationId, integrationId),
-      ),
-    );
-  const taken = rows.map((row) => row.label);
-  return dedupeLabel(label, taken, { maxLength: CONNECTION_LABEL_MAX });
+    .where(labelKeyFilter(key));
+  return rows.map((row) => row.label);
+}
+
+/** Call under {@link lockLabelKeys}. */
+async function firstFreeLabel(tx: Tx, key: ConnectionLabelKey, label: string): Promise<string> {
+  return dedupeLabel(label, await takenLabels(tx, key), { maxLength: CONNECTION_LABEL_MAX });
+}
+
+/** Org scope: a member, not through a delegated credential, minting with no space client. */
+function writesOrgScope(
+  target: { actor: Actor; delegated?: boolean },
+  clientSpace: string | null,
+): boolean {
+  return target.actor.type === "user" && !target.delegated && clientSpace === null;
+}
+
+/** A write naming a space locks it before its client, label keys and rows: a space deletion's order. */
+async function lockSpacesForKeyShare(tx: Tx, spaceIds: string[]): Promise<void> {
+  if (spaceIds.length === 0) return;
+  await tx
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(inArray(spaces.id, spaceIds))
+    .orderBy(asc(spaces.id))
+    .for("key share");
+}
+
+// The space of `clientRef`'s custom client (`null`: org, system or none), read FOR SHARE: its tier
+// cannot change before the connection it mints commits.
+async function mintingClientSpace(
+  tx: Tx,
+  clientRef: string | null | undefined,
+): Promise<string | null> {
+  // System ids are never UUID-shaped (the registry refuses them): a non-UUID names the system tier.
+  if (!clientRef || !isUuid(clientRef)) return null;
+  const [client] = await tx
+    .select({ spaceId: integrationOauthClients.spaceId })
+    .from(integrationOauthClients)
+    .where(eq(integrationOauthClients.id, clientRef))
+    .for("share");
+  if (!client) throw notFound(`OAuth client '${clientRef}' not found`);
+  return client.spaceId;
+}
+
+/** `where` over the unaliased table; shares kept, `origin_space_id` the space left, a taken label ` (n)`. */
+export async function widenConnectionsToOrgScope(
+  tx: Tx,
+  where: SQL,
+): Promise<{ id: string; label: string; previousLabel: string }[]> {
+  const c = integrationConnections;
+  const widenable = and(where, isNotNull(c.spaceId), isNotNull(c.userId));
+  const keyOf = (
+    row: { orgId: string; integrationId: string; userId: string | null },
+    spaceId: string | null,
+  ): ConnectionLabelKey => ({
+    orgId: row.orgId,
+    spaceId,
+    integrationId: row.integrationId,
+    ownerId: row.userId!,
+  });
+  const sources = await tx
+    .selectDistinct({
+      orgId: c.orgId,
+      spaceId: c.spaceId,
+      integrationId: c.integrationId,
+      userId: c.userId,
+    })
+    .from(c)
+    .where(widenable);
+  await lockSpacesForKeyShare(tx, [...new Set(sources.map((source) => source.spaceId!))]);
+  await lockLabelKeys(
+    tx,
+    sources.flatMap((source) => [keyOf(source, source.spaceId), keyOf(source, null)]),
+  );
+  const rows = await tx
+    .select({
+      id: c.id,
+      orgId: c.orgId,
+      spaceId: c.spaceId,
+      integrationId: c.integrationId,
+      userId: c.userId,
+      label: c.label,
+    })
+    .from(c)
+    .where(widenable)
+    .orderBy(asc(c.id))
+    .for("update");
+
+  const taken = new Map<string, string[]>();
+  const widened: { id: string; label: string; previousLabel: string }[] = [];
+  for (const row of rows) {
+    const key = keyOf(row, null);
+    let labels = taken.get(labelLockKey(key));
+    if (!labels) {
+      labels = await takenLabels(tx, key);
+      taken.set(labelLockKey(key), labels);
+    }
+    const label = dedupeLabel(row.label, labels, { maxLength: CONNECTION_LABEL_MAX });
+    labels.push(label);
+    await tx
+      .update(c)
+      .set({ spaceId: null, originSpaceId: row.spaceId, label, updatedAt: new Date() })
+      .where(eq(c.id, row.id));
+    widened.push({ id: row.id, label, previousLabel: row.label });
+  }
+  return widened;
 }
 
 /**
@@ -2374,8 +2832,7 @@ async function firstFreeLabel(
  * (`credentials_encrypted`, `expires_at`, `scopes_granted`, `identity_claims`,
  * `needs_reconnection`) on `integration_connections`. Every acquisition and
  * refresh path converges here (spec §4.1 — "1 writer"). Returns the persisted
- * summary for INSERT / `update-owned`; `null` for `update-by-id` (the refresh
- * write-back consumes its own result shape and ignores this).
+ * summary; `null` only for an `update-by-id` that wrote nothing.
  *
  * Why no upsert-by-accountId: the previous model collapsed every connection on
  * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
@@ -2384,12 +2841,13 @@ async function firstFreeLabel(
  *
  * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
  * dashboard renew CTAs (agent-page MemberConnectionPicker per-row Renew,
- * integration-detail ConnectionRow reconnect), and the run-kickoff
- * MissingConnectionsModal reconnect button. The latter two consume the
- * `connection_id` field smuggled on `needs_reconnection` / `insufficient_scopes`
- * ProblemDetails by `integration-connection-resolver.ts:translateResolutionError`
- * and forward it through the OAuth state record so the callback lands here on
- * the `update-owned` path.
+ * integration-detail ConnectionRow reconnect), the run-kickoff
+ * MissingConnectionsModal reconnect button, and an upgrade the user chose. The
+ * latter consume the `connection_id` field carried on `needs_reconnection` /
+ * `insufficient_scopes` ProblemDetails by
+ * `integration-connection-resolver.ts:translateResolutionError` and forward it
+ * through the OAuth state record so the callback lands here on the
+ * `update-owned` path.
  */
 export async function persistCredentialBundle(
   target: PersistTarget,
@@ -2418,22 +2876,33 @@ export async function persistCredentialBundle(
     // mix of declared auths (OAuth + PAT + custom).
     //
     // Label: identity or `labelHint` (" (n)"-suffixed when taken), else "Connexion N" past the
-    // highest N across EVERY owner — unique per (space, integration) under the advisory lock.
+    // owner's highest N — unique per owner in the scope under the advisory lock.
     const namedLabel = [displayAccountId(input.accountId), input.labelHint]
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
     const row = await db.transaction(async (tx) => {
-      await lockConnectionLabels(tx, target.scope.spaceId, insertPackageId);
+      await lockSpacesForKeyShare(tx, [target.scope.spaceId]);
+      const clientSpace = await mintingClientSpace(tx, input.clientRef);
+      const spaceId = writesOrgScope(target, clientSpace) ? null : target.scope.spaceId;
+      const key: ConnectionLabelKey = {
+        orgId: target.scope.orgId,
+        spaceId,
+        integrationId: insertPackageId,
+        ownerId: target.actor.id,
+      };
+      await lockLabelKeys(tx, [key]);
       const labelValue: string | SQL = namedLabel
-        ? await firstFreeLabel(tx, target.scope.spaceId, insertPackageId, namedLabel)
-        : sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(label from '^Connexion ([0-9]+)$')::numeric) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND label ~ '^Connexion [0-9]+$'), 0) + 1)`;
+        ? await firstFreeLabel(tx, key, namedLabel)
+        : sql<string>`'Connexion ' || (COALESCE((SELECT MAX(substring(${integrationConnections.label} from '^Connexion ([0-9]+)$')::numeric) FROM ${integrationConnections} WHERE ${labelKeyFilter(key)} AND ${integrationConnections.label} ~ '^Connexion [0-9]+$'), 0) + 1)`;
       const inserted = await tx
         .insert(integrationConnections)
         .values({
           integrationId: insertPackageId,
           authKey: insertAuthKey,
           accountId: insertAccountId,
-          spaceId: target.scope.spaceId,
+          orgId: target.scope.orgId,
+          spaceId,
+          originSpaceId: spaceId === null ? target.scope.spaceId : null,
           userId,
           endUserId,
           credentialsEncrypted: ciphertext,
@@ -2441,6 +2910,8 @@ export async function persistCredentialBundle(
           scopesGranted: input.scopesGranted ?? [],
           needsReconnection: input.needsReconnection ?? false,
           clientRef: input.clientRef ?? null,
+          variables: input.variables ?? null,
+          oauthResource: input.oauthResource ?? null,
           expiresAt: input.expiresAt ?? null,
           label: labelValue,
           createdAt: now,
@@ -2452,7 +2923,7 @@ export async function persistCredentialBundle(
     if (!row) {
       throw new Error("persistCredentialBundle: insert returned no row");
     }
-    return serializeIntegrationConnection(row);
+    return serializeIntegrationConnection(row, { owner: true, within: target.scope.spaceId });
   }
 
   // UPDATE — shared column set; WHERE differs by target.
@@ -2474,11 +2945,12 @@ export async function persistCredentialBundle(
   // Re-stamp the minting client on reconnect (acquisition UPDATE passes it);
   // the refresh write-back omits it so the high-water client_ref is preserved.
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
+  if (input.variables !== undefined) set.variables = input.variables;
 
   if (target.kind === "update-owned") {
+    set.oauthResource = input.oauthResource ?? null;
     await assertSpaceInScope(target.scope);
-    const ownerPredicate = actorFilter(target.actor, integrationConnections);
-    // Owner-scoped reconnect: id + space + actor identity, PLUS the
+    // Owner-scoped reconnect: id + the actor's own row reaching the space, PLUS the
     // (packageId, authKey) the new credentials belong to. Without the latter
     // two, a caller-supplied `connectionId` could overwrite ANY connection they
     // own — including one for a different integration — with this integration's
@@ -2486,10 +2958,9 @@ export async function persistCredentialBundle(
     // zero rows → the caller gets `notFound`, never a cross-integration clobber.
     const ownerScope = and(
       eq(integrationConnections.id, target.connectionId),
-      eq(integrationConnections.spaceId, target.scope.spaceId),
       eq(integrationConnections.integrationId, target.packageId),
       eq(integrationConnections.authKey, target.authKey),
-      ownerPredicate,
+      ownRowInSpace(target.scope.spaceId, target.actor),
     );
     // Identity guard: a reconnect / scope-upgrade must stay on the SAME
     // upstream account. If the re-consent authenticated a different identity
@@ -2499,71 +2970,116 @@ export async function persistCredentialBundle(
     // data-integrity and access surprise. Only enforced between two real
     // identities; "default" (identity-less) never blocks an upgrade.
     //
+    // The variables (AFPS §7.12) name the instance the account lives on: same rule.
+    //
     // The read (identity check) and the write must be atomic: performed as two
     // separate statements, a concurrent update could change `accountId` between
     // them and slip a different-account clobber past the guard. Do both in one
     // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
     // is pinned for the duration.
+    const checksAccount =
+      input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
+    const checksVariables = input.variables !== undefined && input.variables !== null;
     const row = await db.transaction(async (tx) => {
-      if (input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID) {
-        const [existing] = await tx
-          .select({ accountId: integrationConnections.accountId })
-          .from(integrationConnections)
-          .where(ownerScope)
-          .limit(1)
-          .for("update");
-        if (
-          existing &&
-          existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
-          existing.accountId !== input.accountId
-        ) {
-          throw conflict(
-            "identity_mismatch",
-            `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
-          );
-        }
+      // A re-stamped client re-decides the scope: see {@link writesOrgScope}.
+      const restamped = input.clientRef !== undefined;
+      if (restamped) await lockSpacesForKeyShare(tx, [target.scope.spaceId]);
+      const clientSpace = restamped ? await mintingClientSpace(tx, input.clientRef) : null;
+      const widens = restamped && writesOrgScope(target, clientSpace);
+      if (widens) {
+        // The keys a widening leaves and joins, before the row lock.
+        const key = {
+          orgId: target.scope.orgId,
+          integrationId: target.packageId,
+          ownerId: target.actor.id,
+        };
+        await lockLabelKeys(tx, [
+          { ...key, spaceId: target.scope.spaceId },
+          { ...key, spaceId: null },
+        ]);
+      }
+      const [existing] = await tx
+        .select({
+          accountId: integrationConnections.accountId,
+          variables: integrationConnections.variables,
+          spaceId: integrationConnections.spaceId,
+        })
+        .from(integrationConnections)
+        .where(ownerScope)
+        .limit(1)
+        .for("update");
+      if (!existing) return undefined;
+      if (target.delegated && existing.spaceId !== target.scope.spaceId) {
+        throw delegatedReconnectRefused();
+      }
+      if (clientSpace !== null && existing.spaceId !== clientSpace) {
+        throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
+      }
+      if (
+        checksAccount &&
+        existing.accountId !== PLACEHOLDER_ACCOUNT_ID &&
+        existing.accountId !== input.accountId
+      ) {
+        throw conflict(
+          "identity_mismatch",
+          `This connection is linked to a different account (${existing.accountId}). Reconnect with the same account, or create a new connection.`,
+        );
+      }
+      if (
+        existing.variables &&
+        checksVariables &&
+        !sameConnectionVariables(connectionVariablesOf(existing.variables), input.variables!)
+      ) {
+        const instance = Object.entries(existing.variables)
+          .map(([name, value]) => `${name}=${value}`)
+          .join(", ");
+        throw conflict(
+          "identity_mismatch",
+          `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
+        );
+      }
+      if (widens && existing.spaceId !== null) {
+        await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId));
       }
       const updated = await tx
         .update(integrationConnections)
         .set(set)
-        .where(ownerScope)
+        .where(eq(integrationConnections.id, target.connectionId))
         .returning();
       return updated[0];
     });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
-    return serializeIntegrationConnection(row);
+    return serializeIntegrationConnection(row, { owner: true, within: target.scope.spaceId });
   }
 
-  // update-by-id (system write-back) — keyed by id only, silent no-op on miss.
+  // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
   // Monotonic clear: the proactive refresh write-back always passes
   // `needsReconnection: false`, which would race-clobber a `true` set
-  // concurrently by `markIntegrationConnectionNeedsReconnection` (scope-shrink /
-  // revoke). When this write CLEARS the flag, gate the row on
+  // concurrently by `markIntegrationConnectionNeedsReconnection` (revoked grant,
+  // missing refresh token, unreadable credential). When this write CLEARS the flag, gate the row on
   // `needs_reconnection = false` so a concurrently-set `true` is preserved — the
   // refresh simply no-ops on that row (a flagged connection's cached credentials
   // are stale anyway, so skipping the write-back is harmless). An explicit
   // `true` write (or any non-clearing write) stays unconditional.
-  const byIdWhere = clearsReconnection
-    ? and(
-        eq(integrationConnections.id, target.connectionId),
-        eq(integrationConnections.needsReconnection, false),
-      )
-    : eq(integrationConnections.id, target.connectionId);
-  await db.update(integrationConnections).set(set).where(byIdWhere);
-  return null;
+  const { clientRef, credentialsEncrypted } = target.expect;
+  const byIdWhere = and(
+    eq(integrationConnections.id, target.connectionId),
+    clientRef === null
+      ? isNull(integrationConnections.clientRef)
+      : eq(integrationConnections.clientRef, clientRef),
+    eq(integrationConnections.credentialsEncrypted, credentialsEncrypted),
+    clearsReconnection ? eq(integrationConnections.needsReconnection, false) : undefined,
+  );
+  const [row] = await db.update(integrationConnections).set(set).where(byIdWhere).returning();
+  return row ? serializeIntegrationConnection(row, { owner: true, within: null }) : null;
 }
 
 /**
- * The single writer of `needs_reconnection = true` that does NOT touch the
- * stored credentials. Flips a row to "re-connect required" — used by the
- * refresh paths (no refresh_token / revoked grant) and the scope-shrink-
- * below-floor guard. Keyed by id (system write); no-ops when the row is gone.
- */
-/**
  * Read and decrypt the stored credential fields for one connection by id.
- * Returns `null` when the row is gone.
+ * Returns `null` when the row is gone or its blob cannot be read (logged): every
+ * caller only enriches a reconnect or a deletion with them.
  *
  * Keyed by id alone — it carries NO ownership, org or space predicate, so it
  * hands back plaintext for any connection in the deployment. Every caller must
@@ -2579,9 +3095,13 @@ export async function getIntegrationConnectionCredentialFields(
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
   if (!row?.credentialsEncrypted) return null;
-  return decryptCredentialsToStringMap(row.credentialsEncrypted);
+  const fields = decryptForDisplay(() => decryptCredentialsToStringMap(row.credentialsEncrypted), {
+    connectionId,
+  });
+  return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
+/** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */
 export async function markIntegrationConnectionNeedsReconnection(
   connectionId: string,
 ): Promise<void> {
@@ -2604,13 +3124,14 @@ type RefreshFailureGate =
  * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
  * of an unrefreshable credential. Increment and escalation are one statement,
  * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
- * never cleared, and a credential write resets the count.
+ * never cleared, and a credential write resets the count. `null` when no row
+ * was counted (gone, or outside `reachable`).
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
   maxFailures: number,
   gate: RefreshFailureGate,
-): Promise<{ failures: number; needsReconnection: boolean }> {
+): Promise<{ failures: number; needsReconnection: boolean } | null> {
   const failures = sql`${integrationConnections.refreshFailureCount} + 1`;
   const escalates =
     "reachable" in gate
@@ -2633,23 +3154,28 @@ export async function recordIntegrationRefreshFailure(
       failures: integrationConnections.refreshFailureCount,
       needsReconnection: integrationConnections.needsReconnection,
     });
-  return row ?? { failures: 0, needsReconnection: false };
+  return row ?? null;
 }
 
 /**
  * Count an upstream rejection of a credential nothing can refresh toward
- * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection.
+ * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection and it still holds
+ * the rejected credential `revision`. `null` when nothing was counted.
  */
 export async function recordUnrefreshableRejection(
   connectionId: string,
   integrationId: string,
   reach: { spaceId: string; actor: Actor },
-): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean }> {
+  revision: string,
+): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean } | null> {
   const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
   const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
-    reachable: reachableConnection(connectionId, integrationId, reach),
+    reachable: and(
+      reachableConnection(connectionId, integrationId, reach),
+      eq(credentialRevision, revision),
+    )!,
   });
-  return { ...counted, maxFailures };
+  return counted && { ...counted, maxFailures };
 }
 
 /**
@@ -2727,6 +3253,8 @@ export async function saveIntegrationConnection(
     expiresAt: input.expiresAt ?? null,
     ...(input.labelHint ? { labelHint: input.labelHint } : {}),
     ...(input.clientRef !== undefined ? { clientRef: input.clientRef } : {}),
+    variables: input.variables ?? null,
+    ...(input.oauthResource !== undefined ? { oauthResource: input.oauthResource } : {}),
   };
   const summary = input.connectionId
     ? await persistCredentialBundle(
@@ -2737,11 +3265,17 @@ export async function saveIntegrationConnection(
           connectionId: input.connectionId,
           packageId: input.packageId,
           authKey: input.authKey,
+          ...(input.delegated ? { delegated: true } : {}),
         },
         persistInput,
       )
     : await persistCredentialBundle(
-        { kind: "insert", scope, actor: input.actor },
+        {
+          kind: "insert",
+          scope,
+          actor: input.actor,
+          ...(input.delegated ? { delegated: true } : {}),
+        },
         { ...persistInput, packageId: input.packageId, authKey: input.authKey },
       );
   // INSERT and update-owned always return a summary (or throw).
@@ -2749,64 +3283,44 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * List the connections the actor can *use* for an integration in this
- * space: their own rows, plus every row opted into org-wide sharing
- * (`sharedWithOrg`) whoever owns it.
- *
- * The union — not the actor's own rows — is the correct set here because
- * it is what the runtime resolver will actually pick from
- * (`selectAccessibleConnection`, `loadAccessibleConnections`,
- * `listAccessibleConnections`). An own-only list made three surfaces built
- * on top of it silently wrong: the admin org-default and pin pickers
- * (which filter this list for `shared_with_org` and could therefore only
- * ever offer the admin's *own* shared rows, while the backend happily
- * accepts anyone's — `integration-pins-service.ts` `upsertIntegrationPin`),
- * and `auths[].ready`, which claimed "not connected" for an actor whose
- * run would in fact resolve a shared connection.
- *
- * Rows the actor does not own come back with `identity_claims: null`:
- * sharing a connection consents to *using* it, not to publishing the
- * owner's OIDC claim bag (email, sub, …) to every member. `account_id`
- * and `owner_name` stay — the picker DTO already exposes both, and a
- * connection you can pick has to be identifiable.
- *
- * `locked_by` says up front which rows an unshare or delete would refuse
- * (`assertConnectionsUnpinned`), so the UI need not learn it from a 409.
+ * The resolver's set ({@link usableInSpace}), projected for this space unless an owner reads with
+ * `wholeReach`. `locked_by`: what a 409 would refuse — an own row's delete (a lock anywhere),
+ * another's withdrawal from this space.
  */
 export async function listIntegrationConnections(
   scope: SpaceScope,
   packageId: string,
   actor: Actor,
+  wholeReach = false,
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const rows = await db
     .select()
     .from(integrationConnections)
     .where(
-      and(
-        eq(integrationConnections.integrationId, packageId),
-        eq(integrationConnections.spaceId, scope.spaceId),
-        actorOrSharedFilter(actor, integrationConnections),
-      ),
+      and(eq(integrationConnections.integrationId, packageId), usableInSpace(scope.spaceId, actor)),
     );
   const ownerName = await resolveConnectionOwnerNames(rows);
-  const locks = await connectionLocks(
-    db,
-    rows.map((row) => row.id),
-  );
+  const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
+  const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);
+  const locks = new Map([
+    ...(await connectionLocks(db, own)),
+    ...(await connectionLocks(db, others, scope.spaceId)),
+  ]);
   return rows.map((row) => {
-    const isOwn = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
-    const summary = serializeIntegrationConnection(row);
+    const owner = actorOwns(actor, row);
     return {
-      ...summary,
-      ...(isOwn ? {} : { identity_claims: null }),
+      ...serializeIntegrationConnection(row, {
+        owner,
+        within: owner && wholeReach ? null : scope.spaceId,
+      }),
       owner_name: ownerName(row),
       locked_by: locks.get(row.id) ?? null,
     };
   });
 }
 
-/** One integration the actor could attach to an agent (own and/or org-shared). */
+/** One integration the actor could attach to an agent (own and/or shared into the space). */
 interface UsableIntegration {
   integration_package_id: string;
   name: string;
@@ -2830,9 +3344,8 @@ interface UsableIntegration {
 
 /**
  * Integrations the actor could use when building an agent manually in the
- * current space: any integration for which a connection exists that is
- * either the actor's own (`actorFilter`) OR opted into org-wide sharing
- * (`sharedWithOrg`) — `actorOrSharedFilter`, the resolver's access predicate.
+ * current space: any integration with a connection the actor may bind there —
+ * {@link usableInSpace}, the resolver's access predicate.
  *
  * Deduped to the integration level (the agent picks an integration; the
  * connection itself is resolved at run time by `resolveAgentIntegrationPick`).
@@ -2849,25 +3362,19 @@ export async function listUsableIntegrationsForActor(
       integrationId: integrationConnections.integrationId,
       userId: integrationConnections.userId,
       endUserId: integrationConnections.endUserId,
-      sharedWithOrg: integrationConnections.sharedWithOrg,
+      sharedSpaceIds: integrationConnections.sharedSpaceIds,
     })
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.spaceId, scope.spaceId),
-        actorOrSharedFilter(actor, integrationConnections),
-      ),
-    );
+    .where(usableInSpace(scope.spaceId, actor));
   if (rows.length === 0) return [];
 
-  // own = row owned by this actor; shared = row opted into org-wide sharing.
+  // own = row owned by this actor; shared = row shared into this space.
   // A single integration can have both kinds across multiple connection rows.
   const acc = new Map<string, { own: boolean; shared: boolean }>();
   for (const row of rows) {
-    const own = actor.type === "end_user" ? row.endUserId === actor.id : row.userId === actor.id;
     const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
-    entry.own ||= own;
-    entry.shared ||= row.sharedWithOrg;
+    entry.own ||= actorOwns(actor, row);
+    entry.shared ||= row.sharedSpaceIds.includes(scope.spaceId);
     acc.set(row.integrationId, entry);
   }
 
@@ -2923,6 +3430,7 @@ type ConnectionLock = NonNullable<IntegrationConnectionSummary["locked_by"]>;
 export async function connectionLocks(
   executor: DbOrTx,
   ids: readonly string[],
+  spaceId?: string,
 ): Promise<Map<string, ConnectionLock>> {
   const locks = new Map<string, ConnectionLock>();
   if (ids.length === 0) return locks;
@@ -2930,12 +3438,21 @@ export async function connectionLocks(
     .select({ connectionIds: integrationPins.connectionIds })
     .from(integrationPins)
     .where(
-      and(isNull(integrationPins.userId), arrayOverlaps(integrationPins.connectionIds, [...ids])),
+      and(
+        isNull(integrationPins.userId),
+        spaceId === undefined ? undefined : eq(integrationPins.spaceId, spaceId),
+        arrayOverlaps(integrationPins.connectionIds, [...ids]),
+      ),
     );
   const orgDefaults = await executor
     .select({ connectionIds: integrationOrgDefaults.connectionIds })
     .from(integrationOrgDefaults)
-    .where(arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]));
+    .where(
+      and(
+        spaceId === undefined ? undefined : eq(integrationOrgDefaults.spaceId, spaceId),
+        arrayOverlaps(integrationOrgDefaults.connectionIds, [...ids]),
+      ),
+    );
   const wanted = new Set(ids);
   // Pins last, so they overwrite a default naming the same id.
   for (const row of orgDefaults) {
@@ -2952,8 +3469,9 @@ export async function assertConnectionsUnpinned(
   tx: Tx,
   ids: readonly string[],
   refused: string,
+  spaceId?: string,
 ): Promise<void> {
-  const locks = new Set((await connectionLocks(tx, ids)).values());
+  const locks = new Set((await connectionLocks(tx, ids, spaceId)).values());
   if (locks.has("admin_pin")) {
     throw conflict(
       "connection_pinned",
@@ -2968,53 +3486,37 @@ export async function assertConnectionsUnpinned(
   }
 }
 
-/** Delete one connection row the caller owns ({@link forgetDeletedConnection}). */
-export async function deleteIntegrationConnection(
-  scope: SpaceScope | ActorScope,
-  connectionId: string,
+/** Delete one own row within `authority` ({@link forgetDeletedConnection}); `null` when none. */
+export async function deleteOwnConnection(
   actor: Actor,
-): Promise<{ disabledScheduleIds: string[] }> {
-  // Confirm the target space belongs to the caller's org before touching
-  // any connection — same escalation guard the other connection mutations run.
-  // Without it a caller could pass a space id from another org and the
-  // WHERE (id + spaceId + owner) would silently match zero rows and 404,
-  // masking the cross-org attempt instead of rejecting it up front.
-  //
-  // The `/me/connections` path passes an `ActorScope` (no `orgId`): it is
-  // actor-scoped, so the actor-ownership predicate below is the authoritative
-  // boundary and the space∈org check does not apply. The escalation guard runs
-  // only for `SpaceScope` callers (those that resolved an org). See docs: /me
-  // routes skip org context.
-  if ("orgId" in scope) await assertSpaceInScope(scope);
-  const ownerPredicate = actorFilter(actor, integrationConnections);
-  const [owned] = await db
-    .select({ id: integrationConnections.id })
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.spaceId, scope.spaceId),
-        ownerPredicate,
-      ),
-    )
-    .limit(1);
-  if (!owned) throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+  connectionId: string,
+  authority: MeConnectionAuthority,
+): Promise<{ orgId: string; disabledScheduleIds: string[] } | null> {
   return db.transaction(async (tx) => {
-    await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
-    const deleted = await tx
-      .delete(integrationConnections)
+    const [row] = await tx
+      .select({
+        ...deletedConnectionOwner,
+        orgId: integrationConnections.orgId,
+        spaceId: integrationConnections.spaceId,
+      })
+      .from(integrationConnections)
       .where(
         and(
           eq(integrationConnections.id, connectionId),
-          eq(integrationConnections.spaceId, scope.spaceId),
-          ownerPredicate,
+          actorFilter(actor, integrationConnections),
+          meConnectionAuthorityFilter(authority),
         ),
       )
-      .returning(deletedConnectionOwner);
-    if (deleted.length === 0) {
-      throw notFound(`Connection '${connectionId}' not found or not owned by caller`);
+      .for("update");
+    if (!row) return null;
+    if (authority.kind === "bound" && authority.spaceId && row.spaceId === null) {
+      throw forbidden(
+        "A credential bound to a space cannot delete a connection serving the whole organization",
+      );
     }
-    return { disabledScheduleIds: await forgetDeletedConnection(tx, deleted[0]!) };
+    await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
+    await tx.delete(integrationConnections).where(eq(integrationConnections.id, row.id));
+    return { orgId: row.orgId, disabledScheduleIds: await forgetDeletedConnection(tx, row) };
   });
 }
 
@@ -3037,7 +3539,7 @@ async function forgetDeletedConnection(
   const owner = actorFromIds(row.userId, row.endUserId)!;
   const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
   for (const pin of plan.pins) {
-    // `cardinality BETWEEN 1 AND 20` refuses an emptied set: the pin goes instead.
+    // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
     } else {
@@ -3099,12 +3601,16 @@ interface ConnectionForgetPlan {
  * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
  * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
  * a caller that applies the plan in the same transaction. `scheduleFilter` narrows both schedule
- * lists: a schedule may name a connection of another space.
+ * lists (a schedule may name a connection of another space), `pinFilter` the pins.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
   connection: { id: string; owner: Actor },
-  { lock = false, scheduleFilter }: { lock?: boolean; scheduleFilter?: SQL } = {},
+  {
+    lock = false,
+    scheduleFilter,
+    pinFilter,
+  }: { lock?: boolean; scheduleFilter?: SQL; pinFilter?: SQL } = {},
 ): Promise<ConnectionForgetPlan> {
   const { id, owner } = connection;
   const pinQuery = executor
@@ -3116,7 +3622,11 @@ export async function planConnectionForget(
     })
     .from(integrationPins)
     .where(
-      and(eq(integrationPins.userId, owner.id), arrayContains(integrationPins.connectionIds, [id])),
+      and(
+        eq(integrationPins.userId, owner.id),
+        arrayContains(integrationPins.connectionIds, [id]),
+        pinFilter,
+      ),
     )
     .orderBy(
       asc(integrationPins.packageId),
@@ -3157,6 +3667,7 @@ export async function planConnectionForget(
     schedules: ownRows.map((row) => {
       const overrides = row.connectionOverrides ?? {};
       const kept = Object.entries(overrides).flatMap(([integrationId, ids]) => {
+        if (!ids.includes(id)) return [[integrationId, ids] as const]; // `[]` (none) included
         const rest = ids.filter((c) => c !== id);
         return rest.length > 0 ? [[integrationId, rest] as const] : [];
       });
@@ -3183,13 +3694,30 @@ function compareBinary(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** A row's scope, and its shares and origin `within` one space (`null`: all — the owner's session). */
+export function connectionReachView(
+  row: Pick<
+    typeof integrationConnections.$inferSelect,
+    "spaceId" | "sharedSpaceIds" | "originSpaceId"
+  >,
+  within: string | null,
+): { scope: "org" | "space"; shared_space_ids: string[]; origin_space_id: string | null } {
+  const seen = (id: string | null) => id !== null && (within === null || id === within);
+  return {
+    scope: row.spaceId === null ? "org" : "space",
+    shared_space_ids: row.sharedSpaceIds.filter(seen),
+    origin_space_id: seen(row.originSpaceId) ? row.originSpaceId : null,
+  };
+}
+
 /**
  * Single wire serializer for an `integration_connections` row — every route
  * that returns a connection (list, connect flows, metadata PATCH) goes
- * through this so the DTO shape never forks.
+ * through this so the DTO shape never forks. Only the `owner` sees the identity claims.
  */
 export function serializeIntegrationConnection(
   row: typeof integrationConnections.$inferSelect,
+  view: { owner: boolean; within: string | null },
 ): IntegrationConnectionSummary {
   if (row.userId && row.endUserId) {
     // DB check constraint rules this out; guard against drift.
@@ -3200,21 +3728,36 @@ export function serializeIntegrationConnection(
     integration_package_id: row.integrationId,
     auth_key: row.authKey,
     account_id: row.accountId,
-    identity_claims: (row.identityClaims as Record<string, unknown> | null) ?? null,
+    identity_claims: view.owner
+      ? ((row.identityClaims as Record<string, unknown> | null) ?? null)
+      : null,
     scopes_granted: row.scopesGranted,
     needs_reconnection: row.needsReconnection,
     expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
     owner_type: row.userId ? "user" : "end_user",
     owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
-    shared_with_org: row.sharedWithOrg,
+    ...connectionReachView(row, view.within),
     // Which registered client minted this connection (system env id or custom
     // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
     // UI can show, per connection, exactly which client is in use.
     client_ref: row.clientRef,
+    variables: row.variables ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/** One connection's variables (AFPS §7.12); keyed by id alone — the caller checked ownership. */
+export async function getIntegrationConnectionVariables(
+  connectionId: string,
+): Promise<Record<string, string> | null> {
+  const [row] = await db
+    .select({ variables: integrationConnections.variables })
+    .from(integrationConnections)
+    .where(eq(integrationConnections.id, connectionId))
+    .limit(1);
+  return row?.variables ?? null;
 }
 
 // ─────────────────────────────────────────────
@@ -3239,6 +3782,7 @@ export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
   packageId: string,
   actor: Actor,
+  wholeReach = false,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
@@ -3324,7 +3868,7 @@ export async function getIntegrationAuthStatuses(
     mcpServerTools,
   });
 
-  const allConnections = await listIntegrationConnections(scope, packageId, actor);
+  const allConnections = await listIntegrationConnections(scope, packageId, actor, wholeReach);
   // Same precedence rule as the settings list endpoint, via the shared
   // resolver — env-backed SYSTEM integrations stay `active` here too.
   const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
@@ -3339,7 +3883,7 @@ export async function getIntegrationAuthStatuses(
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS: default scopes are `default_scopes`, the OAuth resource is
     // `resource` (RFC 8707); the Appstrate run-policy `required` flag lives
-    // under `_meta["dev.appstrate/auth"].required`.
+    // under `_meta["dev.appstrate/auth"].required` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       { required?: boolean } | undefined;
@@ -3348,7 +3892,7 @@ export async function getIntegrationAuthStatuses(
     return {
       auth_key: key,
       type: auth.type,
-      required: authMeta?.required ?? true,
+      required: authMeta?.required === true,
       scopes: auth.default_scopes ?? [],
       // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,
@@ -3360,7 +3904,7 @@ export async function getIntegrationAuthStatuses(
       // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
       // a run's authoritative readiness still comes from `validateInlineRun`.
       //
-      // Reads the own ∪ org-shared union (see `listIntegrationConnections`),
+      // Reads the usable set (see `listIntegrationConnections`),
       // so an actor who owns nothing but inherits a shared connection is
       // `ready: true` — deliberately, because their run resolves that
       // connection. This is what makes the state correct under

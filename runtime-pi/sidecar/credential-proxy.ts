@@ -283,6 +283,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];
   const policy = credentialUrlPolicy({
+    target: resolvedUrl,
     templates: prepared.request.templates,
     fields: creds.credentials,
     allowAllUris: creds.allowAllUris,
@@ -294,7 +295,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return {
       ok: false,
       code: URL_POLICY_REFUSAL_CODE[policy.refuse],
-      error: urlPolicyRefusalMessage(policy.refuse, integrationId),
+      error: urlPolicyRefusalMessage(policy.refuse, integrationId, templateHost(targetUrl)),
     };
   }
   // Reassigned when a 401 retry runs with refreshed credentials.

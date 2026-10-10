@@ -22,18 +22,20 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bot, ShieldCheck, Trash2 } from "lucide-react";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../components/confirm-modal";
-import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { InlineEditableLabel } from "../components/inline-editable-label";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
+import { ConnectionScopeBadge } from "../components/integration-connect/connection-scope-badge";
+import { ConnectionShareEditor } from "../components/integration-connect/connection-share-editor";
+import { ConnectionVariablesLine } from "../components/integration-connect/connection-variables-line";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import {
   connectionLockHintKey,
   connectionRowGrants,
+  isSharedInSpace,
 } from "../components/integration-connect/connection-ownership";
 import {
   useUpdateIntegrationConnection,
@@ -48,6 +50,8 @@ import {
 } from "../hooks/use-me-connections";
 import { isQueryInFlight } from "../lib/query-state";
 import { usePermissions } from "../hooks/use-permissions";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { useCurrentOrgId } from "../hooks/use-org";
 import { useCanReach } from "../hooks/use-can-reach";
 import { packageDetailPath } from "../lib/package-paths";
 import { TableRowActions } from "../components/table-row-actions";
@@ -103,16 +107,18 @@ function useLockText(
 /** What the caller may do to this row, as the API enforces it. */
 function useRowGrants(connection: IntegrationConnection, isOwn: boolean, isAdmin: boolean) {
   const { can } = usePermissions();
+  const spaceId = useCurrentSpaceId();
   const canConnect = can("integrations:connect");
   const lockKey = connectionLockHintKey(connection.locked_by, isAdmin);
   return {
     canConnect,
+    spaceId,
     ...connectionRowGrants({
       isOwn,
-      isShared: connection.shared_with_org === true,
+      isShared: isSharedInSpace(connection, spaceId),
+      scope: connection.scope,
       canConnect,
       canConfigure: isAdmin,
-      locked: !!connection.locked_by,
     }),
     lockKey,
   };
@@ -121,8 +127,10 @@ function useRowGrants(connection: IntegrationConnection, isOwn: boolean, isAdmin
 /**
  * The account, renamed in place.
  *
- * Renaming is owner OR org admin — the same rule the route enforces — while
- * sharing and deleting are strictly the owner's.
+ * Renaming is the owner's, or a governor's on a row of this space — the same rule
+ * the route enforces — while sharing and deleting are strictly the owner's. A
+ * connection's variables (its instance URL) sit under the label: they are what
+ * tells two accounts of one integration apart.
  *
  * It used to be a pencil that swapped the label for an input, which is the Edit
  * button the product owner ruled out ("Direct manipulation in forms. No Edit
@@ -162,6 +170,10 @@ export function AccountCell({
           });
         }}
       />
+      <ConnectionVariablesLine
+        variables={connection.variables}
+        testId={`connection-variables-${connection.id}`}
+      />
     </div>
   );
 }
@@ -185,15 +197,15 @@ export function StatusCell({ connection }: { connection: IntegrationConnection }
 }
 
 /**
- * The org-share consent, as the control itself.
+ * Where the connection is usable, and the spaces it is shared into.
  *
- * The sentence the checkbox used to carry is the column's header now, which is
- * what a table is for — repeated on every row it wrapped onto two lines and
- * made the row twice as tall. Sharing is the owner's consent; a governor can
- * only withdraw one. A row the caller may not toggle shows the state without
- * the control, and a locked row keeps it disabled with the reason on it.
+ * Its scope is the scope of the OAuth client that minted it, so it is a fact
+ * (the badge), not a setting. Sharing is the owner's consent: an org-wide row is
+ * shared into any space the owner reaches, a space-confined one into its own
+ * space alone; a governor of this space can only withdraw a colleague's share
+ * here, and a row an admin pin or the space default names refuses that (409).
  */
-export function SharedCell({
+export function ScopeCell({
   connection,
   packageId,
   isOwn,
@@ -204,34 +216,36 @@ export function SharedCell({
   isOwn: boolean;
   isAdmin: boolean;
 }) {
-  const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
-  const { canToggleShare, shareLocked, lockKey } = useRowGrants(connection, isOwn, isAdmin);
+  const orgId = useCurrentOrgId();
+  const { spaceId, canEditShares, canUnshareHere, lockKey } = useRowGrants(
+    connection,
+    isOwn,
+    isAdmin,
+  );
   const { text: lockText } = useLockText(connection, packageId, isAdmin, lockKey);
   return (
-    <DisabledReasonTooltip reason={shareLocked ? lockText : null}>
-      <Checkbox
-        checked={connection.shared_with_org === true}
-        disabled={!canToggleShare || shareLocked || updateConnection.isPending}
-        onCheckedChange={(next) =>
+    <div className="flex min-w-0 flex-col items-start gap-1.5">
+      <ConnectionScopeBadge scope={connection.scope} testId={`connection-scope-${connection.id}`} />
+      <ConnectionShareEditor
+        connectionId={connection.id}
+        orgId={orgId}
+        scope={connection.scope}
+        sharedSpaceIds={connection.shared_space_ids}
+        ownSpaceId={connection.scope === "space" ? spaceId : null}
+        hereSpaceId={spaceId}
+        canEditShares={canEditShares}
+        canUnshareHere={canUnshareHere}
+        lockHint={lockText}
+        pending={updateConnection.isPending}
+        onChange={(sharedSpaceIds) =>
           updateConnection.mutate({
             params: { path: { packageId, connectionId: connection.id } },
-            body: { shared_with_org: next === true },
+            body: { shared_space_ids: sharedSpaceIds },
           })
         }
-        aria-label={t("integration.connection.shareWithOrg.label")}
-        title={
-          !canToggleShare || shareLocked
-            ? undefined
-            : t(
-                isOwn
-                  ? "integration.connection.shareWithOrg.help"
-                  : "integration.connection.shareWithOrg.unshareHelp",
-              )
-        }
-        data-testid={`share-toggle-${connection.id}`}
       />
-    </DisabledReasonTooltip>
+    </div>
   );
 }
 
@@ -276,9 +290,7 @@ export function ConnectionActionsCell({
           <InlineConnectButton
             packageId={packageId}
             authKey={authKey}
-            intent="reconnect"
             connectionId={connection.id}
-            lockToAuthKey
             iconOnly
           />
         )}

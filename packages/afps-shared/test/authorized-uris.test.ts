@@ -11,6 +11,7 @@ import {
   parseUrlFormPattern,
   renderAuthorizedUris,
   unrenderableAuthorizedUriFields,
+  wildcardMatchStaysWithinBound,
 } from "../src/authorized-uris.ts";
 
 describe("renderAuthorizedUris", () => {
@@ -88,10 +89,12 @@ describe("renderAuthorizedUris", () => {
 describe("parseUrlFormPattern", () => {
   it("splits a leading placeholder from its / suffix", () => {
     expect(parseUrlFormPattern("{$credential.site_url}/api/3/**")).toEqual({
+      root: "credential",
       field: "site_url",
       suffix: "/api/3/**",
     });
     expect(parseUrlFormPattern("{$credential.webhook_url}")).toEqual({
+      root: "credential",
       field: "webhook_url",
       suffix: "",
     });
@@ -226,7 +229,11 @@ describe("unrenderableAuthorizedUriFields", () => {
   it("names a bare entry whose value ends in an empty '?' or '#'", () => {
     for (const hook of ["https://h.example.com/hook?", "https://h.example.com/hook#"]) {
       const [entry] = unrenderableAuthorizedUriFields(["{$credential.hook}"], { hook });
-      expect(entry).toEqual({ field: "hook", expected: expect.stringContaining("empty '?'") });
+      expect(entry).toEqual({
+        root: "credential",
+        field: "hook",
+        expected: expect.stringContaining("empty '?'"),
+      });
     }
   });
 
@@ -293,6 +300,67 @@ describe("isHostUnboundedUriPattern", () => {
     }
   });
 
+  describe("a wildcard host, judged with the Public Suffix List", () => {
+    it.each([
+      ["under a .com registrable domain", "https://*.zendesk.com/**"],
+      ["deeper under a registrable domain", "https://*.api.crm4.dynamics.com/**"],
+      ["under a registrable domain below a multi-label suffix", "https://*.example.co.uk/**"],
+      ["under a registrable domain below a private suffix", "https://*.someone.github.io/**"],
+      ["under an exception rule of a list wildcard", "https://*.www.ck/**"],
+      ["in the middle of the host", "https://api.*.example.com/**"],
+      ["as a double star under a registrable domain", "https://**.example.com/**"],
+      ["inside the leftmost label", "https://api-*.example.com/**"],
+      ["with a port", "https://*.example.com:8443/**"],
+      ["with a globbed port", "https://*.example.com:*/**"],
+      ["in uppercase", "HTTPS://*.EXAMPLE.CO.UK/**"],
+      ["with a trailing dot", "https://*.example.co.uk./**"],
+      ["under a punycode registrable domain", "https://*.xn--80ak6aa92e.com/**"],
+      ["under an unlisted top-level domain", "https://*.example.internal/**"],
+      [
+        "above a host rendered from the connection",
+        "https://*.{$credential.tenant}.example.com/**",
+      ],
+    ])("is bounded %s", (_, pattern) => {
+      expect(isHostUnboundedUriPattern(pattern)).toBe(false);
+    });
+
+    it.each([
+      ["right under an ICANN multi-label suffix", "https://*.co.uk/**"],
+      ["right under a private suffix", "https://*.github.io/**"],
+      ["right under another private suffix", "https://*.vercel.app/**"],
+      ["right under a private API suffix", "https://*.googleapis.com/**"],
+      ["right under a private hosting suffix", "https://*.supabase.co/**"],
+      ["right under a private workers suffix", "https://*.workers.dev/**"],
+      ["right under a private suffix, with a port", "https://*.github.io:443/**"],
+      ["right under a suffix, with a trailing dot", "https://*.co.uk./**"],
+      ["right under a suffix, in uppercase", "https://*.CO.UK/**"],
+      ["where the wildcard reaches the registrable label", "https://*example.co.uk/**"],
+      ["in the middle, above a public suffix only", "https://api.*.co.uk/**"],
+      ["under a suffix whose children a list wildcard makes public", "https://*.kawasaki.jp/**"],
+      ["right under a list wildcard rule", "https://*.foo.ck/**"],
+      ["under a punycode top-level domain", "https://*.xn--fiqs8s/**"],
+      ["right under a punycode multi-label suffix", "https://*.xn--55qx5d.cn/**"],
+      ["under a single-label name", "https://*.localhost/**"],
+      ["under an unlisted top-level domain alone", "https://*.internal/**"],
+      ["above a host rendered from the connection alone", "https://*.{$credential.domain}/**"],
+    ])("is unbounded %s", (_, pattern) => {
+      expect(isHostUnboundedUriPattern(pattern)).toBe(true);
+    });
+
+    it("keeps a literal host bounded, a public suffix or a single label included", () => {
+      for (const pattern of [
+        "https://github.io/**",
+        "https://co.uk/**",
+        "https://localhost/**",
+        "https://localhost:8080/**",
+        "https://{$credential.shop_domain}/**",
+        "https://{$credential.sub}.github.io/**",
+      ]) {
+        expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+      }
+    });
+  });
+
   it("is true for a malformed entry, whose authority WHATWG would rewrite", () => {
     for (const pattern of [
       "https://%2A%2A\\**",
@@ -310,6 +378,40 @@ describe("isHostUnboundedUriPattern", () => {
     ]) {
       expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, true]);
     }
+  });
+});
+
+describe("wildcardMatchStaysWithinBound", () => {
+  it.each([
+    ["https://*.amazonaws.com/**", "sts.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "dynamodb.eu-west-1.amazonaws.com"],
+    ["https://*.zendesk.com/**", "acme.zendesk.com"],
+    ["https://*.salesforce.com/**", "acme.my.salesforce.com"],
+    ["https://*.my.salesforce.com/**", "acme.my.salesforce.com"],
+    ["https://*.api.crm4.dynamics.com/**", "org.api.crm4.dynamics.com"],
+    ["https://*.example.co.uk/**", "a.b.example.co.uk"],
+    ["https://*.example.com/**", "A.Example.COM."],
+    ["https://api.example.com/**", "api.example.com"],
+    ["https://{$credential.shop_domain}/**", "store.myshopify.com"],
+    ["{$credential.site_url}/**", "someone.github.io"],
+  ])("keeps %s → %s within its bound", (pattern, host) => {
+    expect(wildcardMatchStaysWithinBound(pattern, host)).toBe(true);
+  });
+
+  it.each([
+    ["https://*.amazonaws.com/**", "bucket.s3.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "sqs.us-east-1.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "bedrock-runtime.us-east-1.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "x.execute-api.us-east-1.amazonaws.com"],
+    ["https://*.amazonaws.com/**", "s3.amazonaws.com"],
+    ["https://*.co.uk/**", "a.co.uk"],
+    ["https://*.kawasaki.jp/**", "x.foo.kawasaki.jp"],
+    ["https://*.example.com/**", "45.33.0.1"],
+    ["https://*.example.com/**", "[::1]"],
+    ["https://*/**", "example.com"],
+    ["https://**/**", "example.com"],
+  ])("takes %s → %s past its bound", (pattern, host) => {
+    expect(wildcardMatchStaysWithinBound(pattern, host)).toBe(false);
   });
 });
 
@@ -718,9 +820,15 @@ describe("matchesAuthorizedUriSpec", () => {
       "https://45.33.0.1/steal",
       "https://0x2d210001/steal",
       "https://8.168.1.1/steal",
+      "https://another-site.github.io/x",
+      "https://another-site.co.uk/x",
     ];
     for (const pattern of [
       "https://*.example.com/**",
+      "https://*.someone.github.io/**",
+      "https://*.example.co.uk/**",
+      "https://*.github.io/**",
+      "https://*.co.uk/**",
       "https://api.example.com:*/**",
       "https://*.example.com./**",
       "HTTPS://*.EXAMPLE.com:443/**",
@@ -743,6 +851,8 @@ describe("matchesAuthorizedUriSpec", () => {
     expect(matchesAuthorizedUriSpec("https://[::**/**", targets[2]!)).toBe(true);
     expect(matchesAuthorizedUriSpec("https://*.0.1/**", "https://0x2d210001/steal")).toBe(true);
     expect(matchesAuthorizedUriSpec("https://*.168.1.1/**", "https://8.168.1.1/steal")).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.github.io/**", targets[6]!)).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://*.co.uk/**", targets[7]!)).toBe(true);
   });
 });
 
@@ -950,5 +1060,149 @@ describe("compileEgressPolicy — allowAllUris", () => {
     const p = compileEgressPolicy({ authorizedUris: [], allowAllUris: true });
     expect(p.allowsAuthority("anything.example", 8443)).toBe(true);
     expect(p.allowsUrl("https://anything.example/x")).toBe(true);
+  });
+});
+
+describe("connection variables (§7.9) in authorized_uris", () => {
+  it("parseUrlFormPattern reads a leading variable", () => {
+    expect(parseUrlFormPattern("{$variable.base_url}/api/v4/**")).toEqual({
+      root: "variable",
+      field: "base_url",
+      suffix: "/api/v4/**",
+    });
+    expect(parseUrlFormPattern("{$variable.base_url}")).toEqual({
+      root: "variable",
+      field: "base_url",
+      suffix: "",
+    });
+    expect(parseUrlFormPattern("{$variable.base_url}/{$credential.p}")).toBeNull();
+    expect(parseUrlFormPattern("{$credential.site}/{$variable.p}")).toBeNull();
+    expect(parseUrlFormPattern("{$variable.base_url}.example.com/**")).toBeNull();
+  });
+
+  describe("URL form", () => {
+    const api = "{$variable.base_url}/api/v4/**";
+
+    for (const [value, expected] of [
+      ["https://gitlab.example.com", "https://gitlab.example.com/api/v4/**"],
+      ["https://example.com/gitlab//", "https://example.com/gitlab/api/v4/**"],
+      ["http://GitLab.example.com:8080", "http://gitlab.example.com:8080/api/v4/**"],
+    ] as const) {
+      it(`renders ${JSON.stringify(value)}`, () => {
+        expect(renderAuthorizedUris([api], {}, { base_url: value })).toEqual([expected]);
+      });
+    }
+
+    it("renders a bare entry as the value URL itself", () => {
+      expect(
+        renderAuthorizedUris(["{$variable.base_url}"], {}, { base_url: "https://a.example.com" }),
+      ).toEqual(["https://a.example.com/"]);
+    });
+
+    for (const bad of [
+      "gitlab.example.com",
+      "ftp://gitlab.example.com",
+      "https://u@gitlab.example.com",
+      "https://@gitlab.example.com",
+      "https://gitlab.example.com/?a=1",
+      "https://gitlab.example.com/?",
+      "https://gitlab.example.com/#x",
+      "https://*.example.com",
+      "https://gitlab.example.com/*",
+    ]) {
+      it(`drops the entry, bare or not, when the value is ${JSON.stringify(bad)}`, () => {
+        expect(renderAuthorizedUris([api, "{$variable.base_url}"], {}, { base_url: bad })).toEqual(
+          [],
+        );
+      });
+    }
+
+    it("drops the entry when the variable is missing, whatever the credential holds", () => {
+      expect(renderAuthorizedUris([api], { base_url: "https://a.example.com" })).toEqual([]);
+    });
+  });
+
+  describe("authority form", () => {
+    const tenant = "https://{$variable.tenant}.forge.example.com/**";
+
+    it("fills the host alone or ahead of literal labels, before a literal port", () => {
+      expect(
+        renderAuthorizedUris(
+          ["https://{$variable.tenant}/**", "https://{$variable.tenant}.example.com:8443/v1/**"],
+          {},
+          { tenant: "Acme" },
+        ),
+      ).toEqual(["https://acme/**", "https://acme.example.com:8443/v1/**"]);
+    });
+
+    it("fills the host with lowercased labels", () => {
+      expect(renderAuthorizedUris([tenant], {}, { tenant: "Acme.EU" })).toEqual([
+        "https://acme.eu.forge.example.com/**",
+      ]);
+      expect(
+        renderAuthorizedUris(["https://{$variable.host}/**"], {}, { host: "Box.Example.com" }),
+      ).toEqual(["https://box.example.com/**"]);
+    });
+
+    for (const bad of ["-acme", "acme-", "a..b", "a_b", "a/b", "a:1", "*", "a".repeat(64), ""]) {
+      it(`drops the entry when the value is ${JSON.stringify(bad)}`, () => {
+        expect(renderAuthorizedUris([tenant], {}, { tenant: bad })).toEqual([]);
+      });
+    }
+
+    it("drops the entry when the rendered host exceeds 253 characters", () => {
+      const label = "a".repeat(63);
+      const value = [label, label, label, "a".repeat(44)].join(".");
+      expect(value.length + ".forge.example.com".length).toBe(254);
+      expect(renderAuthorizedUris([tenant], {}, { tenant: value })).toEqual([]);
+      expect(renderAuthorizedUris([tenant], {}, { tenant: value.slice(1) })).toHaveLength(1);
+    });
+
+    it("never fills a port, a path, or an entry without a scheme", () => {
+      for (const pattern of [
+        "https://h.example.com:{$variable.port}/**",
+        "https://h.example.com/{$variable.tenant}/**",
+        "{$variable.tenant}.example.com/**",
+        "https://api.{$variable.tenant}.example.com/**",
+        "https://u@{$variable.tenant}.example.com/**",
+        "https://{$variable.tenant}.example.com/{$credential.p}/**",
+      ]) {
+        expect([
+          pattern,
+          renderAuthorizedUris([pattern], {}, { port: "443", tenant: "a" }),
+        ]).toEqual([pattern, []]);
+      }
+    });
+  });
+
+  it("names the offending variables apart from same-named credential fields", () => {
+    const patterns = [
+      "{$variable.base_url}/**",
+      "{$credential.base_url}/**",
+      "https://{$variable.tenant}.example.com/**",
+    ];
+    expect(
+      unrenderableAuthorizedUriFields(
+        patterns,
+        { base_url: "nope" },
+        { base_url: "nope", tenant: "-x" },
+      ),
+    ).toEqual([
+      { root: "variable", field: "base_url", expected: expect.stringContaining("query string") },
+      { root: "credential", field: "base_url", expected: expect.stringContaining("query string") },
+      { root: "variable", field: "tenant", expected: expect.stringContaining("labels") },
+    ]);
+  });
+
+  it("isHostUnboundedUriPattern bounds a variable placeholder like a credential one", () => {
+    for (const pattern of [
+      "{$variable.base_url}/**",
+      "{$variable.base_url}",
+      "https://{$variable.tenant}.example.com/**",
+      "https://{$variable.host}/**",
+    ]) {
+      expect([pattern, isHostUnboundedUriPattern(pattern)]).toEqual([pattern, false]);
+    }
+    expect(isHostUnboundedUriPattern("https://{$variable.tenant}.*/**")).toBe(true);
   });
 });

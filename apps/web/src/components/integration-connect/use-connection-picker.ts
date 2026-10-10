@@ -5,8 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   invalidateIntegrationQueries,
-  useIntegrationAgentResolution,
-  useIntegrationRunBlocking,
+  useIntegrationReadinessEntry,
   useReadIntegrationResolution,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
@@ -19,6 +18,7 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution } from "./integration-run-readiness";
+import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
 import {
   requiredScopesForAgent,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -26,6 +26,7 @@ import {
 import {
   canApplyConnectionSet,
   checkedConnectionIds,
+  type ConnectionSet,
   displayedConnectionIds,
   placeCreatedConnection,
   toggleCapped,
@@ -42,17 +43,20 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `pin`      — writes a member `integration_pin` (agent page), the
  *                 agent-wide default for this member across every run.
  *  - `override` — controlled form value (schedule editor, per-run modal);
- *                 nothing is persisted until the form is. Empty = inherit.
+ *                 nothing is persisted until the form is. `null` = inherit.
+ *
+ * In both, `[]` is "no connection", offered only when the agent does not require the integration.
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
  * locked set is refused (`override_outranked`). A stored override within the
  * locked set narrows it and is shown as what binds; one reaching outside it is
- * offered its only fix, being cleared.
+ * offered its only fix, being cleared. "No connection" narrows any lock, so an
+ * override may still pick it under one.
  */
 export type ConnectionPickerPersistence =
   | { mode: "pin" }
-  | { mode: "override"; value: string[]; onChange: (connectionIds: string[]) => void };
+  | { mode: "override"; value: ConnectionSet; onChange: (connectionIds: ConnectionSet) => void };
 
 export interface ConnectionPickerOptions {
   integrationId: string;
@@ -100,14 +104,12 @@ export function useConnectionPicker(
   deps: ConnectionPickerDeps = {},
 ) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: resolution, isPending } = useIntegrationAgentResolution(
+  // Same bulk query as the launch badge, selected per-integration.
+  const { data: entry, isPending } = useIntegrationReadinessEntry(
     integrationId,
     agentPackageId,
     version,
   );
-  // Authoritative run-blocking flag for this integration (run semantics) — same
-  // bulk query as the launch badge, selected per-integration.
-  const { data: runBlocking } = useIntegrationRunBlocking(integrationId, agentPackageId, version);
   const readResolution = useReadIntegrationResolution(integrationId, agentPackageId, version);
   const upsertPin = useUpsertMemberIntegrationPin();
   const deletePin = useDeleteMemberIntegrationPin();
@@ -118,6 +120,7 @@ export function useConnectionPicker(
   // Uncommitted ticks (`null` = untouched); dropped when the menu closes.
   const [draft, setDraft] = useState<string[] | null>(null);
   const [open, setOpen] = useState(false);
+  const [upgradeTargetId, setUpgradeTargetId] = useState<string | null>(null);
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (!next) setDraft(null);
@@ -135,15 +138,24 @@ export function useConnectionPicker(
   // client (else the connect 403s); api_key/basic/custom always can. Without
   // this the "add connection" entries offered a flow doomed to 403.
   const connectable = connectableAuthKeys(manifest, authStatuses);
-  const authKeys = Object.keys(auths).filter((k) => connectable.has(k));
+  // When the actor's connections sit on another auth, only the agent's own auth fixes it.
+  const requiredAuthKey = entry?.resolution.warning?.required_auth_key ?? null;
+  const authKeys = Object.keys(auths).filter(
+    (k) => connectable.has(k) && (requiredAuthKey === null || k === requiredAuthKey),
+  );
   // The whole verdict (cascade + scope diff) is computed server-side; a pin
   // write or scope upgrade invalidates it so the dropdown re-resolves.
   const refresh = () => invalidateIntegrationQueries(qc);
+  const requiredScopesFor = (authKey: string) =>
+    requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
 
-  if (isPending || !resolution) return null;
+  // No picker until the entry is in: `required` is unknown before, and "no connection" must not
+  // be offered for an integration the agent requires.
+  if (isPending || !entry) return null;
 
+  const { resolution, run_blocking: runBlocking, required } = entry;
   const {
-    candidates,
+    candidates: unranked,
     resolved_connection_ids: resolvedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
@@ -151,8 +163,28 @@ export function useConnectionPicker(
   const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
+  const fits = new Map(
+    unranked.map((c) => [
+      c.id,
+      scopeFit({
+        manifest,
+        authKey: c.auth_key,
+        granted: c.scopes_granted,
+        missing: c.missing_scopes,
+        required: requiredScopesFor(c.auth_key),
+      }),
+    ]),
+  );
+  const scopeFitOf = (c: IntegrationCandidate) => fits.get(c.id) ?? "unjudged";
+  // Compatible first, least privilege leading.
+  const candidates = sortByScopeFit(unranked, scopeFitOf);
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
+  const missingScopeLabels = (c: IntegrationCandidate) =>
+    scopeLabels(manifest, c.auth_key, c.missing_scopes);
+  // A fresh connect requests the agent's scopes; only an oauth2 auth makes that worth saying.
+  const connectsWithAgentScopes = (authKey: string) =>
+    auths[authKey]?.type === "oauth2" && requiredScopesFor(authKey).length > 0;
   const ownerLabel = (c: IntegrationCandidate): string =>
     c.is_own
       ? t("detail.integrationMemberPicker.byYou")
@@ -167,7 +199,8 @@ export function useConnectionPicker(
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
-  const explicitIds = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
+  const pickedNone = explicitIds?.length === 0;
   const boundIds = displayedConnectionIds({
     overrideMode,
     explicitIds,
@@ -175,8 +208,8 @@ export function useConnectionPicker(
   });
   // The set in play, named whole: the actor's own pick, else (pin mode) a soft
   // space default — a member of either that is no candidate blocks the run.
-  const fromDefault = !overrideMode && explicitIds.length === 0 && softDefaultIds.length > 0;
-  const storedIds = fromDefault ? softDefaultIds : explicitIds;
+  const fromDefault = !overrideMode && explicitIds === null && softDefaultIds.length > 0;
+  const storedIds = fromDefault ? softDefaultIds : (explicitIds ?? []);
   const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
   const dirty = draft !== null;
   const checkedIds = checkedConnectionIds({
@@ -201,12 +234,12 @@ export function useConnectionPicker(
   const busy = upsertPin.isPending || deletePin.isPending;
   const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !busy;
 
-  // An empty set clears the pick. False = refused; the mutation already toasted why.
-  const persist = async (connectionIds: string[]): Promise<boolean> => {
+  // `null` clears the pick, `[]` stores "no connection". False = refused; the mutation toasted why.
+  const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
     if (overrideMode) persistence.onChange(connectionIds);
     else {
       try {
-        if (connectionIds.length > 0) {
+        if (connectionIds !== null) {
           await upsertPin.mutateAsync({ agentPackageId, integrationId, connectionIds });
         } else {
           await deletePin.mutateAsync({ agentPackageId, integrationId });
@@ -223,34 +256,27 @@ export function useConnectionPicker(
 
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
-  const triggerConnect = async (authKey: string, opts?: { connectionId?: string }) => {
+  /**
+   * A NEW connection with the agent's scopes, which takes the place of `replacing` (an
+   * under-scoped member) in the pick. Never sends a `connection_id`: the server would union the
+   * scopes into that connection, widening every agent bound to it.
+   */
+  const triggerConnect = async (authKey: string, opts?: { replacing?: string }) => {
     if (!auths[authKey]) return;
-    // Every auth type goes through the hosted connect portal (issue #769) — the
-    // popup opens the connect_url, which dispatches to the OAuth screen or the
-    // hosted credential form server-side. We snapshot the accessible set first
-    // so we can identify the just-created connection afterwards (the popup
-    // can't return its id, and a cancelled popup adds nothing, leaving the
-    // prior resolution intact). On a renew (connectionId supplied) the backend
-    // UPDATEs in place and the snapshot diff is empty — we skip the select step.
+    // The popup cannot return the new id: it is the candidate this snapshot lacks.
     const before = new Set(candidates.map((c) => c.id));
-    const isRenew = !!opts?.connectionId;
-    // Forward the agent's per-tool inferred scopes so consent asks for what THIS
-    // agent needs — not just the integration's manifest defaults (the
-    // integration detail page is the surface that connects at defaults).
-    // Non-OAuth auths resolve to an empty set and connect at their fixed creds.
-    const scopes = requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+    // Consent asks for what THIS agent needs on top of the auth's `default_scopes`, which the
+    // server always requests. Non-OAuth auths connect at their fixed credentials.
+    const scopes = requiredScopesFor(authKey);
     const settled = await openPopup({
       packageId: integrationId,
       authKey,
       ...(scopes.length ? { scopes } : {}),
-      // Account picker is noise on a renew — the user is re-authorising the
-      // existing identity, not picking a new one. Force-pick stays on fresh
-      // connects so "Add another" actually offers a different account.
-      ...(isRenew ? {} : { forceAccountSelect: true }),
-      ...(opts?.connectionId ? { connectionId: opts.connectionId } : {}),
+      // Force the IdP's account picker so "Add another" can offer a different account.
+      forceAccountSelect: true,
     });
     // A settled popup has refetched the readiness verdict: read it, never ask again.
-    if (!settled || isRenew) return;
+    if (!settled) return;
     let added: IntegrationCandidate | undefined;
     try {
       added = readResolution()?.candidates.find((c) => !before.has(c.id));
@@ -263,6 +289,7 @@ export function useConnectionPicker(
       explicitIds,
       checkedIds,
       createdId: added.id,
+      ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
     if ("persist" in placed) {
       await persist(placed.persist);
@@ -273,7 +300,11 @@ export function useConnectionPicker(
     setOpen(true);
   };
 
-  // A settled popup has already refetched the active integration queries.
+  // The two in-place writes. A settled popup has already refetched the active integration queries.
+  // Renewing re-consents what the connection holds: it sends no scopes, so it widens nothing.
+  const renewConnection = (conn: IntegrationCandidate) =>
+    openPopup({ packageId: integrationId, authKey: conn.auth_key, connectionId: conn.id });
+  // Upgrading widens it for every agent bound to it — only ever after a confirmation.
   const upgradeScopes = (conn: IntegrationCandidate) =>
     openPopup({
       packageId: integrationId,
@@ -285,6 +316,7 @@ export function useConnectionPicker(
   return {
     // Verdict
     runBlocking,
+    required,
     candidates,
     candidateIds,
     resolvedConnectionIds,
@@ -304,6 +336,7 @@ export function useConnectionPicker(
     hasCandidates,
     // Sets
     explicitIds,
+    pickedNone,
     fromDefault,
     storedIds,
     unavailableIds,
@@ -318,6 +351,10 @@ export function useConnectionPicker(
     // Labels shared by several components
     ownerLabel,
     setLabel,
+    scopeFitOf,
+    manifest,
+    missingScopeLabels,
+    connectsWithAgentScopes,
     // Menu + actions
     open,
     setOpen,
@@ -326,6 +363,9 @@ export function useConnectionPicker(
     persist,
     toggle,
     triggerConnect,
+    renewConnection,
     upgradeScopes,
+    upgradeTargetId,
+    setUpgradeTargetId,
   };
 }

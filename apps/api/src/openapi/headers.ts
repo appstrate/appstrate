@@ -15,7 +15,9 @@ export const headers = {
   },
   IdempotentReplayed: {
     description:
-      "Set to 'true' when the response is a cached replay of a previous idempotent request.",
+      "Set to 'true' when the response re-serves the 2xx a previous request with the same `Idempotency-Key` stored, " +
+      "under the caller's current permissions; a run launch's `warnings` items carry no `connect_url`, `expiresAt` or " +
+      "`packageId`. A refusal or failure is never stored, so never replayed.",
     schema: { type: "string", enum: ["true"] },
   },
   RateLimit: {

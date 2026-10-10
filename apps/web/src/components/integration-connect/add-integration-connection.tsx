@@ -15,17 +15,14 @@ import { connectableAuthKeys } from "./connectable-auth-keys";
 import { isConnectionOwnedBy } from "./connection-ownership";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
+import { useModalParam } from "../../hooks/use-modal-param";
+import { connectPopupInput, scopeChoiceFor } from "../integration-detail/connect-scope-choice";
+import {
+  CONNECT_SCOPES_PARAM,
+  ConnectScopesModal,
+} from "../integration-detail/connect-scopes-dialog";
 
-/** Single action for an integration; only genuinely multi-auth packages need a picker. */
-export function AddIntegrationConnection({
-  packageId,
-  detail,
-  userId,
-  onConfigure,
-  canConfigure,
-  canConnect,
-  blockedReason,
-}: {
+type AddProps = {
   packageId: string;
   detail: IntegrationDetailWire;
   userId?: string;
@@ -36,20 +33,60 @@ export function AddIntegrationConnection({
   canConnect: boolean;
   /** Why adding one's own is refused here (an admin blocked personal connections). */
   blockedReason?: string;
-}) {
-  const { t } = useTranslation("settings");
+};
+
+/**
+ * Single action for an integration; only genuinely multi-auth packages need a picker. An oauth2
+ * method with a `scope_catalog` asks which permissions to request first, in a modal
+ * (`?connectScopes=<method>`); any other connects at once.
+ */
+export function AddIntegrationConnection(props: AddProps) {
+  const { packageId, detail, userId } = props;
+  const modal = useModalParam(CONNECT_SCOPES_PARAM);
   const { openPopup, isPending } = useHostedConnectPopup();
-  const allowed = connectableAuthKeys(detail.manifest, detail.auths);
+  const forceAccountSelect = (auth: IntegrationAuthStatus) =>
+    auth.connections.some((connection) => isConnectionOwnedBy(connection, userId));
   const connect = (auth: IntegrationAuthStatus) => {
-    if (!allowed.has(auth.auth_key)) return;
-    void openPopup({
-      packageId,
-      authKey: auth.auth_key,
-      forceAccountSelect: auth.connections.some((connection) =>
-        isConnectionOwnedBy(connection, userId),
-      ),
-    });
+    if (!connectableAuthKeys(detail.manifest, detail.auths).has(auth.auth_key)) return;
+    if (scopeChoiceFor(detail.manifest.auths?.[auth.auth_key])) modal.open(auth.auth_key);
+    else
+      void openPopup(
+        connectPopupInput(
+          { packageId, authKey: auth.auth_key, choice: null },
+          [],
+          forceAccountSelect(auth),
+        ),
+      );
   };
+  const asked = detail.auths.find((auth) => auth.auth_key === modal.value);
+  const choice = asked && scopeChoiceFor(detail.manifest.auths?.[asked.auth_key]);
+  return (
+    <>
+      <AddButton {...props} connect={connect} isPending={isPending} />
+      {asked && choice && (
+        <ConnectScopesModal
+          packageId={packageId}
+          authKey={asked.auth_key}
+          manifest={detail.manifest}
+          choice={choice}
+          forceAccountSelect={forceAccountSelect(asked)}
+        />
+      )}
+    </>
+  );
+}
+
+function AddButton({
+  detail,
+  onConfigure,
+  canConfigure,
+  canConnect,
+  blockedReason,
+  connect,
+  isPending,
+}: AddProps & { connect: (auth: IntegrationAuthStatus) => void; isPending: boolean }) {
+  const { t } = useTranslation("settings");
+  const allowed = connectableAuthKeys(detail.manifest, detail.auths);
   if (!detail.auths.length) return null;
   if (!allowed.size && !canConfigure) return null;
   if (!allowed.size)

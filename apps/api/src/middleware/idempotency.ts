@@ -5,6 +5,9 @@
  * produce the same response without re-executing.
  *
  * Pattern: Stripe `Idempotency-Key` header (IETF draft-ietf-httpapi-idempotency-key-header).
+ *
+ * Only a 2xx is stored, as at Stripe: a 4xx is a refusal that often depends on state the caller
+ * can change (a connection, a quota), so its key is released and a retry is judged again.
  */
 
 import type { Context, Next } from "hono";
@@ -44,6 +47,25 @@ export function isIdempotencyAware(handler: unknown): boolean {
 }
 
 /**
+ * Never throws on the body's shape: it runs after the handler has committed (a launch has
+ * created its run), so a throw would turn that success into a 500 and strand the lock.
+ */
+function storableBody(
+  resBody: string,
+  storedBody: ((body: Record<string, unknown>) => Record<string, unknown>) | undefined,
+): string {
+  if (!storedBody) return resBody;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resBody);
+  } catch {
+    return resBody;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return resBody;
+  return JSON.stringify(storedBody(parsed as Record<string, unknown>));
+}
+
+/**
  * Idempotency middleware factory. Apply to POST routes that create resources.
  *
  * If `Idempotency-Key` header is absent, the request proceeds normally (opt-in).
@@ -56,8 +78,13 @@ export function isIdempotencyAware(handler: unknown): boolean {
  * so we only need to validate length here.
  */
 export function idempotency(
-  replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>,
+  options: {
+    replay?: (c: Context<AppEnv>, response: Response) => Promise<Response>;
+    /** Rewrites a stored 2xx JSON-object body, and so what is replayed to any key reuser. */
+    storedBody?: (body: Record<string, unknown>) => Record<string, unknown>;
+  } = {},
 ) {
+  const { replay, storedBody } = options;
   const middleware = async (c: Context<AppEnv>, next: Next) => {
     const key = c.req.header("Idempotency-Key");
     if (!key) return next();
@@ -126,12 +153,12 @@ export function idempotency(
     // Hono's HonoRequest wraps c.req.raw — replacing it lets downstream re-read the body.
     (c.req as { raw: Request }).raw = freshRequest;
 
+    // Hono's compose turns an `Error` thrown downstream into `c.res` through
+    // the app's `onError` before `next()` returns, so a thrown `ApiError` is judged by its status
+    // below. This catch only sees what compose rethrows: release the lock so the client can retry.
     try {
       await next();
     } catch (err) {
-      // On thrown error (including ApiError 4xx), release the lock so client can retry.
-      // Thrown errors don't produce a c.res — they go through errorHandler which builds
-      // a new Response. We can't cache that here, so releasing is the safe choice.
       try {
         await releaseIdempotencyLock(orgId, spaceId, key);
       } catch {
@@ -143,8 +170,7 @@ export function idempotency(
     const res = c.res;
     const statusCode = res.status;
 
-    // Only cache 2xx and 4xx (deterministic). 5xx = release lock for retry.
-    if (statusCode >= 500) {
+    if (statusCode < 200 || statusCode >= 300) {
       await releaseIdempotencyLock(orgId, spaceId, key);
       return;
     }
@@ -156,11 +182,13 @@ export function idempotency(
     cloned.headers.forEach((v, k) => {
       resHeaders[k] = v;
     });
+    const body = storableBody(resBody, storedBody);
+    if (body !== resBody) delete resHeaders["content-length"];
 
     await storeIdempotencyResult(orgId, spaceId, key, {
       statusCode,
       headers: resHeaders,
-      body: resBody,
+      body,
       requestHash,
     });
   };

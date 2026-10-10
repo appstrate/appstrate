@@ -33,7 +33,7 @@ import {
   useSpaceRoleOptions,
 } from "../../hooks/use-roles";
 import { useCreateVersion, usePackageDetail } from "../../hooks/use-packages";
-import { useIntegrations } from "../../hooks/use-integrations";
+import { useAllIntegrations } from "../../hooks/use-integrations";
 import {
   shareTargetHandle,
   usePackageShares,
@@ -129,7 +129,7 @@ export function SharePackageDialog({
   const detail = usePackageDetail("agent", open && type === "agent" ? packageId : undefined);
   // The names as a reader knows them, not the ids: the index is already loaded
   // wherever this dialog opens from, so it costs nothing here.
-  const { data: integrationRows } = useIntegrations();
+  const { data: integrationRows } = useAllIntegrations();
   const declaredIntegrations = (detail.data?.dependencies.integrations ?? []).map((entry) => {
     const row = integrationRows?.find((candidate) => candidate.id === entry.id);
     return row?.manifest.display_name ?? entry.id.split("/").pop() ?? entry.id;

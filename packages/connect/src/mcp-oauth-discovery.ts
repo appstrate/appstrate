@@ -20,12 +20,9 @@
  *   discoverProtectedResourceMetadata → resolveOAuthEndpoints(issuer) →
  *   registerDynamicClient → persist.
  *
- * Resolution order (first hit wins):
- *   1. Explicit `resourceMetadataUrl` (e.g. parsed from a WWW-Authenticate
- *      challenge the caller already has) — authoritative.
- *   2. RFC 9728 §3 well-known probes derived from the resource URL.
- *   3. Best-effort `401` probe of the resource URL itself, parsing the
- *      `resource_metadata` challenge param, then fetching that.
+ * Resolution order (RFC 9728 §3, §5): explicit `resourceMetadataUrl`, the `WWW-Authenticate`
+ * challenge, the path-inserted well-known location, the root one. A document is used only when its
+ * `resource` equals the identifier its location was derived from (§3.3); else the next is tried.
  *
  * Best-effort throughout: any network/parse/validation failure falls through
  * to the next strategy and ultimately returns `null` (the caller then surfaces
@@ -33,6 +30,8 @@
  */
 
 import { guardedFetch } from "@appstrate/core/ssrf";
+import { readJsonUnder } from "./bounded-body.ts";
+import { sameUrlIdentifier } from "./oauth-discovery.ts";
 
 /** Validated subset of an RFC 9728 protected-resource metadata document. */
 export interface ProtectedResourceMetadata {
@@ -74,44 +73,34 @@ function isHttpUrl(raw: string): boolean {
   }
 }
 
-/**
- * RFC 9728 §3.3: the `resource` value in a protected-resource metadata document
- * MUST identify the resource server the client is talking to. Validate that its
- * origin matches the MCP server URL we discovered it for — otherwise a hostile
- * (or misconfigured) metadata document could bind the token's audience to an
- * unrelated resource. Compared by origin (scheme+host+port) to tolerate path /
- * trailing-slash differences in the canonical identifier.
- */
-function metadataResourceMatchesOrigin(resource: string, resourceServerUrl: string): boolean {
-  try {
-    return new URL(resource).origin === new URL(resourceServerUrl).origin;
-  } catch {
-    return false;
-  }
-}
-
 /** Strip a single trailing slash so well-known suffixes join cleanly. */
 function trimTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
-/**
- * Build RFC 9728 §3 well-known probe URLs for a resource server URL. The
- * well-known segment is inserted between the host and the path component:
- *   `https://host/mcp` → `https://host/.well-known/oauth-protected-resource/mcp`
- * The path-less variant is always included as a fallback.
- */
-export function buildProtectedResourceProbes(resourceServerUrl: string): string[] {
+/** A well-known metadata location and the resource identifier it was derived from. */
+interface MetadataLocation {
+  metadataUrl: string;
+  resource: string;
+}
+
+/** RFC 9728 §3 well-known locations, path-inserted (resource = the URL) then root (its origin). */
+export function buildProtectedResourceProbes(resourceServerUrl: string): MetadataLocation[] {
   try {
     const u = new URL(resourceServerUrl);
     const base = `${u.protocol}//${u.host}`;
     let path = trimTrailingSlash(u.pathname);
     if (path === "/" || path === "") path = "";
-    const probes = [
-      `${base}/.well-known/oauth-protected-resource${path}`,
-      `${base}/.well-known/oauth-protected-resource`,
-    ];
-    return [...new Set(probes)];
+    const root = { metadataUrl: `${base}/.well-known/oauth-protected-resource`, resource: base };
+    return path === ""
+      ? [root]
+      : [
+          {
+            metadataUrl: `${base}/.well-known/oauth-protected-resource${path}`,
+            resource: resourceServerUrl,
+          },
+          root,
+        ];
   } catch {
     return [];
   }
@@ -172,7 +161,7 @@ async function fetchResourceMetadata(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    const json = (await res.json()) as unknown;
+    const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;
     return validateResourceMetadata(json as RawResourceMetadata);
   } catch {
@@ -195,25 +184,19 @@ export async function discoverProtectedResourceMetadata(
   // metadata and must not reach the network layer.
   if (!isHttpUrl(input.resourceServerUrl)) return null;
 
-  // Any resolved document is only accepted when its RFC 8707 `resource`
-  // identifier matches the MCP server's origin (RFC 9728 §3.3).
-  const accept = (md: ProtectedResourceMetadata | null): ProtectedResourceMetadata | null =>
-    md && metadataResourceMatchesOrigin(md.resource, input.resourceServerUrl) ? md : null;
+  const fetchAt = async (
+    metadataUrl: string,
+    resource: string,
+  ): Promise<ProtectedResourceMetadata | null> => {
+    const md = await fetchResourceMetadata(metadataUrl, fetchImpl);
+    return md && sameUrlIdentifier(md.resource, resource) ? md : null;
+  };
 
-  // 1. Explicit metadata URL (authoritative).
   if (input.resourceMetadataUrl) {
-    const md = accept(await fetchResourceMetadata(input.resourceMetadataUrl, fetchImpl));
+    const md = await fetchAt(input.resourceMetadataUrl, input.resourceServerUrl);
     if (md) return md;
   }
 
-  // 2. RFC 9728 §3 well-known probes.
-  for (const url of buildProtectedResourceProbes(input.resourceServerUrl)) {
-    const md = accept(await fetchResourceMetadata(url, fetchImpl));
-    if (md) return md;
-  }
-
-  // 3. Best-effort 401 probe — read the `resource_metadata` challenge the
-  //    server advertises on an unauthenticated request, then fetch it.
   try {
     const res = await fetchImpl(input.resourceServerUrl, {
       method: "GET",
@@ -221,15 +204,18 @@ export async function discoverProtectedResourceMetadata(
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     const challenge = res.headers.get("www-authenticate");
-    if (challenge) {
-      const metadataUrl = parseResourceMetadataChallenge(challenge);
-      if (metadataUrl) {
-        const md = accept(await fetchResourceMetadata(metadataUrl, fetchImpl));
-        if (md) return md;
-      }
+    const metadataUrl = challenge ? parseResourceMetadataChallenge(challenge) : undefined;
+    if (metadataUrl) {
+      const md = await fetchAt(metadataUrl, input.resourceServerUrl);
+      if (md) return md;
     }
   } catch {
-    // Best-effort — fall through to null.
+    // Best-effort.
+  }
+
+  for (const location of buildProtectedResourceProbes(input.resourceServerUrl)) {
+    const md = await fetchAt(location.metadataUrl, location.resource);
+    if (md) return md;
   }
 
   return null;

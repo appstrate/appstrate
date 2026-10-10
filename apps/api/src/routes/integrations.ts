@@ -53,7 +53,7 @@ import {
   type OAuthClientResolver,
 } from "@appstrate/connect";
 import type { AppEnv } from "../types/index.ts";
-import type { IntegrationOAuthClient } from "@appstrate/shared-types";
+import type { IntegrationConnection, IntegrationOAuthClient } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import {
   ApiError,
@@ -74,18 +74,22 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { rateLimitByIp } from "../middleware/rate-limit.ts";
+import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
+import { isUserPrincipal } from "../lib/principal.ts";
+import { callerPermissionsInSpace } from "../lib/view-as.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
-import { recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
+import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
+  assertConnectionBelongsToActor,
   assertIsIntegration,
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   getIntegrationConnectionCredentialFields,
+  getIntegrationConnectionVariables,
   listIntegrationClients,
   listIntegrationConnections,
   promoteIntegrationOAuthClient,
@@ -99,6 +103,11 @@ import {
   usesAutoProvisionedClient,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
+import type {
+  ConnectCompleteInput,
+  ConnectContext,
+  IntegrationConnectStrategy,
+} from "../services/connect/strategy.ts";
 import {
   authWithoutMintedCredentials,
   handoffStepsFor,
@@ -112,20 +121,21 @@ import { removeScheduleJobs } from "../services/scheduler.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
+  getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
-import { connectionIdSetSchema } from "../lib/connection-set.ts";
+import { connectionIdSetSchema, nonEmptyConnectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
   deletePin,
   listAgentsConsumingIntegration,
   listIntegrationPins,
-  loadConnectionOwnership,
   pinAudit,
   pinAuditResourceId,
   setBlockUserConnections,
-  updateConnectionMetadata,
+  updateConnection,
   upsertIntegrationPin,
+  type ConnectionViewer,
 } from "../services/integration-pins-service.ts";
 import {
   getOrgDefault,
@@ -159,6 +169,10 @@ import {
 // integration manifest's `credentials.schema` (AJV) downstream. Narrowing to
 // `Record<string, string>` here would silently reject every well-formed
 // non-string credential shape before AJV ever got to see it.
+// Connection variables (AFPS §7.12): non-secret strings choosing the upstream. Names, values and
+// the manifest's `variables.schema` are checked by `resolveConnectionVariables`; this bounds size.
+const connectionVariablesSchema = z.record(z.string().max(64), z.string().max(2048));
+
 // Porte B programmatic import — the backend already holds the credential and
 // submits it directly ("import a connection", Nango `POST /connection`).
 export const importConnectionSchema = z
@@ -171,6 +185,8 @@ export const importConnectionSchema = z
     // id so the write UPDATEs the dead row instead of INSERTing a duplicate
     // (single-writer contract, integration-connections.ts:persistCredentialBundle).
     connection_id: z.uuid().optional(),
+    // Required iff the integration declares variables, a reconnect included.
+    variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
@@ -179,6 +195,7 @@ export const connectOAuthSchema = z
     scopes: z.array(z.string()).optional(),
     force_account_select: z.boolean().optional(),
     connection_id: z.uuid().optional(),
+    variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
@@ -193,12 +210,17 @@ export const connectSessionSchema = z
   })
   .strict();
 
-// Hosted-form submit — credentials only; all context comes from the page cookie.
+// Hosted-form submit — credentials (none for an oauth2 auth) and connection variables; all
+// context comes from the page cookie.
 export const connectSubmitSchema = z
   .object({
-    credentials: z.record(z.string(), z.unknown()).refine((c) => Object.keys(c).length > 0, {
-      message: "credentials must contain at least one field",
-    }),
+    credentials: z
+      .record(z.string(), z.unknown())
+      .refine((c) => Object.keys(c).length > 0, {
+        message: "credentials must contain at least one field",
+      })
+      .optional(),
+    variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
@@ -224,7 +246,7 @@ export const setPinSchema = z
 
 export const setOrgDefaultSchema = z
   .object({
-    connection_ids: connectionIdSetSchema,
+    connection_ids: nonEmptyConnectionIdSetSchema,
     enforce: z.boolean().default(false),
   })
   .strict();
@@ -240,11 +262,17 @@ export const updateConnectionSchema = z
         if (problem) ctx.addIssue({ code: "custom", message: `label ${problem}` });
       })
       .optional(),
-    shared_with_org: z.boolean().optional(),
+    shared_space_ids: z
+      .array(z.string().min(1).max(100))
+      .max(100)
+      .refine((ids) => new Set(ids).size === ids.length, {
+        message: "must not repeat a space id",
+      })
+      .optional(),
   })
   .strict()
-  .refine((b) => b.label !== undefined || b.shared_with_org !== undefined, {
-    message: "at least one of label, shared_with_org must be provided",
+  .refine((b) => b.label !== undefined || b.shared_space_ids !== undefined, {
+    message: "at least one of label, shared_space_ids must be provided",
   });
 
 const oauthClientSchema = z
@@ -474,8 +502,8 @@ export function oauthClientHandlers(
  * has `block_user_connections=true` and the caller is not allowed to
  * govern this integration.
  *
- * Workflow this enables: an admin toggles the gate → connects → marks the
- * connection sharedWithOrg → members are funnelled onto the shared
+ * Workflow this enables: an admin toggles the gate → connects → shares the
+ * connection into the space → members are funnelled onto the shared
  * connection via the resolver's fallback path. Members trying to bypass
  * with their own connection get a clean 403 instead of a silent override.
  *
@@ -498,32 +526,8 @@ async function assertConnectionCreationAllowed(
       status: 403,
       code: "connection_blocked_by_admin",
       title: "Connection Blocked by Admin",
-      detail: `Creation of personal connections to '${integrationId}' is disabled by the organization admin. Use the shared connection instead.`,
+      detail: `Creation of personal connections to '${integrationId}' is disabled by an admin of this space. Use the shared connection instead.`,
     });
-  }
-}
-
-/**
- * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
- * connect flows honor an arbitrary connection id to renew a credential in
- * place, so before that id is trusted we must confirm it is a connection the
- * caller actually owns in THIS space. Without this a caller could pass
- * another actor's (or another space's) connection id and overwrite its
- * credentials through the single-writer persist path. A miss surfaces as a
- * plain 404 so cross-scope existence is never disclosed.
- */
-async function assertConnectionBelongsToActor(
-  connectionId: string,
-  spaceId: string,
-  actor: Actor,
-): Promise<void> {
-  const owner = await loadConnectionOwnership(connectionId);
-  const ownedByActor =
-    owner !== null &&
-    owner.spaceId === spaceId &&
-    (actor.type === "user" ? owner.userId === actor.id : owner.endUserId === actor.id);
-  if (!ownedByActor) {
-    throw notFound("Connection not found");
   }
 }
 
@@ -560,21 +564,30 @@ function assertScopesInAuthCatalog(
 }
 
 /**
- * Audit fields for a connection written by a connect door. A `connection_id`
- * target means the credential was renewed in place, not a new connection.
+ * Complete a connect door's write and build its audit event. A reconnect renews the credential in
+ * place and records the granted scopes when it changed them, since they reach every agent the
+ * connection serves; the scopes before are a best-effort read ahead of the write.
  */
-function connectionPersistedAudit(
-  conn: { id: string; account_id: string },
-  packageId: string,
-  authKey: string,
-  reconnected: boolean,
+async function completeConnect(
+  strategy: IntegrationConnectStrategy,
+  ctx: ConnectContext,
+  input: ConnectCompleteInput,
 ) {
-  return {
-    action: reconnected ? "integration.connection.reconnected" : "integration.connection.created",
+  const scopesBefore = ctx.connectionId
+    ? await getCurrentScopesGranted({ ...ctx, connectionId: ctx.connectionId })
+    : null;
+  const conn = await strategy.complete(ctx, input);
+  const after = { packageId: ctx.integrationId, authKey: ctx.authKey, accountId: conn.account_id };
+  const scopes =
+    scopesBefore &&
+    auditDiff({ scopesGranted: [[...scopesBefore].sort(), [...conn.scopes_granted].sort()] });
+  const audit = {
+    action: scopesBefore ? "integration.connection.reconnected" : "integration.connection.created",
     resourceType: "integration_connection",
     resourceId: conn.id,
-    after: { packageId, authKey, accountId: conn.account_id },
+    ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
   };
+  return { conn, audit };
 }
 
 /** The OAuth state holds only `clientRef`; the callback resolves it as token refresh does. */
@@ -592,6 +605,89 @@ const resolveCallbackClient: OAuthClientResolver = async (ref) => {
     auth.token_endpoint_auth_method,
   );
 };
+
+type IntegrationAuthDef = Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
+type IntegrationManifestDef = Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"];
+type ConnectSessionClaims = NonNullable<ReturnType<typeof readConnectToken>>;
+
+/**
+ * The scopes a connect requests: the manifest's `default_scopes`, the caller's, and — on a reconnect
+ * — those already granted on the target connection, so an upgrade never silently shrinks.
+ * `default_scopes` is the baseline of every connection of the auth (identity, refresh, least
+ * capability); `requested` only widens it (afps-spec/afps-spec#34).
+ */
+async function connectScopes(
+  input: { scope: SpaceScope; actor: Actor; integrationId: string; authKey: string },
+  auth: IntegrationAuthDef,
+  requested: readonly string[] | undefined,
+  connectionId: string | undefined,
+): Promise<string[]> {
+  const granted = connectionId ? await getCurrentScopesGranted({ ...input, connectionId }) : [];
+  const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
+  return [...new Set([...defaultScopes, ...(requested ?? []), ...granted])];
+}
+
+type HostedOAuthBegin =
+  | { redirectUrl: string }
+  /** A client-side refusal; `reusable` when it provably preceded any egress. */
+  | { refused: ApiError; reusable: boolean }
+  /** Any other failure; retryable only when nothing was sent yet. */
+  | { failed: true; beforeEgress: boolean };
+
+/**
+ * Begin the oauth2 flow of a hosted-connect session whose jti the caller spent; the caller renders
+ * the outcome. An auto-provisioned client may have registered upstream before refusing (#1344).
+ */
+async function beginHostedOAuth(
+  claims: ConnectSessionClaims,
+  manifest: IntegrationManifestDef,
+  auth: IntegrationAuthDef,
+  variables?: Record<string, string>,
+): Promise<HostedOAuthBegin> {
+  const ctx = {
+    scope: scopeFromClaims(claims),
+    actor: actorFromClaims(claims),
+    integrationId: claims.package_id,
+    authKey: claims.auth_key,
+  };
+  const log = { packageId: claims.package_id, authKey: claims.auth_key };
+  let scopes: string[];
+  let begin: NonNullable<ReturnType<typeof resolveStrategy>["begin"]>;
+  try {
+    scopes = await connectScopes(ctx, auth, claims.scopes, claims.connection_id);
+    const strategy = resolveStrategy(auth);
+    if (!strategy.begin) throw new Error(`auth type '${auth.type}' has no begin`);
+    begin = strategy.begin.bind(strategy);
+  } catch (err) {
+    logger.error("Hosted connect scope resolution failed", { err: String(err), ...log });
+    return { failed: true, beforeEgress: true };
+  }
+  try {
+    const result = await begin(
+      {
+        ...ctx,
+        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(claims.delegated ? { delegated: true } : {}),
+        ...(variables ? { variables } : {}),
+      },
+      { scopes, forceAccountSelect: claims.force_account_select ?? false },
+    );
+    return { redirectUrl: result.redirectUrl };
+  } catch (err) {
+    if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+      // The detail names operator artefacts (#1345): logged, never rendered.
+      logger.warn("Hosted connect OAuth begin refused", {
+        status: err.status,
+        code: err.code,
+        detail: err.message,
+        ...log,
+      });
+      return { refused: err, reusable: !usesAutoProvisionedClient(manifest, auth) };
+    }
+    logger.error("Hosted connect OAuth begin failed", { err: String(err), ...log });
+    return { failed: true, beforeEgress: false };
+  }
+}
 
 // ─────────────────────────────────────────────
 // Router
@@ -641,7 +737,10 @@ export function createIntegrationsRouter() {
     return c.json(listResponse(projected, { hasMore, total }));
   });
 
-  router.get("/callback", async (c) => {
+  // One handler for the shared `/callback` and the per-authorization-server
+  // `/callback/:tag` of a server chosen per connection (AFPS §7.3): the state
+  // names which of the two the response must arrive at, both ways.
+  const oauthCallback = async (c: Context<AppEnv>, redirectTag: string | null) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
     const error = c.req.query("error");
@@ -666,11 +765,14 @@ export function createIntegrationsRouter() {
     }
     let result: IntegrationOAuthCallbackResult;
     try {
+      const iss = c.req.query("iss");
       result = await handleIntegrationOAuthCallback(
         oauthStateStore,
         resolveCallbackClient,
         code,
         state,
+        undefined,
+        { redirectTag, ...(iss !== undefined ? { iss } : {}) },
       );
     } catch (err) {
       if (err instanceof OAuthCallbackError) {
@@ -685,7 +787,11 @@ export function createIntegrationsRouter() {
             "The authorization expired before it could be exchanged. Please retry the connection.",
           client_unavailable:
             "The OAuth client this connection was started with is no longer available. Ask an administrator to check the integration's OAuth clients, then connect again.",
+          client_rejected:
+            "The provider rejected this integration's OAuth client. Ask an administrator to check the client's registration, then connect again.",
           transient: "Could not complete the connection. Please try again in a moment.",
+          issuer_mismatch:
+            "The authorization response did not come from the authorization server this connection was started with. Please retry the connection.",
         }[err.kind];
         const userMessage = `${reason}${diagnostic}`;
         logger.error("Integration OAuth callback failed", {
@@ -716,20 +822,20 @@ export function createIntegrationsRouter() {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
-      const conn = await strategy.complete(
-        {
-          scope,
-          actor: result.actor,
-          integrationId: result.packageId,
-          authKey: result.authKey,
-          ...(result.connectionId ? { connectionId: result.connectionId } : {}),
-        },
-        { kind: "oauth2-result", result },
-      );
+      const ctx: ConnectContext = {
+        scope,
+        actor: result.actor,
+        integrationId: result.packageId,
+        authKey: result.authKey,
+        ...(result.connectionId ? { connectionId: result.connectionId } : {}),
+        ...(result.delegated ? { delegated: true } : {}),
+        ...(result.variables ? { variables: result.variables } : {}),
+      };
+      const { audit } = await completeConnect(strategy, ctx, { kind: "oauth2-result", result });
       await recordAuditAs(
         c,
         { ...scope, actorType: result.actor.type, actorId: result.actor.id },
-        connectionPersistedAudit(conn, result.packageId, result.authKey, !!result.connectionId),
+        audit,
       );
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
@@ -755,14 +861,16 @@ export function createIntegrationsRouter() {
       );
     }
     return c.html(popupHtmlClose({ state, packageId: result.packageId }));
-  });
+  };
+  router.get("/callback", (c) => oauthCallback(c, null));
+  router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     const actor = getActor(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, actor);
+    const status = await getIntegrationAuthStatuses(scope, packageId, actor, isUserPrincipal(c));
     return c.json(status);
   });
 
@@ -826,13 +934,14 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, importConnectionSchema);
       // A reconnect target must be the caller's own connection in this space —
       // otherwise the credential write below would overwrite an arbitrary
       // (possibly another actor's) connection (IDOR).
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -854,22 +963,21 @@ export function createIntegrationsRouter() {
         // OrchestratedStrategy, which needs the connect-run substrate to run
         // the untrusted login tool. Supply it lazily so the plain
         // paste-the-bag / declarative paths don't construct an executor.
-        const conn = await resolveStrategy(auth, {
-          connectToolExecutor: createConnectRunExecutor(),
-        }).complete(
-          {
-            scope,
-            actor,
-            integrationId: packageId,
-            authKey,
-            ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-          },
-          { kind: "fields", credentials: body.credentials },
-        );
-        await recordAuditFromContext(
-          c,
-          connectionPersistedAudit(conn, packageId, authKey, !!body.connection_id),
-        );
+        const ctx: ConnectContext = {
+          scope,
+          actor,
+          integrationId: packageId,
+          authKey,
+          ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
+          ...(body.variables ? { variables: body.variables } : {}),
+        };
+        const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
+        const { conn, audit } = await completeConnect(strategy, ctx, {
+          kind: "fields",
+          credentials: body.credentials,
+        });
+        await recordAuditFromContext(c, audit);
         return c.json(conn);
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -879,20 +987,23 @@ export function createIntegrationsRouter() {
     },
   );
 
+  // Rate-limited: each call may discover a server the caller chose and register a client there.
   router.post(
     "/:packageId{@[^/]+/[^/]+}/auths/:authKey/connect/oauth2",
+    rateLimit(30),
     requirePermission("integrations", "connect"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // carried into the OAuth state and honored at callback-time write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -902,34 +1013,14 @@ export function createIntegrationsRouter() {
         );
       }
       assertScopesInAuthCatalog(auth, authKey, body.scopes);
-      // Request exactly what the caller scopes the connect to:
-      //   - manifest defaults (`auth.scopes`) — always
-      //   - caller-supplied (`body.scopes`) — the agent surface forwards its
-      //     inferred required scopes here when it drives an upgrade; the
-      //     integration page passes none, so its "+ Add account" connects
-      //     with defaults only.
-      //   - already granted ON THE TARGET CONNECTION (`getCurrentScopesGranted`,
-      //     keyed by `connectionId`) → reconnect/upgrade never silently shrinks
-      //     what that account already authorized. Empty for a fresh connect
-      //     (no row yet), so fresh connects stay at the default scope set.
-      //
-      // The kickoff deliberately does NOT walk the space's agents — that
-      // would leak unrelated agents' scopes into a plain "connect" and made the
-      // integration page's connect request more than its defaults. Scope
-      // upgrades are an explicit, per-agent action on the agent's Connexions
-      // tab. Endpoint validation + client lookup live in OAuth2Strategy.begin.
-      const granted = body.connection_id
-        ? await getCurrentScopesGranted({
-            scope,
-            integrationId: packageId,
-            authKey,
-            actor,
-            connectionId: body.connection_id,
-          })
-        : [];
-      // AFPS: manifest default scopes are `default_scopes`.
-      const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
-      const scopes = [...new Set([...defaultScopes, ...(body.scopes ?? []), ...granted])];
+      // The kickoff deliberately does NOT walk the space's agents: scope upgrades are an explicit,
+      // per-agent action. Endpoint validation + client lookup live in OAuth2Strategy.begin.
+      const scopes = await connectScopes(
+        { scope, actor, integrationId: packageId, authKey },
+        auth,
+        body.scopes,
+        body.connection_id,
+      );
       const strategy = resolveStrategy(auth);
       if (!strategy.begin) {
         throw internalError();
@@ -941,6 +1032,8 @@ export function createIntegrationsRouter() {
           integrationId: packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
+          ...(body.variables ? { variables: body.variables } : {}),
         },
         {
           scopes,
@@ -966,12 +1059,13 @@ export function createIntegrationsRouter() {
       const authKey = c.req.param("authKey")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
+      const delegated = !isUserPrincipal(c);
       await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // minted into the hosted-connect capability token and honored at write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor, delegated);
       }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -985,6 +1079,7 @@ export function createIntegrationsRouter() {
           packageId,
           authKey,
           ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+          delegated,
           ...(body.scopes ? { scopes: body.scopes } : {}),
           ...(body.force_account_select ? { forceAccountSelect: true } : {}),
         }),
@@ -1013,7 +1108,6 @@ export function createIntegrationsRouter() {
     const claims = readConnectToken(token);
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
     const scope = scopeFromClaims(claims);
-    const actor = actorFromClaims(claims);
     // Every completion this handler emits must name the integration (issue
     // #1346): a completion identifying nothing matches every card by contract
     // (`completionMatches`), and `packageId` is the only identifier a
@@ -1022,8 +1116,8 @@ export function createIntegrationsRouter() {
     // Resolve the integration BEFORE consuming the jti — if the auth no longer
     // exists, the capability token stays unburned so the caller can retry once
     // the integration is back, rather than being forced to re-mint.
-    let auth: Awaited<ReturnType<typeof readIntegrationAuth>>["auth"];
-    let manifest: Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"];
+    let auth: IntegrationAuthDef;
+    let manifest: IntegrationManifestDef;
     try {
       ({ auth, manifest } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key));
     } catch {
@@ -1040,123 +1134,36 @@ export function createIntegrationsRouter() {
       );
     }
 
-    if (auth.type === "oauth2") {
-      // Same scope-union semantics as POST /connect/oauth2 — except that here
-      // it runs AFTER the burn and reads the database, so an unguarded fault
-      // escaped to the global error handler and rendered raw
-      // `application/problem+json` inside the popup, on top of a link the click
-      // had already spent (issue #1352).
-      //
-      // Nothing is granted, minted or sent upstream until `begin` runs below,
-      // so a click that dies here is indistinguishable from no click at all:
-      // hand the jti back and the very same link works once the fault passes.
-      // That is the opposite of what the `begin` guard further down does with
-      // its unknown failures, which may have gone half way.
-      let scopes: string[];
-      let strategy: ReturnType<typeof resolveStrategy>;
-      try {
-        const granted = claims.connection_id
-          ? await getCurrentScopesGranted({
-              scope,
-              integrationId: claims.package_id,
-              authKey: claims.auth_key,
-              actor,
-              connectionId: claims.connection_id,
-            })
-          : [];
-        const defaultScopes = (auth as { default_scopes?: string[] }).default_scopes ?? [];
-        scopes = [...new Set([...defaultScopes, ...(claims.scopes ?? []), ...granted])];
-        strategy = resolveStrategy(auth);
-      } catch (err) {
-        logger.error("Hosted connect scope resolution failed", {
-          err: String(err),
-          packageId: claims.package_id,
-          authKey: claims.auth_key,
-        });
-        await releaseJti(claims.jti);
+    // An integration declaring connection variables (AFPS §7.12) collects them on the hosted form
+    // first: its oauth2 begins from `/connect/submit`, once the user has chosen the upstream.
+    if (auth.type === "oauth2" && getVariablesSchema(manifest) === null) {
+      const begun = await beginHostedOAuth(claims, manifest, auth);
+      if ("redirectUrl" in begun) return c.redirect(begun.redirectUrl);
+      if ("refused" in begun) {
+        // Rendered generically, with the refusal's own status (#1263, #1345).
+        if (begun.reusable) await releaseJti(claims.jti);
+        const retry = begun.reusable ? "open this link again" : "request a new connection link";
         return c.html(
-          popupHtmlError("Could not start the connection. Please try again.", completionDetail),
-          500,
+          popupHtmlError(
+            `This integration is not ready to be connected. Ask an administrator to finish setting it up, then ${retry}.`,
+            completionDetail,
+          ),
+          begun.refused.status as ContentfulStatusCode,
         );
       }
-      if (!strategy.begin) {
-        // Same criterion as the guard above: a pure in-memory check, no egress.
-        await releaseJti(claims.jti);
-        return c.html(
-          popupHtmlError("This integration cannot be connected.", completionDetail),
-          500,
-        );
-      }
-      // `begin` throws for two different reasons, and the popup must tell them
-      // apart (issue #1263).
-      //
-      //  1. A client-side `ApiError` (4xx): permanent until an admin acts.
-      //     Render it with its own status, but GENERICALLY (issue #1345) —
-      //     the `ApiError` detail names operator artefacts (a client row id,
-      //     `CONNECTION_ENCRYPTION_KEY`, an upstream AS's prose) and this
-      //     route has no session. The detail stays on the log line above.
-      //  2. Anything else (provider discovery error, network, an unexpected
-      //     throw): transient or unknown. Keep the generic wording, keep the
-      //     502, keep the jti burned — an unknown failure may have gone half
-      //     way (a state row minted), and the burn is what stops a replay from
-      //     re-entering that flow. The user re-mints (one click).
-      let result: Awaited<ReturnType<NonNullable<typeof strategy.begin>>>;
-      try {
-        result = await strategy.begin(
-          {
-            scope,
-            actor,
-            integrationId: claims.package_id,
-            authKey: claims.auth_key,
-            ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
-          },
-          { scopes, forceAccountSelect: claims.force_account_select ?? false },
-        );
-      } catch (err) {
-        if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-          logger.warn("Hosted connect OAuth begin refused", {
-            status: err.status,
-            code: err.code,
-            detail: err.message,
-            packageId: claims.package_id,
-            authKey: claims.auth_key,
-          });
-          // Hand the jti back only when the refusal PROVABLY precedes any
-          // egress. A classic auth resolves its client from OUR database, so
-          // nothing left the process and the same link works once an admin
-          // registers it. An auto-provisioned (DCR/CIMD) auth already POSTed an
-          // RFC 7591 registration upstream by the time it refuses — releasing the
-          // jti would let one link replay that registration on every click (issue
-          // #1344). Burn it, and tell the user to re-mint rather than reopen a
-          // link that now 410s.
-          const reusable = !usesAutoProvisionedClient(manifest, auth);
-          if (reusable) await releaseJti(claims.jti);
-          const retry = reusable ? "open this link again" : "request a new connection link";
-          return c.html(
-            popupHtmlError(
-              `This integration is not ready to be connected. Ask an administrator to finish setting it up, then ${retry}.`,
-              completionDetail,
-            ),
-            err.status as ContentfulStatusCode,
-          );
-        }
-        logger.error("Hosted connect OAuth begin failed", {
-          err: String(err),
-          packageId: claims.package_id,
-          authKey: claims.auth_key,
-        });
-        return c.html(
-          popupHtmlError("Could not start the connection. Please try again.", completionDetail),
-          502,
-        );
-      }
-      return c.redirect(result.redirectUrl);
+      // Nothing sent upstream yet: the very same link works once the fault passes (#1352).
+      // Otherwise the flow may have gone half way, and the burn stops a replay re-entering it.
+      if (begun.beforeEgress) await releaseJti(claims.jti);
+      return c.html(
+        popupHtmlError("Could not start the connection. Please try again.", completionDetail),
+        begun.beforeEgress ? 500 : 502,
+      );
     }
 
-    // Non-oauth → hand off to the hosted SPA form. Pin the page cookie so the
-    // form can read context via GET /connect/context (no token in the URL). The
-    // oauth2 branch above never reaches here, so the cookie is set only when the
-    // hosted form actually needs it.
+    // Non-oauth, or oauth2 with connection variables → hand off to the hosted
+    // SPA form. Pin the page cookie so the form can read context via
+    // GET /connect/context (no token in the URL). The oauth2 branch above never
+    // reaches here, so the cookie is set only when the hosted form needs it.
     setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });
@@ -1168,6 +1175,13 @@ export function createIntegrationsRouter() {
     if (!claims) throw notFound("No active connect session");
     const scope = scopeFromClaims(claims);
     const { manifest, auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+    const variablesSchema = getVariablesSchema(manifest);
+    // A reconnect shows the values the connection was made with; `connection_id` rides signed
+    // claims minted after `assertConnectionBelongsToActor`.
+    const values =
+      variablesSchema && claims.connection_id
+        ? await getIntegrationConnectionVariables(claims.connection_id)
+        : null;
     return c.json({
       packageId: claims.package_id,
       auth_key: claims.auth_key,
@@ -1176,12 +1190,15 @@ export function createIntegrationsRouter() {
       auth: authWithoutMintedCredentials(claims.package_id, claims.auth_key, auth),
       connection_id: claims.connection_id ?? null,
       csrf: claims.csrf ?? null,
+      variables: variablesSchema ? { schema: variablesSchema, values: values ?? {} } : null,
     });
   });
 
   // POST /connect/submit — hosted-form credential submit. Context + actor come
   // from the page cookie; the request carries only the credentials + CSRF nonce.
-  router.post("/connect/submit", async (c) => {
+  // Rate-limited per IP like `/connect/start`: no session, and an oauth2 submit
+  // reaches a server the submitter chose.
+  router.post("/connect/submit", rateLimitByIp(20), async (c) => {
     const claims = readConnectPageCookie(c);
     if (!claims) throw notFound("No active connect session");
     // Double-submit CSRF: the nonce minted into the page cookie must match the
@@ -1194,10 +1211,58 @@ export function createIntegrationsRouter() {
     const actor = actorFromClaims(claims);
     const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
     try {
-      const { auth } = await readIntegrationAuth(scope, claims.package_id, claims.auth_key);
+      const { manifest, auth } = await readIntegrationAuth(
+        scope,
+        claims.package_id,
+        claims.auth_key,
+      );
       if (auth.type === "oauth2") {
-        throw invalidRequest("This integration uses OAuth — open the connect link instead");
+        if (body.credentials) {
+          throw invalidRequest(
+            "This integration uses OAuth: submit its connection variables only",
+            "credentials",
+          );
+        }
+        // The capability token's jti was burned by `/connect/start`; the page cookie's own jti
+        // is spent here, so one link starts one authorization request.
+        if (!(await consumeJti(claims.jti, claims.exp))) {
+          throw notFound("No active connect session");
+        }
+        const begun = await beginHostedOAuth(claims, manifest, auth, body.variables);
+        if ("redirectUrl" in begun) {
+          clearConnectPageCookie(c);
+          return c.json({ ok: true, redirect_url: begun.redirectUrl });
+        }
+        if ("refused" in begun && begun.refused.code === "validation_failed") {
+          // A variable to fix, shown beside its field: the form may be submitted again.
+          await releaseJti(claims.jti);
+          throw begun.refused;
+        }
+        const reusable = "refused" in begun ? begun.reusable : begun.beforeEgress;
+        if (reusable) await releaseJti(claims.jti);
+        else clearConnectPageCookie(c);
+        if ("refused" in begun) {
+          throw new ApiError({
+            status: begun.refused.status,
+            code: "connection_not_ready",
+            title: "Connection Not Ready",
+            detail: `This integration is not ready to be connected. Ask an administrator to finish setting it up, then ${
+              reusable ? "submit this form again" : "request a new connection link"
+            }.`,
+          });
+        }
+        if (begun.beforeEgress) throw internalError();
+        throw new ApiError({
+          status: 502,
+          code: "connect_start_failed",
+          title: "Bad Gateway",
+          detail: "Could not start the connection. Please request a new connection link.",
+        });
       }
+      if (!body.credentials) {
+        throw invalidRequest("credentials payload cannot be empty", "credentials");
+      }
+      const submittedCredentials = body.credentials;
       const provisioning = readProvisioning(claims.package_id, claims.auth_key);
       // On a reconnect, the stored bundle, so the provisioner can reuse the key
       // already installed on the target. Decrypted only for a provisioning
@@ -1212,28 +1277,25 @@ export function createIntegrationsRouter() {
       const provisioned = await provisionCredentials(
         claims.package_id,
         claims.auth_key,
-        body.credentials,
+        submittedCredentials,
         existing,
       );
-      const credentials = provisioned ? { ...body.credentials, ...provisioned } : body.credentials;
+      const credentials = provisioned
+        ? { ...submittedCredentials, ...provisioned }
+        : submittedCredentials;
 
-      const conn = await resolveStrategy(auth, {
-        connectToolExecutor: createConnectRunExecutor(),
-      }).complete(
-        {
-          scope,
-          actor,
-          integrationId: claims.package_id,
-          authKey: claims.auth_key,
-          ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
-        },
-        { kind: "fields", credentials },
-      );
-      await recordAuditAs(
-        c,
-        { ...scope, actorType: actor.type, actorId: actor.id },
-        connectionPersistedAudit(conn, claims.package_id, claims.auth_key, !!claims.connection_id),
-      );
+      const ctx: ConnectContext = {
+        scope,
+        actor,
+        integrationId: claims.package_id,
+        authKey: claims.auth_key,
+        ...(claims.connection_id ? { connectionId: claims.connection_id } : {}),
+        ...(claims.delegated ? { delegated: true } : {}),
+        ...(body.variables ? { variables: body.variables } : {}),
+      };
+      const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
+      const { conn, audit } = await completeConnect(strategy, ctx, { kind: "fields", credentials });
+      await recordAuditAs(c, { ...scope, actorType: actor.type, actorId: actor.id }, audit);
       clearConnectPageCookie(c);
       // Carried on the response, not fetched: the page cookie that authenticates
       // the portal was just cleared, and the end-user may hold no session.
@@ -1258,7 +1320,7 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
       const actor = getActor(c);
-      const items = await listIntegrationConnections(scope, packageId, actor);
+      const items = await listIntegrationConnections(scope, packageId, actor, isUserPrincipal(c));
       return c.json(listResponse(items));
     },
   );
@@ -1287,7 +1349,7 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap (#657).
-      const detail = await getIntegrationAuthStatuses(scope, packageId, actor);
+      const detail = await getIntegrationAuthStatuses(scope, packageId, actor, isUserPrincipal(c));
       return c.json(detail);
     },
   );
@@ -1365,10 +1427,10 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // ─── Org default connection (cross-agent governance) ─────────────────────
+  // ─── Space default connection (cross-agent governance; `org_default` on the wire) ───
   // One default connection set per (space, integration) — the resolver
-  // baseline for every consuming agent (enforce → org-wide lock; soft →
-  // overridable by member pins). Admin-only.
+  // baseline for every consuming agent of the space (enforce → space-wide lock;
+  // soft → overridable by member pins). Admin-only.
 
   router.get(
     "/:packageId{@[^/]+/[^/]+}/default",
@@ -1433,70 +1495,22 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "connect"),
     async (c) => {
       const connectionId = c.req.param("connectionId")!;
-      const scope = getSpaceScope(c);
-      const actor = getActor(c);
       // `connectionId` hits a `uuid` column — a non-UUID raises PG `22P02` and
       // surfaces as a 500. Validate first and collapse to the same `notFound`
       // the missing-row branch returns (no information leak / no 500).
       if (!z.uuid().safeParse(connectionId).success) {
         throw notFound(`Connection '${connectionId}' not found`);
       }
-      const ownership = await loadConnectionOwnership(connectionId);
-      if (!ownership || ownership.spaceId !== scope.spaceId) {
-        throw notFound(`Connection '${connectionId}' not found`);
-      }
-      // The connection owner, or whoever governs this space's integrations,
-      // can edit metadata. Sharing is the owner's consent, so only they may
-      // set `shared_with_org: true`; a governor may withdraw it.
-      const isOwner =
-        (actor.type === "user" && ownership.userId === actor.id) ||
-        (actor.type === "end_user" && ownership.endUserId === actor.id);
-      if (!isOwner && !canConfigureIntegrations(c)) {
-        throw new ApiError({
-          status: 403,
-          code: "forbidden",
-          title: "Forbidden",
-          detail:
-            "Only the connection owner or a principal with integrations:configure can update this connection",
-        });
-      }
       const body = await readJsonBody(c, updateConnectionSchema);
-      if (body.shared_with_org === true && !isOwner) {
-        throw new ApiError({
-          status: 403,
-          code: "forbidden",
-          title: "Forbidden",
-          detail: "Only the connection owner can share it (shared_with_org: true)",
-        });
-      }
-      const { connection: updated, disabledScheduleIds } = await updateConnectionMetadata(
-        connectionId,
-        {
-          ...(body.label !== undefined ? { label: body.label } : {}),
-          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
-        },
-      );
-      await removeScheduleJobs(disabledScheduleIds);
-      await recordAuditFromContext(c, {
-        action: "integration.connection.metadata.updated",
-        resourceType: "integration_connection",
-        resourceId: connectionId,
-        after: {
-          ...(body.label !== undefined ? { label: body.label } : {}),
-          ...(body.shared_with_org !== undefined ? { sharedWithOrg: body.shared_with_org } : {}),
-          ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
-        },
-      });
-      // 200 + the bare connection resource — same serializer as the
-      // connections list / connect flows (#657), not a hand-built stub.
-      //
-      // An org admin may rename a connection they do not own, so this echo
-      // must honour the same rule the list does: sharing a connection consents
-      // to using it, not to publishing the owner's OIDC claim bag. Without the
-      // redaction a `PATCH {label}` reads back what
-      // `GET .../connections` deliberately withheld.
-      const serialized = serializeIntegrationConnection(updated);
-      return c.json(isOwner ? serialized : { ...serialized, identity_claims: null });
+      const { orgId, spaceId } = getSpaceScope(c);
+      const viewer = {
+        actor: getActor(c),
+        spaceId,
+        governs: canConfigureIntegrations(c),
+        // A delegated credential acts from this space only.
+        boundSpaceId: isUserPrincipal(c) ? null : spaceId,
+      };
+      return c.json(await applyConnectionUpdate(c, orgId, viewer, connectionId, body));
     },
   );
 
@@ -1515,4 +1529,51 @@ export function createIntegrationsRouter() {
  */
 function canConfigureIntegrations(c: import("hono").Context<AppEnv>): boolean {
   return c.get("permissions")?.has("integrations:configure") ?? false;
+}
+
+/** Both connection-edit doors: apply, drop disabled schedules' jobs, audit, echo the row. */
+export async function applyConnectionUpdate(
+  c: Context<AppEnv>,
+  orgId: string,
+  viewer: Omit<ConnectionViewer, "permissionsIn">,
+  connectionId: string,
+  body: z.infer<typeof updateConnectionSchema>,
+): Promise<IntegrationConnection> {
+  const { connection, isOwner, added, removed, disabledScheduleIds } = await updateConnection({
+    connectionId,
+    viewer: {
+      ...viewer,
+      permissionsIn: (spaceId) => callerPermissionsInSpace(c, spaceId, orgId),
+    },
+    ...(body.label !== undefined ? { label: body.label } : {}),
+    ...(body.shared_space_ids !== undefined ? { sharedSpaceIds: body.shared_space_ids } : {}),
+  });
+  await removeScheduleJobs(disabledScheduleIds);
+  const audit = (action: string, after: AuditPayload, spaceIdOverride?: string) =>
+    recordAuditFromContext(c, {
+      action,
+      resourceType: "integration_connection",
+      resourceId: connectionId,
+      after,
+      // `/me/*` carries no org context: the audit names the connection's org.
+      orgIdOverride: connection.orgId,
+      ...(spaceIdOverride ? { spaceIdOverride } : {}),
+    });
+  // A share is recorded in the space it opens or closes.
+  for (const spaceId of added) {
+    await audit("integration.connection.share_added", { spaceId }, spaceId);
+  }
+  for (const spaceId of removed) {
+    await audit("integration.connection.share_removed", { spaceId }, spaceId);
+  }
+  if (body.label !== undefined || disabledScheduleIds.length > 0) {
+    await audit("integration.connection.metadata.updated", {
+      ...(body.label !== undefined ? { label: body.label } : {}),
+      ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),
+    });
+  }
+  return serializeIntegrationConnection(connection, {
+    owner: isOwner,
+    within: isOwner ? viewer.boundSpaceId : viewer.spaceId,
+  });
 }

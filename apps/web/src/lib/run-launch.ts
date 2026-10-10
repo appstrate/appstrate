@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { MissingIntegrationConnectionCode } from "@appstrate/core/integration";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
-import { integrationIdOfField, type MissingIntegrationFieldError } from "./connection-choice";
+import { ApiError } from "../api/errors";
+import {
+  integrationIdOfField,
+  missingConnectionErrors,
+  type MissingIntegrationFieldError,
+} from "./connection-choice";
 
 /** One run launch, as the launch surfaces build it — `useRunAgent` maps it onto the wire. */
 export interface RunLaunch {
@@ -83,7 +89,10 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
 }
 
 /** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
-const OWN_PICK_REFUSALS = new Set(["override_outranked", "override_connection_unavailable"]);
+const OWN_PICK_REFUSALS: ReadonlySet<string> = new Set([
+  "override_outranked",
+  "override_connection_unavailable",
+] satisfies MissingIntegrationConnectionCode[]);
 
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
@@ -113,6 +122,21 @@ export function retryLaunch(
   );
   const kept = Object.entries(own).filter(([id]) => !refused.has(id));
   return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
+}
+
+/** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */
+export interface LaunchRefusal {
+  errors: MissingIntegrationFieldError[];
+  /** The 409's `version_ref` — an omitted `?version=` launches what readiness would not read. */
+  version: string | undefined;
+}
+
+/** The `409 missing_integration_connection` of a launch; `null` for any other error. */
+export function launchRefusal(err: unknown): LaunchRefusal | null {
+  const errors = missingConnectionErrors(err);
+  if (!errors || !(err instanceof ApiError)) return null;
+  const version = err.details?.version_ref;
+  return { errors, version: typeof version === "string" ? version : undefined };
 }
 
 /**

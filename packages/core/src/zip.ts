@@ -226,7 +226,7 @@ export function unzipArtifact(
 
 /**
  * Detect and strip a single common wrapper folder from ZIP entries — re-exported
- * verbatim from the zero-dependency `@appstrate/afps-shared` package, so the
+ * verbatim from the zero-internal-dependency `@appstrate/afps-shared` package, so the
  * `@appstrate/core/zip` public surface is unchanged (both overloads, `Record`
  * and `Map`, and the identity return when there is nothing to strip).
  *

@@ -463,11 +463,14 @@ function verifyManifestSignature(
 /**
  * Ensure the guest kernel + rootfs are present and match the requested
  * version. Called once at daemon boot, before orchestrator.initialize().
+ *
+ * Returns the installed artifacts' release (the signed manifest's `version`),
+ * or `null` under FIRECRACKER_ARTIFACTS_LOCAL.
  */
 export async function ensureGuestArtifacts(
   config: ArtifactsConfig,
   deps: ArtifactsDeps = {},
-): Promise<void> {
+): Promise<string | null> {
   const fetchFn = deps.fetchFn ?? fetch;
   const fs = deps.fs ?? bunFs;
   const log = deps.logger ?? defaultLogger;
@@ -480,7 +483,7 @@ export async function ensureGuestArtifacts(
       kernelPath: config.kernelPath,
       rootfsPath: config.rootfsPath,
     });
-    return;
+    return null;
   }
 
   const present = (await fs.exists(config.kernelPath)) && (await fs.exists(config.rootfsPath));
@@ -513,12 +516,12 @@ export async function ensureGuestArtifacts(
       installedVersion: installed.version,
       requestedVersion: config.version ?? "(none)",
     });
-    return;
+    return installed.version;
   }
 
   const baseUrl = config.baseUrl ?? DEFAULT_ARTIFACTS_BASE_URL;
   try {
-    await downloadAndInstall({
+    return await downloadAndInstall({
       fetchFn,
       fs,
       log,
@@ -549,7 +552,7 @@ export async function ensureGuestArtifacts(
         kernelPath: config.kernelPath,
         rootfsPath: config.rootfsPath,
       });
-      return;
+      return installed.version;
     }
     // Nothing usable on disk (absent, present at an incompatible guest
     // protocol, or present but never signature-verified) and we could not
@@ -584,7 +587,7 @@ interface InstallCtx {
   manifestPublicKey: string | undefined;
 }
 
-async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
+async function downloadAndInstall(ctx: InstallCtx): Promise<string> {
   const { fetchFn, fs, log, decompressZstd, arch, baseUrl, version } = ctx;
 
   // 1. Manifest — the trust anchor for the two file downloads. It is
@@ -728,6 +731,7 @@ async function downloadAndInstall(ctx: InstallCtx): Promise<void> {
     kernelPath: ctx.kernelPath,
     rootfsPath: ctx.rootfsPath,
   });
+  return manifest.version;
 }
 
 function verifyChecksum(

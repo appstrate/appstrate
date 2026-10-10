@@ -29,8 +29,7 @@ import type { SocialProviderId, SocialProviderView } from "@appstrate/shared-typ
 import { spaceSocialProviders } from "@appstrate/db/schema";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
-import { logger } from "../../../lib/logger.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { decryptStoredCredential } from "../../../lib/stored-credential.ts";
 
 export type { SocialProviderId };
 
@@ -108,17 +107,13 @@ async function resolvePerApp(
       )
       .limit(1);
     if (!row) return null;
-    let decrypted: { clientSecret: string };
-    try {
-      decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
-    } catch (err) {
-      logger.error("oidc social: decryption failed for per-space creds, treating as unconfigured", {
-        spaceId,
-        provider,
-        error: getErrorMessage(err),
-      });
-      return null;
-    }
+    // An unreadable blob reads as unconfigured; a missing key throws the 503 (never cached),
+    // so the instance credentials are not silently used in its place.
+    const decrypted = decryptStoredCredential(
+      () => decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted),
+      { spaceId, provider },
+    );
+    if (!decrypted) return null;
     return {
       clientId: row.clientId,
       clientSecret: decrypted.clientSecret,

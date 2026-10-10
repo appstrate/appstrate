@@ -74,11 +74,7 @@ import {
   usePackageDownload,
   type Versioned,
 } from "../hooks/use-packages";
-import {
-  useIntegrationDetail,
-  useIntegrations,
-  type IntegrationDetailWire,
-} from "../hooks/use-integrations";
+import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useSetPackageActive } from "../hooks/use-library";
@@ -501,8 +497,10 @@ export function IntegrationDetailPage() {
   const { scope, name } = useParams<{ scope: string; name: string }>();
   const packageId = scope && name ? `${scope}/${name}` : "";
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId || undefined);
-  const { data: pkg } = usePackageDetail("integration", packageId || undefined);
-  const { data: integrations } = useIntegrations();
+  const { data: pkg, isLoading: pkgLoading } = usePackageDetail(
+    "integration",
+    packageId || undefined,
+  );
   // ONE pair of doors for every package family: an integration is activated in
   // a space by `POST /api/spaces/{id}/packages` and switched off by its
   // `DELETE`, exactly like an agent or a skill. The row and its settings
@@ -565,7 +563,8 @@ export function IntegrationDetailPage() {
     return <Navigate replace to={{ search: params.toString(), hash: "#configuration" }} />;
   }
 
-  if (isLoading) return <LoadingState />;
+  // `source` (system or local) comes from the package detail only: wait for it.
+  if (isLoading || pkgLoading) return <LoadingState />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.
@@ -581,14 +580,14 @@ export function IntegrationDetailPage() {
   }
   if (!detail) return <ErrorState message={t("packages.detailNotFound")} />;
 
-  const summary = integrations?.find((i) => i.id === packageId);
   const active = detail.active;
   const m = detail.manifest;
-  const source = pkg?.source ?? summary?.source ?? "local";
+  // Only the package detail knows the source. Unknown (read refused or failed) is not owned.
+  const source = pkg?.source;
   const version = pkg?.version ?? m.version;
   const isBuiltIn = source === "system";
   // Org-owned packages are editable regardless of scope name; only system packages are read-only.
-  const isOwned = !isBuiltIn;
+  const isOwned = source === "local";
   const setActivation = (next: boolean, onSuccess?: () => void) => {
     if (!currentSpaceId) return;
     setActive.mutate({ spaceId: currentSpaceId, packageId, active: next }, { onSuccess });
@@ -602,7 +601,7 @@ export function IntegrationDetailPage() {
           id: packageId,
           displayName: m.display_name ?? packageId,
           description: m.description ?? "",
-          source,
+          source: source ?? "",
           type: "integration",
           version,
           icon: typeof m.icon === "string" ? m.icon : undefined,

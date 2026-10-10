@@ -2,24 +2,58 @@
 
 /**
  * Unit tests for `describeResolution` — the one reading of the server verdict
- * (`source` + `error_code`, the resolver's vocabulary) the picker, the 409
- * recovery modal and the agent's integrations block share. This is where the
- * mapping from the resolver's codes to what the UI shows is pinned.
+ * (`source` + `error_code`, the resolver's vocabulary) the picker and the
+ * agent's integrations block share. This is where the
+ * mapping from the resolver's codes to what the UI shows is pinned — and
+ * `unboundLabel`, why a run starts without a declared integration (its launch
+ * warning), and `requiredNoneLabel`, who chose none for one the agent requires.
  */
 
-import { describe, it, expect } from "bun:test";
-import type { IntegrationAgentResolution } from "@appstrate/shared-types";
-import { describeResolution } from "../integration-run-readiness";
+import { afterAll, describe, it, expect } from "bun:test";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import type { components } from "../../../api/schema";
+import i18n, { i18nReady } from "../../../i18n.ts";
+import { describeResolution, requiredNoneLabel, unboundLabel } from "../integration-run-readiness";
+import { NONE_CHOOSING_SOURCES } from "../../../lib/launch-warnings";
+
+type IntegrationAgentResolution = components["schemas"]["IntegrationAgentResolution"];
+type Warning = NonNullable<IntegrationAgentResolution["warning"]>;
+
+await i18nReady;
+await i18n.changeLanguage("fr");
+afterAll(async () => {
+  await i18n.changeLanguage("fr");
+});
+
+function candidate(): IntegrationAgentResolution["candidates"][number] {
+  return {
+    id: "conn_1",
+    auth_key: "oauth",
+    account_id: "me@acme.test",
+    label: "Moi",
+    owner_user_id: "usr_me",
+    owner_end_user_id: null,
+    owner_name: "Moi",
+    scopes_granted: [],
+    scope: "org",
+    shared_space_ids: [],
+    origin_space_id: null,
+    needs_reconnection: false,
+    missing_scopes: [],
+    is_own: true,
+  };
+}
 
 function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgentResolution {
   return {
     source: "fallback_auto",
     error_code: null,
+    warning: null,
     resolved_connection_ids: ["conn_1"],
     resolved_missing_scopes: [],
-    admin_pinned_connection_ids: [],
-    member_pinned_connection_ids: [],
-    org_default_connection_ids: [],
+    admin_pinned_connection_ids: null,
+    member_pinned_connection_ids: null,
+    org_default_connection_ids: null,
     org_default_enforced: false,
     can_add_connection: true,
     candidates: [],
@@ -64,6 +98,18 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
     expect(view.lockedConnectionIds).toEqual(["a"]);
   });
 
+  it("an admin pin to none locks too — to nothing, over an enforced default", () => {
+    const view = describeResolution(
+      resolution({
+        admin_pinned_connection_ids: [],
+        org_default_connection_ids: ["d"],
+        org_default_enforced: true,
+      }),
+    );
+    expect(view.lockedBy).toBe("admin_pin");
+    expect(view.lockedConnectionIds).toEqual([]);
+  });
+
   it("a soft org default does not lock", () => {
     const view = describeResolution(
       resolution({ source: "org_default", org_default_connection_ids: ["d"] }),
@@ -95,7 +141,7 @@ describe("describeResolution — resolved", () => {
 
   it("does not hold when there is no verdict at all (no manifest loaded)", () => {
     // `source` and `error_code` both null: nothing bound, nothing refused —
-    // the recovery modal and the reuse hint must not read that as "ready".
+    // the agent block's reuse hint must not read that as "ready".
     expect(
       describeResolution(
         resolution({ source: null, error_code: null, resolved_connection_ids: [] }),
@@ -151,5 +197,114 @@ describe("describeResolution — empty picker prompt", () => {
     for (const [error_code, prompt] of cases) {
       expect(describeResolution(resolution({ error_code })).emptyPickerPrompt).toBe(prompt);
     }
+  });
+
+  it("asks for a pick when the run starts without it for want of one", () => {
+    const shared = { ...candidate(), is_own: false };
+    const unbound = (code: Warning["code"]) =>
+      resolution({
+        source: null,
+        resolved_connection_ids: [],
+        candidates: [shared],
+        warning: warning(code),
+      });
+    expect(describeResolution(unbound("must_choose_connection")).emptyPickerPrompt).toBe("choose");
+    // Control: the same shared candidate under another cause asks for a connection.
+    expect(describeResolution(unbound("not_connected")).emptyPickerPrompt).toBe("connect");
+    expect(describeResolution(unbound("auth_key_mismatch")).emptyPickerPrompt).toBe("connect");
+  });
+});
+
+describe("describeResolution — no org default", () => {
+  it("reads a null org default as no lock and no soft set", () => {
+    const view = describeResolution(
+      resolution({ source: "org_default", org_default_connection_ids: null }),
+    );
+    expect(view.lockedBy).toBeNull();
+    expect(view.softDefaultIds).toEqual([]);
+  });
+});
+
+function warning(code: Warning["code"], over: Partial<Warning> = {}): Warning {
+  return { field: "integrations.@acme/gmail", code, message: "server prose", ...over };
+}
+
+describe("unboundLabel", () => {
+  it("is null when the run starts with it", () => {
+    expect(unboundLabel(null)).toBeNull();
+  });
+
+  it("words every warning code, in French", () => {
+    for (const code of CONNECTION_RESOLUTION_WARNING_CODES) {
+      const label = unboundLabel(warning(code));
+      expect(label).toBeString();
+      expect(label).not.toContain("detail.");
+    }
+    expect(unboundLabel(warning("not_connected"))).toBe("Non connectée — l'agent s'exécute sans");
+    expect(unboundLabel(warning("must_choose_connection"))).toBe(
+      "Seules des connexions partagées existent — choisissez-en une pour l'utiliser",
+    );
+    expect(unboundLabel(warning("auth_key_mismatch"))).toBe(
+      "Connectée avec une autre méthode d'authentification — l'agent s'exécute sans",
+    );
+    expect(unboundLabel(warning("integration_not_active"))).toBe(
+      "Désactivée dans cet espace — l'agent s'exécute sans",
+    );
+  });
+
+  it("names the layer that chose no connection, from the warning's `source`", () => {
+    expect(unboundLabel(warning("integration_unbound", { source: "member_pin" }))).toBe(
+      "Aucune connexion (votre choix) — l'agent s'exécute sans",
+    );
+    expect(unboundLabel(warning("integration_unbound", { source: "admin_pin" }))).toBe(
+      "Aucune connexion (choix d'un admin) — l'agent s'exécute sans",
+    );
+    const phrases = NONE_CHOOSING_SOURCES.map((source) =>
+      unboundLabel(warning("integration_unbound", { source })),
+    );
+    expect(new Set(phrases).size).toBe(phrases.length);
+    for (const phrase of phrases) expect(phrase).not.toContain("noneChosenBy.");
+    // No layer named: the sentence claims nobody.
+    expect(unboundLabel(warning("integration_unbound"))).toBe(
+      "Aucune connexion — l'agent s'exécute sans",
+    );
+  });
+});
+
+describe("requiredNoneLabel", () => {
+  const refused = {
+    error_code: "required_integration_unbound" as const,
+    resolved_connection_ids: [],
+  };
+
+  it("names the layer whose set is empty, from `source`", () => {
+    expect(requiredNoneLabel(resolution({ ...refused, source: "admin_pin" }))).toBe(
+      "Aucune connexion (choix d'un admin) alors que l'agent l'exige — lancement bloqué",
+    );
+    expect(requiredNoneLabel(resolution({ ...refused, source: "member_pin" }))).toBe(
+      "Aucune connexion (votre choix) alors que l'agent l'exige — lancement bloqué",
+    );
+  });
+
+  it("still says none was chosen when no layer is named", () => {
+    expect(requiredNoneLabel(resolution({ ...refused, source: null }))).toBe(
+      "Aucune connexion choisie alors que l'agent l'exige — lancement bloqué",
+    );
+  });
+
+  it("is null for any other verdict, a warning included", () => {
+    expect(requiredNoneLabel(resolution({}))).toBeNull();
+    expect(
+      requiredNoneLabel(
+        resolution({
+          source: null,
+          error_code: null,
+          warning: warning("integration_unbound", { source: "member_pin" }),
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      requiredNoneLabel(resolution({ ...refused, error_code: "must_choose_connection" })),
+    ).toBeNull();
   });
 });

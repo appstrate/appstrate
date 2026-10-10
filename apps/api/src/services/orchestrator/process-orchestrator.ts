@@ -7,15 +7,15 @@
  * ⚠️ No container isolation: agents can access the local filesystem and network.
  *    Use only with trusted agent code.
  *
- * Stdout workaround (Bun ≤1.3.9): `Bun.spawn({ stdout: "pipe" })` returns a
- * ReadableStream that signals EOF prematurely when the event loop services
- * concurrent I/O (e.g. incoming HTTP requests while an agent run is in-flight).
- * The subprocess keeps running but the platform sees an empty stream → 0 tokens
- * → false "could not reach the LLM API" failure. Reproducible by opening any
- * page while a run is active. Agent stdout is therefore redirected to a file via
- * `Bun.file()` and tailed with a sequential read handle. Docker mode is unaffected
- * (logs are read via the Docker HTTP API, not a Bun pipe).
- * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
+ * Agent stdout is redirected to a file via `Bun.file()` and tailed with a
+ * sequential read handle, not read from `Bun.spawn({ stdout: "pipe" })`: a
+ * piped stream was seen to signal EOF while the agent kept running whenever
+ * the event loop served concurrent HTTP traffic (opening any page during a
+ * run), so the platform read an empty stream → 0 tokens → a false "could not
+ * reach the LLM API" failure. A spawned writer under concurrent `Bun.serve`
+ * load does not reproduce it on Linux, but the original trigger was never
+ * isolated, so the file stays. Docker mode is unaffected (logs are read via
+ * the Docker HTTP API, not a Bun pipe).
  */
 
 import { mkdir, rm, readdir, stat } from "node:fs/promises";
@@ -460,8 +460,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     const platformApiUrl = await this.resolvePlatformApiUrl();
     const id = `sidecar-${runId}`;
 
-    // No `runId`: RUN_ID only serves container labeling and this
-    // topology spawns no containers.
+    // No `runId`: RUN_ID only names Docker runner resources, and this topology spawns none.
     const env = buildBaseSidecarEnv({
       spec,
       baseEnv: cleanProcessEnv(),
@@ -470,14 +469,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
       platformApiUrl,
       workspace: boundary.workspace,
     });
-    // This run is NOT containerized (process orchestrator), so its integrations
-    // must spawn as host subprocesses too. The sidecar selects its integration
-    // runtime purely from INTEGRATION_RUNTIME_ADAPTER (no auto-detection), so we
-    // pin it to mirror this orchestrator's RUN_ADAPTER. Respect an explicit
-    // operator override carried in from the environment.
-    if (!env.INTEGRATION_RUNTIME_ADAPTER) {
-      env.INTEGRATION_RUNTIME_ADAPTER = "process";
-    }
+    env.INTEGRATION_RUNTIME_ADAPTER = "process";
     // The agent reaches the sidecar over loopback, and nothing else may: on the host every
     // interface is reachable, and the forward proxy has no runner peers to tell apart here.
     env.LISTEN_HOST = LOOPBACK;

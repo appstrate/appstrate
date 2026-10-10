@@ -31,6 +31,11 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { getEnv } from "@appstrate/env";
 import { getSystemModelProviderCredentials, getSystemModels } from "../model-registry.ts";
 import { logger } from "../../lib/logger.ts";
+import {
+  decryptForDisplay,
+  decryptStoredCredential,
+  KEY_UNAVAILABLE,
+} from "../../lib/stored-credential.ts";
 import type { ModelProviderCredentialInfo } from "@appstrate/shared-types";
 import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 
@@ -152,41 +157,19 @@ function effectiveBaseUrl(cfg: ModelProviderDefinition, override: string | null)
   return resolveBaseUrlOverride(cfg, override) ?? cfg.defaultBaseUrl;
 }
 
-function decryptBlob(ciphertext: string): CredentialsBlob | null {
-  try {
-    return decryptCredentials<CredentialsBlob>(ciphertext);
-  } catch {
-    return null;
-  }
+/** `null` for an unreadable blob; a 503 when its key is missing from the keyring. */
+function decryptBlob(ciphertext: string, credentialId: string): CredentialsBlob | null {
+  return decryptStoredCredential(() => decryptCredentials<CredentialsBlob>(ciphertext), {
+    credentialId,
+  });
 }
 
-/**
- * Shared "raw load" behind every credential read path — the inference read
- * path, the OAuth token resolver, and the metadata-only listings. Returns the
- * row identity, the registry overlay (`config` + the derived `apiShape` /
- * `baseUrl`), and the decrypted blob, or `null` when the row is missing, the
- * org doesn't match, or the provider is unknown. Caller maps `null` to its
- * preferred error mode (notFound() vs silent fallback).
- *
- * A blob that will not decrypt yields `blob: null` on an otherwise-populated
- * result, NOT `null`: the registry overlay is derived from the plaintext
- * `provider_id` column and stays resolvable for a credential whose secret is
- * unreadable — which is exactly what the metadata-only callers need in order
- * to render a dead row instead of dropping it. Callers that need the secret
- * test `blob` themselves.
- *
- * `config` is non-nullable: an unknown `providerId` returns `null` outright
- * (below), so every returned object has one.
- *
- * `expectedOrgId` is enforced when provided — used as defense-in-depth by
- * the sidecar token-resolver path (run pinned to a specific org).
- */
-interface RawCredentialLoad {
+/** A row's identity and registry overlay, from its plaintext `provider_id`. */
+interface CredentialMetadata {
   id: string;
   orgId: string;
   providerId: string;
   baseUrlOverride: string | null;
-  blob: CredentialsBlob | null;
   config: ModelProviderDefinition;
   /** Registry-derived — see {@link DecryptedModelProviderCredentials}. */
   apiShape: ModelApiShape;
@@ -194,10 +177,10 @@ interface RawCredentialLoad {
   baseUrl: string;
 }
 
-export async function loadCredentialRow(
+async function selectCredential(
   id: string,
   expectedOrgId?: string,
-): Promise<RawCredentialLoad | null> {
+): Promise<{ metadata: CredentialMetadata; credentialsEncrypted: string } | null> {
   const [row] = await db
     .select({
       id: modelProviderCredentials.id,
@@ -220,15 +203,35 @@ export async function loadCredentialRow(
     return null;
   }
   return {
-    id: row.id,
-    orgId: row.orgId,
-    providerId: row.providerId,
-    baseUrlOverride: row.baseUrlOverride,
-    blob: decryptBlob(row.credentialsEncrypted),
-    config,
-    apiShape: config.apiShape,
-    baseUrl: effectiveBaseUrl(config, row.baseUrlOverride),
+    metadata: {
+      id: row.id,
+      orgId: row.orgId,
+      providerId: row.providerId,
+      baseUrlOverride: row.baseUrlOverride,
+      config,
+      apiShape: config.apiShape,
+      baseUrl: effectiveBaseUrl(config, row.baseUrlOverride),
+    },
+    credentialsEncrypted: row.credentialsEncrypted,
   };
+}
+
+/** `null` when the row is missing, another org's, or of an unknown provider. Never decrypts. */
+export async function loadCredentialMetadata(
+  id: string,
+  expectedOrgId?: string,
+): Promise<CredentialMetadata | null> {
+  return (await selectCredential(id, expectedOrgId))?.metadata ?? null;
+}
+
+/** Plus the blob: `null` when unreadable, the 503 when its key is missing. */
+export async function loadCredentialRow(
+  id: string,
+  expectedOrgId?: string,
+): Promise<(CredentialMetadata & { blob: CredentialsBlob | null }) | null> {
+  const loaded = await selectCredential(id, expectedOrgId);
+  if (!loaded) return null;
+  return { ...loaded.metadata, blob: decryptBlob(loaded.credentialsEncrypted, id) };
 }
 
 // ─── Create ────────────────────────────────────────────────────────────────
@@ -353,8 +356,13 @@ export async function reconnectOAuthCredential(
     .limit(1);
   if (!row) return false;
 
-  const existing = decryptBlob(row.credentialsEncrypted);
-  const existingOAuth = existing?.kind === "oauth" ? existing : null;
+  // Only the old identity is read: an unreadable blob, or one under a missing key, is absent.
+  const existing = decryptForDisplay(
+    () => decryptCredentials<CredentialsBlob>(row.credentialsEncrypted),
+    { credentialId: input.id },
+  );
+  const existingOAuth =
+    existing !== KEY_UNAVAILABLE && existing?.kind === "oauth" ? existing : null;
   const expiresAt = input.expiresAt ?? null;
   const accountId = input.accountId ?? existingOAuth?.accountId;
   const email = input.email ?? existingOAuth?.email;
@@ -411,12 +419,9 @@ export async function updateModelProviderCredential(
   if (patch.baseUrlOverride !== undefined) updates.baseUrlOverride = patch.baseUrlOverride;
 
   if (patch.apiKey !== undefined) {
-    // Rotate the api key — load the row to verify it's an api_key blob, then re-encrypt.
+    // Rotate the api key — load the row to verify it's an api_key credential, then re-encrypt.
     const [row] = await db
-      .select({
-        providerId: modelProviderCredentials.providerId,
-        credentialsEncrypted: modelProviderCredentials.credentialsEncrypted,
-      })
+      .select({ providerId: modelProviderCredentials.providerId })
       .from(modelProviderCredentials)
       .where(
         scopedWhere(modelProviderCredentials, {
@@ -426,11 +431,10 @@ export async function updateModelProviderCredential(
       )
       .limit(1);
     if (!row) return;
-    const existing = decryptBlob(row.credentialsEncrypted);
-    if (existing?.kind !== "api_key") {
-      throw new Error(
-        `Cannot rotate apiKey on credential ${id}: stored blob is ${existing?.kind ?? "unreadable"}`,
-      );
+    // Read from the registry, not the blob: rotation must repair a blob that no longer opens.
+    const authMode = getModelProvider(row.providerId)?.authMode;
+    if (authMode !== "api_key") {
+      throw new Error(`Cannot rotate apiKey on credential ${id}: provider auth is ${authMode}`);
     }
     const next: ApiKeyBlob = { kind: "api_key", apiKey: patch.apiKey };
     updates.credentialsEncrypted = encryptCredentials(next as unknown as Record<string, unknown>);
@@ -539,7 +543,7 @@ async function updateBlob(
       )
       .limit(1);
     if (!row) return;
-    const existing = decryptBlob(row.credentialsEncrypted);
+    const existing = decryptBlob(row.credentialsEncrypted, id);
     const next = existing && mutate(existing);
     if (!existing || !next) return;
     const set: Record<string, unknown> = {
@@ -643,13 +647,15 @@ export async function markCredentialNeedsReconnection(orgId: string, id: string)
  * recovers (clearing the streak via {@link updateOAuthCredentialTokens}). Only
  * a token that is expired-past-grace AND repeatedly unrefreshable — the
  * silent-death case — gets flipped.
+ *
+ * Returns the streak and whether this failure flagged the credential; `null` when no row matched.
  */
 export async function recordModelCredentialRefreshFailure(
   orgId: string,
   id: string,
   maxFailures: number,
   graceSeconds: number,
-): Promise<void> {
+): Promise<{ failures: number; needsReconnection: boolean } | null> {
   const updated = await db
     .update(modelProviderCredentials)
     .set({
@@ -667,17 +673,18 @@ export async function recordModelCredentialRefreshFailure(
       expiresAt: modelProviderCredentials.expiresAt,
     });
   const row = updated[0];
-  if (!row) return;
+  if (!row) return null;
+  const failures = row.refreshFailureCount;
   const expiredPastGrace =
     row.expiresAt !== null && row.expiresAt.getTime() < Date.now() - graceSeconds * 1000;
-  if (row.refreshFailureCount >= maxFailures && expiredPastGrace) {
-    logger.warn("oauth model provider: escalating to needsReconnection after repeated failures", {
-      credentialId: id,
-      refreshFailureCount: row.refreshFailureCount,
-      expiresAt: row.expiresAt?.toISOString() ?? null,
-    });
-    await markCredentialNeedsReconnection(orgId, id);
-  }
+  if (failures < maxFailures || !expiredPastGrace) return { failures, needsReconnection: false };
+  logger.warn("oauth model provider: escalating to needsReconnection after repeated failures", {
+    credentialId: id,
+    refreshFailureCount: failures,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+  });
+  await markCredentialNeedsReconnection(orgId, id);
+  return { failures, needsReconnection: true };
 }
 
 /**
@@ -810,7 +817,12 @@ export async function listOrgModelProviderCredentials(
     },
     mapRow: (r): ModelProviderCredentialInfo => {
       const cfg = getModelProvider(r.providerId);
-      const blob = decryptBlob(r.credentialsEncrypted);
+      const stored = decryptForDisplay(
+        () => decryptCredentials<CredentialsBlob>(r.credentialsEncrypted),
+        { credentialId: r.id },
+      );
+      // Under a missing key the row shows as it is: the 503 is for the actions that need it.
+      const blob = stored === KEY_UNAVAILABLE ? undefined : stored;
       const isOauth = blob?.kind === "oauth";
       return {
         id: r.id,
@@ -822,7 +834,7 @@ export async function listOrgModelProviderCredentials(
         providerId: r.providerId,
         oauth_email: isOauth ? (blob.email ?? null) : null,
         // Flagged or undecryptable: the model list badges the same cases and points here.
-        needs_reconnection: blob === null || !!blob.needsReconnection,
+        needs_reconnection: blob === null || !!blob?.needsReconnection,
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),
@@ -888,7 +900,7 @@ export async function loadInferenceCredentials(
   const loaded = await loadCredentialRow(id, orgId);
   // A blob that will not decrypt is as dead as a missing row for inference —
   // the raw load keeps such a credential alive for the metadata callers, this
-  // path does not.
+  // path does not (a key missing from the keyring has already thrown the 503).
   if (!loaded || !loaded.blob) return null;
   if (loaded.blob.needsReconnection) return null;
 

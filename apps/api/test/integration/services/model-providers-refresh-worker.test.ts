@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import type { Logger } from "@appstrate/core/logger";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../helpers/auth.ts";
 import {
@@ -30,7 +31,10 @@ import {
   createOAuthCredential,
   markCredentialNeedsReconnection,
 } from "../../../src/services/model-providers/credentials.ts";
-import { scanAndEnqueueRefreshes } from "../../../src/services/model-providers/refresh-worker.ts";
+import {
+  handleRefreshJob,
+  scanAndEnqueueRefreshes,
+} from "../../../src/services/model-providers/refresh-worker.ts";
 
 interface SeedFixture {
   orgId: string;
@@ -46,7 +50,7 @@ async function setupOrg(): Promise<SeedFixture> {
 async function seedOauthCred(
   fx: SeedFixture,
   providerId: "test-oauth",
-  opts: { expiresAtMs: number | null; needsReconnection?: boolean },
+  opts: { expiresAtMs: number | null; needsReconnection?: boolean; refreshToken?: string },
 ): Promise<string> {
   const id = await createOAuthCredential({
     orgId: fx.orgId,
@@ -54,7 +58,7 @@ async function seedOauthCred(
     label: `Test ${providerId}`,
     providerId,
     accessToken: "tok",
-    refreshToken: "rt",
+    refreshToken: opts.refreshToken ?? "rt",
     expiresAt: opts.expiresAtMs,
   });
   if (opts.needsReconnection) {
@@ -162,5 +166,62 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     const result = await scanAndEnqueueRefreshes();
     expect(result.scanned).toBe(2);
     expect(result.enqueued).toBe(2);
+  });
+});
+
+describe("handleRefreshJob — the verdict it logs", () => {
+  let fx: SeedFixture;
+
+  beforeEach(async () => {
+    await truncateAll();
+    fx = await setupOrg();
+  });
+
+  interface LogLine {
+    level: keyof Logger;
+    msg: string;
+    data: Record<string, unknown>;
+  }
+
+  async function logsOfRefresh(credentialId: string): Promise<LogLine[]> {
+    const lines: LogLine[] = [];
+    const at =
+      (level: keyof Logger) =>
+      (msg: string, data?: Record<string, unknown>): void => {
+        lines.push({ level, msg, data: data ?? {} });
+      };
+    const log: Logger = {
+      debug: at("debug"),
+      info: at("info"),
+      warn: at("warn"),
+      error: at("error"),
+    };
+    await handleRefreshJob({ data: { credentialId, providerId: "test-oauth" } }, log);
+    return lines;
+  }
+
+  // A 410 is the resolver's verdict, flagged before or by this refresh: never a failed job.
+  it.each([
+    [
+      "no stored refresh token",
+      { refreshToken: "" },
+      "oauth_model_refresh_needs_reconnection",
+      "refresh_token_missing",
+    ],
+    [
+      "an already-flagged credential",
+      { needsReconnection: true },
+      "oauth_model_refresh_skipped_already_flagged",
+      "connection_flagged",
+    ],
+  ])("warns with the cause on %s", async (_label, opts, msg, cause) => {
+    const id = await seedOauthCred(fx, "test-oauth", {
+      expiresAtMs: Date.now() + 60 * 60 * 1000,
+      ...opts,
+    });
+
+    expect(await logsOfRefresh(id)).toEqual([
+      { level: "warn", msg, data: expect.objectContaining({ credentialId: id, cause }) },
+    ]);
   });
 });

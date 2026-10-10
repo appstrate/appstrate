@@ -27,3 +27,22 @@ export const INTEGRATION_CALLBACK_PATH = "/api/integrations/callback";
 export function integrationCallbackUrl(): string {
   return `${getEnv().APP_URL}${INTEGRATION_CALLBACK_PATH}`;
 }
+
+/** 22 base64url characters: 132 bits. */
+const AUTHORIZATION_SERVER_TAG_LENGTH = 22;
+
+export const INTEGRATION_TAGGED_CALLBACK_PATH = new RegExp(
+  `^${INTEGRATION_CALLBACK_PATH}/[A-Za-z0-9_-]{${AUTHORIZATION_SERVER_TAG_LENGTH}}$`,
+);
+
+/** A redirect URI per server chosen per connection (AFPS §7.3, RFC 9700 §4.4). */
+export function authorizationServerTag(issuer: string): string {
+  return new Bun.CryptoHasher("sha256")
+    .update(issuer)
+    .digest("base64url")
+    .slice(0, AUTHORIZATION_SERVER_TAG_LENGTH);
+}
+
+export function integrationCallbackUrlFor(issuer: string): string {
+  return `${integrationCallbackUrl()}/${authorizationServerTag(issuer)}`;
+}

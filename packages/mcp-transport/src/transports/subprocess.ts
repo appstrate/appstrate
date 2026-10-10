@@ -231,7 +231,7 @@ export class SubprocessTransport implements Transport {
     ).Bun?.spawn;
     if (!bunSpawn) {
       throw new SubprocessTransportError(
-        "Bun.spawn is not available — SubprocessTransport requires Bun >= 1.3.9",
+        "Bun.spawn is not available — SubprocessTransport requires the Bun runtime",
       );
     }
     const child = bunSpawn([this.options.command, ...(this.options.args ?? [])], {

@@ -17,6 +17,7 @@ import type { ModelReasoningLevel } from "@appstrate/core/model-generation";
 import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { PiModelDialect } from "@appstrate/core/sidecar-types";
+import type { TokenUsage } from "@appstrate/core/token-usage";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "./model-compat.ts";
 import { deriveProviderFromApi } from "./provider-map.ts";
 import type { Api, Model } from "./pi-sdk.ts";
@@ -103,14 +104,29 @@ export function clampPiReasoningLevel(
   return clampThinkingLevel(model, level);
 }
 
+/** Pi's token buckets: `input` is net of the two cache buckets. */
+export interface PiTokenCounts {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** The {@link PiTokenCounts} of a wire {@link TokenUsage} or band; absent → 0. */
+export function piTokenCounts(usage: Omit<TokenUsage, "tiers">): PiTokenCounts {
+  return {
+    input: usage.input_tokens ?? 0,
+    output: usage.output_tokens ?? 0,
+    cacheRead: usage.cache_read_input_tokens ?? 0,
+    cacheWrite: usage.cache_creation_input_tokens ?? 0,
+  };
+}
+
 /**
  * USD cost of one request's tokens, `cost.tiers` honoured. Pi's
  * `calculateCost` writes into the usage it is given, so each call gets a fresh one.
  */
-export function piTokenCostUsd(
-  cost: ModelCost,
-  usage: { input: number; output: number; cacheRead: number; cacheWrite: number },
-): number {
+export function piTokenCostUsd(cost: ModelCost, usage: PiTokenCounts): number {
   const rates = { ...cost, cacheRead: cost.cacheRead ?? 0, cacheWrite: cost.cacheWrite ?? 0 };
   const { input, output, cacheRead, cacheWrite } = usage;
   const tokens = {
@@ -123,6 +139,72 @@ export function piTokenCostUsd(
   };
   // `calculateCost` reads nothing of the model but its `cost`.
   return calculateCost({ cost: rates } as Model<Api>, tokens).total;
+}
+
+/** The tier threshold `calculateCost` prices `request` at (null: base): pi-ai's private loop. */
+function pricedTierThreshold(cost: ModelCost, request: PiTokenCounts): number | null {
+  const prompt = request.input + request.cacheRead + request.cacheWrite;
+  let matched: number | null = null;
+  for (const { inputTokensAbove } of cost.tiers ?? []) {
+    if (prompt > inputTokensAbove && inputTokensAbove > (matched ?? -1)) matched = inputTokensAbove;
+  }
+  return matched;
+}
+
+function addCounts(
+  usage: Omit<TokenUsage, "tiers">,
+  request: PiTokenCounts,
+): Required<Omit<TokenUsage, "tiers">> {
+  return {
+    input_tokens: (usage.input_tokens ?? 0) + request.input,
+    output_tokens: (usage.output_tokens ?? 0) + request.output,
+    cache_creation_input_tokens: (usage.cache_creation_input_tokens ?? 0) + request.cacheWrite,
+    cache_read_input_tokens: (usage.cache_read_input_tokens ?? 0) + request.cacheRead,
+  };
+}
+
+/** `total` plus one request, added to the counters and to the band of its tier. Pure. */
+export function addRequestUsage(
+  total: TokenUsage,
+  usage: Partial<PiTokenCounts>,
+  cost: ModelCost | null | undefined,
+): TokenUsage {
+  const request: PiTokenCounts = {
+    input: usage.input ?? 0,
+    output: usage.output ?? 0,
+    cacheRead: usage.cacheRead ?? 0,
+    cacheWrite: usage.cacheWrite ?? 0,
+  };
+  const next: TokenUsage = { ...total, ...addCounts(total, request) };
+  const threshold = cost ? pricedTierThreshold(cost, request) : null;
+  if (threshold === null) return next;
+  const bands = total.tiers ?? [];
+  const band = bands.find((b) => b.input_tokens_above === threshold);
+  next.tiers = band
+    ? bands.map((b) => (b === band ? { ...b, ...addCounts(b, request) } : b))
+    : [...bands, { input_tokens_above: threshold, ...addCounts({}, request) }];
+  return next;
+}
+
+/**
+ * USD cost of usage summed by {@link addRequestUsage}: each band at its tier, the
+ * rest at base. Unknown tiers price at base and bands are clamped: never throws.
+ */
+export function usageCostUsd(usage: TokenUsage, cost: ModelCost): number {
+  const base: ModelCost = { ...cost, tiers: [] };
+  const rest = piTokenCounts(usage);
+  let total = 0;
+  for (const band of usage.tiers ?? []) {
+    const counts = piTokenCounts(band);
+    const share = {} as PiTokenCounts;
+    for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) {
+      share[key] = Math.max(0, Math.min(counts[key], rest[key]));
+      rest[key] -= share[key];
+    }
+    const tier = cost.tiers?.find((t) => t.inputTokensAbove === band.input_tokens_above);
+    total += piTokenCostUsd(tier ? { ...tier, tiers: [] } : base, share);
+  }
+  return total + piTokenCostUsd(base, rest);
 }
 
 /** The dialect of a registry record — see {@link PiModelDialect}. */

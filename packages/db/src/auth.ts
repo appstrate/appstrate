@@ -8,10 +8,13 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { and, eq, gt } from "drizzle-orm";
-import { renderEmail, type RenderedEmail } from "@appstrate/emails";
-import { createLogger } from "@appstrate/core/logger";
-
-const logger = createLogger("info");
+import {
+  renderEmail,
+  type EmailPropsMap,
+  type EmailType,
+  type RenderedEmail,
+  type SupportedLocale,
+} from "@appstrate/emails";
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
 import * as schema from "./schema/index.ts";
@@ -29,6 +32,7 @@ import { createBootstrapOrg } from "./bootstrap-org.ts";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
 import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./credential-change.ts";
 import { hookSlot } from "./hook-slot.ts";
+import { logger } from "./logger.ts";
 
 export { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "./credential-change.ts";
 
@@ -214,26 +218,34 @@ const realmResolver = hookSlot<RealmResolver>();
 
 export const setRealmResolver = realmResolver.set;
 
-// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
-async function assertMagicLinkAudience(
-  userId: string,
-  context: GenericEndpointContext | null,
-): Promise<void> {
-  const resolver = realmResolver.get();
-  if (context?.path !== "/magic-link/verify" || !resolver) return;
-  const [account] = await db
+/** `user.realm` of `userId`, or `undefined` when no such row exists. */
+async function readUserRealm(userId: string): Promise<string | undefined> {
+  const [row] = await db
     .select({ realm: user.realm })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
-  if (!account) return;
+  return row?.realm;
+}
+
+// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
+// `readRealm` runs only on the verify leg with a resolver installed, so `account.delete`
+// queries nothing elsewhere.
+async function assertMagicLinkAudience(
+  readRealm: () => Promise<string | undefined>,
+  context: GenericEndpointContext | null,
+): Promise<void> {
+  const resolver = realmResolver.get();
+  if (context?.path !== "/magic-link/verify" || !resolver) return;
+  const realm = await readRealm();
+  if (realm === undefined) return;
   const query = (context.query ?? {}) as Record<string, unknown>;
   const expected = await resolver({
     headers: context.headers ?? null,
     path: context.path,
     query,
   });
-  if (account.realm === expected) return;
+  if (realm === expected) return;
   logger.warn("auth: refused a magic link for an account outside its audience", { expected });
   const raw = query.errorCallbackURL ?? query.callbackURL;
   const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
@@ -251,8 +263,8 @@ async function assertMagicLinkAudience(
 // the browser cannot strip or forge (CRIT-15), and to return the URL of its
 // own confirmation page, which is the one the email then carries.
 //
-// FAIL CLOSED contract: if the hook throws, the email is NOT sent (the
-// surrounding try/catch in `sendMagicLink` aborts before `sendMail`). An
+// FAIL CLOSED contract: if the hook throws, the email is NOT sent
+// (`sendMagicLink` logs the failure and returns before sending). An
 // OIDC-initiated magic link must never go out without its binding.
 
 export interface MagicLinkIssuedInfo {
@@ -558,6 +570,50 @@ async function sendAuthMail(
   await transport.sendMail({ from, to, subject, html });
 }
 
+/** The language of the account, found by id, else by address; French when there is none. */
+async function accountLocale(userId: string | undefined, email: string): Promise<SupportedLocale> {
+  const [row] = await db
+    .select({ language: profiles.language })
+    .from(profiles)
+    .innerJoin(user, eq(user.id, profiles.id))
+    .where(userId ? eq(user.id, userId) : eq(user.email, normalizeEmail(email)))
+    .limit(1);
+  return row?.language === "en" ? "en" : "fr";
+}
+
+// An error can quote an address in any case ("Recipient address rejected: <addr>"): every
+// token holding an `@` is masked. Split, not a `x+@y+` regex, which backtracks quadratically.
+function redactAddresses(message: string): string {
+  return message
+    .split(/([\s<>"']+)/)
+    .map((token) => (token.includes("@") ? "<address>" : token))
+    .join("");
+}
+
+function warnAuthMailNotSent(template: EmailType, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  logger.warn("auth: auth e-mail not sent", { template, error: redactAddresses(message) });
+}
+
+/** Sends `template` in the account's language. Never throws: no auth flow waits on a mail. */
+async function sendAuthMailQuietly<T extends EmailType>(
+  env: ReturnType<typeof getEnv>,
+  smtpTransport: Transporter,
+  to: string,
+  template: T,
+  props: Omit<EmailPropsMap[T], "locale">,
+  userId?: string,
+): Promise<void> {
+  try {
+    // A failed lookup costs the language, not the mail.
+    const locale = await accountLocale(userId, to).catch(() => "fr" as const);
+    const rendered = renderEmail(template, { ...props, locale } as EmailPropsMap[T]);
+    await sendAuthMail(env, smtpTransport, to, rendered);
+  } catch (err) {
+    warnAuthMailNotSent(template, err);
+  }
+}
+
 function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transporter | null) {
   return [
     ...(smtpTransport
@@ -578,16 +634,15 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
             // while closing the replay window.
             expiresIn: MAGIC_LINK_TTL_SECONDS,
             sendMagicLink: async ({ email, url: rawUrl, token }, mlCtx) => {
+              const normalizedEmail = normalizeEmail(email);
+              let url: string;
               try {
-                const normalizedEmail = email.toLowerCase().trim();
-
                 // `EndpointContext.headers` is typed `HeadersInit` — copy
                 // into a real `Headers` so the hook contract stays uniform
                 // with the other signup-hook channels.
                 const rawHeaders = mlCtx?.headers ?? mlCtx?.request?.headers ?? null;
-                // A throw aborts the send via the surrounding catch — fail closed.
                 const issued = magicLinkIssuedHook.get();
-                const url = issued
+                url = issued
                   ? await issued({
                       token,
                       email: normalizedEmail,
@@ -595,26 +650,22 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
                       headers: rawHeaders ? new Headers(rawHeaders) : null,
                     })
                   : (magicLinkConfirmPageUrl(rawUrl, "/magic-link/confirm")?.toString() ?? rawUrl);
-
-                // Magic-link is now a pure passwordless-login channel. The
-                // invitation flow no longer rides on magic-link: an invited
-                // user opens the `/invite/{token}` page and authenticates
-                // through the standard login/signup path, then accepts. So a
-                // single generic template covers every magic-link send.
-                await sendAuthMail(
-                  env,
-                  smtpTransport,
-                  email,
-                  renderEmail("magic-link", {
-                    email: normalizedEmail,
-                    url,
-                    expiresInMinutes: MAGIC_LINK_TTL_SECONDS / 60,
-                    locale: "fr",
-                  }),
-                );
-              } catch {
-                // Fire-and-forget
+              } catch (err) {
+                // Fail closed: no link goes out without what the hook records.
+                warnAuthMailNotSent("magic-link", err);
+                return;
               }
+
+              // Magic-link is now a pure passwordless-login channel. The
+              // invitation flow no longer rides on magic-link: an invited
+              // user opens the `/invite/{token}` page and authenticates
+              // through the standard login/signup path, then accepts. So a
+              // single generic template covers every magic-link send.
+              await sendAuthMailQuietly(env, smtpTransport, email, "magic-link", {
+                email: normalizedEmail,
+                url,
+                expiresInMinutes: MAGIC_LINK_TTL_SECONDS / 60,
+              });
             },
           }),
         ]
@@ -694,18 +745,16 @@ function buildAuth(options: CreateAuthOptions) {
     },
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
-  const notifyPasswordChanged = async (email: string): Promise<void> => {
+  const notifyPasswordChanged = async (account: { id: string; email: string }): Promise<void> => {
     if (!smtpTransport) return;
-    try {
-      await sendAuthMail(
-        env,
-        smtpTransport,
-        email,
-        renderEmail("password-changed", { locale: "fr" }),
-      );
-    } catch {
-      // Fire-and-forget — the password is already changed
-    }
+    await sendAuthMailQuietly(
+      env,
+      smtpTransport,
+      account.email,
+      "password-changed",
+      {},
+      account.id,
+    );
   };
   const auth = betterAuth({
     database: drizzleAdapter(db, {
@@ -781,7 +830,7 @@ function buildAuth(options: CreateAuthOptions) {
           const { internalAdapter } = await auth.$context;
           await endOtherAccessAfterCredentialChange(internalAdapter, user, null);
         } finally {
-          await notifyPasswordChanged(user.email);
+          await notifyPasswordChanged(user);
         }
       },
       // Test-only fast password hasher. Better Auth's default is scrypt
@@ -810,35 +859,26 @@ function buildAuth(options: CreateAuthOptions) {
       ...(smtpTransport && {
         resetPasswordTokenExpiresIn: RESET_PASSWORD_TTL_SECONDS,
         sendResetPassword: async ({ user, url }) => {
-          try {
-            await sendAuthMail(
-              env,
-              smtpTransport,
-              user.email,
-              renderEmail("reset-password", {
-                email: user.email,
-                url,
-                expiresInMinutes: RESET_PASSWORD_TTL_SECONDS / 60,
-                locale: "fr",
-              }),
-            );
-          } catch {
-            // Fire-and-forget — don't block reset flow if email fails
-          }
+          await sendAuthMailQuietly(
+            env,
+            smtpTransport,
+            user.email,
+            "reset-password",
+            { email: user.email, url, expiresInMinutes: RESET_PASSWORD_TTL_SECONDS / 60 },
+            user.id,
+          );
         },
         // The signup answer is the same as for a free address, so the SPA
         // announces an email: this is it, sent to the account's owner.
         onExistingUserSignUp: async ({ user }) => {
-          try {
-            await sendAuthMail(
-              env,
-              smtpTransport,
-              user.email,
-              renderEmail("existing-account", { locale: "fr" }),
-            );
-          } catch {
-            // Fire-and-forget — the signup response must not depend on it
-          }
+          await sendAuthMailQuietly(
+            env,
+            smtpTransport,
+            user.email,
+            "existing-account",
+            {},
+            user.id,
+          );
         },
       }),
     },
@@ -852,21 +892,14 @@ function buildAuth(options: CreateAuthOptions) {
         sendVerificationEmail: async ({ user, url }) => {
           // An address with no account is the target of an e-mail change.
           if (await isUnclaimedReservedEmail(user.email)) return warnReservedEmailRefused();
-          try {
-            await sendAuthMail(
-              env,
-              smtpTransport,
-              user.email,
-              renderEmail("verification", {
-                user,
-                url,
-                expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
-                locale: "fr",
-              }),
-            );
-          } catch {
-            // Fire-and-forget — don't block signup if email fails
-          }
+          await sendAuthMailQuietly(
+            env,
+            smtpTransport,
+            user.email,
+            "verification",
+            { user, url, expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60 },
+            user.id,
+          );
         },
       },
     }),
@@ -887,7 +920,7 @@ function buildAuth(options: CreateAuthOptions) {
             kept.session.id,
           );
         } finally {
-          await notifyPasswordChanged(caller.user.email);
+          await notifyPasswordChanged(caller.user);
         }
       }),
     },
@@ -963,21 +996,14 @@ function buildAuth(options: CreateAuthOptions) {
           sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
             // Answered like a taken address; `user.update.before` refuses a link issued earlier.
             if (await isUnclaimedReservedEmail(newEmail)) return warnReservedEmailRefused();
-            try {
-              await sendAuthMail(
-                env,
-                smtpTransport,
-                user.email,
-                renderEmail("email-change-confirmation", {
-                  newEmail,
-                  url,
-                  expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60,
-                  locale: "fr",
-                }),
-              );
-            } catch {
-              // Fire-and-forget — same as every other auth email
-            }
+            await sendAuthMailQuietly(
+              env,
+              smtpTransport,
+              user.email,
+              "email-change-confirmation",
+              { newEmail, url, expiresInMinutes: EMAIL_VERIFICATION_TTL_SECONDS / 60 },
+              user.id,
+            );
           },
         }),
       },
@@ -1241,7 +1267,7 @@ function buildAuth(options: CreateAuthOptions) {
       account: {
         delete: {
           before: async (account, context) => {
-            await assertMagicLinkAudience(account.userId, context);
+            await assertMagicLinkAudience(() => readUserRealm(account.userId), context);
           },
         },
       },
@@ -1253,18 +1279,15 @@ function buildAuth(options: CreateAuthOptions) {
           // on every request. BA creates the session row by INSERT — we
           // return a patch to merge the realm before the write.
           before: async (sess, context) => {
-            await assertMagicLinkAudience(sess.userId, context);
-            const [row] = await db
-              .select({ realm: user.realm })
-              .from(user)
-              .where(eq(user.id, sess.userId))
-              .limit(1);
-            // If the user row vanished between session insert and our SELECT
-            // (shouldn't happen — BA inserts the user before the session in
-            // the same flow), fall back to "platform". The request-time guard
-            // then treats the session as platform-scoped, which is safer than
-            // leaking an end-user session.
-            return { data: { realm: row?.realm ?? "platform" } };
+            // One read serves both the magic-link audience check and the patch.
+            const realm = await readUserRealm(sess.userId);
+            await assertMagicLinkAudience(async () => realm, context);
+            // If the user row vanished before our SELECT (shouldn't happen —
+            // BA inserts the user before the session in the same flow), fall
+            // back to "platform". The request-time guard then treats the
+            // session as platform-scoped, which is safer than leaking an
+            // end-user session.
+            return { data: { realm: realm ?? "platform" } };
           },
         },
       },

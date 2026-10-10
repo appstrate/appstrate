@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mint a hosted-connect link into the run-kickoff 409 (issue #1207).
+ * Mint a hosted-connect link into the run-kickoff 409 (issue #1207), and into
+ * the connect-flow warnings of a launch that started without one.
  *
  * The readiness gate already names WHICH auth a connect flow must target and
  * WHICH scopes it must request (`auth_key` + `required_scopes`, relayed by
@@ -23,8 +24,8 @@
  * the same scope-catalog check the route applies to `body.scopes`, and the
  * unscoped `fetchIntegrationManifest` read is safe ONLY because the ids
  * reaching this function are the ones readiness just resolved for this org and
- * space (the agent declared them and `listActiveIntegrationIds` confirmed each
- * is ACTIVE HERE).
+ * space (the agent declared them, and the resolver emits a connect-flow item only
+ * for one ACTIVE HERE).
  */
 
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
@@ -41,7 +42,7 @@ import { logger } from "../../lib/logger.ts";
 export interface ConnectOfferTarget {
   integrationId: string;
   authKey: string;
-  /** Exactly what the item asked for — no union computed at mint time. */
+  /** The item's `required_scopes` on a fresh connect, `[]` on a reconnect; never unioned here. */
   scopes: string[];
   /** Present = re-consent the actor's existing connection in place. */
   connectionId?: string;
@@ -51,39 +52,34 @@ export interface ConnectOfferTarget {
 const FIELD_PREFIX = "integrations.";
 
 /**
- * The codes whose remedy is a fresh consent on a connection that already
- * exists — a scope upgrade, or a dead credential re-granted. Both re-consent
- * the SAME row (`connection_id` rides the claims), never a duplicate.
- */
-const IN_PLACE_CODES: ReadonlySet<string> = new Set(["insufficient_scopes", "needs_reconnection"]);
-
-/**
  * Decide whether one 409 item is something the CALLING actor can clear by
  * opening a link, and with which claims. Pure.
  *
- * `not_connected` qualifies outright (a fresh connect, no `connection_id`).
- * The two {@link IN_PLACE_CODES} qualify only on a connection the actor OWNS
- * and only with an id to re-consent: a foreign-owned row is somebody else's
- * account, and minting against it would let the caller re-consent a
- * colleague's credential.
+ * `not_connected`, or `auth_key_mismatch` on the dep's own auth, qualifies as a fresh
+ * connect (no `connection_id`). `needs_reconnection` qualifies only on a connection the actor
+ * OWNS and only with an id to re-consent in place, with no scopes of this agent: a
+ * foreign-owned row is somebody else's account, and minting against it would let the caller
+ * re-consent a colleague's credential.
  *
- * Everything else is refused: `must_choose_connection` is a choice, not a
- * missing connection, and `auth_key_mismatch` and `auth_key_serves_no_selected_tool`
- * need the user to change the agent, not to connect.
+ * Everything else is refused: `insufficient_scopes` and `must_choose_connection`
+ * need a choice, and `auth_key_serves_no_selected_tool` needs the user to change
+ * the agent, not to connect.
  */
 export function connectOfferTarget(e: ResolutionFieldError): ConnectOfferTarget | null {
   if (!e.field.startsWith(FIELD_PREFIX)) return null;
   const integrationId = e.field.slice(FIELD_PREFIX.length);
   if (!integrationId || !e.auth_key) return null;
-  const scopes = e.required_scopes ?? [];
-
-  if (e.code === "not_connected") {
-    return { integrationId, authKey: e.auth_key, scopes };
+  switch (e.code) {
+    case "not_connected":
+    case "auth_key_mismatch":
+      return { integrationId, authKey: e.auth_key, scopes: e.required_scopes ?? [] };
+    case "needs_reconnection":
+      return e.owned_by_actor === true && e.connection_id
+        ? { integrationId, authKey: e.auth_key, scopes: [], connectionId: e.connection_id }
+        : null;
+    default:
+      return null;
   }
-  if (IN_PLACE_CODES.has(e.code) && e.owned_by_actor === true && e.connection_id) {
-    return { integrationId, authKey: e.auth_key, scopes, connectionId: e.connection_id };
-  }
-  return null;
 }
 
 /**
@@ -157,6 +153,7 @@ export async function attachConnectOffers(params: {
             packageId: target.integrationId,
             authKey: target.authKey,
             ...(target.connectionId ? { connectionId: target.connectionId } : {}),
+            delegated: policy.delegated,
             scopes: target.scopes,
           }),
         );
@@ -176,4 +173,18 @@ export async function attachConnectOffers(params: {
       }
     }),
   );
+}
+
+/**
+ * `items` without the fields {@link attachConnectOffers} adds: a link connects as the actor it
+ * was minted for, and a stored response is replayed to whoever reuses its `Idempotency-Key`.
+ */
+export function withoutConnectOffers(items: ResolutionFieldError[]): ResolutionFieldError[] {
+  return items.map((item) => {
+    const copy = { ...item };
+    delete copy.connect_url;
+    delete copy.expiresAt;
+    delete copy.packageId;
+    return copy;
+  });
 }

@@ -34,11 +34,16 @@ export interface PrepareBundleOptions {
   workspaceDir: string;
 }
 
+/** Where a workspace's skills live: `{workspaceDir}/.pi/skills/<packageId>/`. */
+export function piSkillsDir(workspaceDir: string): string {
+  return path.join(workspaceDir, ".pi", "skills");
+}
+
 export async function prepareBundleForPi(
   bundle: Bundle,
   opts: PrepareBundleOptions,
 ): Promise<void> {
-  const piDir = path.join(opts.workspaceDir, ".pi");
+  const skillsDir = piSkillsDir(opts.workspaceDir);
 
   // Materialise each skill dep package under its .pi/ subtree. Runtime tools
   // (output/log/note/pin) are NOT handled here — they are MCP tool
@@ -51,7 +56,7 @@ export async function prepareBundleForPi(
     if (!parsed) continue;
     const type = (pkg.manifest as { type?: unknown }).type;
     if (type === "skill") {
-      await materialisePackage(pkg, path.join(piDir, "skills", parsed.packageId));
+      await materialisePackage(pkg, path.join(skillsDir, parsed.packageId));
     }
   }
 }

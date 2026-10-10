@@ -429,6 +429,21 @@ describe("fetchApiCall — credentials across a redirect", () => {
     expect(second!.get("cookie")).toBeNull();
   });
 
+  it("strips them on a hop a wildcard reaches past its registrable domain", async () => {
+    const authorizedUris = ["https://api.dropboxapi.com/**", "https://*.amazonaws.com/**"];
+    const [, beyond] = await hopHeaders("https://sqs.us-east-1.amazonaws.com/queue", {
+      authorizedUris,
+      allowAllUris: false,
+    });
+    expect(beyond!.get("authorization")).toBeNull();
+    expect(beyond!.get("cookie")).toBeNull();
+    const [, inside] = await hopHeaders("https://sts.amazonaws.com/", {
+      authorizedUris,
+      allowAllUris: false,
+    });
+    expect(inside!.get("authorization")).toBe("Bearer tok");
+  });
+
   it("refuses a hop off the allowlist instead of following it", async () => {
     const err = await hopHeaders("https://evil.example/steal", {
       authorizedUris: ["https://api.dropboxapi.com/**"],
@@ -703,6 +718,7 @@ describe("classifyApiCallFailure", () => {
       unrendered: "unauthorized_target",
       unauthorized: "unauthorized_target",
       exfiltration: "credential_exfiltration_refused",
+      beyond_bound: "credential_exfiltration_refused",
     });
   });
 });

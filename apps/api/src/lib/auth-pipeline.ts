@@ -35,6 +35,7 @@ import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
 import { principalGrants } from "./principal-permissions.ts";
 import { getClientIp, propagateRequestClientIp } from "./client-ip.ts";
+import { INTEGRATION_TAGGED_CALLBACK_PATH } from "./integration-callback-url.ts";
 import { logger } from "./logger.ts";
 import { withPublicAppOrigin } from "./public-url.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
@@ -486,6 +487,7 @@ export function skipAuth(
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/integrations/callback") return true; // Integration OAuth redirect — no session
+  if (INTEGRATION_TAGGED_CALLBACK_PATH.test(path)) return true; // Its per-authorization-server twin
   // Hosted connect portal (issue #769) — token/page-cookie authenticated at the
   // route layer. The authed MINT route lives at
   // `/api/integrations/:packageId/auths/:authKey/connect/session` (packageId

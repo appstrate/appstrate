@@ -805,7 +805,9 @@ export async function listIntegrations(scope: SpaceScope): Promise<IntegrationSu
         placementReadFilter(scope.spaceId),
         eq(packages.type, "integration"),
       ),
-    );
+    )
+    // The route paginates this in memory: a stable order keeps pages disjoint.
+    .orderBy(packages.id);
 
   const out: IntegrationSummary[] = [];
   for (const row of rows) {

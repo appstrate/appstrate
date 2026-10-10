@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * E1 — credential-proxy integration resolver
+ * Credential-proxy integration resolver
  * (`resolveIntegrationProxyCredentials` / `forceRefreshIntegrationProxyCredentials`).
  *
  * Backs the external-runner `POST /api/credential-proxy/proxy` endpoint.
@@ -11,7 +11,7 @@
  *
  * Refresh seam: same as the live-credentials resolver — neither function takes
  * an injectable refresh function. The refresh goes through
- * `forceRefreshIntegrationConnection` → `performRefreshTokenExchange`, which
+ * `refreshConnectionCredential` → `performRefreshTokenExchange`, which
  * POSTs to the manifest's `auths.{key}.tokenUrl`. We point that URL at a
  * controllable `Bun.serve` and seed an `integration_oauth_clients` row so the
  * `RefreshContext` builds; the server returns
@@ -39,6 +39,7 @@ import {
   runBoundSelection,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
+import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
@@ -155,8 +156,9 @@ describe("credential-proxy integration-resolver", () => {
     /** Also the label, which is unique per (space, integration). */
     accountId?: string;
     authKey?: string;
-    sharedWithOrg?: boolean;
+    sharedSpaceIds?: string[];
     needsReconnection?: boolean;
+    scopes?: string[];
   }): Promise<string> {
     const accountId = opts.accountId ?? "acct-1";
     const ciphertext = encryptCredentialEnvelope({
@@ -173,12 +175,13 @@ describe("credential-proxy integration-resolver", () => {
         authKey: opts.authKey ?? "primary",
         accountId,
         label: accountId,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
-        scopesGranted: ["read"],
-        sharedWithOrg: opts.sharedWithOrg ?? false,
+        scopesGranted: opts.scopes ?? ["read"],
+        sharedSpaceIds: opts.sharedSpaceIds ?? [],
         needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
@@ -295,6 +298,7 @@ describe("credential-proxy integration-resolver", () => {
       authKey: "primary",
       accountId: "acct-1",
       label: "Connexion 1",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({
@@ -310,6 +314,70 @@ describe("credential-proxy integration-resolver", () => {
     expect(resolved.payload.authorizedUris).toEqual(["https://tenant.example.com/**"]);
   });
 
+  it("renders authorized_uris and the injected header from the connection's variables (§7.12)", async () => {
+    const FORGE = "@official/forge";
+    await seedPackage({
+      id: FORGE,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        schema_version: "0.1",
+        type: "integration",
+        name: FORGE,
+        version: "1.0.0",
+        display_name: "Forge",
+        source: { kind: "local", server: { name: "@official/forge-server", version: "^1.0.0" } },
+        variables: {
+          schema: {
+            type: "object",
+            properties: { base_url: { type: "string" }, tenant: { type: "string" } },
+            required: ["base_url", "tenant"],
+          },
+        },
+        auths: {
+          primary: {
+            type: "api_key",
+            authorized_uris: ["{$variable.base_url}/api/**"],
+            credentials: {
+              schema: {
+                type: "object",
+                properties: { api_key: { type: "string" } },
+                required: ["api_key"],
+              },
+            },
+            delivery: {
+              http: {
+                in: "header",
+                name: "X-Api-Key",
+                value: "{$variable.tenant}:{$credential.api_key}",
+              },
+            },
+          },
+        },
+      },
+    });
+    await seedPublishedVersion(FORGE, "1.0.0");
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, FORGE);
+    await db.insert(integrationConnections).values({
+      integrationId: FORGE,
+      authKey: "primary",
+      accountId: "acct-1",
+      label: "Connexion 1",
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+      variables: { base_url: "https://forge.example.com", tenant: "acme" },
+    });
+
+    const resolved = await resolveIntegrationProxyCredentials({ ...input(), integrationId: FORGE });
+    expect(resolved.payload.authorizedUris).toEqual(["https://forge.example.com/api/**"]);
+    expect(resolved.declaredUris).toEqual(["{$variable.base_url}/api/**"]);
+    expect(JSON.stringify(resolved.payload)).toContain("acme:k");
+  });
+
   it("returns null and flags needsReconnection on a revoked refresh token (force-refresh path)", async () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ error: "invalid_grant", error_description: "revoked" }, 400);
@@ -317,7 +385,7 @@ describe("credential-proxy integration-resolver", () => {
     // Not-refreshed, like the other terminal shape: the caller (inside
     // `catch {}` either way) relays the upstream 401, and the persisted flag
     // is what makes the failure legible.
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -335,7 +403,7 @@ describe("credential-proxy integration-resolver", () => {
     // refresh_token, not from an upstream failure.
     token.setResponse({ access_token: "rotated", expires_in: 3600 });
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
@@ -371,7 +439,7 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     // `null` alone no longer discriminates transient from terminal: both
     // shapes return it since `IntegrationCredentialRevokedError` was removed,
     // so the PERSISTED flag is the only thing left that tells them apart. The
@@ -403,10 +471,10 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -433,10 +501,10 @@ describe("credential-proxy integration-resolver", () => {
 
     const max = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
     for (let i = 1; i < max; i++) {
-      expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+      expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     }
     expect(await flaggedConnection(connId)).toBe(false);
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
     expect(await flaggedConnection(connId)).toBe(true);
   });
 
@@ -466,13 +534,87 @@ describe("credential-proxy integration-resolver", () => {
     const connId = await seedConnection({ userId: ctx.user.id });
     token.setResponse({ not: "a discovery doc" }); // well-known probes → no issuer match
 
-    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    expect(await forceRefreshIntegrationProxyCredentials(input(), null)).toBeNull();
 
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
     expect(row!.needsReconnection).toBe(false);
+  });
+
+  describe("a forced refresh that narrows the grant stores it; resolution judges each agent", () => {
+    beforeEach(async () => {
+      const base = gmailManifest(token.url);
+      const primary = (base["auths"] as Record<string, Record<string, unknown>>)["primary"];
+      const scoped: Record<string, unknown> = {
+        ...base,
+        version: "1.0.1",
+        auths: {
+          primary: {
+            ...primary,
+            scope_catalog: [
+              { value: "read", label: "Read" },
+              { value: "send", label: "Send" },
+              { value: "delete", label: "Delete" },
+            ],
+          },
+        },
+        tools_policy: {
+          list_messages: { required_scopes: { primary: ["read"] } },
+          delete_message: { required_scopes: { primary: ["delete"] } },
+        },
+      };
+      // Resolution reads the draft; the proxy reads the latest published version.
+      await db
+        .update(packages)
+        .set({ draftManifest: scoped })
+        .where(eq(packages.id, INTEGRATION_ID));
+      await seedPublishedVersion(INTEGRATION_ID, "1.0.1", { manifest: scoped });
+    });
+
+    const resolveFor = (name: string, tools: string[]) =>
+      resolveConnectionsForRun({
+        agentManifest: {
+          name,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: name,
+          dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
+          integrations_configuration: { [INTEGRATION_ID]: { tools } },
+        },
+        packageId: name,
+        actor: { type: "user", id: ctx.user.id },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      });
+
+    it("keeps the connection usable and refuses only the agent needing the dropped scope", async () => {
+      const connId = await seedConnection({
+        userId: ctx.user.id,
+        scopes: ["read", "send", "delete"],
+      });
+      token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read send" });
+
+      const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
+      expect(JSON.stringify(refreshed)).toContain("narrowed-access");
+      const [row] = await db
+        .select({
+          scopesGranted: integrationConnections.scopesGranted,
+          needsReconnection: integrationConnections.needsReconnection,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(row).toEqual({ scopesGranted: ["read", "send"], needsReconnection: false });
+
+      const deleter = await resolveFor("@cproxy/deleter", ["delete_message"]);
+      expect(deleter.errors).toMatchObject([
+        { code: "insufficient_scopes", connectionId: connId, missingScopes: ["delete"] },
+      ]);
+      const reader = await resolveFor("@cproxy/reader", ["list_messages"]);
+      expect(reader.errors).toEqual([]);
+      expect(reader.resolved[INTEGRATION_ID]?.map((c) => c.connectionId)).toEqual([connId]);
+    });
   });
 
   it("does not resolve another actor's connection (actor isolation, never leaks B's credentials)", async () => {
@@ -486,7 +628,7 @@ describe("credential-proxy integration-resolver", () => {
     );
     // Refresh path: A's force-refresh returns null (no accessible connection),
     // never touches/returns B's row.
-    const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id));
+    const refreshed = await forceRefreshIntegrationProxyCredentials(input(ctx.user.id), null);
     expect(refreshed).toBeNull();
   });
 
@@ -502,7 +644,11 @@ describe("credential-proxy integration-resolver", () => {
 
     it("uses the actor's own connection even when a colleague shares one", async () => {
       const colleague = await createTestUser();
-      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedSpaceIds: [ctx.defaultSpaceId],
+      });
       const ownId = await seedConnection({ userId: ctx.user.id, accountId: "mine" });
 
       const resolved = await resolveIntegrationProxyCredentials(input());
@@ -515,7 +661,7 @@ describe("credential-proxy integration-resolver", () => {
       const sharedId = await seedConnection({
         userId: colleague.id,
         accountId: "shared",
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
       });
 
       const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
@@ -544,7 +690,7 @@ describe("credential-proxy integration-resolver", () => {
       const sharedId = await seedConnection({
         userId: colleague.id,
         accountId: "shared",
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
       });
       // A colleague's UNshared connection is not the caller's to name.
       await seedConnection({ userId: colleague.id, accountId: "private" });
@@ -593,7 +739,11 @@ describe("credential-proxy integration-resolver", () => {
 
     it("reports a lone dead own connection as 409 needs_reconnection — never switches to the shared one", async () => {
       const colleague = await createTestUser();
-      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedSpaceIds: [ctx.defaultSpaceId],
+      });
       const deadId = await seedConnection({
         userId: ctx.user.id,
         accountId: "dead",

@@ -9,61 +9,13 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { PiRunner } from "../src/index.ts";
-import { buildPiModel } from "../src/pi-model.ts";
 import { LLM_PROXY_ROUTES } from "../src/llm-proxy-routes.ts";
-import { createCaptureSink, makeBundlePackage, makeContext, makeTestBundle } from "./helpers.ts";
-
-const TEST_BUNDLE = makeTestBundle(
-  makeBundlePackage("@test/gateway-provider-path", "0.0.0", "agent", {}),
-);
+import { runAgainstStub, stubGatewayModel } from "./helpers.ts";
 
 /** The path of every request a run makes against a gateway model of `apiShape`. */
 async function requestPaths(apiShape: keyof typeof LLM_PROXY_ROUTES): Promise<string[]> {
-  const root = await mkdtemp(join(tmpdir(), "runner-pi-gateway-"));
-  const agentDir = join(root, "agent");
-  const paths: string[] = [];
-  let server: ReturnType<typeof Bun.serve> | undefined;
-  try {
-    await mkdir(agentDir, { recursive: true });
-    server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch(request) {
-        paths.push(new URL(request.url).pathname);
-        // Non-retryable: the path of the first request is all this test reads.
-        return new Response("stop", { status: 400 });
-      },
-    });
-    const route = LLM_PROXY_ROUTES[apiShape];
-    const runner = new PiRunner({
-      model: buildPiModel({
-        id: "gateway-model",
-        dialect: null,
-        apiShape,
-        piProvider: null,
-        baseUrl: `${server.url.origin}${route.baseSuffix}`,
-      }),
-      apiKey: "gateway-key",
-      systemPrompt: "Answer briefly.",
-      startMessage: "Say done.",
-      cwd: root,
-      agentDir,
-      authStoragePath: join(root, "auth.json"),
-    });
-    await runner.run({
-      bundle: TEST_BUNDLE,
-      context: makeContext(),
-      eventSink: createCaptureSink(),
-    });
-    return paths;
-  } finally {
-    if (server) await server.stop(true);
-    await rm(root, { recursive: true, force: true });
-  }
+  const { requests } = await runAgainstStub({ model: stubGatewayModel(apiShape) });
+  return requests.map((request) => request.path);
 }
 
 describe("PiRunner on a gateway model", () => {

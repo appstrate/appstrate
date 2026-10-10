@@ -18,8 +18,11 @@ import {
   type TransparentListenerHandle,
 } from "../integration-transparent-listener.ts";
 import type { EgressListenerEvent } from "../integration-egress-listener.ts";
-import type { Peer } from "../helpers.ts";
+import { isBlockedHost, type AuthorityPolicy, type Peer } from "../helpers.ts";
+import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { buildClientHello } from "./helpers/tls-client-hello.ts";
+import { privateIpv4 } from "./helpers/private-ipv4.ts";
+import { halfCloseClient, startLateReplyServer } from "./helpers/half-close.ts";
 
 const openListeners: TransparentListenerHandle[] = [];
 const openServers: Server[] = [];
@@ -33,8 +36,8 @@ afterEach(async () => {
   }
 });
 
-/** Plain TCP echo upstream — records everything it receives. */
-async function startTcpEcho(): Promise<{ port: number; received: Buffer[] }> {
+/** Plain TCP echo upstream on `host` — records everything it receives. */
+async function startTcpEcho(host = "127.0.0.1"): Promise<{ port: number; received: Buffer[] }> {
   const received: Buffer[] = [];
   const server = createServer((socket) => {
     socket.on("data", (chunk: Buffer) => {
@@ -43,14 +46,18 @@ async function startTcpEcho(): Promise<{ port: number; received: Buffer[] }> {
     });
   });
   openServers.push(server);
-  await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+  await new Promise<void>((res) => server.listen(0, host, () => res()));
   const addr = server.address();
   const port = addr && typeof addr === "object" ? addr.port : 0;
   return { port, received };
 }
 
-type PeerPolicy = { allowsAuthority(host: string, port: number): boolean };
-const allowAll: PeerPolicy = { allowsAuthority: () => true };
+type PeerPolicy = AuthorityPolicy;
+const allowAll: PeerPolicy = {
+  allowsAuthority: () => true,
+  skipsSsrfFloor: () => false,
+  isSelf: () => false,
+};
 
 async function makeListener(
   opts: {
@@ -223,7 +230,11 @@ describe("transparent egress listener — TLS SNI path", () => {
     const resolved: string[] = [];
     const listener = await makeListener({
       upstreamPort: upstream.port,
-      policyForPeer: async () => ({ allowsAuthority: (host) => host === "allowed.test.local" }),
+      policyForPeer: async () => ({
+        allowsAuthority: (host) => host === "allowed.test.local",
+        skipsSsrfFloor: () => false,
+        isSelf: () => false,
+      }),
       resolveHostFn: async (host) => {
         resolved.push(host);
         return ["127.0.0.1"];
@@ -252,6 +263,8 @@ describe("transparent egress listener — TLS SNI path", () => {
           seen.push([host, port]);
           return port === 443;
         },
+        skipsSsrfFloor: () => false,
+        isSelf: () => false,
       }),
       onEvent: (e) => events.push(e),
     });
@@ -403,5 +416,114 @@ describe("transparent egress listener — plain HTTP path", () => {
     expect(received.length).toBe(0);
     expect(events[0]?.kind).toBe("tunnel-refused");
     expect(events[0]?.reason).toBe("no-host-header");
+  });
+});
+
+describe("transparent egress listener — internal hosts: the runner rule (#1819)", () => {
+  type RunnerEgress = Parameters<typeof compileRunnerEgressPolicy>[0];
+  const literal = (uris: string[]) => ({
+    authorizedUris: uris,
+    declaredUris: uris,
+    allowAllUris: false,
+  });
+  /** The real SSRF floor, every name resolving to `address`, `internal.test` operator-listed. */
+  async function runnerListener(
+    upstreamPort: number,
+    egress: RunnerEgress,
+    address = privateIpv4(),
+  ) {
+    const events: EgressListenerEvent[] = [];
+    const internalHost = (h: string) => h === "internal.test";
+    const listener = await makeListener({
+      upstreamPort,
+      isBlockedHostFn: isBlockedHost,
+      resolveHostFn: async () => [address],
+      // The test upstreams bind an own address: the sidecar's own set stays empty here.
+      policyForPeer: async () => compileRunnerEgressPolicy(egress, internalHost, () => new Set()),
+      onEvent: (e) => events.push(e),
+    });
+    return { port: listener.address().port, events };
+  }
+  const httpTo = (host: string) => Buffer.from(`GET / HTTP/1.1\r\nHost: ${host}\r\n\r\n`, "latin1");
+
+  it("splices to a private address behind a listed declared literal host, any SNI or Host case", async () => {
+    const upstream = await startTcpEcho(privateIpv4());
+    const egress = literal([`https://internal.test:${upstream.port}`]);
+    for (const preamble of [buildClientHello("INTERNAL.test"), httpTo("INTERNAL.test")]) {
+      const { port, events } = await runnerListener(upstream.port, egress);
+      const { received } = await driveClient(port, [preamble], preamble.length);
+      expect(received.equals(preamble)).toBe(true);
+      expect(events[0]?.kind).toBe("tunnel-opened");
+    }
+  });
+
+  it("never splices to a listed declared host that resolves to loopback", async () => {
+    const upstream = await startTcpEcho();
+    const egress = literal([`https://internal.test:${upstream.port}`]);
+    const { port, events } = await runnerListener(upstream.port, egress, "127.0.0.1");
+    const { closed } = await driveClient(port, [httpTo("internal.test")], 1);
+    expect(closed).toBe(true);
+    expect(events[0]?.reason).toBe("ssrf");
+    expect(upstream.received.length).toBe(0);
+  });
+});
+
+describe("transparent egress listener — half-close", () => {
+  const head = "GET / HTTP/1.1\r\nHost: up.example\r\n\r\n";
+
+  it("relays the client's FIN as a FIN: the upstream's later answer arrives, then both close", async () => {
+    const upstream = await startLateReplyServer((server) => openServers.push(server));
+    const listener = await makeListener({ upstreamPort: upstream.port });
+
+    const res = await halfCloseClient(listener.address().port, head);
+    expect(res).toEqual({ received: `late:${head}`, closed: true });
+    await upstream.closed;
+  });
+
+  // The preamble deadline is 10 s: a FIN ends the preamble at once, as no SNI or `Host` can follow.
+  it("closes on a FIN mid-HTTP-head, well before the preamble deadline", async () => {
+    const upstream = await startTcpEcho();
+    const listener = await makeListener({ upstreamPort: upstream.port });
+    const res = await halfCloseClient(listener.address().port, "GET / HTTP/1.1\r\nHo");
+    expect(res.closed).toBe(true);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("closes on a FIN mid-ClientHello, well before the preamble deadline", async () => {
+    const upstream = await startTcpEcho();
+    const listener = await makeListener({ upstreamPort: upstream.port });
+    const partial = buildClientHello("api.example.com").subarray(0, 20);
+    const res = await halfCloseClient(listener.address().port, partial);
+    expect(res.closed).toBe(true);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("relays the upstream's FIN as a FIN: what the client sends afterwards still arrives", async () => {
+    let markDone!: (received: string) => void;
+    const done = new Promise<string>((res) => (markDone = res));
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
+      let received = "";
+      socket.end("bye");
+      socket.on("data", (chunk: Buffer) => (received += chunk.toString("latin1")));
+      socket.on("error", () => {});
+      socket.on("close", () => markDone(received));
+    });
+    openServers.push(server);
+    await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+    const listener = await makeListener({
+      upstreamPort: (server.address() as { port: number }).port,
+    });
+
+    const client = netConnect(
+      { port: listener.address().port, host: "127.0.0.1", allowHalfOpen: true },
+      () => client.write(head),
+    );
+    client.on("error", () => {});
+    client.resume();
+    client.on("end", () => setTimeout(() => client.end("after"), 50));
+    expect(await Promise.race([done, Bun.sleep(2_000).then(() => "<timeout>")])).toBe(
+      `${head}after`,
+    );
+    client.destroy();
   });
 });

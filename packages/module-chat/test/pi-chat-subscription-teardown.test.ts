@@ -35,7 +35,7 @@ import type { OrgModel } from "../src/llm.ts";
 
 /** Nothing listens here — every hop must go through the injected transport. */
 const ORIGIN = "http://127.0.0.1:1";
-const MCP_URL = `${ORIGIN}/api/mcp/o/org_teardown`;
+const MCP_URL = `${ORIGIN}/api/mcp/o/org_teardown/s/spc_1`;
 
 /**
  * The engine's own bound on a session wind-down (`SESSION_ABORT_GRACE_MS`),
@@ -202,7 +202,7 @@ async function runStubbedTurn(abortSettles: boolean) {
     ] as UIMessage[],
     system: "You are a helpful assistant.",
     generation: {},
-    platformMcp: { url: MCP_URL, headers: {}, fetch: transport.fetch },
+    platformMcp: { url: MCP_URL, headers: {}, spaceId: "spc_1", fetch: transport.fetch },
     abortSignal: stop.signal,
     onError: (error) => String(error),
     recordUsage: () => {},

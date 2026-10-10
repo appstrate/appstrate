@@ -21,7 +21,7 @@ import {
 } from "../src/pi-chat/mcp-surface-cache.ts";
 
 const ORIGIN = "http://127.0.0.1:1";
-const MCP_URL = `${ORIGIN}/api/mcp/o/org_1?context=injected`;
+const MCP_URL = `${ORIGIN}/api/mcp/o/org_1/s/spc_1?context=injected`;
 
 interface RegisteredTool {
   name: string;
@@ -124,6 +124,7 @@ function buildTurn(
   return buildPlatformMcpTools({
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-surface": surface },
+    spaceId: "spc_1",
     writeChunk: () => {},
     signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },

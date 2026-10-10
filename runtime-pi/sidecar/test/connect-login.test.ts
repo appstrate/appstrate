@@ -14,6 +14,7 @@ import {
   type ActiveConnectInputs,
 } from "../integration-mitm-listener.ts";
 import { runConnectLogin } from "../connect-login.ts";
+import { CONNECT_LOGIN_TOOL_ERROR_PREFIX } from "@appstrate/core/sidecar-types";
 import {
   coerceExpiresAtToEpochMs,
   createIntegrationCredentialsSource,
@@ -35,7 +36,7 @@ describe("applyConnectInputSubstitution", () => {
       { username: "alice", password: "s3cret", token: "tok-123" },
     );
     expect("failed" in result).toBe(false);
-    if ("failed" in result) throw new Error("unexpected failure");
+    if ("failed" in result || "refused" in result) throw new Error("unexpected failure");
     expect(result.url).toBe("https://api.example.com/login?u=alice");
     expect(result.bodyText).toBe('{"password":"s3cret"}');
     expect(result.headers["X-Token"]).toBe("tok-123");
@@ -68,10 +69,20 @@ describe("applyConnectInputSubstitution", () => {
     };
     const result = applyConnectInputSubstitution(parts, { username: "alice" });
     expect("failed" in result).toBe(false);
-    if ("failed" in result) throw new Error("unexpected failure");
+    if ("failed" in result || "refused" in result) throw new Error("unexpected failure");
     expect(result.url).toBe(parts.url);
     expect(result.bodyText).toBe(parts.bodyText);
     expect(result.headers).toEqual(parts.headers);
+  });
+});
+
+describe("applyConnectInputSubstitution — a value the request cannot carry", () => {
+  it("refuses a value carrying CR/LF into a header, naming only the field", () => {
+    const result = applyConnectInputSubstitution(
+      { url: "https://api.example.com/login", bodyText: null, headers: { "x-pw": "{{password}}" } },
+      { password: "pw\r\nX-Admin: 1" },
+    );
+    expect(result).toEqual({ refused: "password" });
   });
 });
 
@@ -187,6 +198,31 @@ describe("runConnectLogin", () => {
     expect(capture.args.arguments).toEqual({});
   });
 
+  it("renders the connection's variables into the session header (AFPS §7.12)", async () => {
+    const source = makeSource();
+    const canned = {
+      content: [{ type: "text", text: JSON.stringify({ outputs: { session: "S" } }) }],
+    };
+    const { client } = makeFakeClient(canned, () => source.activeInputs());
+    await runConnectLogin({
+      client: client as any,
+      namespace: "ns",
+      toolName: "login",
+      inputs: {},
+      source,
+      authKey: "primary",
+      authType: "custom",
+      authorizedUris: ["https://acme.forge.example.com/**"],
+      deliveryHttp: {
+        in: "header",
+        name: "Cookie",
+        value: "tenant={$variable.tenant}; sid={$credential.session}",
+      },
+      variables: { tenant: "acme" },
+    });
+    expect(source.deliveryPlans().primary?.value).toBe("tenant=acme; sid=S");
+  });
+
   // F3 — the login-tool result wire format is canonical snake_case (AFPS §7.x).
   it("accepts snake_case identity_claims / expires_at / scopes_granted in the login-tool result", async () => {
     const source = makeSource();
@@ -243,6 +279,50 @@ describe("runConnectLogin", () => {
     ).rejects.toThrow("boom");
     expect(source.activeInputs()).toBeNull();
   });
+
+  it("records a refused input on the window whose envelope admits the refused request", () => {
+    const source = makeSource();
+    source.setActiveInputs({ password: "a" }, "a", ["https://a.example/**"]);
+    source.setActiveInputs({ password: "b" }, "b", ["https://b.example/**"]);
+    source.setActiveInputs({ token: "t" }, "c", ["https://a.example/**"]);
+    source.refuseActiveInput("password", "https://a.example/login");
+    expect(source.refusedActiveInput("a")).toBe("password");
+    expect(source.refusedActiveInput("b")).toBeUndefined();
+    expect(source.refusedActiveInput("c")).toBeUndefined();
+    source.clearActiveInputs();
+  });
+
+  for (const outcome of ["reports an error", "returns a session"] as const) {
+    it(`names the input the listener refused to send when the tool ${outcome}`, async () => {
+      const source = makeSource();
+      const client = {
+        callTool() {
+          // The listener refused the tool's login request for this input.
+          source.refuseActiveInput("password", "https://api.example.com/login");
+          return Promise.resolve(
+            outcome === "reports an error"
+              ? { isError: true, content: [{ type: "text", text: "HTTP 403 from proxy" }] }
+              : { content: [{ type: "text", text: JSON.stringify({ outputs: { t: "x" } }) }] },
+          );
+        },
+      };
+      const err = await runConnectLogin({
+        client: client as any,
+        namespace: "ns",
+        toolName: "login",
+        inputs: { password: "pw\r\nX" },
+        source,
+        authKey: "primary",
+        authType: "oauth2",
+        authorizedUris: ["https://api.example.com/**"],
+        deliveryHttp: DELIVERY_HTTP,
+      }).catch((e: unknown) => e);
+      expect((err as Error).message).toBe(
+        `${CONNECT_LOGIN_TOOL_ERROR_PREFIX}: the value of 'password' contains a character this request cannot carry where it is placed.`,
+      );
+      expect(source.activeInputs()).toBeNull();
+    });
+  }
 
   it("rejects an output not in the produces allowlist", async () => {
     const source = makeSource();

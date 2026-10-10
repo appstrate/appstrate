@@ -241,7 +241,10 @@ const proxyResponses = {
       "(`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a " +
       "blocked network range (`destination_ip_prohibited`); " +
       "`credential_exfiltration_refused` — the call carries a credential and the allowlist " +
-      "does not name its hosts (`http_request_denied`); `forbidden` — principal lacks " +
+      "does not name its hosts: it is empty or has an entry that leaves the host to the " +
+      "caller, or every entry matching the target reaches it through a wildcard past the " +
+      "registrable domain written under it, judged with the Public Suffix List (the message " +
+      "then names the host to list) (`http_request_denied`); `forbidden` — principal lacks " +
       "`credential-proxy:call`, session bound to a different principal, cookie session " +
       "used, or `X-Run-Id` names another actor's run.",
     headers: PROXY_STATUS_HEADER,
@@ -288,6 +291,15 @@ const proxyResponses = {
       "valid HTTP field value (CR, LF, NUL, another control character or a character above " +
       "U+00FF); nothing was sent, the detail names the header, never the value " +
       "(`proxy_configuration_error`).",
+    headers: PROXY_STATUS_HEADER,
+    content: problemContent,
+  },
+  "503": {
+    description:
+      "`encryption_key_unavailable` — the connection's stored credential is encrypted under a " +
+      "key id missing from the platform's keyring. Operator configuration: nothing was sent, " +
+      "the connection is not flagged, and the call succeeds once the key is restored " +
+      "(`Proxy-Status` error `proxy_configuration_error`).",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },

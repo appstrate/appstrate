@@ -32,7 +32,8 @@ import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
 import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-discovery.ts";
 
-const OAUTH_STATE_TTL_SECONDS = 10 * 60;
+/** How long an authorization request can still complete at the callback. */
+export const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 
 /**
  * Subject-id sentinel embedded in the {@link OAuthStateRecord} `subjectId`
@@ -119,6 +120,11 @@ interface InitiateIntegrationOAuthInput {
    * Absent on fresh connects.
    */
   connectionId?: string;
+  /** Carried to the callback: see {@link OAuthStateRecord}. */
+  delegated?: boolean;
+  /** Carried to the callback: see {@link OAuthStateRecord}. */
+  redirectTag?: string;
+  variables?: Record<string, string>;
   /**
    * Optional discovery hook injection (testing seam). Production callers omit
    * it; the default fetches `${issuer}/.well-known/openid-configuration`.
@@ -212,6 +218,13 @@ export async function initiateIntegrationOAuth(
       resource: input.resource,
       clientRef: input.clientRef,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      ...(input.delegated ? { delegated: true as const } : {}),
+      ...(endpoints.issuer ? { issuer: endpoints.issuer } : {}),
+      ...(endpoints.issuer && endpoints.authorizationResponseIssParameterSupported
+        ? { issParameterSupported: true }
+        : {}),
+      ...(input.redirectTag ? { redirectTag: input.redirectTag } : {}),
+      ...(input.variables ? { variables: input.variables } : {}),
     },
   };
   await store.set(state, record, OAUTH_STATE_TTL_SECONDS);
@@ -262,12 +275,45 @@ export interface IntegrationOAuthCallbackResult {
    * so the existing row is updated instead of a duplicate inserted.
    */
   connectionId?: string;
+  /** Pass-through: see {@link OAuthStateRecord}. */
+  delegated?: true;
   /**
    * Pass-through of the minting client id set at initiate time (system env id or
    * custom `integration_oauth_clients.id`). Stamped on the connection row so
    * token refresh resolves the same client credentials.
    */
   clientRef: string;
+  issuer?: string;
+  /** RFC 8707 `resource` of the authorize and token requests; refresh sends it again. */
+  resource?: string;
+  variables?: Record<string, string>;
+}
+
+/** Where an authorization response arrived (`null` = `/callback`) and its RFC 9207 `iss`. */
+export interface IntegrationAuthorizationResponse {
+  iss?: string;
+  redirectTag: string | null;
+}
+
+/**
+ * RFC 9700 §4.4 mix-up defence (AFPS §7.3): the response arrived at the redirect URI of the server
+ * the request went to, and carries that server's `iss` when it carries one or the server says so.
+ */
+function mixUpRefusal(
+  integration: NonNullable<OAuthStateRecord["integration"]>,
+  response: IntegrationAuthorizationResponse,
+): string | null {
+  if ((integration.redirectTag ?? null) !== response.redirectTag) {
+    return "The authorization response arrived at the redirect URI of another authorization server";
+  }
+  if (response.iss !== undefined) {
+    if (integration.issuer !== undefined && response.iss !== integration.issuer) {
+      return "The authorization response names another authorization server (iss)";
+    }
+  } else if (integration.issParameterSupported) {
+    return "The authorization response carries no iss although the authorization server advertises it";
+  }
+  return null;
 }
 
 /**
@@ -289,6 +335,7 @@ export async function handleIntegrationOAuthCallback(
    * would (correctly) fail-close on non-resolvable test hostnames.
    */
   fetchImpl?: typeof fetch,
+  response: IntegrationAuthorizationResponse = { redirectTag: null },
 ): Promise<IntegrationOAuthCallbackResult> {
   const stateRow = await store.get(state);
   if (!stateRow) {
@@ -310,6 +357,11 @@ export async function handleIntegrationOAuthCallback(
 
   const integration = stateRow.integration;
   const sentinel = integrationSubjectIdSentinel(integration.packageId, integration.authKey);
+  const refusal = mixUpRefusal(integration, response);
+  if (refusal) {
+    await store.delete(state);
+    throw new OAuthCallbackError(refusal, "issuer_mismatch", sentinel);
+  }
   const client = await resolveClient({
     clientRef: integration.clientRef,
     packageId: integration.packageId,
@@ -325,6 +377,15 @@ export async function handleIntegrationOAuthCallback(
       sentinel,
     );
   }
+  // AFPS §7.3 client binding: a client is never presented to another server.
+  if (client.issuer !== undefined && client.issuer !== integration.issuer) {
+    await store.delete(state);
+    throw new OAuthCallbackError(
+      "The OAuth client this connection was started with belongs to another authorization server",
+      "issuer_mismatch",
+      sentinel,
+    );
+  }
 
   const { parsed, raw: tokenData } = await exchangeAuthorizationCode({
     tokenEndpoint: integration.tokenEndpoint,
@@ -336,7 +397,6 @@ export async function handleIntegrationOAuthCallback(
     codeVerifier: stateRow.codeVerifier || undefined,
     redirectUri: stateRow.redirectUri,
     code,
-    scopesRequested: stateRow.scopesRequested,
     // RFC 8707 — re-bind on the token request even if we sent it on the
     // authorize URL; some IdPs only honour it here.
     ...(integration.resource ? { extraTokenParams: { resource: integration.resource } } : {}),
@@ -360,10 +420,15 @@ export async function handleIntegrationOAuthCallback(
     accessToken: parsed.accessToken,
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
-    scopesGranted: parsed.scopesGranted,
+    // RFC 6749 §5.1: an omitted `scope` is the requested one.
+    scopesGranted: parsed.scopesReturned ?? stateRow.scopesRequested,
     scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
+    ...(integration.delegated ? { delegated: true as const } : {}),
     clientRef: integration.clientRef,
+    ...(integration.issuer ? { issuer: integration.issuer } : {}),
+    ...(integration.resource ? { resource: integration.resource } : {}),
+    ...(integration.variables ? { variables: integration.variables } : {}),
   };
 }

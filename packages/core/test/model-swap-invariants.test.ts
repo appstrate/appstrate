@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  ALIAS_BACKING_API_SHAPES,
   checkAliasInvariants,
   isAliasBackingShape,
   isAliasClientShape,
@@ -53,6 +54,10 @@ describe("checkAliasInvariants", () => {
     for (const shape of MODEL_API_SHAPES) {
       expect(isAliasBackingShape(shape)).toBe(shape !== "pi-messages");
     }
+  });
+
+  it("ALIAS_BACKING_API_SHAPES lists every shape but the client dialect", () => {
+    expect(ALIAS_BACKING_API_SHAPES).toEqual(MODEL_API_SHAPES.filter((s) => s !== "pi-messages"));
   });
 
   it("isAliasClientShape accepts only the canonical client dialect", () => {

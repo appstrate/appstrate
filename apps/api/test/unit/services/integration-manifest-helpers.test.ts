@@ -16,6 +16,8 @@ import {
   getIntegrationSourceKind,
   getLocalServerRef,
   getRemoteSource,
+  renderRemoteSource,
+  hasPerConnectionAuthServer,
   getAppstrateConnectMeta,
   authKeysServingSelection,
   type AfpsManifestConnect,
@@ -32,26 +34,36 @@ function manifest(source: unknown, auths?: Record<string, unknown>): Integration
 
 describe("renderCredentialTemplate", () => {
   it("substitutes known refs and returns the rendered string", () => {
-    expect(renderCredentialTemplate("Bearer {$credential.token}", { token: "abc" })).toBe(
+    expect(renderCredentialTemplate("Bearer {$credential.token}", { token: "abc" }, {})).toBe(
       "Bearer abc",
     );
   });
 
   it("renders unknown refs as empty but keeps surrounding literal text", () => {
     // A partial render still has the literal prefix, so it is non-empty.
-    expect(renderCredentialTemplate("k={$credential.missing}", {})).toBe("k=");
+    expect(renderCredentialTemplate("k={$credential.missing}", {}, {})).toBe("k=");
   });
 
   it("returns null when the whole template resolves to empty (field absent → skip)", () => {
     // A bare ref against a missing field collapses to "" → null, so the caller
     // skips emitting the env var / file entirely.
-    expect(renderCredentialTemplate("{$credential.absent}", {})).toBeNull();
+    expect(renderCredentialTemplate("{$credential.absent}", {}, {})).toBeNull();
   });
 
   it("handles multiple refs in one template", () => {
-    expect(renderCredentialTemplate("{$credential.a}:{$credential.b}", { a: "1", b: "2" })).toBe(
-      "1:2",
-    );
+    expect(
+      renderCredentialTemplate("{$credential.a}:{$credential.b}", { a: "1", b: "2" }, {}),
+    ).toBe("1:2");
+  });
+  it("renders the connection's variables beside its credential fields", () => {
+    expect(
+      renderCredentialTemplate(
+        "{$variable.base_url}|{$credential.token}",
+        { token: "t" },
+        { base_url: "https://forge.example.com" },
+      ),
+    ).toBe("https://forge.example.com|t");
+    expect(renderCredentialTemplate("{$variable.absent}", {}, {})).toBeNull();
   });
 });
 
@@ -213,23 +225,23 @@ describe("renderAuthAuthorizedUris", () => {
   const ssh = { authorized_uris: ["ssh://{$credential.host}:{$credential.port}"] };
 
   it("renders a templated entry from the connection's fields", () => {
-    expect(renderAuthAuthorizedUris(ssh, { host: "h", port: "22" })).toEqual(["ssh://h:22"]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "h", port: "22" }, {})).toEqual(["ssh://h:22"]);
   });
 
   it("drops a templated entry whose field is missing (deny-all), never the raw template", () => {
-    expect(renderAuthAuthorizedUris(ssh, { host: "h" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "h" }, {})).toEqual([]);
   });
 
   it("drops a templated entry whose value is not a literal host label or port", () => {
-    expect(renderAuthAuthorizedUris(ssh, { host: "a.com:443", port: "22" })).toEqual([]);
-    expect(renderAuthAuthorizedUris(ssh, { host: "*", port: "22" })).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "a.com:443", port: "22" }, {})).toEqual([]);
+    expect(renderAuthAuthorizedUris(ssh, { host: "*", port: "22" }, {})).toEqual([]);
   });
 
   it("passes static entries unchanged and treats an absent list as empty", () => {
-    expect(renderAuthAuthorizedUris({ authorized_uris: ["https://a.example/**"] }, {})).toEqual([
-      "https://a.example/**",
-    ]);
-    expect(renderAuthAuthorizedUris({}, {})).toEqual([]);
+    expect(renderAuthAuthorizedUris({ authorized_uris: ["https://a.example/**"] }, {}, {})).toEqual(
+      ["https://a.example/**"],
+    );
+    expect(renderAuthAuthorizedUris({}, {}, {})).toEqual([]);
   });
 });
 
@@ -239,11 +251,17 @@ describe("runnerEgressFor", () => {
     expect(runnerEgressFor({ authorized_uris: [] }, [])).toBeUndefined();
   });
 
-  it("carries the rendered list, even when rendering emptied it (deny-all)", () => {
-    const auth = { authorized_uris: ["ssh://{$credential.host}:22"] };
-    expect(runnerEgressFor(auth, [])).toEqual({ authorizedUris: [], allowAllUris: false });
+  it("carries the rendered list, even when rendering emptied it (deny-all), and the declared one", () => {
+    const declaredUris = ["ssh://{$credential.host}:22"];
+    const auth = { authorized_uris: declaredUris };
+    expect(runnerEgressFor(auth, [])).toEqual({
+      authorizedUris: [],
+      declaredUris,
+      allowAllUris: false,
+    });
     expect(runnerEgressFor(auth, ["ssh://h:22"])).toEqual({
       authorizedUris: ["ssh://h:22"],
+      declaredUris,
       allowAllUris: false,
     });
   });
@@ -251,7 +269,48 @@ describe("runnerEgressFor", () => {
   it("carries allow_all_uris", () => {
     expect(runnerEgressFor({ allow_all_uris: true }, [])).toEqual({
       authorizedUris: [],
+      declaredUris: [],
       allowAllUris: true,
     });
+  });
+});
+
+describe("connection variables (AFPS §7.12)", () => {
+  const templated = manifest({
+    kind: "remote",
+    remote: { url: "{$variable.base_url}/api/v4/mcp", transport: "streamable-http" },
+  });
+
+  it("renderRemoteSource renders a template per connection, a literal as it is", () => {
+    expect(renderRemoteSource(templated, { base_url: "https://gitlab.example.com/" })).toEqual({
+      url: "https://gitlab.example.com/api/v4/mcp",
+      transport: "streamable-http",
+    });
+    expect(renderRemoteSource(templated, null)).toBeNull();
+    expect(renderRemoteSource(templated, { base_url: "https://u@gitlab.example.com" })).toBeNull();
+    const literal = manifest({
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/v1", transport: "sse" },
+    });
+    expect(renderRemoteSource(literal, null)).toEqual({
+      url: "https://mcp.example.com/v1",
+      transport: "sse",
+    });
+    expect(renderRemoteSource(manifest({ kind: "none" }), null)).toBeNull();
+  });
+
+  it("hasPerConnectionAuthServer: oauth2 under a templated issuer or remote url", () => {
+    const literal = manifest({ kind: "remote", remote: { url: "https://x.example.com/mcp" } });
+    expect(hasPerConnectionAuthServer(templated, { type: "oauth2" })).toBe(true);
+    expect(hasPerConnectionAuthServer(templated, { type: "api_key" })).toBe(false);
+    expect(
+      hasPerConnectionAuthServer(literal, {
+        type: "oauth2",
+        issuer: "https://{$variable.tenant}.idp.example.com",
+      }),
+    ).toBe(true);
+    expect(
+      hasPerConnectionAuthServer(literal, { type: "oauth2", issuer: "https://idp.example.com" }),
+    ).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import {
   getSource,
   getToolsPolicy,
   emptyAuth,
+  isRemoteSourceUrl,
   setAllowUndeclaredTools,
   setAuths,
   setSource,
@@ -65,6 +66,55 @@ describe("integration-editor source", () => {
     );
     expect((typed.auths as any).primary.authorized_uris).toEqual(["https://example.com/**"]);
     expect(findUnboundedInjectedCredentials(typed)).toEqual([]);
+  });
+
+  it("gives a URL-form template's auth the variable's own allowlist", () => {
+    const typed = ["{$variable.base_url}", "{$variable.base_url}/api/v4/mcp"].reduce(
+      (m, url) => setSource(m, remote(url)),
+      defaultIntegrationManifest("acme"),
+    );
+    expect((typed.auths as any).primary.authorized_uris).toEqual(["{$variable.base_url}/**"]);
+    expect(findUnboundedInjectedCredentials(typed)).toEqual([]);
+  });
+
+  it("gives a host-form template's auth its templated origin", () => {
+    const m = setSource(
+      defaultIntegrationManifest("acme"),
+      remote("https://{$variable.tenant}.example.com/mcp"),
+    );
+    expect((m.auths as any).primary.authorized_uris).toEqual([
+      "https://{$variable.tenant}.example.com/**",
+    ]);
+    expect(findUnboundedInjectedCredentials(m)).toEqual([]);
+  });
+
+  it("follows the source from a literal URL to a template and back", () => {
+    const steps = [
+      "https://gitlab.com/api/v4/mcp",
+      "{$variable.base_url}/api/v4/mcp",
+      "https://gitlab.com/api/v4/mcp",
+    ];
+    const allowlists: unknown[] = [];
+    steps.reduce((m, url) => {
+      const next = setSource(m, remote(url));
+      allowlists.push((next.auths as any).primary.authorized_uris);
+      return next;
+    }, defaultIntegrationManifest("acme"));
+    expect(allowlists).toEqual([
+      ["https://gitlab.com/**"],
+      ["{$variable.base_url}/**"],
+      ["https://gitlab.com/**"],
+    ]);
+  });
+
+  it("accepts an absolute URL or a URL template as the remote URL, nothing else", () => {
+    expect(isRemoteSourceUrl("https://x.test/mcp")).toBe(true);
+    expect(isRemoteSourceUrl("{$variable.base_url}/mcp")).toBe(true);
+    expect(isRemoteSourceUrl("https://{$variable.tenant}.example.com/mcp")).toBe(true);
+    expect(isRemoteSourceUrl("")).toBe(false);
+    expect(isRemoteSourceUrl("{$variable.base_url}?x=1")).toBe(false);
+    expect(isRemoteSourceUrl("https://api.{$variable.tenant}.com/mcp")).toBe(false);
+    expect(isRemoteSourceUrl("{$credential.host}/mcp")).toBe(false);
   });
 
   it("leaves an allowlist the author wrote", () => {

@@ -278,8 +278,16 @@
               "type": "object",
               "properties": {
                 "url": {
-                  "type": "string",
-                  "format": "uri"
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^(?:\\{\\$variable\\.[a-z][a-z0-9_]*\\}|https:\\/\\/\\{\\$variable\\.[a-z][a-z0-9_]*\\}(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\\.[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?)(?:\\/(?!\\.\\.?(?:\\/|$))[A-Za-z0-9._~!$&'()+,;=:@-]+)*\\/?$"
+                    }
+                  ]
                 },
                 "transport": {
                   "type": "string",
@@ -317,6 +325,34 @@
         }
       ]
     },
+    "variables": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "allOf": [
+            {
+              "$ref": "https://json-schema.org/draft/2020-12/schema"
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "properties"
+              ],
+              "properties": {
+                "type": {
+                  "const": "object"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema"
+      ],
+      "additionalProperties": {}
+    },
     "auths": {
       "type": "object",
       "propertyNames": {
@@ -337,8 +373,16 @@
             ]
           },
           "issuer": {
-            "type": "string",
-            "format": "uri"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "string",
+                "pattern": "^(?:\\{\\$variable\\.[a-z][a-z0-9_]*\\}|https:\\/\\/\\{\\$variable\\.[a-z][a-z0-9_]*\\}(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\\.[A-Za-z](?:[A-Za-z0-9-]*[A-Za-z0-9])?)(?:\\/(?!\\.\\.?(?:\\/|$))[A-Za-z0-9._~!$&'()+,;=:@-]+)*\\/?$"
+              }
+            ]
           },
           "authorization_endpoint": {
             "type": "string",

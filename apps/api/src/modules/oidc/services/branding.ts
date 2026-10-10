@@ -24,7 +24,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
+import { oauthClient, spaces } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { scopedWhere } from "../../../lib/db-helpers.ts";
 
@@ -133,6 +133,8 @@ export async function resolveSpaceBranding(spaceId: string): Promise<ResolvedSpa
 /**
  * Resolve branding for a polymorphic OAuth client.
  *
+ * - **instance-level clients**: platform defaults, named after the client
+ *   when an operator declared it — never after a self-registered one.
  * - **space-level clients**: branding comes from the pinned
  *   `spaces.settings.branding`.
  * - **org-level clients**: branding comes from the org's default space
@@ -143,12 +145,23 @@ export async function resolveSpaceBranding(spaceId: string): Promise<ResolvedSpa
  * Falls back to platform defaults on any missing / malformed data.
  */
 export async function resolveBrandingForClient(client: {
+  clientId: string;
   level: string;
   name: string | null;
   referencedOrgId: string | null;
   referencedSpaceId: string | null;
 }): Promise<ResolvedSpaceBranding> {
   if (client.level === "instance") {
+    // A client that registered itself (DCR, CIMD) chose its own name: shown as
+    // the platform's, it would brand the login page and the sender of the
+    // account emails with whatever it claims to be. Only an operator-declared
+    // client (`OIDC_INSTANCE_CLIENTS`) names the brand.
+    const [row] = await db
+      .select({ selfService: oauthClient.selfService })
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, client.clientId))
+      .limit(1);
+    if (row?.selfService) return { ...PLATFORM_DEFAULT_BRANDING };
     return {
       ...PLATFORM_DEFAULT_BRANDING,
       name: client.name ?? PLATFORM_DEFAULT_BRANDING.name,

@@ -35,6 +35,9 @@ import type {
   IntegrationConnectStrategy,
 } from "./strategy.ts";
 import { assertFieldsInput, requireNonEmptyCredentials, connectionTarget } from "./strategy.ts";
+import { resolveConnectionVariables } from "./connection-variables.ts";
+import { maskCredentialLabel } from "./mask-label.ts";
+import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 export class LoginSecretStrategy implements IntegrationConnectStrategy {
   async complete(
@@ -45,7 +48,12 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
     requireNonEmptyCredentials(credentials);
     // Read the auth (validates the manifest declares it). The session is
     // minted at run-start, so we don't run the tool or extract identity here.
-    await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
+    const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
+    const variables = await resolveConnectionVariables(
+      manifest,
+      auth as unknown as AfpsManifestAuth,
+      ctx.variables,
+    );
 
     const target = connectionTarget(ctx);
 
@@ -55,10 +63,12 @@ export class LoginSecretStrategy implements IntegrationConnectStrategy {
       // The login secret, persisted in the NON-injectable `inputs` plane.
       inputs: credentials,
       accountId: "default",
+      labelHint: maskCredentialLabel(auth.credentials?.schema, credentials),
       identityClaims: {},
       scopesGranted: [],
       expiresAt: null,
       needsReconnection: false,
+      variables,
       ...(ctx.connectionId ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });
     // insert / update-owned always return a summary (or throw).

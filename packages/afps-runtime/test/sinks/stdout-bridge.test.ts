@@ -118,6 +118,16 @@ describe("isStdoutEventLine", () => {
     // `pinned.set` requires non-empty string key + content presence.
     expect(isStdoutEventLine({ type: "pinned.set", key: "", content: "x" })).toBe(false);
     expect(isStdoutEventLine({ type: "pinned.set", key: "k" })).toBe(false);
+    // `appstrate.metric` bands and counters follow the token-usage rule.
+    expect(
+      isStdoutEventLine({
+        type: "appstrate.metric",
+        usage: { input_tokens: 1, tiers: [{ input_tokens_above: 0 }] },
+      }),
+    ).toBe(false);
+    expect(isStdoutEventLine({ type: "appstrate.metric", usage: { input_tokens: 1.5 } })).toBe(
+      false,
+    );
   });
 });
 
@@ -359,6 +369,42 @@ describe("attachStdoutBridge — stdout interception", () => {
     await flushMicrotasks();
     expect(underlying.handled).toHaveLength(0);
     expect(stdout.writes).toEqual(["{not valid json\n"]);
+    bridge.restore();
+  });
+
+  it("drops malformed bands and unknown keys of a metric's usage, keeping the event", async () => {
+    const underlying = recordingSink();
+    const stdout = makeFakeStdout();
+    const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
+
+    const usage = { input_tokens: 10, output_tokens: 2 };
+    const line = {
+      type: "appstrate.metric",
+      usage: { ...usage, vendor: { blob: true }, tiers: [{ input_tokens_above: 0 }] },
+      cost: 0.1,
+    };
+    stdout.write.call(null as never, `${JSON.stringify(line)}\n`);
+
+    await flushMicrotasks();
+    expect(underlying.handled).toHaveLength(1);
+    expect(underlying.handled).toEqual([
+      { type: "appstrate.metric", usage, cost: 0.1, runId: "r" } as unknown as RunEvent,
+    ]);
+    expect(stdout.writes).toHaveLength(0);
+    bridge.restore();
+  });
+
+  it("passes a metric through when its usage counters are malformed", async () => {
+    const underlying = recordingSink();
+    const stdout = makeFakeStdout();
+    const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
+
+    const line = '{"type":"appstrate.metric","usage":{"input_tokens":1.5}}\n';
+    stdout.write.call(null as never, line);
+
+    await flushMicrotasks();
+    expect(underlying.handled).toHaveLength(0);
+    expect(stdout.writes).toEqual([line]);
     bridge.restore();
   });
 

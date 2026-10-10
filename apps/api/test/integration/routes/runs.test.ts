@@ -1993,6 +1993,52 @@ describe("Runs API", () => {
       );
     });
 
+    it("GET /api/runs/:id lists the integrations the run started without, with their cause", async () => {
+      await seedAgent({ id: "@runorg/unbound-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/unbound-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        resolvedConnections: { "@acme/slack": [], "@acme/notion": [] },
+        integrationsUnbound: [
+          { integrationId: "@acme/slack", code: "integration_unbound", source: "member_pin" },
+          { integrationId: "@acme/notion", code: "not_connected" },
+        ],
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.integrations_unbound).toEqual([
+        {
+          integration_package_id: "@acme/slack",
+          code: "integration_unbound",
+          source: "member_pin",
+        },
+        { integration_package_id: "@acme/notion", code: "not_connected", source: null },
+      ]);
+    });
+
+    it("GET /api/runs/:id refuses to serve an integrations_unbound row that drifted from its shape", async () => {
+      await seedAgent({ id: "@runorg/drift-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const run = await seedRun({
+        packageId: "@runorg/drift-agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        integrationsUnbound: ["@acme/slack"] as never,
+      });
+
+      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
+
+      // Parsed, never trusted as typed: a drifted row fails loudly, not as a half-shaped item.
+      expect(res.status).toBe(500);
+    });
+
     it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {
       await seedAgent({ id: "@runorg/noconn-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
@@ -2008,6 +2054,8 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.connections_used).toBeNull();
+      // NULL column = not recorded (no resolution ran, or the run predates the record).
+      expect(body.integrations_unbound).toBeNull();
     });
 
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {

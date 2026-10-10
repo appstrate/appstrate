@@ -9,7 +9,7 @@
  * fact — the effective manifest (`resolveAgentRunVersion`), the app install
  * (`getSpacePackageSettings`), the schedule table (`listPackageSchedules`), the
  * connection resolver (`resolveAgentConnectionReadiness`) and the readiness
- * gate (`collectAgentReadinessErrors`). Adding a check here would let the map
+ * gate (`collectAgentReadiness`). Adding a check here would let the map
  * disagree with the run gate, which is the one thing it must never do.
  *
  * Layout is computed server-side (like LangSmith Fleet's, which hardcodes it):
@@ -39,7 +39,8 @@ import {
 import { listPackageSchedules } from "../../services/scheduler.ts";
 import { getSpacePackageSettings } from "../../services/space-packages.ts";
 import { resolveAgentConnectionReadiness } from "../../services/integration-pins-service.ts";
-import { collectAgentReadinessErrors } from "../../services/agent-readiness.ts";
+import { collectBundleReadinessErrors } from "../../services/agent-diagnostics.ts";
+import { isUserPrincipal } from "../../lib/principal.ts";
 import { listOrgModels } from "../../services/org-models.ts";
 import { listOrgProxies } from "../../services/org-proxies.ts";
 import {
@@ -413,6 +414,7 @@ export async function buildAgentMap(
           actor,
           canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
           canConfigureIntegrations: c.get("permissions")?.has("integrations:configure") ?? false,
+          wholeReach: isUserPrincipal(c),
           version: versionRef,
         })
       : Promise.resolve(null),
@@ -432,13 +434,12 @@ export async function buildAgentMap(
     : packageConfig.values;
 
   // Readiness minus connections: the connection verdict already arrives via
-  // `connectionReadiness` above, and passing an actor here would run the same
-  // resolver a second time on the request path.
-  const readinessErrors = await collectAgentReadinessErrors({
+  // `connectionReadiness` above.
+  const readinessErrors = await collectBundleReadinessErrors({
     agent: agent as LoadedPackage,
     orgId,
     spaceId,
-    actor: null,
+    actor,
   });
 
   const connectionByIntegration = new Map(

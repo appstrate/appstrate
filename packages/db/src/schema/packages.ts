@@ -81,10 +81,10 @@ export const spacePackages = pgTable(
     // Per-(space, integration) admin lock. Only meaningful for
     // integration packages — set true to refuse user/end-user attempts
     // to create their own connection on this integration in this space
-    // (POST /api/integration-connections returns 403). Existing user
-    // connections stay functional; the lock is on creation only. The
-    // intended workflow: admin enables this → connects → marks the
-    // connection sharedWithOrg → makes it the org default
+    // (POST /api/integration-connections returns 403), and to keep an
+    // actor's own connection from binding here unless it is shared with
+    // this space. The intended workflow: admin enables this → connects →
+    // shares the connection with the space → makes it the org default
     // (integration_org_defaults), since the resolver's fallback never
     // binds a shared connection. Stored on space_packages
     // because the gate is per-(space, integration) and spacePackages

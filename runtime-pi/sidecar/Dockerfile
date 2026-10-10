@@ -17,7 +17,7 @@
 #
 # Paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.14-alpine
+ARG BUN_IMAGE=oven/bun:1.4.2-alpine
 ARG RUNTIME_IMAGE=alpine:3.22.4
 
 # ── Stage 1 — compile to a single-file binary ─────────────────────
@@ -36,18 +36,16 @@ COPY package.json bun.lock ./
 COPY --parents */package.json */*/package.json ./
 
 # `--filter=appstrate-sidecar` restricts the install to the sidecar's
-# subgraph. Same root lockfile, subset of the workspace.
+# subgraph. Same root lockfile, subset of the workspace. `--frozen-lockfile`
+# fails the build when bun.lock is out of step with the manifests.
 #
-# NOT `--frozen-lockfile` / `--production`: bun's frozen comparator has a known
-# bug with same-name aliased platform binaries in the workspace graph — it
-# false-reports "lockfile had changes" on a byte-stable lockfile (confirmed on
-# bun 1.3.11 + 1.3.14, full graph + subset); `--production` implicitly freezes
-# with no override flag in bun 1.3.x. Versions stay pinned by the COPY'd bun.lock
-# (resolution reads it); lockfile drift is caught by the
-# `git diff --exit-code bun.lock` guard in CI (.github/workflows/check.yml) on
-# every commit.
+# No `--production`: it would gain nothing, since the runtime stage ships only
+# the compiled binary, never this node_modules. (It also freezes the lockfile
+# implicitly — on bun 1.4.2 a drifted manifest fails it with "lockfile had
+# changes, but lockfile is frozen".)
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
+        --frozen-lockfile \
         --filter=appstrate-sidecar \
         --no-progress
 

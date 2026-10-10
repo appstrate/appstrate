@@ -48,6 +48,7 @@ export function RunLaunchRecovery({
         onClose={launcher.dismiss}
         errors={launcher.missingErrors}
         agentPackageId={packageId}
+        version={launcher.missingVersion}
         {...(integrationEntries ? { integrationEntries } : {})}
         retrying={launcher.isPending}
         // The modal stays open until the retry lands, so the picker is still

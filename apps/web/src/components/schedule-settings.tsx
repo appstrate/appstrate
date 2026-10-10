@@ -49,7 +49,11 @@ import { authorDefaults, getOrderedKeys } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { useUploadClient } from "../hooks/use-upload";
 import { type ConnectionChoice, scheduleConnectionChoices } from "../lib/connection-choice";
-import { withConnectionOverride, withDeclaredConnections } from "../lib/connection-set";
+import {
+  type ConnectionSet,
+  withConnectionOverride,
+  withDeclaredConnections,
+} from "../lib/connection-set";
 import { type ActorValue, type RunOverridesValue, sameActor } from "../lib/schedule-payload";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 import {
@@ -78,6 +82,17 @@ function useSaveAfterPause<T>(
     }, 650);
     return () => window.clearTimeout(timeout);
   }, [edited, value, save, done]);
+}
+
+/**
+ * The integrations every fire runs, with their `required` flag: inherit is the latest published
+ * version, never the draft the page would otherwise project for an author.
+ */
+function useFiredIntegrations(schedule: Schedule) {
+  const version = schedule.version_override ?? VERSION_PUBLISHED;
+  const integrations = usePackageDetail("agent", schedule.packageId, { version }).data?.dependencies
+    .integrations;
+  return { version, integrations };
 }
 
 export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
@@ -238,6 +253,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
   // The refusal of the last actor save, and the picks that answer it.
   const [choices, setChoices] = useState<ConnectionChoice[]>([]);
   const [picks, setPicks] = useState<Record<string, string[]>>({});
+  const { integrations } = useFiredIntegrations(schedule);
 
   // The stored picks name the previous identity's connections: a new actor
   // starts without them, as the create form does.
@@ -271,6 +287,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
         <div className="space-y-4">
           <ScheduleActorConnectionChoice
             choices={choices}
+            integrations={integrations ?? []}
             value={picks}
             onChange={(integrationId, connectionIds) =>
               setPicks(
@@ -486,10 +503,7 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
   const { t } = useTranslation(["agents"]);
   const { user } = useAuth();
   const [choices, setChoices] = useState<ConnectionChoice[]>([]);
-  // The integrations every fire runs: inherit is the latest published version.
-  const firedVersion = schedule.version_override ?? VERSION_PUBLISHED;
-  const integrations = usePackageDetail("agent", schedule.packageId, { version: firedVersion }).data
-    ?.dependencies.integrations;
+  const { version: firedVersion, integrations } = useFiredIntegrations(schedule);
   const picks = schedule.connection_overrides ?? {};
   // The pickers judge the VIEWER's connections: the agent's table speaks only
   // for a schedule that runs as the viewer. Another actor's connections are
@@ -497,7 +511,7 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
   const actorIsViewer =
     !!user && sameActor({ userId: schedule.userId ?? undefined }, { userId: user.id });
 
-  const pick = (integrationId: string, connectionIds: string[]) => {
+  const pick = (integrationId: string, connectionIds: ConnectionSet) => {
     const next = withDeclaredConnections(
       withConnectionOverride({ connection_overrides: picks }, integrationId, connectionIds),
       integrations?.map((i) => i.id),
@@ -532,7 +546,12 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
           scheduleOverrides={{ value: picks, onChange: pick, version: firedVersion }}
         />
       ) : (
-        <ScheduleActorConnectionChoice choices={choices} value={picks} onChange={pick} />
+        <ScheduleActorConnectionChoice
+          choices={choices}
+          integrations={integrations}
+          value={picks}
+          onChange={pick}
+        />
       )}
     </div>
   );

@@ -9,15 +9,17 @@
  * building a bundle internally and routing it through the single
  * `persistCredentialBundle` writer.
  *
- * Re-acquisition is OAuth2-only and is a direct call to
- * `forceRefreshIntegrationConnection` from the live resolvers — not a strategy
- * method — because the only refreshable auth type is `oauth2`.
+ * Re-acquisition is OAuth2-only and goes through `refreshConnectionCredential`
+ * (`services/integration-token-refresh.ts`) from the live resolvers — not a
+ * strategy method — because the only refreshable auth type is `oauth2`.
  */
 
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
 import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
-import { invalidRequest } from "../../lib/errors.ts";
+import type { JSONSchemaObject } from "@appstrate/core/form";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { validateConnectionCredentials } from "../schema.ts";
 
 export type { CredentialBundle };
 
@@ -32,6 +34,13 @@ export interface ConnectContext {
   authKey: string;
   /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
   connectionId?: string;
+  /** Started by a delegated credential: the row it writes or reconnects is scoped to the space. */
+  delegated?: boolean;
+  /**
+   * The connection variables submitted (AFPS §7.12); absent when none were. Every strategy
+   * validates them (`resolveConnectionVariables`) before use and persists what that returns.
+   */
+  variables?: Readonly<Record<string, string>>;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */
@@ -98,6 +107,57 @@ export function requireNonEmptyCredentials(credentials: Record<string, unknown>)
   }
 }
 
+/** The credentials checked against `credentials.schema` (else a 400) and typed by it. */
+export function assertCredentialsMatchSchema(
+  schema: unknown,
+  credentials: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = validateConnectionCredentials(schema as JSONSchemaObject | undefined, credentials);
+  if (!result.valid) {
+    throw invalidRequest(
+      `Credentials do not match the integration's declared schema: ${result.errors
+        .map((e) => `${e.field} ${e.message}`)
+        .join("; ")}`,
+      "credentials",
+    );
+  }
+  return result.data ?? credentials;
+}
+
+/** Credentials the service refused: a 400 naming the remedy. `diagnostic` never holds a value. */
+export function loginRejected(diagnostic: string): ApiError {
+  return invalidRequest(
+    `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
+    "credentials",
+  );
+}
+
+/** A login input the login request cannot carry where it sits (a line break in a header value). */
+export function loginInputRefused(field: string): ApiError {
+  return invalidRequest(
+    `The value of '${field}' contains a character this request cannot carry where it is placed.`,
+    `credentials.${field}`,
+  );
+}
+
+/** Submitted values that put the login URL's host somewhere the auth's `authorized_uris` refuse. */
+export function loginUrlRefused(fields: readonly string[]): ApiError {
+  return invalidRequest(
+    `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`,
+    fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
+  );
+}
+
+/** A login the service did not finish in time: not a server bug, retrying is the remedy. */
+export function loginTimedOut(timeoutMs: number): ApiError {
+  return new ApiError({
+    status: 504,
+    code: "timeout",
+    title: "Gateway Timeout",
+    detail: `The connection attempt timed out after ${timeoutMs}ms — the login did not complete in time. Please try again.`,
+  });
+}
+
 /**
  * Build the {@link PersistTarget} for a strategy write: an owner-scoped update
  * when reconnecting an existing connection, otherwise a fresh insert.
@@ -114,6 +174,12 @@ export function connectionTarget(ctx: ConnectContext): PersistTarget {
         // zero rows instead of overwriting an unrelated connection.
         packageId: ctx.integrationId,
         authKey: ctx.authKey,
+        ...(ctx.delegated ? { delegated: true } : {}),
       }
-    : { kind: "insert", scope: ctx.scope, actor: ctx.actor };
+    : {
+        kind: "insert",
+        scope: ctx.scope,
+        actor: ctx.actor,
+        ...(ctx.delegated ? { delegated: true } : {}),
+      };
 }

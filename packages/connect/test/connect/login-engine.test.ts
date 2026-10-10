@@ -66,8 +66,8 @@ describe("runLogin — declarative login (AFPS)", () => {
     expect(res.outputs.access_token).toBe("TOK-123");
     // expiresAt computed from expires_in seconds.
     expect(res.expiresAt).toBe(new Date(1_000_000 + 3600 * 1000).toISOString());
-    // The login request received the substituted secret in the body.
-    expect(calls[0]!.init.body).toBe("grant_type=password&username=a@b.co&password=s3cr3t");
+    // The login request received the substituted secret in the body, form-encoded.
+    expect(calls[0]!.init.body).toBe("grant_type=password&username=a%40b.co&password=s3cr3t");
   });
 
   it("non-leak: the bootstrap secret never lands in outputs", async () => {
@@ -281,6 +281,23 @@ describe("runLogin — security limits", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("refuses a simple criterion other than <expr> == <operand>, before any fetch", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      login: { ...baseLogin, success_criteria: [{ condition: "$statusCode != 401" }] },
+    };
+    await expect(
+      runLogin(config, {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      }),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+    expect(calls).toHaveLength(0);
+  });
+
   it("sends an input value containing {$…} as data, not as an expression", async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
     const config: LoginConfig = {
@@ -307,7 +324,8 @@ describe("runLogin — security limits", () => {
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("bad_status");
+    expect((err as LoginError).reason).toBe("rejected");
+    expect((err as LoginError).upstreamStatus).toBe(401);
     expect((err as Error).message).not.toContain("secret-error-detail");
   });
 
@@ -325,7 +343,40 @@ describe("runLogin — security limits", () => {
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("bad_status");
+    expect((err as LoginError).reason).toBe("rejected");
+  });
+
+  it("classifies a 5xx that fails the criteria as `upstream_failed`, not a refusal", async () => {
+    const { impl } = fakeFetch([{ status: 503, body: "maintenance" }]);
+    const err = await runLogin(
+      { login: baseLogin },
+      {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    ).catch((e: unknown) => e);
+    expect(err).toMatchObject({ reason: "upstream_failed", upstreamStatus: 503 });
+  });
+
+  it("classifies a request that never reached the target as `upstream_failed`", async () => {
+    const refused = (async () => {
+      throw new TypeError("connect ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    await expect(
+      runLogin(
+        { login: baseLogin },
+        {
+          inputs: {},
+          authorizedUris: ALLOW,
+          allowAllUris: false,
+          fetchImpl: refused,
+          resolveHost: TEST_RESOLVE,
+        },
+      ),
+    ).rejects.toMatchObject({ reason: "upstream_failed" });
   });
 
   it("rejects an oversized response body", async () => {
@@ -340,6 +391,28 @@ describe("runLogin — security limits", () => {
         resolveHost: TEST_RESOLVE,
       }),
     ).rejects.toMatchObject({ reason: "response_too_large" });
+  });
+
+  it("does not read an oversized body that no criterion or output reads", async () => {
+    const { impl } = fakeFetch([
+      { status: 200, body: "x".repeat(2000), headers: { "X-Token": "tok" } },
+    ]);
+    const config: LoginConfig = {
+      login: {
+        request: baseLogin.request,
+        success_criteria: [{ condition: "$statusCode == 200" }],
+        outputs: { t: "$response.header.X-Token" },
+      },
+      limits: { max_response_bytes: 1000 },
+    };
+    const res = await runLogin(config, {
+      inputs: {},
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    });
+    expect(res.outputs.t).toBe("tok");
   });
 
   it("classifies an aborted (timed-out) request as `timeout`", async () => {
@@ -550,9 +623,10 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     expect(res.outputs.access_token).toBe("first");
   });
 
-  it("xpath selector raises a structured 'not supported' LoginError", async () => {
-    const { impl } = fakeFetch([{ status: 200, body: "<root><tok>X</tok></root>" }]);
-    const config: LoginConfig = {
+  it("refuses an xpath selector before any fetch", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "<root><tok>X</tok></root>" }]);
+    // A manifest may declare xpath (AFPS §7.7); the engine's own types do not.
+    const config = {
       login: {
         request: { method: "POST", url: "https://idp.example.com/token" },
         outputs: {
@@ -563,7 +637,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
           },
         },
       },
-    };
+    } as unknown as LoginConfig;
     const err = await runLogin(config, {
       inputs: {},
       authorizedUris: ALLOW,
@@ -574,10 +648,11 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
     expect((err as LoginError).message).toMatch(/xpath/);
+    expect(calls).toHaveLength(0);
   });
 
   it("jsonpath with unsupported wildcard fails with invalid_config", async () => {
-    const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ a: [1, 2] }) }]);
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ a: [1, 2] }) }]);
     const config: LoginConfig = {
       login: {
         request: { method: "POST", url: "https://idp.example.com/token" },
@@ -599,6 +674,7 @@ describe("runLogin — Arazzo Selector Object outputs (AFPS §7.7)", () => {
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
     expect((err as LoginError).reason).toBe("invalid_config");
+    expect(calls).toHaveLength(0);
   });
 });
 
@@ -636,6 +712,55 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
         { condition: '$response.body#/status == "fail"', type: "simple" },
       ]),
     ).toBe(false);
+  });
+
+  it("simple: a single-quoted literal reads '' as one quote", () => {
+    const body = JSON.stringify({ name: "O'Brien" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/name == 'O''Brien'" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("simple: strings compare case-insensitively (Arazzo)", () => {
+    const body = JSON.stringify({ status: "OK" });
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/status == 'ok'" },
+      ]),
+    ).toBe(true);
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), body, [
+        { condition: "$response.body#/status == 'ko'" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("simple: a number equals only a string holding the same JSON number", () => {
+    const headers = new Headers({ "X-N": "200", "X-Blank": " ", "X-Hex": "0x10" });
+    const passes = (condition: string) =>
+      evaluateSuccessCriteriaForTest(200, headers, "", [{ condition }]);
+    expect(passes("$response.header.X-N == 200")).toBe(true);
+    expect(passes("$response.header.X-Blank == 0")).toBe(false);
+    expect(passes("$response.header.X-Hex == 16")).toBe(false);
+  });
+
+  it("simple: an absent value equals nothing, not even another absent value", () => {
+    expect(
+      evaluateSuccessCriteriaForTest(200, new Headers(), "{}", [
+        { condition: "$response.body#/a == $response.body#/b" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("simple: a body pointer reads only canonical array indices and own members", () => {
+    const passes = (body: unknown, condition: string) =>
+      evaluateSuccessCriteriaForTest(200, new Headers(), JSON.stringify(body), [{ condition }]);
+    expect(passes({ "1": "a", "01": "b" }, "$response.body#/01 == 'b'")).toBe(true);
+    expect(passes({ a: ["x", "y"] }, "$response.body#/a/01 == 'y'")).toBe(false);
+    expect(passes({ a: [1, 2, 3] }, "$response.body#/a/length == 3")).toBe(false);
+    expect(passes({ a: [1, 2, 3] }, "$response.body#/a/2 == 3")).toBe(true);
   });
 
   it("simple: $response.header.<name> == <literal>", () => {
@@ -696,14 +821,6 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
     ).toBe(true);
   });
 
-  it("xpath: conservatively fails (no XML evaluator)", () => {
-    expect(
-      evaluateSuccessCriteriaForTest(200, new Headers(), "<root/>", [
-        { condition: "//root", type: "xpath" },
-      ]),
-    ).toBe(false);
-  });
-
   it("all criteria must pass (AND semantics)", () => {
     const body = JSON.stringify({ status: "ok" });
     expect(
@@ -741,7 +858,7 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
     expect(res.outputs.access_token).toBe("TOK");
   });
 
-  it("integration: runLogin fails with bad_status when a regex criterion does NOT match", async () => {
+  it("integration: runLogin fails with rejected when a regex criterion does NOT match", async () => {
     const { impl } = fakeFetch([
       { status: 200, body: JSON.stringify({ token: "TOK", status: "fail" }) },
     ]);
@@ -760,7 +877,7 @@ describe("success_criteria engine — Arazzo Criterion types (AFPS §7.7)", () =
       resolveHost: TEST_RESOLVE,
     }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(LoginError);
-    expect((err as LoginError).reason).toBe("bad_status");
+    expect((err as LoginError).reason).toBe("rejected");
   });
 });
 
@@ -779,6 +896,41 @@ describe("runLogin — runtime expressions (AFPS §7.7)", () => {
         resolveHost: TEST_RESOLVE,
       },
     );
+
+  it("never reads an inherited member through a body pointer", async () => {
+    await expect(run({ p: "$response.body#/__proto__" }, { body: "{}" })).rejects.toMatchObject({
+      reason: "extract_failed",
+    });
+  });
+
+  it("refuses an extractor that also carries selector fields", async () => {
+    const sid = {
+      from: "cookie",
+      name: "sid",
+      context: "$response.body",
+      selector: "/sid",
+      type: "jsonpointer",
+    } as const;
+    const { impl, calls } = fakeFetch([{ status: 200, headers: { "Set-Cookie": "sid=x" } }]);
+    await expect(
+      runLogin(
+        {
+          login: {
+            request: { method: "POST", url: "https://idp.example.com/token" },
+            outputs: { sid },
+          },
+        },
+        {
+          inputs: {},
+          authorizedUris: ALLOW,
+          allowAllUris: false,
+          fetchImpl: impl,
+          resolveHost: TEST_RESOLVE,
+        },
+      ),
+    ).rejects.toMatchObject({ reason: "invalid_config" });
+    expect(calls).toHaveLength(0);
+  });
 
   it("regex extractor reads the body named by its source", async () => {
     const res = await run(
@@ -811,5 +963,200 @@ describe("runLogin — runtime expressions (AFPS §7.7)", () => {
   it("$response.body as an output yields the body text", async () => {
     const res = await run({ raw: "$response.body" }, { body: "opaque-token" });
     expect(res.outputs.raw).toBe("opaque-token");
+  });
+});
+
+describe("runLogin — input encoding wiring (the matrix: afps-runtime request-template.test)", () => {
+  const PASSWORD = "p&ss=w+rd %x";
+
+  async function sent(
+    request: LoginConfig["login"]["request"],
+    inputs: Record<string, unknown>,
+  ): Promise<{ url: string; init: RequestInit }> {
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
+    await runLogin(
+      { login: { request, outputs: { t: "$response.body#/t" } } },
+      {
+        inputs,
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    );
+    return calls[0]!;
+  }
+
+  const refusal = (request: LoginConfig["login"]["request"], inputs: Record<string, unknown>) => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
+    const err = runLogin(
+      { login: { request, outputs: { t: "$response.body#/t" } } },
+      {
+        inputs,
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    ).catch((e: unknown) => e);
+    return { err, calls };
+  };
+
+  it("form body: each value is one form component, never a separator", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body: "grant_type=password&username={{username}}&password={{password}}",
+        content_type: "application/x-www-form-urlencoded",
+      },
+      { username: "a b&admin=1", password: PASSWORD },
+    );
+    const params = new URLSearchParams(String(init.body));
+    expect([...params.keys()]).toEqual(["grant_type", "username", "password"]);
+    expect(params.getAll("password")).toEqual([PASSWORD]);
+    expect(params.get("username")).toBe("a b&admin=1");
+    // The WHATWG serializer: a space is `+`, a `+` is `%2B`.
+    expect(String(init.body)).toContain("username=a+b%26admin%3D1");
+  });
+
+  it("form body: the media type is read from a Content-Type header, any case, parameters ignored", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        headers: { "content-type": "application/x-www-form-urlencoded; charset=utf-8" },
+        body: "password={{password}}",
+        content_type: "application/x-www-form-urlencoded",
+      },
+      { password: PASSWORD },
+    );
+    expect(new URLSearchParams(String(init.body)).getAll("password")).toEqual([PASSWORD]);
+    // The declared header is the one sent: `content_type` adds no second one.
+    expect(Object.keys(init.headers as Record<string, string>)).toEqual(["content-type"]);
+  });
+
+  it("header: a value carrying CR/LF is refused before any request, naming only the field", async () => {
+    const { err, calls } = refusal(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        headers: { "X-Api-Key": "{{api_key}}" },
+      },
+      { api_key: "k\r\nX-Admin: 1" },
+    );
+    const e = await err;
+    expect(e).toBeInstanceOf(LoginError);
+    expect(e).toMatchObject({ reason: "invalid_input", field: "api_key" });
+    expect((e as Error).message).not.toContain("X-Admin");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("JSON body: a typed value keeps its JSON type in a bare position, its text in a string", async () => {
+    const { init } = await sent(
+      {
+        method: "POST",
+        url: "https://idp.example.com/token",
+        body:
+          '{"pin":{{pin}},"remember":{{remember}},"profile":{{profile}},"name":{{name}},' +
+          '"pin_text":"{{pin}}","profile_text":"{{profile}}","name_text":"{{name}}"}',
+        content_type: "application/json",
+      },
+      { pin: 1234, remember: true, profile: { a: 'x"y' }, name: 'a"b' },
+    );
+    expect(JSON.parse(String(init.body))).toEqual({
+      pin: 1234,
+      remember: true,
+      profile: { a: 'x"y' },
+      name: 'a"b',
+      pin_text: "1234",
+      profile_text: '{"a":"x\\"y"}',
+      name_text: 'a"b',
+    });
+  });
+
+  it("URL: a placeholder after a literal host is a path value, never raw", async () => {
+    const { err, calls } = refusal(
+      { method: "POST", url: "https://idp.example.com{{path}}" },
+      { path: "/login?admin=1#" },
+    );
+    // Encoded, the value cannot open a query: what is left is no URL this login may reach.
+    expect(await err).toMatchObject({ reason: "url_not_allowed", fields: ["path"] });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("URL: a base URL the submitter chose outside the allowlist is refused naming that input", async () => {
+    const { err, calls } = refusal(
+      { method: "POST", url: "{{base_url}}/login" },
+      { base_url: "https://elsewhere.example.org" },
+    );
+    expect(await err).toMatchObject({ reason: "url_not_allowed", fields: ["base_url"] });
+    expect(calls).toHaveLength(0);
+    const malformed = refusal({ method: "POST", url: "{{base_url}}/login" }, { base_url: "nope" });
+    expect(await malformed.err).toMatchObject({ reason: "url_not_allowed", fields: ["base_url"] });
+    const port = refusal(
+      { method: "POST", url: "https://idp.example.com:{{port}}/login" },
+      { port: "443@elsewhere.example.org" },
+    );
+    expect(await port.err).toMatchObject({ reason: "url_not_allowed", fields: ["port"] });
+  });
+});
+
+describe("runLogin — what a failed answer means", () => {
+  const login = (status: number, success_criteria?: { condition: string }[]) =>
+    runLogin(
+      {
+        login: {
+          request: { method: "POST", url: "https://idp.example.com/login", body: "x=1" },
+          ...(success_criteria ? { success_criteria } : {}),
+          outputs: { sid: { from: "cookie", name: "sid" } },
+        },
+      },
+      {
+        inputs: {},
+        authorizedUris: ALLOW,
+        allowAllUris: false,
+        fetchImpl: fakeFetch([{ status }]).impl,
+        resolveHost: TEST_RESOLVE,
+      },
+    ).catch((e: unknown) => e);
+
+  for (const status of [400, 401, 403, 422]) {
+    it(`${status} with no success_criteria: the credentials were refused`, async () => {
+      expect(await login(status)).toMatchObject({ reason: "rejected", upstreamStatus: status });
+    });
+  }
+
+  for (const status of [302, 404, 405]) {
+    it(`${status} with no success_criteria: a defect of the integration, not a refusal`, async () => {
+      expect(await login(status)).toMatchObject({
+        reason: "unexpected_status",
+        upstreamStatus: status,
+      });
+    });
+  }
+
+  it("an answer below 500 that fails declared success_criteria is a refusal", async () => {
+    for (const status of [200, 302, 400]) {
+      expect(await login(status, [{ condition: "$statusCode == 201" }])).toMatchObject({
+        reason: "rejected",
+        upstreamStatus: status,
+      });
+    }
+  });
+
+  for (const status of [404, 405, 410]) {
+    it(`${status} is no login endpoint, whatever the criteria`, async () => {
+      expect(await login(status, [{ condition: "$statusCode == 302" }])).toMatchObject({
+        reason: "unexpected_status",
+      });
+    });
+  }
+
+  it("429 is the service turning the login away for now, whatever the criteria", async () => {
+    expect(await login(429)).toMatchObject({ reason: "upstream_failed", upstreamStatus: 429 });
+    expect(await login(429, [{ condition: "$statusCode == 302" }])).toMatchObject({
+      reason: "upstream_failed",
+    });
   });
 });

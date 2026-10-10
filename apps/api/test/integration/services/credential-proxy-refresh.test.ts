@@ -20,7 +20,7 @@ import {
   seedRun,
   seedPublishedVersion,
 } from "../../helpers/seed.ts";
-import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
+import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
@@ -112,11 +112,11 @@ async function setup(
     authKey: "google",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
-    sharedWithOrg: false,
     // oauth2 connections always pin their minting client by id; here the org's
     // custom per-space client registered just above.
     clientRef: customClient!.id,
@@ -157,11 +157,11 @@ async function setupSystemPinned(
     authKey: "google",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
-    sharedWithOrg: false,
     clientRef: systemId,
     expiresAt: new Date(Date.now() - 60_000),
   });
@@ -263,13 +263,13 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
           authKey: "google",
           accountId: "acct-2",
           label: "acct-2",
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           credentialsEncrypted: encryptCredentialEnvelope({
             outputs: { access_token: "other_token", refresh_token: "rt_other" },
           }),
           scopesGranted: ["openid", "email"],
-          sharedWithOrg: false,
         });
         return new Response("expired", { status: 401 });
       }
@@ -371,6 +371,51 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     expect(res.status).toBe(401);
     expect(upstreamCalls).toBe(1);
     expect(res.authRefreshed).toBeUndefined();
+  });
+
+  it("answers the 503 — not the upstream 401 — when the refresh meets a missing key", async () => {
+    const packageId = "@cprefreshorg/gmail-missing-kid";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+      .where(eq(integrationOauthClients.integrationId, packageId));
+    const fakeFetch = ((url: string, init: RequestInit) =>
+      String(url).startsWith(mockServer.url)
+        ? fetch(url, init)
+        : Promise.resolve(
+            new Response("unauthorized", { status: 401 }),
+          )) as unknown as typeof fetch;
+    const call = (body?: ReadableStream<Uint8Array>) =>
+      proxyCall({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        actor: { type: "user", id: ctx.user.id },
+        integrationId: packageId,
+        method: body ? "POST" : "GET",
+        target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+        headers: body ? { "Content-Type": "application/octet-stream" } : {},
+        ...(body ? { body } : {}),
+        fetch: fakeFetch,
+      });
+    const unavailable = { code: "encryption_key_unavailable" };
+
+    // Buffered (replayable) and streaming bodies alike: no relayed 401, no `authRefreshed`.
+    await expect(call()).rejects.toBeInstanceOf(ProxyCallError);
+    await expect(call()).rejects.toMatchObject(unavailable);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("upload-bytes"));
+        controller.close();
+      },
+    });
+    await expect(call(stream)).rejects.toMatchObject(unavailable);
+
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, packageId));
+    expect(row!.needsReconnection).toBe(false);
   });
 
   it("does not retry when upstream returns a non-401 response", async () => {
@@ -632,6 +677,7 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
         authKey: "key",
         accountId: "acct-1",
         label: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
@@ -679,6 +725,37 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
   it("a 2xx ends the streak", async () => {
     expect(await callReturning(200)).toBe(200);
     expect(await clearedWithin(connId, 1000)).toBe(true);
+  });
+
+  it("a 401 on a key replaced during the call counts nothing and replays with the current key", async () => {
+    const sent: Array<string | null> = [];
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://api.example.com/v1/items",
+      headers: {},
+      fetch: (async (_url: string, init: RequestInit) => {
+        sent.push(new Headers(init.headers).get("x-api-key"));
+        // Not a 2xx, so no success clears a count behind the assertion below.
+        if (sent.length > 1) return new Response("{}", { status: 403 });
+        // A reconnect lands while the call carrying the old key is in flight.
+        await db
+          .update(integrationConnections)
+          .set({
+            credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k2" } }),
+            refreshFailureCount: 0,
+          })
+          .where(eq(integrationConnections.id, connId));
+        return new Response("revoked", { status: 401 });
+      }) as unknown as typeof fetch,
+    });
+
+    expect(res.status).toBe(403);
+    expect(sent).toEqual(["k", "k2"]);
+    expect(await failures()).toBe(0);
   });
 
   it("a non-2xx leaves it", async () => {

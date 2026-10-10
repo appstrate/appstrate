@@ -14,7 +14,7 @@ import {
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import { createSkillServer, skillMd, type SkillFixture } from "./helpers/skills-server.ts";
 
 const configHome = useTempConfigHome("appstrate-multi-context-config-");
@@ -176,7 +176,7 @@ describe("multi-space skill distribution regressions", () => {
       "Library-only draft reference",
     );
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.headers["X-Space-Id"]).toBe("spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
     expect((await getProfile("default"))?.spaceId).toBe("spc_active");
   });
 
@@ -194,7 +194,7 @@ describe("multi-space skill distribution regressions", () => {
         { target: ["claude-plugin"], space: ["spc_active", "spc_library"], printPath: true },
         io,
       ),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);
@@ -235,7 +235,7 @@ describe("multi-space skill distribution regressions", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], space: ["Duplicate"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toMatch(/ambiguous/i);
     expect(stdout()).toBe("");
@@ -305,7 +305,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
       "shared",
     ]);
     const mcp = JSON.parse(await readFile(join(pluginRoot(), ".mcp.json"), "utf8"));
-    expect(mcp.mcpServers.appstrate.headers["X-Space-Id"]).toBe("spc_active");
+    expect(mcp.mcpServers.appstrate.url).toEndWith("/s/spc_active");
   });
 
   // A space the org lists so a member can ASK to join it (`closed`,
@@ -363,7 +363,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], space: ["spc_closed"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     // Distinct from "no space matches": the id IS listed, it just cannot be used.
     expect(stderr()).toContain("cannot supply skills: you are not a member of it");
@@ -379,7 +379,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], space: ["Closed"] }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stderr()).toContain('Space "Closed" (spc_closed) cannot supply skills');
   });
@@ -410,7 +410,7 @@ describe("multi-space skill distribution — access decides the sources", () => 
     const { io, stderr } = createMemoryIO();
 
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
-      ExitError,
+      CommandExit,
     );
 
     expect(stderr()).toContain('Invalid syncSpaces for profile "default"');

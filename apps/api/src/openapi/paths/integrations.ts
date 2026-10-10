@@ -16,6 +16,46 @@ import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 /** `GET /connect/start` answers every refusal with a rendered HTML page (`popupHtmlError`). */
 const htmlErrorPage = { "text/html": { schema: { type: "string" } } } as const;
 
+const oauthCallbackQueryParameters = [
+  {
+    name: "code",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "Authorization code returned by the IdP",
+  },
+  {
+    name: "state",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "OAuth state parameter (UUID)",
+  },
+  {
+    name: "error",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description: "OAuth error code (if the IdP rejected the request)",
+  },
+  {
+    name: "iss",
+    in: "query",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "RFC 9207 issuer identifier of the authorization server that issued the response. Compared with the issuer the request was sent to whenever present.",
+  },
+] as const;
+
+const oauthCallbackResponses = {
+  "200": {
+    description:
+      "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, response from another authorization server, code exchange failure, identity mismatch, or persistence failure).",
+    headers: STD_RESPONSE_HEADERS,
+  },
+} as const;
+
 const packageIdParam = {
   name: "packageId",
   in: "path",
@@ -62,16 +102,30 @@ export const integrationPackageIdParam = {
   name: "integrationPackageId",
 } as const;
 
-/** A connection set as every write takes it and every pin or default returns it. */
+/** A connection set as pins and launch overrides take and return it. */
 export const connectionIdSetJsonSchema = {
   type: "array",
   items: { type: "string", format: "uuid" },
-  minItems: 1,
+  minItems: 0,
   maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
+  uniqueItems: true,
+  description:
+    "A connection set. Absent (no pin, no key) defers to the next cascade layer; `[]` is explicit none: it wins its layer and the run starts without the integration. On an integration the agent marks `required`, `[]` is `required_integration_unbound`: a 400 `validation_failed` item (`field: connection_overrides.<id>`) on a launch override, a 409 item on the runs a `[]` pin governs.",
+} as const;
+
+/** The org default's set: never empty — none for every agent of the space is deactivation. */
+const orgDefaultConnectionIdSetJsonSchema = {
+  ...connectionIdSetJsonSchema,
+  minItems: 1,
+  description:
+    "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
-export const connectionSetRefusals = `an empty set, more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
+
+/** {@link connectionSetRefusals} on an org-default write. */
+const orgDefaultSetRefusals = `an empty set, ${connectionSetRefusals}`;
 
 export const lockedBySchema = {
   type: ["string", "null"],
@@ -88,7 +142,7 @@ const integrationOrgDefaultSchema = {
   required: ["integration_package_id", "connection_ids", "enforce", "createdAt", "updatedAt"],
   properties: {
     integration_package_id: { type: "string" },
-    connection_ids: connectionIdSetJsonSchema,
+    connection_ids: orgDefaultConnectionIdSetJsonSchema,
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -110,14 +164,44 @@ const integrationSummarySchema = {
   },
 } as const;
 
+/** Connection variables (AFPS §7.12): variable name → submitted string value. */
+const connectionVariablesSchema = {
+  type: "object",
+  propertyNames: { type: "string", maxLength: 64 },
+  additionalProperties: { type: "string", maxLength: 2048 },
+  description:
+    "Connection variables (AFPS §7.12): the non-secret values choosing this connection's upstream (e.g. a self-hosted instance URL), one per variable the integration declares in `variables.schema`. Required when the integration declares variables — also on a reconnect, which re-acquires the credential for the values submitted — and refused when it declares none. Each value is validated against the schema, must leave every URL template the auth uses renderable, and every rendered URL must pass the platform's egress controls; a refusal is a 400 `validation_failed` whose entries name `variables.<name>`.",
+} as const;
+
 // CASING: this connection wire shape mixes camelCase and snake_case by policy,
 // not by oversight. `id`, `expiresAt`, `createdAt`, `updatedAt` are the
 // universal DB-convention carve-outs (camelCase everywhere per
 // docs/CASING_CONVENTIONS.md); every other field (`integration_package_id`, `auth_key`, `account_id`,
 // `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
-// `owner_id`, `shared_with_org`, `client_ref`) is snake_case wire. Matches the
+// `owner_id`, `shared_space_ids`, `client_ref`) is snake_case wire. Matches the
 // serializer output (spec==runtime) — do NOT normalize either way.
-const integrationConnectionSchema = {
+export const connectionScopeSchema = {
+  type: "string",
+  enum: ["org", "space"],
+  description:
+    "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org whose default OAuth client for that auth is not a manual one of its own (always from the space it was connected from). `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.",
+} as const;
+
+/** The projection every non-owner reads: the current space only, and only when shared into it. */
+export const sharedSpaceIdsSchema = {
+  type: "array",
+  items: { type: "string" },
+  description:
+    "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`.",
+} as const;
+
+export const originSpaceIdSchema = {
+  type: ["string", "null"],
+  description:
+    "The space an org-scoped connection was connected from — where it stays usable even if that space registers its own OAuth client. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted.",
+} as const;
+
+export const integrationConnectionSchema = {
   type: "object",
   required: [
     "id",
@@ -131,7 +215,11 @@ const integrationConnectionSchema = {
     "owner_type",
     "owner_id",
     "label",
+    "scope",
+    "shared_space_ids",
+    "origin_space_id",
     "client_ref",
+    "variables",
     "createdAt",
     "updatedAt",
   ],
@@ -149,22 +237,30 @@ const integrationConnectionSchema = {
     owner_name: {
       type: ["string", "null"],
       description:
-        "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include org-shared connections owned by other members; absent from the single-connection write responses, where the row is the caller's own.",
+        "Display name of the connection's owner (member name, or end-user name falling back to its external id); null when the owner row was deleted. Returned by the list surfaces, which include connections other members share into the space; absent from the single-connection write responses, where the row is the caller's own.",
     },
     locked_by: {
       ...lockedBySchema,
-      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`.`,
+      description: `${lockedBySchema.description} Returned by the list surfaces only, like \`owner_name\`: for the caller's own connection, a lock in any space (what its delete checks); for another's, a lock of the current space.`,
     },
     label: {
       type: "string",
       description:
         "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
     },
-    shared_with_org: { type: "boolean" },
+    scope: connectionScopeSchema,
+    shared_space_ids: sharedSpaceIdsSchema,
+    origin_space_id: originSpaceIdSchema,
     client_ref: {
       type: ["string", "null"],
       description:
         "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+    },
+    variables: {
+      type: ["object", "null"],
+      additionalProperties: { type: "string" },
+      description:
+        "The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect.",
     },
     createdAt: { type: "string", format: "date-time" },
     updatedAt: { type: "string", format: "date-time" },
@@ -350,7 +446,11 @@ const authStatusSchema = {
       description:
         "Auth method type (AFPS §7.2). For `mtls`, client cert + key are supplied via `credentials.schema` and injected at runtime through `delivery.files`.",
     },
-    required: { type: "boolean" },
+    required: {
+      type: "boolean",
+      description:
+        "The auth's `_meta[\"dev.appstrate/auth\"].required` (absent = false): whether the integration cannot serve a run without a credential on this auth. Unrelated to an agent's `integrations_configuration.<id>.required`.",
+    },
     scopes: { type: "array", items: { type: "string" } },
     resource: {
       type: ["string", "null"],
@@ -495,13 +595,13 @@ const connectKickoffRelayProperties = {
     type: "array",
     items: { type: "string" },
     description:
-      "OAuth scopes to request on top of the auth's `default_scopes` and whatever the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+      "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
   },
   connection_id: {
     type: "string",
     format: "uuid",
     description:
-      "Reconnect/upgrade this existing connection in place instead of creating a new one — the `connection_id` of the readiness error.",
+      "Reconnect this existing connection in place instead of creating a new one. Added scopes then apply to every agent that uses it: to give one agent more rights without widening the others, omit it and pass the required `scopes`. Do not duplicate an integration to change its scopes; create another connection.",
   },
 } as const;
 
@@ -525,7 +625,8 @@ const connectRunResponses = {
     },
   },
   "504": {
-    description: "The connect-run login did not complete within the timeout",
+    description:
+      "The login did not complete within its timeout (`timeout`): a connect-run, or the request of a declarative `connect.login`.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -543,6 +644,85 @@ const connectRunResponses = {
   },
 } as const;
 
+/** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
+const CONNECT_LOGIN_400 =
+  "A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
+const CONNECT_LOGIN_502 =
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).";
+const problemJson = {
+  "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+} as const;
+
+/** Shared by both connection-edit doors: this one and `PATCH /api/me/connections/{connectionId}`. */
+export const connectionUpdateDescription =
+  "The owner may rename the connection and set the WHOLE set of spaces it is shared into " +
+  "(`shared_space_ids` replaces it): sharing is the owner's consent. A governor (`integrations:configure` " +
+  "in the space the request is made from) may rename a space-scoped connection of that space, and withdraw " +
+  "any connection from that space by sending the projection it reads without it (`[]`); nothing else. " +
+  "A connection may be shared into a space of its org it serves: an org-scoped one into any space but one " +
+  "whose default OAuth client for the integration is its own (unless connected from there), a space-scoped " +
+  "one only into its own space. Every target space must still be reached by the owning member, an added one " +
+  "takes a sharer holding `integrations:connect` there (403), and one that blocks user connections for the " +
+  "integration also `integrations:configure` (403 `connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees " +
+  "and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay " +
+  "untouched, and it renames only a connection scoped to it. Sharing an end user's connection " +
+  "is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 " +
+  "`connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin " +
+  "does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick " +
+  "again. Removing a space disables, in the same transaction, every enabled schedule of that space of " +
+  "another actor than the owner whose `connection_overrides` name the connection " +
+  "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays " +
+  "unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is " +
+  "unique per owner among the connections of the integration sharing its scope, compared verbatim: renaming " +
+  "to one another holds is refused with 409 `connection_label_taken`. Each space added or removed is " +
+  "audited on its own (`integration.connection.share_added` / `share_removed`). Scopes are not edited " +
+  "here: for an agent that needs more scopes, create a new connection with them rather than reconnecting " +
+  "a shared one, which widens every agent that uses it.";
+
+export const connectionUpdateRequestBody = {
+  required: true,
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        minProperties: 1,
+        properties: {
+          label: {
+            type: "string",
+            minLength: 1,
+            maxLength: CONNECTION_LABEL_MAX,
+            description:
+              "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of the same owner holds with 409 `connection_label_taken`.",
+          },
+          shared_space_ids: {
+            type: "array",
+            items: { type: "string", minLength: 1, maxLength: 100 },
+            maxItems: 100,
+            uniqueItems: true,
+            description:
+              "The WHOLE set of spaces whose members may bind this connection by an explicit pick; this write replaces it. `[]` shares it nowhere.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+} as const;
+
+export const connectionUpdateRefusals400 =
+  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space whose default OAuth client is its own for an org-scoped one (`invalid_share_target`).";
+
+export const connectionUpdateConflicts = {
+  description:
+    "Removing a space whose admin pin or org default names the connection (`connection_pinned`), renaming it to a label another connection of the same owner holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member does not reach — removed concurrently, or the space closed (`connection_owner_without_access`)",
+  headers: STD_RESPONSE_HEADERS,
+  content: {
+    "application/problem+json": {
+      schema: { $ref: "#/components/schemas/ProblemDetail" },
+    },
+  },
+} as const;
+
 export const integrationsPaths = {
   "/api/integrations": {
     get: {
@@ -550,7 +730,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration PLACED in the current space — homed there, offered there, or shipped with the deployment — enriched with `active` + `block_user_connections` flags for that same space. Placement, not activation: an offer the space has not taken up and an integration switched off are both listed, with `active: false`. An integration homed in another space of the organization and offered to nobody is NOT listed, whatever the caller's organization role: the home is the only authority there is, and a personal space is read by nobody else (RBAC spec §3.6). Rows are sorted by `id`, so offset pagination (`limit`/`offset`) walks a stable order. Supports a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -598,37 +778,31 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
-        "Browser-side OAuth callback. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window.",
+        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
+      parameters: oauthCallbackQueryParameters,
+      responses: oauthCallbackResponses,
+    },
+  },
+  "/api/integrations/callback/{tag}": {
+    get: {
+      operationId: "integrationsOAuthCallbackForServer",
+      tags: ["Integrations"],
+      summary:
+        "Integration OAuth2 callback of an authorization server chosen per connection (popup)",
+      description:
+        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
       parameters: [
         {
-          name: "code",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "Authorization code returned by the IdP",
-        },
-        {
-          name: "state",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "OAuth state parameter (UUID)",
-        },
-        {
-          name: "error",
-          in: "query",
-          required: false,
-          schema: { type: "string" },
-          description: "OAuth error code (if the IdP rejected the request)",
-        },
-      ],
-      responses: {
-        "200": {
+          name: "tag",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9_-]{22}$" },
           description:
-            "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, code exchange failure, identity mismatch, or persistence failure).",
-          headers: STD_RESPONSE_HEADERS,
+            "The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata.",
         },
-      },
+        ...oauthCallbackQueryParameters,
+      ],
+      responses: oauthCallbackResponses,
     },
   },
   "/api/integrations/{packageId}": {
@@ -785,8 +959,9 @@ export const integrationsPaths = {
         "Moves one of this space's custom clients to the org level (`spaceId: " +
         "null`), inherited by every space of the org. It keeps its id and secret, " +
         "so the connections it minted keep working; it becomes the org default " +
-        "when the org has none. Auto-provisioned (DCR/CIMD) clients stay per " +
-        "space (400). Requires both `integrations:configure` and " +
+        "when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, " +
+        "unless the org already holds the auto-provisioned client of the same authorization " +
+        "server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and " +
         "`org-integrations:configure`, which are never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -803,6 +978,16 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`auto_client_exists_at_org`: the client is auto-provisioned and the org already holds the auto-provisioned client of its authorization server",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },
@@ -905,8 +1090,9 @@ export const integrationsPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "Existing connection to renew in place (api_key/PAT/custom). Omit on a fresh connect — the write then INSERTs a new row.",
+                    "Existing connection to renew in place (api_key/PAT/custom); the new credential then serves every agent that uses it. Omit on a fresh connect — the write then INSERTs a new row; to give one agent a different credential, create a new connection rather than duplicating the integration.",
                 },
+                variables: connectionVariablesSchema,
               },
               additionalProperties: false,
             },
@@ -919,9 +1105,13 @@ export const integrationsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: { "application/json": { schema: integrationConnectionSchema } },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Invalid body or credentials. ${CONNECT_LOGIN_400}`,
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "502": { description: CONNECT_LOGIN_502, content: problemJson },
         ...connectRunResponses,
       },
     },
@@ -949,6 +1139,7 @@ export const integrationsPaths = {
                 scopes: connectKickoffRelayProperties.scopes,
                 force_account_select: { type: "boolean" },
                 connection_id: connectKickoffRelayProperties.connection_id,
+                variables: connectionVariablesSchema,
               },
               additionalProperties: false,
             },
@@ -975,6 +1166,8 @@ export const integrationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -1040,7 +1233,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted connect dispatch (token)",
       description:
-        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
+        "Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.",
       parameters: [
         {
           name: "token",
@@ -1058,7 +1251,10 @@ export const integrationsPaths = {
         // the 400/410 error conditions (routes/integrations.ts:/connect/start
         // returns c.html(popupHtmlError(...), 400|410)), so each condition now
         // maps to exactly one status.
-        "302": { description: "Redirect to the provider OAuth screen or the hosted form." },
+        "302": {
+          description:
+            "Redirect to the provider OAuth screen, or to the hosted form (non-oauth, or oauth2 with connection variables).",
+        },
         "400": {
           description:
             "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
@@ -1116,6 +1312,25 @@ export const integrationsPaths = {
                   },
                   connection_id: { type: ["string", "null"] },
                   csrf: { type: ["string", "null"] },
+                  variables: {
+                    type: ["object", "null"],
+                    required: ["schema", "values"],
+                    properties: {
+                      schema: {
+                        type: "object",
+                        additionalProperties: true,
+                        description: "The integration's `variables.schema` (AFPS §7.12).",
+                      },
+                      values: {
+                        type: "object",
+                        additionalProperties: { type: "string" },
+                        description:
+                          "The values of the connection being reconnected, to prefill the form; `{}` on a fresh connect.",
+                      },
+                    },
+                    description:
+                      "The connection variables the form collects (AFPS §7.12); null when the integration declares none.",
+                  },
                 },
               },
             },
@@ -1131,7 +1346,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:
-        "Persists credentials entered on the hosted form. Context + actor come from the page cookie; the request carries only the credentials and echoes the CSRF nonce in the `x-connect-csrf` header.",
+        "Persists credentials entered on the hosted form — or, for an oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.",
       parameters: [
         {
           name: "x-connect-csrf",
@@ -1147,9 +1362,14 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["credentials"],
               properties: {
-                credentials: { type: "object", additionalProperties: true },
+                credentials: {
+                  type: "object",
+                  additionalProperties: true,
+                  description:
+                    "The credential fields. Required for a non-oauth auth, refused for oauth2.",
+                },
+                variables: connectionVariablesSchema,
               },
               additionalProperties: false,
             },
@@ -1164,10 +1384,19 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["ok", "connection"],
+                required: ["ok"],
                 properties: {
                   ok: { type: "boolean" },
-                  connection: integrationConnectionSchema,
+                  connection: {
+                    ...integrationConnectionSchema,
+                    description: "The connection stored (non-oauth auth).",
+                  },
+                  redirect_url: {
+                    type: "string",
+                    format: "uri",
+                    description:
+                      "oauth2 auth: the authorization server's URL to navigate to; the callback creates the connection.",
+                  },
                   handoff_steps: {
                     type: "array",
                     description:
@@ -1179,8 +1408,27 @@ export const integrationsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: `Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is \`connection_not_ready\`, with a generic detail. ${CONNECT_LOGIN_400} The page session survives: the form can be submitted again.`,
+        },
+        "403": {
+          description:
+            "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail.",
+        },
+        "502": {
+          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives.`,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
         ...connectRunResponses,
       },
     },
@@ -1191,7 +1439,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and org-scoped ones unless the space's default OAuth client for their auth is a manual one of its own, except in the space they were connected from), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name`, have `identity_claims` redacted to `null`, and project `shared_space_ids` and `origin_space_id` (see their descriptions).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1223,54 +1471,15 @@ export const integrationsPaths = {
     patch: {
       operationId: "updateIntegrationConnectionMetadata",
       tags: ["Integrations"],
-      summary: "Update an integration connection's label and/or shared_with_org flag",
-      description:
-        "The connection owner or a holder of `integrations:configure` may edit it. Sharing " +
-        "(`shared_with_org: true`) is the owner's consent and is refused with 403 to anyone else; " +
-        "unsharing is open to both, so a governor can withdraw a colleague's shared credentials. " +
-        "Sharing an end user's connection is refused with 409 `end_user_connection_not_shareable`. " +
-        "Unsharing (`shared_with_org: false`) is refused with 409 `connection_pinned` while an admin pin " +
-        "or an org default (enforced or soft) names the connection. A member pin does not block it: " +
-        "that member's next run fails with `pinned_connection_unavailable` until they pick again. " +
-        "Unsharing a shared connection disables, in the same transaction, every enabled schedule of " +
-        "another actor than its owner whose `connection_overrides` name it " +
-        "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the " +
-        "connection stays unreachable, re-enabling it requires a new choice. The owner's own " +
-        "schedules are untouched. " +
-        "A label is unique per " +
-        "(space, integration), compared verbatim: renaming to one another connection holds is refused " +
-        "with 409 `connection_label_taken`.",
+      summary: "Rename an integration connection and/or set the spaces it is shared into",
+      description: connectionUpdateDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         connectionIdParam,
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              properties: {
-                label: {
-                  type: "string",
-                  minLength: 1,
-                  maxLength: CONNECTION_LABEL_MAX,
-                  description:
-                    "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of this integration in the space holds with 409 `connection_label_taken`.",
-                },
-                shared_with_org: {
-                  type: "boolean",
-                  description:
-                    "`true` lets any actor of the space bind this connection by an explicit pick. Only the owning member may set it to `true`; an end user's connection answers 409 `end_user_connection_not_shareable`.",
-                },
-              },
-              additionalProperties: false,
-            },
-          },
-        },
-      },
+      requestBody: connectionUpdateRequestBody,
       responses: {
         "200": {
           description: "Updated — returns the bare connection resource",
@@ -1284,19 +1493,21 @@ export const integrationsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
-          description:
-            "Unsharing a connection an admin pin or an org default names (`connection_pinned`), renaming it to a label another connection of this integration in the space holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it once its owning member no longer reaches the space — removed concurrently, or the space closed (`connection_owner_without_access`)",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionUpdateRefusals400,
         },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and a requested target — added or kept — blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`).",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id: of the caller and reaching this space, or scoped to or shared into it.",
+        },
+        "409": connectionUpdateConflicts,
       },
     },
   },
@@ -1426,7 +1637,9 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationPin",
       tags: ["Integrations"],
-      summary: "Pin a set of admin-shared connections to an agent for all members (admin)",
+      summary: "Pin a set of shared connections to an agent for all members of the space (admin)",
+      description:
+        "Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1444,7 +1657,7 @@ export const integrationsPaths = {
                 connection_ids: {
                   ...connectionIdSetJsonSchema,
                   description:
-                    "The WHOLE pinned set, in the order the run binds it — this write replaces it. Each connection must belong to this integration and be `shared_with_org` by the member who owns it.",
+                    "The WHOLE pinned set, in the order the run binds it — this write replaces it; `[]` pins none (see the set schema). Each connection must belong to this integration, reach this space and be shared into it by the member who owns it.",
                 },
               },
               additionalProperties: false,
@@ -1468,7 +1681,7 @@ export const integrationsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
+            "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
       },
     },
@@ -1495,7 +1708,7 @@ export const integrationsPaths = {
     get: {
       operationId: "getIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Get the org-wide default connection for this integration",
+      summary: "Get the space-wide default connection for this integration",
       description:
         "The cross-agent governance baseline: one default connection set per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
@@ -1527,12 +1740,15 @@ export const integrationsPaths = {
     put: {
       operationId: "upsertIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Set the org-wide default connection for this integration (admin)",
+      summary: "Set the space-wide default connection for this integration (admin)",
       description:
         "Replace the (space, integration) default connection SET. Keyed per-integration, " +
         "NOT per-auth: the body carries the WHOLE set and this write replaces it, " +
         "`enforce` included. Selecting connections of a different auth type replaces " +
-        "the current default rather than adding a second one.",
+        "the current default rather than adding a second one. Every consuming agent gets the " +
+        "default's scopes: bind an agent that needs more to its own connection rather than " +
+        "upgrading a default one — a member pin overrides a soft default, and only an admin pin " +
+        "overrides an enforced one.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1549,8 +1765,8 @@ export const integrationsPaths = {
               required: ["connection_ids"],
               properties: {
                 connection_ids: {
-                  ...connectionIdSetJsonSchema,
-                  description: "The WHOLE default set — this write replaces it.",
+                  ...orgDefaultConnectionIdSetJsonSchema,
+                  description: "The WHOLE default set (1 or more ids) — this write replaces it.",
                 },
                 enforce: { type: "boolean", default: false },
               },
@@ -1567,20 +1783,20 @@ export const integrationsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: `Refused: ${connectionSetRefusals}.`,
+          description: `Refused: ${orgDefaultSetRefusals}.`,
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "A connection id that is unknown, not shared by a member (an end user's connection never is), or of another integration or space — one answer for all, so an id cannot be probed.",
+            "A connection id that is unknown, not shared into this space by a member (an end user's connection never is), of another integration, or that does not reach this space — one answer for all, so an id cannot be probed.",
         },
       },
     },
     delete: {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
-      summary: "Remove the org-wide default connection (admin)",
+      summary: "Remove the space-wide default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

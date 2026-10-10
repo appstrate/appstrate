@@ -5,22 +5,32 @@ import { useTranslation } from "react-i18next";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { cn } from "@appstrate/ui/cn";
 import {
-  useIntegrations,
-  useIntegrationDetail,
-  useIntegrationAgentResolution,
+  useIntegrationDetails,
+  useIntegrationReadinessEntry,
   useAgentsConsumingIntegration,
   type AgentIntegrationEntry,
   type IntegrationAuthStatus,
   type IntegrationCandidate,
+  type IntegrationDetailWire,
   type IntegrationManifestView,
 } from "../../hooks/use-integrations";
 import { useSetPackageActive } from "../../hooks/use-library";
+import { ApiError } from "../../api/errors";
+import { errorMessage } from "../../lib/mutation-error";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
+import type { ConnectionSet } from "../../lib/connection-set";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
-import { describeResolution } from "../integration-connect/integration-run-readiness";
+import {
+  describeResolution,
+  requiredNoneLabel,
+  unboundLabel,
+  UNBOUND_LABEL_KEYS,
+} from "../integration-connect/integration-run-readiness";
+import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
 import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 
@@ -44,17 +54,28 @@ interface AgentIntegrationsBlockProps {
 }
 
 interface ScheduleOverrides {
+  /** The stored picks: a missing integration inherits, an empty set binds none. */
   value: Readonly<Record<string, string[]>>;
-  onChange: (integrationId: string, connectionIds: string[]) => void;
+  onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
   version?: string;
 }
 
+/** An integration's own detail read, as one row needs it. */
+interface DetailState {
+  detail: IntegrationDetailWire | undefined;
+  isLoading: boolean;
+  error: unknown;
+}
+
+/** 404: the integration is not placed in this space, which is what activating it fixes. */
+const isNotPlaced = (error: unknown) => error instanceof ApiError && error.status === 404;
+
 /**
- * Connection-status block for every integration declared in the agent
- * manifest. One card per dependency. A card with a per-agent context
- * (`agentPackageId`) renders the per-integration connection picker — list,
- * pick, disambiguate, connect, reconnect, upgrade, add-another — driven by the
- * server-authoritative `IntegrationAgentResolution`, selected from the bulk
+ * Connection-status table for every integration declared in the agent
+ * manifest. A row with a per-agent context (`agentPackageId`) renders the
+ * per-integration connection picker — list, pick, disambiguate, connect,
+ * reconnect, add-another — driven by the server-authoritative
+ * `IntegrationAgentResolution`, selected from the bulk
  * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
  * the launch-button readiness badge and the run-kickoff 409 consume, so the
  * three can never disagree.
@@ -63,6 +84,10 @@ interface ScheduleOverrides {
  * agent selected tools/scopes: connection management applies even to an inert
  * integration. Whether an integration BLOCKS the run (run semantics) is the
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
+ *
+ * Whether an integration is active comes from its own detail, never from the
+ * paginated list. A dependency binds 0..N connections and only a `required`
+ * one refuses the run: an unbound optional one says why the run starts without it.
  */
 export function AgentIntegrationsBlock({
   entries,
@@ -72,26 +97,24 @@ export function AgentIntegrationsBlock({
   const { t } = useTranslation(["agents", "settings"]);
   const [search, setSearch] = useState("");
   const [states, setStates] = useState<string[]>([]);
-  // The list carries `active` (placed here and switched on). An agent can
-  // declare an integration that was never activated here (or got disabled);
-  // those cards render a read-only "not active" state instead of a connect
-  // affordance, mirroring the run-time `integration_not_active` gate.
-  const { data: integrations } = useIntegrations();
-  const activeIds = integrations
-    ? new Set(integrations.filter((i) => i.active).map((i) => i.id))
-    : null;
-
+  const details = useIntegrationDetails(entries.map((entry) => entry.id));
   if (entries.length === 0) return null;
 
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const rows = entries
-    .map((entry) => {
-      const summary = integrations?.find((integration) => integration.id === entry.id);
+    .map((entry, index) => {
+      const query = details[index]!;
+      const state: DetailState = {
+        detail: query.data,
+        isLoading: query.isLoading,
+        error: query.error,
+      };
       return {
         entry,
-        displayName: summary?.manifest.display_name ?? entry.id,
-        // Optimistic while the list loads so the table does not flash an inactive state.
-        appActive: activeIds ? activeIds.has(entry.id) : true,
+        state,
+        displayName: state.detail?.manifest.display_name ?? entry.id,
+        // Optimistic while the detail loads so the table does not flash an inactive state.
+        appActive: state.detail ? state.detail.active : !isNotPlaced(state.error),
       };
     })
     .filter((row) => {
@@ -109,24 +132,31 @@ export function AgentIntegrationsBlock({
       id: "integration",
       header: t("detail.connectionsTable.integration"),
       width: "minmax(200px,1.2fr)",
-      cell: ({ entry }) => <IntegrationIdentityCell packageId={entry.id} />,
+      cell: ({ entry, displayName }) => (
+        <IntegrationIdentityCell
+          packageId={entry.id}
+          displayName={displayName}
+          required={entry.required === true}
+        />
+      ),
     },
     {
       id: "access",
       header: t("detail.connectionsTable.access"),
       width: "minmax(150px,0.8fr)",
-      cell: ({ entry }) => <IntegrationAccessCell packageId={entry.id} />,
+      cell: ({ state }) => <IntegrationAccessCell state={state} />,
     },
     {
       id: "account",
       header: t("detail.connectionsTable.account"),
       width: "minmax(260px,1.4fr)",
-      cell: ({ entry, appActive }) => (
+      cell: ({ entry, state }) => (
         <IntegrationConnectionCell
           packageId={entry.id}
+          state={state}
           agentTools={entry.tools}
           agentScopes={entry.scopes}
-          appActive={appActive}
+          required={entry.required === true}
           {...(agentPackageId ? { agentPackageId } : {})}
           {...(scheduleOverrides ? { scheduleOverrides } : {})}
         />
@@ -192,75 +222,45 @@ export function AgentIntegrationsBlock({
   );
 }
 
-interface IntegrationConnectionCardProps {
-  packageId: string;
-  agentTools: string[] | "*" | undefined;
-  agentScopes: string[] | undefined;
-  /** Whether the integration is active — placed in this space and switched on. */
-  appActive: boolean;
-  agentPackageId?: string;
-  scheduleOverrides?: ScheduleOverrides;
-}
-
 function IntegrationConnectionCell({
   packageId,
+  state,
   agentTools,
   agentScopes,
-  appActive,
+  required,
   agentPackageId,
   scheduleOverrides,
-}: IntegrationConnectionCardProps) {
-  const { t } = useTranslation(["agents", "common"]);
-  const { data: detail, isPending: detailPending } = useIntegrationDetail(packageId);
-  const setActive = useSetPackageActive();
-  const currentSpaceId = useCurrentSpaceId();
-  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
-  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
-  const spaceGrant = useCurrentSpaceGrant();
-  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+}: {
+  packageId: string;
+  state: DetailState;
+  agentTools: string[] | "*" | undefined;
+  agentScopes: string[] | undefined;
+  /** The agent's `required` flag: an inactive required integration refuses the run. */
+  required: boolean;
+  agentPackageId?: string;
+  scheduleOverrides?: ScheduleOverrides;
+}) {
+  const { detail, isLoading, error } = state;
 
-  if (detailPending || !detail) {
-    return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
-  }
-
-  // Not active in this space → no connection is possible. Show a
-  // disabled, explanatory control rather than a picker the run-time gate would
-  // reject with `integration_not_active`.
-  if (!appActive) {
-    return (
-      <span className="flex items-center justify-end gap-3">
-        <span
-          className="text-destructive max-w-[18rem] text-right text-xs"
-          data-testid={`integration-inactive-${packageId}`}
-        >
-          {t("detail.integrationInactive")}
-        </span>
-        {/* The sentence asks for an activation; without this the reader had to
-              go find the integration page to perform it. Somebody the route
-              would refuse gets the button DEAD with the reason on it, rather
-              than a click that ends in a toast. */}
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={setActive.isPending || !currentSpaceId || !canActivate}
-          title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
-          onClick={() => {
-            if (!currentSpaceId || !canActivate) return;
-            setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-          }}
-          data-testid={`integration-activate-${packageId}`}
-        >
-          {setActive.isPending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            t("editor.activateIntegration")
-          )}
-        </Button>
-      </span>
+  if (!detail) {
+    // A spinner only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
+    if (isLoading) return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+    if (isNotPlaced(error))
+      return <InactiveIntegration packageId={packageId} required={required} />;
+    // Any other failure is named; a disabled read has none to name.
+    return error ? (
+      <span className={cn(AMBER_TEXT, "text-xs break-words")}>{errorMessage(error)}</span>
+    ) : (
+      <span className="text-muted-foreground text-sm">—</span>
     );
   }
 
-  // Read-only preview (no per-agent context) — just the shell, no picker/CTA.
+  // Not active in this space (the integration's own detail says so) → no
+  // connection is possible. Show a disabled, explanatory control rather than a
+  // picker the run-time gate would reject with `integration_not_active`.
+  if (!detail.active) return <InactiveIntegration packageId={packageId} required={required} />;
+
+  // Read-only preview (no per-agent context) — no picker/CTA.
   // Matches the prior behaviour for library/marketplace previews.
   if (!agentPackageId) {
     return <span className="text-muted-foreground text-sm">—</span>;
@@ -277,7 +277,7 @@ function IntegrationConnectionCell({
         agentScopes={agentScopes}
         persistence={{
           mode: "override",
-          value: scheduleOverrides.value[packageId] ?? [],
+          value: scheduleOverrides.value[packageId] ?? null,
           onChange: (ids) => scheduleOverrides.onChange(packageId, ids),
         }}
         version={scheduleOverrides.version}
@@ -286,7 +286,7 @@ function IntegrationConnectionCell({
   }
 
   return (
-    <ManagedIntegrationCard
+    <ManagedIntegration
       packageId={packageId}
       agentPackageId={agentPackageId}
       manifest={detail.manifest}
@@ -303,7 +303,7 @@ function IntegrationConnectionCell({
  * only once the parent's loading / not-active / read-only guards have passed —
  * i.e. only when the picker actually renders.
  */
-function ManagedIntegrationCard({
+function ManagedIntegration({
   packageId,
   agentPackageId,
   manifest,
@@ -319,8 +319,15 @@ function ManagedIntegrationCard({
   agentScopes: string[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: resolution } = useIntegrationAgentResolution(packageId, agentPackageId);
+  const { data: entry } = useIntegrationReadinessEntry(packageId, agentPackageId);
+  const resolution = entry?.resolution;
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
+
+  // The verdict can know it is off when the detail did not; an `inactive` verdict is a warning,
+  // so the run starts without it.
+  if (resolution?.warning?.code === "integration_not_active") {
+    return <InactiveIntegration packageId={packageId} required={false} />;
+  }
 
   // R5 — reuse hint: the resolved connections are shared across every agent in
   // the space that consumes this integration, killing the "do I need one
@@ -334,6 +341,9 @@ function ManagedIntegrationCard({
     resolution && describeResolution(resolution).resolved
       ? buildReuseInfo(resolvedConnections, consumingAgents?.length ?? 0, t)
       : null;
+  // A stored none on a required integration refuses the run; on an optional one it is a warning.
+  const requiredNone = resolution ? requiredNoneLabel(resolution) : null;
+  const note = requiredNone ?? unboundLabel(resolution?.warning ?? null) ?? reuseInfo;
 
   return (
     <div className="min-w-0">
@@ -345,12 +355,63 @@ function ManagedIntegrationCard({
         agentTools={agentTools}
         agentScopes={agentScopes}
       />
-      {reuseInfo && (
-        <p className="text-muted-foreground mt-1 truncate text-xs" title={reuseInfo}>
-          {reuseInfo}
+      {note && (
+        <p
+          className={cn(
+            requiredNone ? AMBER_TEXT : "text-muted-foreground",
+            "mt-1 text-xs break-words",
+          )}
+        >
+          {note}
         </p>
       )}
     </div>
+  );
+}
+
+/** Switched off in this space: the reason and the activation button. Only a required one blocks. */
+function InactiveIntegration({ packageId, required }: { packageId: string; required: boolean }) {
+  const { t } = useTranslation(["agents", "common"]);
+  const setActive = useSetPackageActive();
+  const currentSpaceId = useCurrentSpaceId();
+  // The tree's ONE activation verdict (`maySetPackageActive`), not a third
+  // spelling: the type's grant in THIS space, or owning it (RBAC §3.6).
+  const spaceGrant = useCurrentSpaceGrant();
+  const canActivate = maySetPackageActive(spaceGrant, "integration", true);
+
+  return (
+    <span className="flex items-center justify-end gap-3">
+      <span
+        className={cn(
+          required ? "text-destructive" : "text-muted-foreground",
+          "max-w-[18rem] text-xs sm:text-right",
+        )}
+        data-testid={`integration-inactive-${packageId}`}
+      >
+        {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
+      </span>
+      {/* The sentence asks for an activation; without this the reader had to
+          go find the integration page to perform it. Somebody the route
+          would refuse gets the button DEAD with the reason on it, rather
+          than a click that ends in a toast. */}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={setActive.isPending || !currentSpaceId || !canActivate}
+        title={canActivate ? undefined : t("library.cannotActivate", { ns: "common" })}
+        onClick={() => {
+          if (!currentSpaceId || !canActivate) return;
+          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+        }}
+        data-testid={`integration-activate-${packageId}`}
+      >
+        {setActive.isPending ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : (
+          t("editor.activateIntegration")
+        )}
+      </Button>
+    </span>
   );
 }
 
@@ -368,14 +429,31 @@ function buildReuseInfo(
   return t("detail.integrationReuseShared", { account, count: agentCount });
 }
 
-function IntegrationIdentityCell({ packageId }: { packageId: string }) {
-  const { data: detail, isPending } = useIntegrationDetail(packageId);
+function IntegrationIdentityCell({
+  packageId,
+  displayName,
+  required,
+}: {
+  packageId: string;
+  displayName: string;
+  required: boolean;
+}) {
+  const { t } = useTranslation("agents");
   return (
     <div className="flex min-w-0 items-center gap-2">
       <Puzzle className="text-muted-foreground size-4 shrink-0" />
       <div className="min-w-0">
-        <div className="truncate text-sm font-medium">
-          {isPending ? packageId : (detail?.manifest.display_name ?? packageId)}
+        <div className="flex items-center gap-1.5">
+          <span className="truncate text-sm font-medium">{displayName}</span>
+          {required && (
+            <Badge
+              variant="secondary"
+              className="text-[0.6rem]"
+              data-testid={`integration-required-${packageId}`}
+            >
+              {t("detail.integrationRequiredBadge")}
+            </Badge>
+          )}
         </div>
         <div className="text-muted-foreground truncate font-mono text-xs">{packageId}</div>
       </div>
@@ -383,11 +461,11 @@ function IntegrationIdentityCell({ packageId }: { packageId: string }) {
   );
 }
 
-function IntegrationAccessCell({ packageId }: { packageId: string }) {
+function IntegrationAccessCell({ state }: { state: DetailState }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: detail, isPending } = useIntegrationDetail(packageId);
-  if (isPending || !detail)
-    return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+  const { detail, isLoading } = state;
+  if (isLoading) return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+  if (!detail) return <span className="text-muted-foreground text-xs">—</span>;
   const types = Array.from(
     new Set(Object.values(detail.manifest.auths ?? {}).map((auth) => auth.type)),
   );
@@ -403,6 +481,10 @@ function IntegrationAccessCell({ packageId }: { packageId: string }) {
   );
 }
 
+/**
+ * Ready, to configure (the run is refused), or unbound (the run starts without it,
+ * the picker's note says why).
+ */
 function IntegrationStatusCell({
   packageId,
   appActive,
@@ -413,16 +495,19 @@ function IntegrationStatusCell({
   agentPackageId?: string;
 }) {
   const { t } = useTranslation("agents");
-  const { data: resolution, isPending } = useIntegrationAgentResolution(packageId, agentPackageId);
+  const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
   if (!appActive) {
     return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
   }
-  if (!agentPackageId || isPending || !resolution) {
+  if (!agentPackageId || isPending || !entry) {
     return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
   }
-  return describeResolution(resolution).resolved ? (
-    <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>
-  ) : (
+  if (describeResolution(entry.resolution).resolved) {
+    return <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>;
+  }
+  return entry.run_blocking ? (
     <Badge variant="warning">{t("detail.connectionsTable.required")}</Badge>
+  ) : (
+    <Badge variant="secondary">{t("detail.connectionsTable.unbound")}</Badge>
   );
 }

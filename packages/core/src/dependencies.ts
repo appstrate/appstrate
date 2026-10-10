@@ -133,7 +133,8 @@ export type ToolsWildcard = typeof TOOLS_WILDCARD;
  * dependency id. Each key MUST correspond to an entry in
  * `dependencies.integrations`. `tools` drives the runtime allowlist + OAuth
  * scope inference; `scopes` is the explicit escape hatch; `auth_key`
- * disambiguates a multi-auth integration.
+ * disambiguates a multi-auth integration; `required` marks the integration
+ * as one the agent cannot run without.
  *
  * `tools` accepts the wildcard literal `"*"` to opt the agent into all
  * upstream tools (zero-trust preserved: the integration must opt in via
@@ -143,6 +144,8 @@ export interface IntegrationConfiguration {
   tools?: string[] | ToolsWildcard;
   scopes?: string[];
   auth_key?: string;
+  /** AFPS §4.4 — no run starts without a connection. Not the auth-level `_meta` `required`. */
+  required?: boolean;
 }
 
 /** The agent manifest's `integrations_configuration` map (AFPS §4.4). */
@@ -250,6 +253,8 @@ export interface ManifestIntegrationEntry {
    * cascade (any accessible connection on the integration).
    */
   auth_key?: string;
+  /** See {@link IntegrationConfiguration.required}. */
+  required?: boolean;
 }
 
 /** Type guard — `tools` field is the AFPS wildcard literal. */
@@ -306,6 +311,7 @@ export function parseManifestIntegrations(
       tools: toToolsField(config?.tools),
       scopes: toStringArray(config?.scopes),
       auth_key: pickString(config?.auth_key),
+      required: typeof config?.required === "boolean" ? config.required : undefined,
     });
   }
   return out;
@@ -341,8 +347,8 @@ export function collectOverridableDependencyIds(manifest: Record<string, unknown
  * Write integration entries back to a manifest in the AFPS split form:
  * the semver range goes to `dependencies.integrations.<id>` (a bare string,
  * §4.1) and the per-integration configuration goes to
- * `integrations_configuration.<id>` ({ tools?, scopes?, auth_key? }, §4.4).
- * Entries with no configuration leave no `integrations_configuration` entry.
+ * `integrations_configuration.<id>` (§4.4), merged onto the stored one: modelled keys are set or
+ * removed, any other key (`_meta`, extensions) kept; an empty or undeclared configuration is dropped.
  */
 export function writeManifestIntegrations(
   manifest: Record<string, unknown>,
@@ -350,26 +356,31 @@ export function writeManifestIntegrations(
 ): void {
   if (!manifest.dependencies) manifest.dependencies = {};
   const deps = manifest.dependencies as Record<string, unknown>;
+  const previous = asRecord(manifest.integrations_configuration);
   const integrationMap: Record<string, string> = {};
-  const configMap: IntegrationsConfiguration = {};
+  const configMap: Record<string, Record<string, unknown>> = {};
 
   for (const e of entries) {
     if (!e.id) continue;
     integrationMap[e.id] = e.version || "*";
 
-    const hasTools = e.tools !== undefined;
-    const hasScopes = Array.isArray(e.scopes) && e.scopes.length > 0;
-    const hasAuthKey = typeof e.auth_key === "string" && e.auth_key.length > 0;
-
-    if (hasTools || hasScopes || hasAuthKey) {
-      configMap[e.id] = {
-        ...(hasTools
-          ? { tools: isToolsWildcard(e.tools) ? TOOLS_WILDCARD : [...(e.tools as string[])] }
-          : {}),
-        ...(hasScopes ? { scopes: [...e.scopes!] } : {}),
-        ...(hasAuthKey ? { auth_key: e.auth_key! } : {}),
-      };
+    const config: Record<string, unknown> = { ...asRecord(previous[e.id]) };
+    const known: Record<keyof IntegrationConfiguration, unknown> = {
+      tools:
+        e.tools === undefined
+          ? undefined
+          : isToolsWildcard(e.tools)
+            ? TOOLS_WILDCARD
+            : [...e.tools],
+      scopes: e.scopes && e.scopes.length > 0 ? [...e.scopes] : undefined,
+      auth_key: e.auth_key || undefined,
+      required: e.required === true ? true : undefined,
+    };
+    for (const [key, value] of Object.entries(known)) {
+      if (value === undefined) delete config[key];
+      else config[key] = value;
     }
+    if (Object.keys(config).length > 0) configMap[e.id] = config;
   }
 
   if (Object.keys(integrationMap).length > 0) {
@@ -383,6 +394,12 @@ export function writeManifestIntegrations(
   } else {
     delete manifest.integrations_configuration;
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 /** Result of circular dependency detection. */

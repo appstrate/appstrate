@@ -15,7 +15,7 @@
  *
  * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
- * scope-shrink behaviour) live in the service-level test
+ * narrowed-grant behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
  * the HTTP route boundary: auth, dep, install, the `connection_id` selector,
  * response shape.
@@ -44,8 +44,13 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { integrationConnections, packages, runs } from "@appstrate/db/schema";
+import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
+import {
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+  runs,
+} from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 
@@ -155,7 +160,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       authKey?: string;
       credentialsEncrypted?: string;
       userId?: string;
-      sharedWithOrg?: boolean;
+      shared?: boolean;
     } = {},
   ): Promise<string> {
     const label = `acct-test-${++seededConnections}`;
@@ -166,6 +171,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
         authKey: opts.authKey ?? "primary",
         accountId: label,
         label,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? ctx.user.id,
         endUserId: null,
@@ -173,7 +179,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
           opts.credentialsEncrypted ??
           encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
         scopesGranted: [],
-        sharedWithOrg: opts.sharedWithOrg ?? false,
+        sharedSpaceIds: opts.shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -193,8 +199,8 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
   }
 
   /**
-   * A connection whose ciphertext no key in this deployment can open — what a
-   * rotated `CONNECTION_ENCRYPTION_KEY` (or a corrupted blob) leaves behind.
+   * A connection whose ciphertext is unreadable whatever the keyring — what a
+   * corrupted blob leaves behind (a missing key is the 503 case, not this one).
    */
   async function seedUndecryptableConnection(integrationId: string): Promise<string> {
     return seedConnectionRow(integrationId, { credentialsEncrypted: "v1:not-a-real-envelope" });
@@ -341,7 +347,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnectionRow(INTEGRATION, {
       userId: colleague.user.id,
-      sharedWithOrg: true,
+      shared: true,
     });
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const fetchCredentials = () =>
@@ -510,8 +516,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     });
 
     expect(res.status).toBe(410);
-    const body = (await res.json()) as { code?: string; detail?: string };
-    expect(body.code).toBe("INTEGRATION_CONNECTION_NEEDS_RECONNECTION");
+    const body = (await res.json()) as { code?: string; detail?: string; cause?: string };
+    expect(body.code).toBe("integration_connection_needs_reconnection");
+    expect(body.cause).toBe("credentials_undecryptable");
     expect(body.detail).toMatch(/could not be decrypted/i);
 
     const [row] = await db
@@ -525,6 +532,31 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("DENY: 503 without flagging when the credentials are under a kid the keyring lacks", async () => {
+    // Operator configuration (a retired key dropped too early, a misspelt kid): restoring
+    // the key makes the same row readable again, so nothing may conclude it is dead.
+    await seedIntegration(INTEGRATION, true);
+    const connectionId = await seedConnectionRow(INTEGRATION, {
+      credentialsEncrypted: "v1:k0gone:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+    await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+
+    const res = await app.request(credentialsUrl(INTEGRATION, connectionId), {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code?: string }).code).toBe("encryption_key_unavailable");
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    expect(row!.needsReconnection).toBe(false);
+    const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+    const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+    expect(meta?.degraded_integrations ?? []).not.toContain(INTEGRATION);
   });
 });
 
@@ -549,9 +581,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
   async function seedConnection(
     integrationId: string,
-    owner: { userId: string; sharedWithOrg: boolean } = {
+    owner: { userId: string; shared: boolean } = {
       userId: ctx.user.id,
-      sharedWithOrg: false,
+      shared: false,
     },
   ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
@@ -562,11 +594,13 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         endUserId: null,
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
-        ...owner,
+        userId: owner.userId,
+        sharedSpaceIds: owner.shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -692,7 +726,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         headers: { Authorization: `Bearer ${token}` },
       });
     for (let i = 1; i < getEnv().INTEGRATION_REFRESH_MAX_FAILURES; i++) {
-      expect((await refresh()).status).toBe(502);
+      const retry = await refresh();
+      expect(retry.status).toBe(502);
+      expect(await retry.json()).toMatchObject({ code: "bad_gateway", cause: "unrefreshable" });
     }
     const [before] = await db.select().from(runs).where(eq(runs.id, runId));
     const beforeMeta = before!.metadata as { degraded_integrations?: string[] } | null;
@@ -700,6 +736,10 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
     const res = await refresh();
     expect(res.status).toBe(410);
+    expect(await res.json()).toMatchObject({
+      code: "integration_connection_needs_reconnection",
+      cause: "unrefreshable",
+    });
 
     const [row] = await db
       .select()
@@ -710,6 +750,93 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
     const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
     expect(meta?.degraded_integrations).toContain(INTEGRATION);
+  });
+
+  it("410 + records the run, without spending the refresh token, once an OAuth2 connection is flagged mid-run", async () => {
+    let exchanges = 0;
+    const idp = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => {
+        exchanges += 1;
+        return Response.json({ access_token: "rotated", expires_in: 3600 });
+      },
+    });
+    try {
+      await seedPackage({
+        id: INTEGRATION,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: localIntegrationManifest({
+          name: INTEGRATION,
+          serverName: MCP_SERVER,
+          auths: {
+            primary: {
+              type: "oauth2",
+              authorizationEndpoint: "https://idp.example.com/authorize",
+              tokenEndpoint: `http://127.0.0.1:${idp.port}/token`,
+              tokenEndpointAuthMethod: "client_secret_post",
+              delivery: httpHeaderDelivery({
+                name: "Authorization",
+                prefix: "Bearer ",
+                field: "access_token",
+              }),
+            },
+          },
+          tools_policy: { search: {} },
+        }),
+      });
+      await seedPackageShare(ctx.defaultSpaceId, INTEGRATION);
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          clientId: "cid",
+          clientSecretEncrypted: encryptCredentials({ client_secret: "csec" }),
+        })
+        .returning({ id: integrationOauthClients.id });
+      const [conn] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          accountId: "acct-oauth",
+          label: "acct-oauth",
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          credentialsEncrypted: encryptCredentialEnvelope({
+            outputs: { access_token: "old-access", refresh_token: "rt-1" },
+          }),
+          clientRef: client!.id,
+        })
+        .returning({ id: integrationConnections.id });
+      const connectionId = conn!.id;
+      await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
+      const held = await heldRevision(connectionId);
+      // Flagged after kickoff — a peer's invalid_grant.
+      await db
+        .update(integrationConnections)
+        .set({ needsReconnection: true })
+        .where(eq(integrationConnections.id, connectionId));
+
+      const res = await app.request(
+        `${credentialsUrl(INTEGRATION, connectionId, true)}&credential_revision=${held}`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+      );
+      expect(res.status).toBe(410);
+      expect(exchanges).toBe(0);
+      const [runRow] = await db.select().from(runs).where(eq(runs.id, runId));
+      const meta = runRow!.metadata as { degraded_integrations?: string[] } | null;
+      expect(meta?.degraded_integrations).toContain(INTEGRATION);
+    } finally {
+      idp.stop();
+    }
   });
 
   it("DENY: 400 without `connection_id` — the selector guards BOTH routes", async () => {
@@ -805,13 +932,13 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnection(INTEGRATION, {
       userId: colleague.user.id,
-      sharedWithOrg: true,
+      shared: true,
     });
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const held = await heldRevision(connectionId);
     await db
       .update(integrationConnections)
-      .set({ sharedWithOrg: false, refreshFailureCount: 2 })
+      .set({ sharedSpaceIds: [], refreshFailureCount: 2 })
       .where(eq(integrationConnections.id, connectionId));
 
     expect((await reportSuccess(connectionId, held)).status).toBe(204);
@@ -919,6 +1046,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,

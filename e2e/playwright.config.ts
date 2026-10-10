@@ -35,7 +35,15 @@ export default defineConfig({
   webServer: {
     // No `--hot`: the suite edits no source, and a crash of Bun's hot-reload
     // runtime mid-suite fails every later test (#1710).
-    command: "cd .. && bun apps/api/src/index.ts",
+    //
+    // Server stdout (pino) and stderr both go to `data/e2e/server.log`, which
+    // CI uploads on failure; stderr is also `tee`d to Playwright as before.
+    // Both append, so lines are not overwritten, but stdout and stderr are not
+    // in strict time order. `bash` for `pipefail` (`/bin/sh` is dash in CI),
+    // so a startup failure reports the server's exit status, not `tee`'s.
+    // In CI only, the server (not the browsers) may dump core on a crash.
+    command:
+      "bash -o pipefail -c '[ -z \"$CI\" ] || ulimit -c unlimited; cd .. && mkdir -p data/e2e && : >data/e2e/server.log && bun apps/api/src/index.ts 2>&1 >>data/e2e/server.log | tee -a data/e2e/server.log >&2'",
     url: E2E_BASE_URL,
     // Reuse an already-listening server ONLY in CI.
     //

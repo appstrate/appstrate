@@ -7,7 +7,8 @@
  * client id (system env id or `integration_oauth_clients.id`); token refresh
  * resolves the same client's credentials by that id (system-first then DB-by-id,
  * mirroring the model-provider credential pattern). Covers:
- *   - persist stamps `client_ref` (round-trip insert/update)
+ *   - persist stamps `client_ref` (round-trip insert/update), and the row takes
+ *     its client's tier as its scope
  *   - `resolveIntegrationClientById` (system / custom-by-id / cross-scope / public)
  *   - refresh-context resolution by `client_ref`
  *   - the client-listing merge + default precedence
@@ -18,6 +19,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
+import { EncryptionKeyUnavailableError } from "../../../src/lib/stored-credential.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -25,6 +27,7 @@ import {
   listIntegrationClients,
   resolveIntegrationClientById,
   resolveConnectClient,
+  ensureIntegrationOAuthClient,
   setDefaultIntegrationClient,
   type ResolvedOAuthConnect,
 } from "../../../src/services/integration-connections.ts";
@@ -133,20 +136,27 @@ describe("integration multi-client", () => {
   }
 
   describe("persist stamps client_ref", () => {
-    it("stores the system client id on insert", async () => {
+    it("stores the system client id on insert, at org scope", async () => {
       const created = await connect(SYSTEM_ID);
       expect(await readClientRef(created.id)).toBe("gmail-system");
+      expect(created).toMatchObject({ scope: "org", origin_space_id: ctx.defaultSpaceId });
     });
 
-    it("stores the custom client id on insert", async () => {
+    it("stores the custom client id on insert, scoped to the client's space", async () => {
       const customId = await seedCustomClient("org-client", "org-secret");
       const created = await connect(customId);
       expect(await readClientRef(created.id)).toBe(customId);
+      expect(created).toMatchObject({ scope: "space", origin_space_id: null });
     });
 
-    it("leaves client_ref NULL when omitted (non-oauth2 callers)", async () => {
+    it("leaves client_ref NULL when omitted (non-oauth2 callers), at org scope", async () => {
       const created = await connect();
       expect(await readClientRef(created.id)).toBeNull();
+      expect(created.scope).toBe("org");
+    });
+
+    it("refuses a custom client id that names no client", async () => {
+      await expect(connect(crypto.randomUUID())).rejects.toMatchObject({ status: 404 });
     });
 
     it("re-stamps the client_ref on reconnect (update-owned)", async () => {
@@ -165,6 +175,15 @@ describe("integration multi-client", () => {
         clientRef: SYSTEM_ID,
       });
       expect(await readClientRef(created.id)).toBe("gmail-system");
+      const [row] = await db
+        .select({
+          spaceId: integrationConnections.spaceId,
+          originSpaceId: integrationConnections.originSpaceId,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, created.id));
+      // A system client serves the org: the reconnect widened the row.
+      expect(row).toEqual({ spaceId: null, originSpaceId: ctx.defaultSpaceId });
     });
   });
 
@@ -223,6 +242,33 @@ describe("integration multi-client", () => {
         undefined,
       );
       expect(c).toBeNull();
+    });
+
+    it("answers 503 for a secret under a kid the keyring lacks, null for an unreadable one", async () => {
+      // `null` reads as "unrefreshable" and counts the connection toward a reconnect;
+      // a missing key is the operator's to restore, so it must not.
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      const setSecret = (clientSecretEncrypted: string) =>
+        db
+          .update(integrationOauthClients)
+          .set({ clientSecretEncrypted })
+          .where(eq(integrationOauthClients.id, customId));
+      const resolve = () =>
+        resolveIntegrationClientById(
+          customId,
+          ctx.defaultSpaceId,
+          INTEGRATION,
+          AUTH_KEY,
+          undefined,
+        );
+
+      await setSecret(`v1:k0gone:${Buffer.alloc(40).toString("base64")}`);
+      await expect(resolve()).rejects.toMatchObject({
+        status: 503,
+        code: "encryption_key_unavailable",
+      });
+      await setSecret("v1:not-a-real-envelope");
+      expect(await resolve()).toBeNull();
     });
 
     it("returns null when the id resolves to neither a system nor a custom client", async () => {
@@ -303,7 +349,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        SYSTEM_ID,
+        { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("sys-client.apps.googleusercontent.com");
@@ -317,7 +363,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        customId,
+        { clientRef: customId, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("custom-client-id");
@@ -330,7 +376,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        "removed-id",
+        { clientRef: "removed-id", oauthResource: null },
       );
       expect(ctxOut).toBeNull();
     });
@@ -344,7 +390,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        null,
+        { clientRef: null, oauthResource: null },
       );
       expect(ctxOut).toBeNull();
     });
@@ -356,7 +402,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         PUBLIC_AUTH,
         ctx.defaultSpaceId,
-        SYSTEM_ID,
+        { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientSecret).toBe("");
@@ -374,7 +420,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        pinned,
+        { clientRef: pinned, oauthResource: null },
       );
       expect(ctxOut!.clientSecret).toBe("rt-secret");
     });
@@ -488,6 +534,8 @@ describe("integration multi-client", () => {
             redirect_uri: null,
             isDefault,
             autoProvisioned: false,
+            issuer: null,
+            secretKeyUnavailable: false,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
@@ -506,6 +554,25 @@ describe("integration multi-client", () => {
         customClient(true),
       );
       expect(out.clientId).toBe("org-client-id");
+    });
+
+    it("answers the 503, not the re-register 403, for a secret under a missing kid", async () => {
+      const customId = await seedCustomClient("custom-client-id", "custom-secret");
+      await db
+        .update(integrationOauthClients)
+        .set({ clientSecretEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
+        .where(eq(integrationOauthClients.id, customId));
+      const resolved = await ensureIntegrationOAuthClient(
+        scope,
+        INTEGRATION,
+        AUTH_KEY,
+        LOCAL_MANIFEST,
+        OAUTH2_AUTH,
+        "https://platform.test/callback",
+      );
+      expect(() =>
+        resolveConnectClient(INTEGRATION, AUTH_KEY, LOCAL_MANIFEST, OAUTH2_AUTH, resolved),
+      ).toThrow(EncryptionKeyUnavailableError);
     });
 
     it("falls to the system client when the custom one is un-flagged", () => {
@@ -550,6 +617,8 @@ describe("integration multi-client", () => {
           redirect_uri: null,
           isDefault: s.isDefault,
           autoProvisioned: false,
+          issuer: null,
+          secretKeyUnavailable: false,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:00:00.000Z",
         })),

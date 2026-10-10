@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // A label reaches the model verbatim (the tools' `connection` enum), so it
-// carries no line break, control, invisible or bidi character.
+// carries no line break, control, invisible or bidi character. The database holds the same rule
+// (CHECK `integration_connections_label_normalized`): a change here is a migration there,
+// `test/unit/lib/connection-label-check.test.ts` fails until both agree.
 
 import { isHiddenCodePoint } from "@appstrate/mcp-transport";
 

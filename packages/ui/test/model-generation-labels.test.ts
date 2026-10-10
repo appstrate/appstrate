@@ -4,10 +4,10 @@
 import { describe, it, expect } from "bun:test";
 import { buildGenerationLabels } from "../src/components/model-generation-labels.ts";
 import { defaultReasoningLevel } from "../src/components/default-reasoning-level.ts";
-import { reasoningOffSendsNothing } from "../src/components/reasoning-off.ts";
 import type {
   ModelGenerationCapabilities,
   ModelReasoningLevel,
+  ModelReasoningOff,
 } from "@appstrate/core/model-generation";
 
 /** A model taking exactly `levels`. */
@@ -19,6 +19,12 @@ const taking = (...levels: ModelReasoningLevel[]): ModelGenerationCapabilities =
     levels: Object.fromEntries(levels.map((level) => [level, "supported"])),
   },
 });
+
+/** A model taking off through high, with what the server reports `off` does on it. */
+const withOff = (off: ModelReasoningOff | undefined): ModelGenerationCapabilities => {
+  const capabilities = taking("off", "low", "medium", "high");
+  return { ...capabilities, reasoning: { ...capabilities.reasoning, off } };
+};
 
 /** Echo the key, and the interpolated level, so the test sees what was asked for. */
 const t = (key: string, options?: { level: string }) =>
@@ -39,30 +45,23 @@ describe("buildGenerationLabels", () => {
     expect(buildGenerationLabels(t).inherit).toBe("models.generation.inherit");
   });
 
-  it("names off for what it does where it sends nothing, and says so in the hint", () => {
-    const labels = buildGenerationLabels(t, taking("off", "low", "medium", "high"), true);
+  it("names off for what it does where the server reports it unsent, and says so in the hint", () => {
+    const labels = buildGenerationLabels(t, withOff("unsent"));
     expect(labels.levels.off).toBe("models.generation.levels.offSendsNothing");
     expect(labels.levels.low).toBe("models.generation.levels.low");
     expect(labels.reasoningHint).toBe(
       "models.generation.reasoningHint(models.generation.levels.medium) models.generation.reasoningOffSendsNothingHint",
     );
-    expect(buildGenerationLabels(t).levels.off).toBe("models.generation.levels.off");
   });
-});
 
-describe("reasoningOffSendsNothing", () => {
-  it("holds for a chat-completions model Pi keeps no record of, and nothing else", () => {
-    expect(reasoningOffSendsNothing({ apiShape: "openai-completions", pi_dialect: null })).toBe(
-      true,
-    );
-    expect(
-      reasoningOffSendsNothing({ apiShape: "openai-completions", pi_dialect: { name: "x" } }),
-    ).toBe(false);
-    expect(reasoningOffSendsNothing({ apiShape: "anthropic-messages", pi_dialect: null })).toBe(
-      false,
-    );
-    // An alias names no api shape.
-    expect(reasoningOffSendsNothing({ apiShape: null, pi_dialect: null })).toBe(false);
+  it("keeps the plain off label where off disables reasoning, or where nothing is reported", () => {
+    for (const capabilities of [withOff("disables"), withOff(undefined), undefined]) {
+      const labels = buildGenerationLabels(t, capabilities);
+      expect(labels.levels.off).toBe("models.generation.levels.off");
+      expect(labels.reasoningHint).toBe(
+        "models.generation.reasoningHint(models.generation.levels.medium)",
+      );
+    }
   });
 });
 

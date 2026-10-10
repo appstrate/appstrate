@@ -19,6 +19,7 @@
  */
 
 import { guardedFetch } from "@appstrate/core/ssrf";
+import { MAX_METADATA_BODY_BYTES, readJsonUnder, readTextUnder } from "./bounded-body.ts";
 import type { TokenEndpointAuthMethod } from "./types.ts";
 
 export interface RegisterDynamicClientInput {
@@ -191,7 +192,7 @@ export async function registerDynamicClient(
   if (!res.ok) {
     let detail = "";
     try {
-      detail = (await res.text()).slice(0, 500);
+      detail = ((await readTextUnder(res)) ?? "").slice(0, 500);
     } catch {
       // ignore — status is enough.
     }
@@ -206,10 +207,16 @@ export async function registerDynamicClient(
 
   let json: RawRegistrationResponse;
   try {
-    json = (await res.json()) as RawRegistrationResponse;
+    json = (await readJsonUnder(res)) as RawRegistrationResponse;
   } catch (err) {
     throw new DynamicClientRegistrationError(
-      `Dynamic client registration response was not JSON: ${String(err)}`,
+      `Dynamic client registration response could not be read: ${String(err)}`,
+      res.status,
+    );
+  }
+  if (!json || typeof json !== "object") {
+    throw new DynamicClientRegistrationError(
+      `Dynamic client registration response was not a JSON object under ${MAX_METADATA_BODY_BYTES} bytes`,
       res.status,
     );
   }

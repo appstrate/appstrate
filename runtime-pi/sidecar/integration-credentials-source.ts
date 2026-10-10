@@ -41,6 +41,7 @@ import type {
   ResolvedAuthCredentials,
 } from "@appstrate/connect/integration-credentials";
 import type { ActiveConnectInputs, MitmCredentialSource } from "./integration-mitm-listener.ts";
+import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import { logger } from "./logger.ts";
 
 /**
@@ -221,6 +222,10 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
   clearActiveInputs(acquiringAuthKey?: string): void;
   /** The merged active transient-input window, or `null` when none is open. */
   activeInputs(): ActiveConnectInputs | null;
+  /** Record that the listener refused to send input `field` to `url`, on the windows admitting it. */
+  refuseActiveInput(field: string, url: string): void;
+  /** The input the listener refused to send for `acquiringAuthKey`'s open window, if any. */
+  refusedActiveInput(acquiringAuthKey: string): string | undefined;
   /**
    * connect.tool mid-run re-login (P3) — register a per-authKey re-login
    * closure plus the upstream status codes that should trigger it. After this
@@ -325,6 +330,7 @@ export function createIntegrationCredentialsSource(
   interface ActiveWindow {
     bag: Record<string, string>;
     authorizedUris: readonly string[];
+    refused?: string;
   }
   const activeWindows = new Map<string, ActiveWindow>();
   // Synthetic key for a window opened without an acquiring authKey (defensive —
@@ -593,6 +599,15 @@ export function createIntegrationCredentialsSource(
       }
       return { inputs, authorizedUris: [...uris] };
     },
+    refuseActiveInput: (field: string, url: string) => {
+      // The login whose request it was: a window holding the field whose envelope admits `url`.
+      for (const win of activeWindows.values()) {
+        if (!Object.hasOwn(win.bag, field)) continue;
+        if (!win.authorizedUris.some((spec) => matchesAuthorizedUriSpec(spec, url))) continue;
+        win.refused ??= field;
+      }
+    },
+    refusedActiveInput: (acquiring: string) => activeWindows.get(acquiring)?.refused,
     setReloginHandler: (authKey, handler, reauthStatuses) => {
       reloginHandlers.set(authKey, {
         handler,

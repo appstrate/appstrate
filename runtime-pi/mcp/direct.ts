@@ -252,9 +252,11 @@ function buildIntegrationToolFactories(
               throw err;
             }
           }
+          // A tool reporting progress (relayed by the sidecar) is kept alive within
+          // Pi's `signal`; one reporting none keeps the hard per-call timeout.
           const result = await opts.mcp.callTool(
             { name: tool.name, arguments: args },
-            { ...(signal ? { signal } : {}) },
+            { ...(signal ? { signal } : {}), onProgress: () => {} },
           );
           opts.emit({
             type: `integration_tool.completed`,

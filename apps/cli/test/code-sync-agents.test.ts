@@ -18,7 +18,7 @@ import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
 import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
-import { ExitError } from "./helpers/process-exit.ts";
+import { CommandExit } from "../src/lib/io.ts";
 import {
   createSkillServer,
   skillMd,
@@ -173,7 +173,7 @@ describe("code sync — agent commands in the plugin", () => {
 
     await expect(
       codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io),
-    ).rejects.toBeInstanceOf(ExitError);
+    ).rejects.toBeInstanceOf(CommandExit);
 
     expect(stdout()).toBe("");
     expect(await snapshot(pluginRoot())).toEqual(before);

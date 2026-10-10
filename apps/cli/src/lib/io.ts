@@ -28,7 +28,7 @@
  *     seam over the same bytes, not a unification. Its `commands/run/*`
  *     helpers are not covered by that reasoning one way or the other:
  *     `run/input.ts` takes an optional `io?: CommandIO` because
- *     `validateLocalInput` exits the process and a test asserting that needs
+ *     `validateLocalInput` ends the command and a test asserting that needs
  *     its own sink.
  *   - `commands/runner.ts` and `commands/lifecycle.ts` are host-level
  *     installers whose user-visible output already goes through `lib/ui.ts`;
@@ -44,11 +44,8 @@
  * migrated onto it — `sink.ts` and `commands/run/remote-runner.ts` each still
  * declare their own writer pair, for the bridge reason above.
  *
- * Four members, deliberately — no colour, TTY or logger abstraction. A
- * command that needs more than "write bytes, exit" keeps that logic in the
- * command; widening the seam would put it in everyone's way. (The one TTY
- * decision the CLI does make — repaint or plain lines — lives in
- * `lib/ui.ts`'s `spinner`, which reads `process.stdout.isTTY` directly.)
+ * Four members, deliberately — no colour, TTY or logger abstraction: a command
+ * that needs more keeps that logic in the command.
  */
 
 import * as clack from "@clack/prompts";
@@ -56,7 +53,7 @@ import * as clack from "@clack/prompts";
 export interface CommandIO {
   stdout: { write(chunk: string | Uint8Array): void };
   stderr: { write(chunk: string | Uint8Array): void };
-  /** Hook so tests assert exit codes without terminating the runner. */
+  /** Ends the command with `code` by throwing; nothing after it runs. */
   exit: (code: number) => never;
   /**
    * Terminal-error renderer. Production uses `clack.cancel` so the message
@@ -69,6 +66,17 @@ export interface CommandIO {
 }
 
 /**
+ * What `DEFAULT_IO.exit` throws, so the process ends naturally: `process.exit` drops what a pipe
+ * has not taken yet. A `catch` that can see one must rethrow it.
+ */
+export class CommandExit extends Error {
+  constructor(readonly code: number) {
+    super(`exit ${code}`);
+    this.name = "CommandExit";
+  }
+}
+
+/**
  * Production wiring — what every command gets when the caller injects
  * nothing.
  *
@@ -78,17 +86,11 @@ export interface CommandIO {
  * `exitWithError` needs no special case for its own default.
  */
 export const DEFAULT_IO: CommandIO = {
-  stdout: {
-    write(chunk) {
-      process.stdout.write(chunk);
-    },
+  stdout: { write: (chunk) => void process.stdout.write(chunk) },
+  stderr: { write: (chunk) => void process.stderr.write(chunk) },
+  exit: (code) => {
+    throw new CommandExit(code);
   },
-  stderr: {
-    write(chunk) {
-      process.stderr.write(chunk);
-    },
-  },
-  exit: (code) => process.exit(code),
   // Wrapped rather than passed by reference so the seam pins the one-argument
   // form regardless of what else clack's export carries.
   cancel: (message) => {

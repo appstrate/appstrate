@@ -8,6 +8,727 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Before the deploy, mark `required: true` on every agent integration a run
+  cannot do without** (#1830). After it, a declared integration blocks a run
+  only when the agent marks it `required` (below): an agent whose user has no
+  connection for it runs without it instead of being refused.
+  1. Run the read-only pre-flight
+     `bun scripts/migration/0039-report-integration-deps.ts` with the env
+     loaded (it writes nothing). Per organization and space it lists the
+     agents declaring integrations (draft and latest published version), each
+     integration with its `required` flag, and the enabled schedules firing
+     those agents, with their `version_override`.
+  2. For each agent that means nothing without an integration, set
+     `integrations_configuration.<id>.required: true` in its manifest JSON and
+     publish a version. Before the deploy, write it only through the
+     manifest itself: the agent editor's JSON tab (apply, then save), or
+     `PATCH /api/packages/agents/{scope}/{name}` with the whole manifest, then
+     `POST /api/packages/agents/{scope}/{name}/versions`. The `PATCH` requires
+     an `If-Match` header (`428 precondition_required` without it) carrying
+     the `ETag` that `GET /api/packages/agents/{scope}/{name}` (the draft)
+     answers; a `412` means the draft moved since, so read it again. Both
+     store the key as given; the running release accepts it as an unknown
+     key. Do not touch
+     those agents' Integrations tab in the editor until the deploy: before
+     this release it rewrites `integrations_configuration` and drops
+     `required`.
+  3. A schedule whose `version_override` pins an older version keeps firing
+     that version, without `required`: move its override to the new version,
+     or clear it.
+  4. An agent the organization cannot publish (it does not own the package)
+     stays optional until its owner publishes a version marking `required`.
+     To enforce it sooner, fork it (`POST /api/packages/{scope}/{name}/fork`),
+     mark the fork and point the schedules at it.
+
+  Migration `0084` only relaxes the `integration_pins` cardinality CHECK to
+  `0..20`; it rewrites no data.
+
+- **Webhook consumers relying on `run.connection_missing` should read
+  `run.started`'s `integrationsUnbound`** (#1849). `run.connection_missing`
+  does not fire for a non-required integration that has no connection: that
+  run starts, and its `run.started` delivery carries `integrationsUnbound`.
+
+- **Before the deploy, run
+  `DATABASE_URL=<platform> bun scripts/migration/0040-token-usage-shape.ts`,
+  then with `--apply`, and `--apply` again right after the deploy** (beta.66
+  keeps writing until the swap; the script is idempotent) (#1846). `--apply`
+  drops undeclared keys and malformed `tiers` bands from stored
+  `token_usage`, so each run matches the strict `TokenUsage` component; no
+  counter is changed. A run whose usage is malformed as a whole (not an
+  object, or a counter that is not a non-negative integer, e.g. a fraction)
+  is listed `MALFORMED` and left as is, and the script exits 1 until an
+  operator decides what each such row becomes.
+
+- **A connection whose OAuth client registration is broken
+  (`invalid_client` / `unauthorized_client`) is never flagged for
+  reconnection** (#1853): every refresh answers `502` `oauth_client_rejected`
+  and logs an error. Fix the client registration.
+
+- **Upgrade the `appstrate-runner` daemon together with this release, and pin
+  its artifacts** (Firecracker only, #1852). The runner protocol goes from 2
+  to 3: a daemon left on protocol 2 is refused ("daemon speaks protocol 2,
+  platform expects 3"). Upgrade the daemon with `appstrate runner update`
+  (CLI beta.67, which needs the `cli@` tag published); it also pins
+  `FIRECRACKER_ARTIFACTS_VERSION` to the new release, which an unpinned
+  runner host needs since it never refreshes the kernel and rootfs it already
+  has. Rolling back the platform needs the runner daemon rolled back too (a
+  beta.66 platform refuses protocol 3): run `appstrate runner update` from
+  the beta.66 CLI.
+
+- **Rolling back to beta.66 silently binds a connection where "No
+  connection" was chosen** (#1830). A beta.66 platform treats an empty
+  connection set (`[]`, "No connection" pins and overrides) as absent and
+  falls back to automatic resolution.
+
+- **`pg_dump` the platform database BEFORE deploying, then after the deploy
+  run `scripts/migration/0041-widen-connections-to-org-scope.ts`** (#1870).
+  Migration `0086` is one-way at boot (`shared_with_org` dropped, `org_id`
+  NOT NULL): rolling back means restoring that dump. Drizzle `0086` adds `org_id` to `integration_connections`, makes
+  `space_id` nullable and folds `shared_with_org` into `shared_space_ids`,
+  leaving every row space-scoped with the reach it had. With the app up,
+  take a `pg_dump`, run the dry run
+  (`set -a && . ./.env && set +a && bun scripts/migration/0041-widen-connections-to-org-scope.ts`),
+  read the rows it will widen per organization and the labels it will rename
+  `<label> (n)`, then run it again with `--apply`. It widens the user-owned
+  connections not minted by a space's own OAuth client (`space_id` NULL,
+  `origin_space_id` the old space, shares kept), then checks three
+  invariants and rolls back with exit 1 if one fails; a second run finds
+  nothing. Until it runs, those connections keep working in their space
+  only. Details: `scripts/migration/README.md`.
+
+- **Remove `INTEGRATION_RUNTIME_ADAPTER` from the environment** (#1819). It
+  is retired and now ignored: each orchestrator pins its sidecar's runtime.
+  Local integrations run under `RUN_ADAPTER=docker` or `firecracker`; under
+  `RUN_ADAPTER=process` they are refused at spawn, as before.
+
+- **Before the deploy, review `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). Every
+  listed host that is not loopback becomes reachable by the local
+  integration runners of every organization, over raw TCP, on any port a
+  declared `authorized_uris` entry names literally: keep only hosts every
+  organization may reach. That includes `host.docker.internal`, often listed
+  for a local model: it is not loopback, so it now opens the Docker host's
+  declared ports to every organization's runners. Loopback (`localhost`,
+  `127.0.0.1`) and the sidecar's own addresses, or a listed name resolving to
+  one, stay refused to runners;
+  listed, it still serves `api_call` and model calls. The rule:
+  `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
+
+- **On `RUN_ADAPTER=firecracker`, narrow the runner host's
+  `FIRECRACKER_EGRESS_DENY_CIDRS` to reach a listed private host** (#1819).
+  Its default drops RFC1918, CGNAT `100.64.0.0/10` (Tailscale included),
+  link-local and other reserved ranges, so a run never reaches such a host
+  until the list leaves its range out. The cost: the list is the runner
+  host's forward chain for every guest, so narrowing a range removes its L3
+  backstop for every run on that host, leaving only the sidecar's app-layer
+  floor. The exemption ships in this release's Firecracker rootfs: pin the
+  runner's artifacts to this release.
+- **Self-hosters who build their own images: rebuild on `oven/bun:1.4.2`**
+  (#1878). The platform image, `PI_IMAGE`, `SIDECAR_IMAGE` and the
+  Firecracker rootfs (built from those two) now start from Bun 1.4.2. They
+  are one version contract: ship all of them, and the Firecracker artifacts,
+  from this release together. An image built from this tree pulls the new
+  base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
+
+### Changed
+
+- **BREAKING (API): a connection may serve the whole organization, and is
+  shared with a set of spaces** (#1870).
+  - `shared_with_org` is gone from the connection DTOs (connection list,
+    accessible connections, pin candidates) and from the body of
+    `PATCH /api/integrations/{packageId}/connections/{connectionId}`, which
+    takes `shared_space_ids`, the full target set, instead. The DTOs add
+    `scope` (`"org"` | `"space"`), `shared_space_ids` (the full set for the
+    owner; for anyone else the current space when shared into it, else
+    `[]`) and `origin_space_id` (owner only). New refusals:
+    `400 invalid_share_target`, `403` on a share into a space where the
+    owner lacks `integrations:connect`, `403 connection_blocked_by_admin` on
+    one into a space blocking user connections without
+    `integrations:configure` there, `403` on renaming an org-scoped
+    connection one does not own, and `403` on reconnecting one with an API
+    key or a third-party token.
+  - New `PATCH /api/me/connections/{connectionId}` (owner,
+    `integrations:connect` ceiling): label and `shared_space_ids`.
+  - `GET /api/me/connections`: `space` is `null` for an org-scoped
+    connection; new `scope`, `origin_space` and `shared_spaces`.
+  - The realtime `connection_update` event adds `orgId`, and `spaceId` is
+    `null` for an org-scoped connection, delivered to its owner in every
+    space of the org.
+  - An org-scoped connection reconnects through an org or system OAuth
+    client, never a space's own: `409 connection_scope_narrowing` when
+    neither exists;
+    `409 auto_client_exists_at_org` on promoting a DCR client to an org that
+    already holds one for that server.
+
+- **A connection is reusable across the spaces of its organization**
+  (#1870). Its scope is the tier of the OAuth client that minted it: the
+  system client, an org client or none (API key, basic, fields) makes it
+  usable by its owner in every space of the org; a space's own OAuth client,
+  an end user, or a delegated credential (API key, third-party token)
+  keeps it in that space. A space whose default OAuth client
+  for that auth is its own uses only the org-wide connections connected from
+  it. The
+  owner shares a connection with chosen spaces; losing access to a space
+  withdraws that share only, and deleting a space withdraws it from every
+  share. With several of their own connections, a member's run binds the one
+  made in the run's space. Promoting a space OAuth client to the org widens
+  its connections.
+- **Remote MCP clients registered by DCR/CIMD live at the org tier**
+  (#1870): one client per organization, integration, auth and authorization
+  server, reused by every space. A client registered in a space before this
+  release keeps refreshing its connections, which move to the org client at
+  their next reconnect.
+- **A token refresh that narrows the granted scopes no longer flags the
+  connection for reconnection** (#1870): `scopes_granted` is updated, and an
+  agent needing a dropped scope gets `insufficient_scopes` when it binds.
+- **`block_user_connections` applies when a run binds, not only when a
+  connection is created** (#1870): in a space blocking user connections for
+  an integration, a member's own connection binds only when shared into that
+  space or made in it.
+- **Connection labels are unique per owner** (#1622, #1870): a label no
+  longer collides with another member's private connection. Two members'
+  equal labels in one pin or default are suffixed ` (2)` in the run.
+- **BREAKING (MCP): a connection reaches every space the caller holds a role
+  in, and each call names its space; a space is pinned by the URL, never by
+  `X-Space-Id`** (#1825). Every tool that acts in a space requires a
+  `space_id` argument, reads and writes alike; without it the call is a
+  `-32602` listing the caller's spaces. To confine a connection to one space,
+  use `/api/mcp/o/<org>/s/<space>` (same OAuth token): the endpoint answers a
+  request carrying `X-Space-Id` with a `400` naming that URL. API keys and
+  end-user tokens stay pinned to their own space. A caller who reaches no space
+  is a `403`; no request lands on the default space any more. The CLI's Claude
+  Code plugin now pins by URL, so its first sync after the upgrade asks for the
+  plugin's OAuth login once. Details: `docs/guides/connecting-mcp-clients.md`.
+- **The repository requires Bun 1.4.2 or later** (#1878): `packageManager`
+  moves to `bun@1.4.2` and the root `engines.bun` to `>=1.4.2`, which the root
+  test preload enforces. CI reads the version from `packageManager` (setup-bun
+  `bun-version-file`), and the Dockerfiles and the devcontainer pin the same
+  `oven/bun:1.4.2` base, held to it by `scripts/test/bun-version-pins.test.ts`.
+  Every install, in CI and in the images, runs `bun install --frozen-lockfile`,
+  which replaces CI's `git diff --exit-code bun.lock` check. Published packages
+  keep their own `>=1.3.9`.
+- **A local integration runner can reach a host listed in
+  `EGRESS_ALLOW_INTERNAL_HOSTS`** (#1819). The sidecar's CONNECT, MITM and
+  transparent listeners refused every private, loopback or link-local
+  address whatever the list said. They now exempt a listed host on a port a
+  declared, untemplated `authorized_uris` entry names (a known scheme's
+  default port when it names none), with `allow_all_uris` off. Never
+  loopback nor the sidecar's own addresses, literal or resolved, on every
+  path; a host from a connection value or a wildcard is never exempt; the
+  runner's allowlist still applies. An `api_call` keeps its per-host rule. The rule:
+  `docs/architecture/SIDECAR.md`, "Runner egress allowlist".
+- **BREAKING (operators): `INTEGRATION_RUNTIME_ADAPTER` is retired and
+  ignored** (#1819); see Operators.
+- **BREAKING (agents): a Gmail connection no longer gets write access by
+  default** (#1871). `@appstrate/gmail` 1.1.7 drops `gmail.send` and
+  `@appstrate/gmail-mcp` 2.3.6 drops `gmail.compose` from `default_scopes`,
+  which every connection of the auth requests: a connection made for a
+  read-only agent is read-only. `@appstrate/gmail` has no `tools_policy`, so an
+  agent that sends mail without declaring the scope now gets a read-only
+  connection and fails at run time. Migration: declare it,
+  `integrations_configuration["@appstrate/gmail"].scopes:
+["https://www.googleapis.com/auth/gmail.send"]`. A `@appstrate/gmail-mcp`
+  agent selecting `create_draft` gets `gmail.compose` from its tool; one with
+  `tools: "*"` declares it the same way. Existing connections keep what they
+  were granted.
+- **The fallback binds among your own connections of one account** (#1871):
+  when every own connection serving an integration is an `oauth2` one of the
+  same known account, auth and instance (connection variables), the run binds
+  the least-privileged one covering the agent's scopes plus the auth's
+  `default_scopes` (else the closest, which answers `insufficient_scopes`)
+  instead of answering `must_choose_connection`, whether or not the agent
+  declares scopes. Grants beyond what the agent and the defaults need weigh
+  before a missing default and before health: a narrow connection short of a
+  newer default is not swapped for a write-capable one, and a dead narrow one
+  is reported `needs_reconnection`, never swapped for a live broader one. A new
+  connection made for one agent no longer breaks the others. Several
+  accounts, auths or instances, an unknown identity, and a credential-proxy
+  call without an agent selection still ask.
+- **Google integrations request `userinfo.email` by default** (#1871):
+  `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
+  `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
+  `default_scopes` next to `email`, the form Google grants in its place, so a
+  connection no longer reads as granting more than its baseline.
+- **BREAKING (API): a declared integration blocks a run only when the agent
+  marks it `required`** (#1830, #1848, afps-spec#28). A non-required
+  integration binds 0..N connections and never blocks for lack of one; the
+  run starts without it and the launch (run, inline run, remote run, schedule
+  write) answers a `warnings[]` item naming it (`field` `integrations.<id>`)
+  with the code the same state raises as a `409` item on a `required`
+  integration, and the same fields:
+  - `not_connected` (`auth_key`, `required_scopes`, plus a `connect_url` on
+    an agent-run or inline-run launch that sent `X-Appstrate-Connect-Offers`;
+    never stored with an idempotent `201`, so a replay carries none; MCP
+    `run_and_wait` warnings carry no connect link, so an MCP client gets the
+    warning and can call
+    `initiateIntegrationConnect`, and the in-app chat gets them through its
+    own launcher);
+  - `must_choose_connection` when only connections other members share
+    serve (`candidate_connections`);
+  - `auth_key_mismatch`: when the agent's `auth_key` is a declared auth that
+    serves its selection, the item (`409` or warning) carries `auth_key` and
+    `required_scopes` and, when connect offers are requested, a
+    `connect_url` to connect the agent's required auth;
+  - `integration_not_active` when the integration is switched off in the
+    space; the run's `integrations_unbound` lists it too;
+  - `integration_unbound` only when a cascade layer holds `[]` (below),
+    named by the item's new `source` field, with no connect target since the
+    choice was deliberate.
+
+  An inert integration (selecting no tool or scope, needing no auth) is
+  skipped first and yields nothing, as the run would not start it anyway.
+
+  A `required` integration keeps the old behaviour: a
+  `409 missing_integration_connection` with `not_connected`,
+  `auth_key_mismatch` or `integration_not_active`, and `required` also makes an integration that
+  selects no tool or scope count, where it used to be skipped as inert.
+  Breakage and ambiguity refuse for every integration, `required` or not: a
+  missing or invalid integration package, `must_choose_connection` over
+  several own connections, and a bound connection that is dead, outranked,
+  unavailable, under-scoped or on an auth serving none of the selected tools.
+  The `run.connection_missing` webhook still fires for blocking refusals only.
+
+- **BREAKING (API): success responses gain `warnings`** (#1830, #1850),
+  always present, possibly empty: `POST /api/agents/{scope}/{name}/run` (201),
+  `POST /api/runs/inline` (201), `POST /api/runs/inline/validate` (200, now
+  `{ valid: true, warnings }`), `POST /api/runs/remote` (201), schedule
+  create (201) and update (200), where `warnings` is nullable: `null` when the
+  write judged nothing to report (the schedule is disabled, the update moves
+  nothing a fire resolves with — actor, `connection_overrides`,
+  `version_override`, `dependency_overrides`, switching it on — or the actor
+  is another member, whose connections the caller must not learn of), `[]`
+  when it was judged and the fires lack nothing. A schedule written for
+  another member keeps the shared-only filtering on its errors. The MCP and
+  chat `run_and_wait` results always carry the launch's `warnings` (`[]` when
+  none).
+- **BREAKING (API): connection sets accept `[]`, "use none"** (#1830): admin
+  pins, member pins, run and schedule `connection_overrides`, and MCP
+  `run_and_wait`'s `connection_overrides`. A layer holding `[]` wins and stops
+  the cascade: the integration starts with no connection, with an
+  `integration_unbound` warning whose `source` names that layer, and the
+  agent is told it runs without it whatever its tool selection. `[]` in
+  `connection_overrides` for an integration the launched manifest marks
+  `required` is refused at a run launch and at a schedule write:
+  `400 validation_failed` with an item
+  `{ field: "connection_overrides.<id>", code: "required_integration_unbound" }`
+  (#1848). A pin accepts `[]` whatever the manifest says; a run
+  whose version marks the integration `required` then fails with a new `409`
+  item `required_integration_unbound`. Org defaults stay `1..20`. A layer
+  with no row or no key is still absent and passes to the next, as is a
+  schedule update's `connection_overrides: null`, which clears them all; a
+  `null` set for one integration is refused (`400`).
+- **BREAKING (API): the connection readiness DTO**
+  (`GET /api/agents/{scope}/{name}/connection-readiness`) gains `required`
+  per integration, and `admin_pinned_connection_ids` /
+  `member_pinned_connection_ids` become `string[] | null` (`null` = no pin,
+  `[]` = pinned to none), and `org_default_connection_ids` is `null` when no
+  org default exists. Per integration, `resolution.warning` is the launch's
+  `warnings[]` item itself, replacing `required_auth_key` and
+  `available_auth_keys`; `null` when the run binds the integration, is
+  refused over it, or never needed it. A non-required integration the run
+  starts without reads `run_blocking: false`, `error_code: null`,
+  `resolved_connection_ids: []` and a non-null `resolution.warning` (#1830,
+  #1848).
+- **BREAKING (API): integration status reads an auth's
+  `_meta["dev.appstrate/auth"].required` as absent = `false`** (#1830), like
+  the rest of the platform, instead of absent = `true`: `auths[].required` on
+  the integration status no longer reports an auth as required when its
+  manifest does not say so.
+- **BREAKING (MCP): `run_and_wait`'s result changes shape and its unstreamed
+  wait is bounded** (#1844, #1851).
+  - A call without a `progressToken` returns `done:false` with the run `id`
+    after ~45 s, launch included, instead of waiting to the end: nothing keeps
+    such a request alive past the 60 s timeout of MCP clients. The run keeps
+    going: continue with `getRun` (`query: { wait: true }`), never with a
+    second `run_and_wait`.
+  - `done:false` carries no `error`; the next step comes as a second text
+    block.
+  - The tool declares a strict `outputSchema` (`RunAndWaitResult`, pending or
+    terminal), and the server validates every `structuredContent` against
+    it. `warnings` is always present.
+
+  The result is truncated on the MCP path too, and files are fetched only once
+  `done`. The 15 s heartbeat and the 45 s unstreamed wait derive from the
+  SDK's 60 s request timeout.
+
+- **BREAKING (API): one `token_usage` contract** (#1846). OpenAPI publishes a
+  `TokenUsage` component (integer counters, `tiers`, no other key) used by
+  `Run.token_usage` (a closed `TokenUsage | null`) and the finalize body's
+  `usage`. A fractional counter makes the usage invalid — a `success`
+  finalize answers `400` — and unknown keys inside `usage` and malformed
+  bands are dropped, never stored. `TokenUsageTier` documents that `input_tokens_above` is
+  compared to the whole prompt while its counters stay net of cache.
+- **`@afps-spec/schema` `^0.9.0`** (was `^0.8.0`; root, `@appstrate/core`,
+  `@appstrate/afps-runtime`), which declares
+  `integrations_configuration.<id>.required` as a boolean (afps-spec#28): an
+  agent manifest whose `required` is not a boolean is now refused at publish,
+  import and inline launch (#1830).
+- **The launch and schedule `409`s type `errors[].code`**
+  (`MissingIntegrationConnectionProblem`), and connection-id sets declare
+  `uniqueItems` in OpenAPI (#1848).
+
+- **A subscription run or chat turn prices each model call at its price tier**
+  (#1552). The runner's cumulative usage and a subscription chat turn's usage
+  now carry per-tier token bands (`token_usage.tiers`, documented in OpenAPI),
+  and the `runner` / chat ledger rows price each band at its tier instead of
+  the whole sum at the base rate. The agent container keeps the `MODEL_COST`
+  tiers, so its reported cost still matches the server's. A subscription
+  provider is therefore offered tiered models too: Claude Haiku 5.5 becomes
+  selectable on `claude-code`, and `verify:system-models` no longer fails on a
+  reachable subscription price tier. Ship the runtime-pi image and the
+  Firecracker rootfs with this release: an older runner strips the
+  `MODEL_COST` tiers and emits no bands, so its runs price at the base rate.
+  Malformed bands are dropped (and logged); the counters are kept.
+
+- **The chat holds back a `run_and_wait` call's connect offers only while its
+  live (preliminary) updates stream** (#1851).
+
+- **Firecracker guest artifacts join the version contract** (#1852). The
+  runner daemon reports the release of its installed kernel and rootfs on
+  `/v1/health` (`artifactsVersion`). A released platform refuses at the
+  handshake a daemon whose artifacts come from another release, and names the
+  fix: `FIRECRACKER_ARTIFACTS_VERSION=<APP_VERSION>` on the runner host. Until
+  the handshake passes, the agent runtime stays not ready and the platform
+  keeps retrying. A `dev` platform or locally built artifacts
+  (`FIRECRACKER_ARTIFACTS_LOCAL`) are exempt.
+
+- **The `integration_dropped` run log is `warn`** unless a layer chose no
+  connection (`info`), and names the code; the agent prompt's reason for a
+  switched-off integration reads "it is switched off" (#1849).
+- **Credential refresh failures speak one vocabulary** (#1853; sidecar
+  protocol: the platform and the images ship together). The
+  integration-credentials `410` code `INTEGRATION_CONNECTION_NEEDS_RECONNECTION`
+  becomes `integration_connection_needs_reconnection`; the OAuth model-token
+  codes `OAUTH_REFRESH_REVOKED`, `OAUTH_REFRESH_TOKEN_MISSING` and
+  `OAUTH_CONNECTION_NEEDS_RECONNECTION` become one
+  `oauth_connection_needs_reconnection`; every `410`/`502` carries a `cause`.
+  The sidecar reads only the status.
+- **A failed model-token refresh answers `502`** with a `cause` (was `500`)
+  (#1853). A model credential whose transient refresh failures pass the
+  threshold answers `410` with cause `refresh_failures_exhausted` right away,
+  like integrations.
+- **"No connection" works the same way on every screen** (#1855): a schedule
+  run by another member, agent pins, the connection picker. Unticking the
+  last connection clears the choice; only the explicit "No connection" box
+  records "no connection".
+- **The dashboard shows a schedule's "will start without" toast only when the
+  server reports `warnings`** (#1850), with no client-side guess.
+- **`Idempotency-Key` stores only a request that executed (a 2xx)** (#1856).
+  A refusal (4xx) is no longer replayed for 24 h: the key is released and a
+  retry is judged again, so a launch retried after connecting the missing
+  integration runs. The `Idempotency-Key` and `Idempotent-Replayed` docs say
+  a replay re-serves the stored 2xx under current permissions, without the
+  bearer connect links of its `warnings`.
+
+- **`@appstrate/connect` `parseTokenResponse` returns
+  `scopesReturned: string[] | null`** instead of `scopesGranted`, and no
+  longer takes the requested scopes (#1854): `null` means the response omitted
+  `scope` (RFC 6749 §5.1), and an echoed `scope` with no token (`""`, `" "`)
+  is treated as omitted. `exchangeAuthorizationCode` drops its
+  `scopesRequested` input; the integration callback applies the
+  requested-scopes fallback itself.
+
+- **An internal error during an integration credential refresh is no longer
+  reported as a transient upstream failure** (#1847). A database fault or an
+  incoherent OAuth client configuration makes the sidecar refresh endpoint
+  answer `500`, and the credential proxy logs it as an error while relaying
+  the upstream `401`.
+- **One refresh decision for every credential path** (#1829). A
+  2xx token response carrying `error: invalid_grant` is classified revoked,
+  on a refresh and on a code exchange; the `410` problem's `detail` wording
+  changed.
+- **A run's Configuration tab says why each integration started without a
+  connection** (#1849): not connected, a pick needed, another auth method,
+  switched off, or no connection chosen and by whom.
+
+### Added
+
+- **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):
+  the agent needs at least one connection of that integration to run (#1830).
+  The agent editor has a "required" toggle per integration, and the
+  connection pickers a « Aucune connexion » ("No connection") option that
+  pins no connection.
+- **The agent is told which declared integrations it runs without** (#1830):
+  its system prompt lists each integration unavailable in the run and why,
+  and tells it not to claim results from them. A run started without one
+  shows it on the run page; the chat renders a connect card from a warning
+  that carries a `connect_url`, the CLI prints one `⚠` line per warning with
+  `(code via source)` (refusal lines too), and the MCP server instructions
+  explain both. The launch toast and the agent's Connections tab say who
+  chose "no connection": you, an admin, the space default, this run or the
+  schedule (#1848).
+- **A run records why it started without an integration** (#1830, #1849):
+  the run resource's `integrations_unbound` is
+  `[{ integration_package_id, code, source }] | null`, one item per declared
+  integration the run bound to no connection, those switched off in the space
+  included. `code` is the launch warning code, `source` the layer that chose
+  none on `integration_unbound` (else `null`). It is stored at creation for
+  manual, scheduled, inline and remote runs (new nullable column
+  `runs.integrations_unbound`, migration `0085`); runs created before read
+  `null`. The codes are visible to the run's actor and to `runs:read-all`
+  holders (`SECURITY.md`).
+- **The `run.started` webhook and module event carry
+  `integrationsUnbound: [{ integrationPackageId, code, source? }]`** (#1849).
+- **`appstrate run --report --json` announces the run** with an
+  `appstrate.report.started` line (`runId`, `instance`, and `warnings` when the
+  registration reported some), as `--remote --json` does with
+  `appstrate.remote.triggered` (#1830). A refused launch prints its items one
+  per line. The locally executed agent is told which integrations the
+  platform bound to none, and their tools are not exposed to it.
+- **The agent detail's integrations carry `required` and `auth_key`** (#1830),
+  as the manifest's `integrations_configuration.<id>` declares them.
+- **A run launch's `409 missing_integration_connection` carries
+  `version_ref`** (#1856), the definition it judged (`draft` or a semver, as
+  on `Run.version_ref`): an omitted `version` launches the latest published
+  version while readiness reads the draft for a writer, so re-check readiness
+  with `version=<version_ref>`. The dashboard's recovery modal reads it
+  instead of remembering the version itself.
+
+- **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
+  hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
+  DCR remote-MCP family (`notion-mcp`, `canva-mcp`, `clickup-mcp`,
+  `mcpemails`): `streamable-http` against `https://mcp.expo.dev/mcp`, DCR as a
+  public client with PKCE (S256) under the single `mcp:access` scope. Its 38
+  tools come from the live server's `tools/list` (Expo's documentation lags
+  it). A read-only agent selects only `build_list`/`_info`/`_logs`,
+  `workflow_list`/`_info`/`_logs`/`_validate`, `workflow_create` (returns
+  YAML), `testflight_crashes`/`_feedback`, `playstore_crashes`, the store
+  reviews, the seven `observe_*` EAS Observe reads, `sandbox_list`,
+  `sandbox_wait` (polls status) and the two documentation tools; the rest
+  change state: builds, workflow runs, cancellations, store submissions and
+  review replies, `learn` memory, `usage_budget_create`, and sandboxes
+  (`sandbox_create` is billable, `sandbox_exec`, `sandbox_write_stdin`,
+  `sandbox_stop`). Expo's local capabilities act on a member's own dev server
+  and are not declared, so the sidecar filters them out. Expo has no userinfo
+  endpoint: unless the token response names the account, connections to
+  different Expo accounts share one account key and a reconnect is unchecked.
+
+- **Browser Use — delegate web tasks to Browser Use Cloud's browser agent
+  (#1880).** `@appstrate/browser-use@1.0.0` targets the hosted v3 MCP server,
+  `streamable-http` against `https://api.browser-use.com/v3/mcp`, with an API
+  key sent as `X-Browser-Use-API-Key` with no prefix: the first remote
+  integration delivering its credential outside `Authorization`. Not OAuth:
+  Browser Use's RFC 9728 protected-resource metadata names only the v1 `/mcp`
+  resource (`/.well-known/oauth-protected-resource/v3/mcp` is 404), and its
+  authorization server issues no refresh token, so an OAuth connection would die
+  when its access token expires. `run_session` and `send_task` consume credits,
+  `stop_session` changes state; `get_session`, `get_session_messages`,
+  `list_sessions` and `list_browser_profiles` read. Tasks can run for minutes,
+  so the agent polls `get_session`. Cloud only: the open-source `browser-use`
+  library is not a self-hostable copy of this API (its MCP server is stdio-only,
+  with other tools); a self-hosted browser is #1827. `tools/list` is public, so
+  the weekly conformance monitor checks tool parity without a credential.
+
+- **Model capabilities say what reasoning level `off` puts on the wire**
+  (#1774). `OrgModel.generation` and the provider registry's models carry
+  `reasoning.off`: `disables` when Pi sends an explicit reasoning-off
+  parameter, `unsent` when it sends none and the server keeps its own default
+  (some models still reason). The server derives it from the model a run
+  builds; it is absent when the model does not reason or does not take `off`.
+  An alias never reports it: it would identify the backing model. The live
+  model catalog drops a record whose `off` cannot be derived or differs from
+  the payload Pi builds.
+
+### Fixed
+
+- **The OAuth consent and device-activation pages introduce the scope list
+  with "Accès demandé :"** instead of "Cette space aura accès à :", a leftover
+  of the application → space rename (#1825).
+
+- **Runner egress tunnels relay a half-close, and the http relay cancels an
+  abandoned upstream request** (#1878). On the egress CONNECT listener, the
+  transparent plane and the agent's forward proxy, a client's FIN reaches the
+  upstream as a FIN, so a reply sent after it now arrives instead of being cut;
+  a half-open tunnel stays bounded by the idle timeout, and a FIN before the
+  tunnel's first bytes closes it at once. A client that leaves before the whole
+  answer cancels the upstream request instead of letting it run to the upstream
+  timeout. Pipelined `http://` requests are vetted one by one and answered in
+  order, and one pipelined behind a refusal is dropped, never relayed.
+
+- **A proxy-aware local runner reaches `http://` targets through its egress
+  listener** (#1819). The listener of a runner with nothing to inject
+  answered 405 to the absolute-form `http://` request such a client sends to
+  `HTTP_PROXY`. It now vets each one like a `CONNECT` and forwards it with
+  the URL authority as `Host` and hop-by-hop headers stripped both ways, on
+  upstream connections no other runner shares; an upstream `101` answers
+  `502`. Origin-form and `https://` absolute-form requests answer 405; the
+  listener that injects credentials still refuses plain HTTP. The listener
+  now parses the `CONNECT` head with Bun's HTTP parser: an HTTP/1.1
+  `CONNECT` must carry `Host` (the SSH `ProxyCommand` does).
+- **Sidecar tunnels and proxies close cleanly** (#1819). On every tunnel
+  (runner egress `CONNECT`, transparent plane, the agent's forward proxy) a
+  clean close flushes what is queued for the other side first, a client
+  gone during the dial takes the upstream down, and the idle timeout closes
+  both sides. On the runner egress listener and the forward proxy, a
+  `CONNECT` port outside 1–65535 answers `400` instead of crashing the
+  sidecar, and a relayed `http://` request whose upstream times out answers
+  `502` instead of leaving the client waiting. A header value the sidecar's
+  HTTP client refuses (a `0x7f` byte) answers `502` and can no longer crash
+  the sidecar through the forward proxy. The forward proxy also strips
+  response hop-by-hop headers.
+- **A login connection that reports no identity is no longer just
+  `Connexion N`** (#1818): a `connect.login` or `connect.tool` connection is
+  named, as a pasted credential already is, after its one non-secret required
+  credential field, masked (`al****.com`).
+- **A new organization's starter agent runs from the CLI, the chat and the
+  Claude Code plugin on its first try** (#1789). It was created as a draft
+  only, so `appstrate run @<scope>/hello-world`, which runs the latest
+  published version, answered `404 no_published_version`. Its version 1.0.0
+  is now published when the organization is created. An organization created
+  before this release publishes it from the agent's page (**Create version**).
+- **A run or a chat turn no longer picks up resources from the machine it
+  runs on** (#1820). With `RUN_ADAPTER=process`, and in `appstrate run`, a
+  run's prompt carried the skills of the host user's `~/.agents/skills`, of
+  the Pi agent directory and of `.agents/skills` in the workspace's parent
+  directories, the `AGENTS.md` / `CLAUDE.md` of the agent directory and of
+  those parent directories, and the `APPEND_SYSTEM.md` of the agent directory
+  or of the workspace's `.pi/`. A chat turn appended an `APPEND_SYSTEM.md`
+  found in `/tmp/.pi/` or `/tmp/pi-chat/`. A run now sees only the skills its
+  bundle provides, the platform's prompt and its own tools; a chat turn, only
+  its prompt and tools.
+- **`@appstrate/ssh-mcp` 1.0.2 no longer opens an SSH connection per tool
+  call** (#1802). The ssh and sftp calls of a run are channels on one SSH
+  ControlMaster, kept up to 5 minutes after the last call and closed when the
+  server ends: calls less than 5 minutes apart authenticate once, so a target
+  behind `ufw limit 22/tcp`, fail2ban or a tight `MaxStartups` no longer bans
+  the runner's egress IP after a handful of calls.
+- **`ssh_exec` stops a command that outlives `timeout_seconds` on the target**
+  (#1799): its process group (the command alone under a wrapping forced
+  command) gets SIGTERM, then SIGKILL 5 s later, and the
+  result carries `remote_pid` and `remote_process` (`terminated`,
+  `already_exited`, `still_running` or `unknown`). The command used to run on
+  after the call returned.
+- **`ssh_read`, `ssh_write_file` and `ssh_edit_file` accept `~` and `~/…`**
+  (#1798), from the account's home directory; `~user` is refused.
+- **A login input is encoded for the place it takes** (#1818), in a declarative
+  `connect.login` and in a `connect.tool` login tool's requests: a password with
+  `&` or `=` no longer breaks a form login, and no value adds a parameter,
+  member or header line. A declarative login now validates the submitted
+  credentials against `credentials.schema` and types them by it. Rules and
+  refusals: `docs/guides/writing-an-integration-with-connect.md`.
+- **A refused declarative login answers `400 invalid_request`**, not `500`, on
+  `connect/fields` and the hosted form (#1818), as a refused `connect.tool`
+  login does; an unreachable or failing service is `502`, a slow one `504`.
+  Importing a form login without `success_criteria` warns.
+- **The guide's `connect.tool` examples send the session cookie as a `Cookie`
+  header** (#1818): `delivery.http.in: "cookie"` is refused at import.
+- **Saving an agent in the editor no longer drops the
+  `integrations_configuration` keys it does not edit**, such as `_meta` or a
+  setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each
+  integration's configuration through whole, and `writeManifestIntegrations`
+  merges onto the stored configuration.
+- **Screen readers announce the connection picker's "No connection" option as
+  a radio item**, checked or not (#1855).
+- **The agent's system prompt carries one `## Integration` section per
+  integration** instead of one per bound connection (#1830).
+- **MCP `run_and_wait` no longer times out client-side on long runs**
+  (#1844). The endpoint answered every POST as one JSON body, so a call sent
+  no byte until the run ended and clients and proxies cut it after 60-100 s.
+  A request carrying `params._meta.progressToken` is now answered over SSE:
+  headers at once, `notifications/progress` every 15 s while the run is
+  waited on, then the result. Other requests keep the JSON response. The
+  sidecar relays progress the same way, and agents' calls to it now ask for
+  it.
+
+- **`appstrate api` no longer cuts a response piped into a slower reader**
+  (#1824, #1858). Piped into `jq` or a script's `capture_output`, the body
+  stopped at the pipe capacity (64 KiB on macOS) because the CLI exited with
+  bytes still queued; `-o <file>` was unaffected. The CLI no longer calls
+  `process.exit` at the end of a command: it sets the exit code and lets the
+  process end on its own, so stdout and stderr are drained first — for every
+  command and exit code, including clack's error banners and the
+  `appstrate code sync` failure report. A reader that stops reading now makes
+  the CLI wait, as curl does, instead of losing the tail.
+
+- **The model settings and the chat model picker name `off` from the
+  server's `reasoning.off`** (#1774). They used to guess it from the API shape
+  and the Pi dialect, and called `off` an explicit disable on models where Pi
+  sends no reasoning parameter (e.g. `opencode-go/kimi-k2.7-code`,
+  `mistral/magistral-medium-latest`).
+
+- **`client_secret_basic` form-urlencodes the client id and secret before
+  base64** (#1854, RFC 6749 §2.3.1): a space becomes `+` and `!'()~` are
+  percent-encoded, the same encoding `client_secret_post` uses. This changes
+  the bytes sent for a secret containing `~ ! ' ( )` or a space: an IdP that
+  does not form-decode Basic credentials (non-compliant) now rejects such a
+  secret.
+
+- **A rejected credential on a connection already flagged for reconnection
+  ends the run's credential refresh with `410`** (#1847), the run marked
+  degraded, instead of `502` in a loop, and no longer spends (on rotating
+  identity providers, burns) the stored refresh token. A proactive refresh of
+  such a connection keeps serving the stored token.
+- **A transient refresh failure that pushes the failure streak past
+  `INTEGRATION_REFRESH_MAX_FAILURES`** (token expired past the grace window)
+  now answers `410` at once instead of one more `502` (#1847).
+- **The platform credential proxy (`/api/credential-proxy/proxy`) no longer
+  refreshes, or counts a rejection against, a credential replaced during the
+  call** (#1847): a refresh by a peer, a reconnect or an API-key rotation. It
+  replays the call once with the connection's current credential.
+- **The model refresh worker no longer logs a missing refresh token as a
+  failure** (#1853).
+- **`invalid_client` / `unauthorized_client` on a token refresh no longer
+  counts toward the failure streak** (#1853), so a broken client registration
+  no longer ends with the connection flagged for reconnection: it answers
+  `502` with cause `oauth_client_rejected`, and for an integration the
+  connect popup names it.
+- **`appstrate run` no longer stays open after a failure while the platform
+  is unreachable** (#1858): unanswered report requests are cancelled.
+- **`appstrate run` prints and keeps launch warnings whose code or source it
+  does not know yet** (#1848).
+
+### Security
+
+- **A self-registered OAuth client no longer names the platform's pages and
+  emails** (#1825). An `instance`-level client took its own `name` as the
+  brand of the login, consent and account pages and as the sender name of the
+  account emails; a client registered through DCR or CIMD chooses that name
+  itself, so it could present the platform as whatever it claimed to be. Only
+  an operator-declared client (`OIDC_INSTANCE_CLIENTS`) names the brand now; a
+  self-registered one gets the platform's.
+
+- **A run never loads Pi extensions from its agent directory** (#1820). In
+  process mode that directory is `/tmp/pi-agent`, under the world-writable
+  `/tmp`, and Pi loaded the extensions it found there whenever the run had
+  extension factories of its own, as a platform run does. Any local user
+  could drop `/tmp/pi-agent/extensions/x.ts` and have it executed inside every
+  run, with the run's environment and workspace.
+- **The sidecar relays an integration MCP server's progress notifications only
+  when the value increases** (#1857), as the MCP spec requires, and at most
+  once per second per call: an untrusted upstream can no longer flood the
+  agent or keep a call open with repeated values. With progress,
+  `APPSTRATE_MCP_TOOL_TIMEOUT_MS` is an idle timeout; the run deadline bounds
+  the call's total duration.
+- **An `insufficient_scopes` item no longer carries a `connect_url`** (#1871).
+  The link upgraded the existing connection in place, which widens every agent
+  that uses it. MCP clients are pointed at a new connection with the item's
+  `required_scopes`, bound by the layer its `source` names. The OpenAPI
+  descriptions of the connect kickoffs, `connection_id`, pins and space
+  defaults state the same rule, and an `integration.connection.reconnected`
+  audit event that changed a connection's granted scopes carries them before
+  and after (`scopesGranted`).
+- **A reconnect no longer adds the current agent's scopes** (#1871): a
+  `needs_reconnection` item carries no `required_scopes`, and its link
+  re-consents what the connection holds plus the auth's `default_scopes`. It
+  used to request the current agent's scopes, which then reached every agent
+  bound to the connection.
+
+## [1.0.0-beta.66] - 2026-10-08
+
+### Operators
+
+- **The boot refuses while the database holds a ciphertext under a kid absent
+  from `CONNECTION_ENCRYPTION_KEY_ID` / `CONNECTION_ENCRYPTION_KEYS`** (#1768),
+  naming each kid and column; a configured kid none of whose sampled
+  ciphertexts opens is only logged as a warning. Before the deploy, with the
+  production env loaded:
+  1. run `bun scripts/rekey-encrypted-columns.ts` (without `--apply`; it writes
+     nothing): no line may read `UNKNOWN`, and every configured kid's line must
+     read `sample opens`. `SAMPLE DOES NOT OPEN` means a key replaced under the
+     same id, or a group whose sampled rows are corrupted. Fix
+     `CONNECTION_ENCRYPTION_KEYS` (or the rows) first;
+  2. this query must return 0 — the inventory counts only open sinks with an
+     expiry:
+     `SELECT count(*) FROM runs WHERE sink_secret_encrypted IS NOT NULL AND sink_expires_at IS NULL AND sink_closed_at IS NULL`.
 - **`BETTER_AUTH_SECRETS` takes Better Auth's `<version>:<secret>[,…]` format;
   a JSON value refuses boot, and `BETTER_AUTH_ACTIVE_KID` is no longer read**
   (#1769). After a non-default active kid, set `BETTER_AUTH_SECRET` to the
@@ -25,9 +746,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or an org default. The pre-flight also counts admin pins and org defaults
   naming an id left dangling by earlier deletions; they are not rewritten and
   fail with `pinned_connection_unavailable` until an admin edits them.
+- **Before the deploy, run
+  `scripts/migration/0037-verify-authorized-uri-host-bounds.ts`** with the
+  env loaded (it decrypts Shopify connections; it writes nothing) (#1656). It
+  lists the org integration drafts and published versions whose
+  `authorized_uris` the release no longer accepts (below), on any auth; the
+  `@appstrate/shopify` connections whose `shop_domain` is not a
+  `<store>.myshopify.com` host, by id, never a value, and exits 1 while one
+  remains. What each line means and how to fix it:
+  `scripts/migration/README.md`.
+- **Migration `0083` refuses the boot while a connection label is empty,
+  starts or ends with whitespace, holds a control, invisible or bidirectional
+  character, or exceeds 80 UTF-16 units** (#1786) — the rule the API already
+  enforces, now a database CHECK. Only a database that applied `0077` without
+  running `0032` can hold one; production is expected at 0. Count them first
+  with the read-only pre-flight in the header of
+  `scripts/migration/0038-normalize-connection-labels.sql`; at 0 there is
+  nothing to do. Otherwise stop the app container (`docker stop`), `pg_dump`,
+  run
+  `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0038-normalize-connection-labels.sql`,
+  deploy: it normalizes those labels, renames the duplicates it creates, turns
+  a label left empty into `Connexion N`, and lists every label it rewrites,
+  for their owners.
+- **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
+  again** (#1773). It writes nothing and now also lists the `connect.login`
+  success criteria and selectors this release refuses (below); it exits 1
+  while one remains. How to fix one: `scripts/migration/README.md`.
 
 ### Changed
 
+- **A credential encrypted under a key id missing from the keyring answers
+  `503 encryption_key_unavailable`, logging the missing kid, and is no longer
+  treated as dead or absent** (#1768, #1814). Before: a `410` and a permanent
+  reconnect prompt on the sidecar path, `404 credential_not_found` on the
+  credential proxy, an integration dropped or a proxy skipped at run start, a
+  `403` asking to re-register an OAuth client, and "not configured" for OIDC
+  per-space SMTP and social sign-ins (social falling back to the instance
+  credentials). Listings show such a row as it is. Only an unreadable blob
+  (corrupted, failed integrity check) stays terminal.
 - **Changing or resetting a password ends the account's other sessions and
   sign-in tokens.** A change ends the account's other sessions and invalidates
   its stored password-reset links, magic links, in-progress social-account links
@@ -39,6 +795,91 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the password is written, the request answers
   `500 credential_change_revocation_failed`. What is deliberately not ended
   (API keys, linked accounts, …) is listed in `SECURITY.md`.
+- **BREAKING (manifest authors): an `authorized_uris` wildcard is bounded
+  only under a literal registrable domain, judged with the Public Suffix
+  List** (ICANN and private sections) (#1656). On an auth whose credential
+  the proxy injects, a wildcard right under a public suffix is refused when
+  the manifest is written: `https://*.co.uk/**`, `https://*.github.io/**`,
+  and the likeliest cases in organization integrations,
+  `https://*.googleapis.com/**`, `https://*.supabase.co/**`,
+  `https://*.workers.dev/**`, `https://*.vercel.app/**`. List the hosts
+  literally instead (`https://sheets.googleapis.com/**`), or render a
+  per-connection host (`https://{$credential.host}/**`). At run time a call
+  carrying a credential under such an entry is refused (sidecar, CLI
+  resolver, platform proxy, MITM listener), as under `https://*.com/**`
+  already, and the target is judged too: a host `*` spans dots, so a
+  credential goes to a host a wildcard matched only when that host's own
+  registrable domain lies inside the literal part of the entry.
+  `https://*.amazonaws.com/**` still passes, but it no longer carries a
+  credential to any host of a whole region whose suffix the list names
+  (every `*.us-east-1.amazonaws.com`: `dynamodb.us-east-1…`, `ec2.us-east-1…`,
+  `sqs.us-east-1…`) nor to any S3 host (`s3.amazonaws.com`,
+  `bucket.s3.eu-west-1.amazonaws.com`); `sts.amazonaws.com` and
+  `iam.amazonaws.com` still receive it. Such a call is refused as
+  `credential_exfiltration_refused`, with a message naming the host to list, and
+  such a redirect hop is followed without the credential. The list bounds
+  only the suffixes their operators declare there: the same wildcard still
+  reaches customer-named endpoints AWS has not listed
+  (`search-<domain>.eu-west-1.es.amazonaws.com`), so list hosts literally
+  where that matters. `https://*.zendesk.com/**` and `https://*.example.co.uk/**` still pass, and
+  so does a literal host or a host rendered from the connection. A stored
+  manifest that passed keeps loading but is refused on its next write; no
+  stored version is grandfathered. The cookie jar is unchanged.
+- **BREAKING (manifest authors): a `connect.login` the login engine cannot
+  evaluate is refused** (#1773), when the manifest is written and, for a stored
+  one, when a connection starts (`invalid_config`, before the login request is
+  sent). The accepted forms are the AFPS §7.7 evaluation profile, stated in
+  `docs/guides/writing-an-integration-with-connect.md`. Refused: a `simple`
+  criterion other than one `<expr> == <operand>` comparison; `xpath`; an output
+  carrying both `from` and Selector fields (`context`, `selector`, `type`); a
+  regex that does not compile (`(?i)…`) or does not capture the extracted
+  `group`; a JSON pointer that is not RFC 6901 (in a body expression, a
+  jsonpointer selector or a jwt `path`); an output named `__proto__`; a jsonpath
+  outside the supported subset, now checked at connect start too. Most such manifests never connected: a compound or grouped
+  condition or an uncompilable regex criterion always failed as `bad_status`
+  ("unexpected status 200"), and the other forms failed only after the user's
+  login inputs had been sent. These forms worked and are refused too:
+  - a number literal that is not a JSON number (`+200`, `200.`, `0x10`, `01`);
+  - an unquoted string literal (`$response.body#/status == ok`): quote it
+    (`'ok'`);
+  - a comparison of two literals (`1 == 1`);
+  - a JSON pointer key or header name holding an operator character or a quote
+    (`$response.body#/a=b == 1`): check such a key with a `regex` criterion;
+  - an extractor carrying Selector fields: drop them;
+  - a JSON pointer with a `~` not followed by `0` or `1`
+    (`$response.body#/a~x`, in a criterion, an output, a jsonpointer selector
+    or a jwt `path`), which used to be read literally: write `~0` for `~`.
+
+  In a bundle, the root is refused; a dependency integration the import
+  inserts imports with a warning naming each such form (a dependency version
+  already present is reused without one). A dependency whose jsonpath is
+  outside the subset, which the manifest schema refused before, now imports
+  the same way, with a warning.
+
+- **A `simple` success criterion compares as Arazzo does** (#1815, #1773).
+  Strings ignore case: `$response.body#/status == 'ok'` now passes on `"OK"`.
+  A number equals a string only when the string is the same JSON number, so
+  `' 200'` and `''` no longer equal `200` and `0`. An absent value (a missing
+  header or body key) equals nothing, not even another absent value.
+- **JSON pointers are read per RFC 6901** (#1773), in criteria, outputs,
+  jsonpointer selectors and jwt `path`s: an array takes only a canonical index
+  and an object only its own members. `#/items/01` and `#/items/length` now
+  yield nothing (an output fails `extract_failed`) where they read index 1 and
+  the array length; an object key `"01"` is read as such.
+- **`@appstrate/shopify` 1.0.3 allows only the connection's own store**:
+  `authorized_uris` is `https://{$credential.shop_domain}/**` instead of
+  `https://*.myshopify.com/**`, and `shop_domain` must be
+  `<store>.myshopify.com` (no scheme) when a connection is created or
+  updated. A connection holding anything else no longer reaches its store
+  until its owner fixes the field (`0037` lists them). (#1656)
+- **`@appstrate/github` 1.0.6 names its `githubusercontent.com` hosts**:
+  `raw`, `gist`, `objects`, `media` (Git LFS files), `release-assets` and
+  `pipelines.actions` instead of `https://*.githubusercontent.com/**`. A call
+  or redirect hop to another `githubusercontent.com` host (`avatars`, user
+  attachments, `results-receiver.actions`) is refused. Actions
+  logs and artifacts that GitHub serves from Azure blob storage
+  (`*.blob.core.windows.net` signed URLs) stay out of reach, as before:
+  that redirect hop was never in the list. (#1656)
 - **A run binds up to 20 connections per integration** (was 10). The cap
   holds on every connection set: admin and member pins, space defaults, launch
   and schedule overrides. Migration `0079` widens the two `connection_ids`
@@ -82,8 +923,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `_meta["dev.appstrate/api-call-error"]`, whichever path served it.
   `appstrate run --integrations=local` reports the same codes; its retired
   codes are listed in `packages/afps-runtime/CHANGELOG.md`.
+- **Remote MCP OAuth checks the protected-resource metadata and the
+  authorization response more strictly.** The RFC 9728 document's `resource`
+  must now be identical (modulo trailing `/`) to the identifier its location
+  was derived from — the MCP URL for a `WWW-Authenticate` challenge or the
+  path-inserted location, its origin for the root location — instead of
+  merely sharing its origin; a document that does not match is skipped for the
+  next location. For every integration OAuth flow, an `iss` authorization
+  response parameter (RFC 9207) must equal the `issuer` of the validated
+  metadata of the server the request was sent to, and a response without one
+  is refused when that server advertises
+  `authorization_response_iss_parameter_supported`.
+
+### Added
+
+- **Connection variables (AFPS §7.12)**: an integration may declare
+  `variables.schema` and use `{$variable.<name>}` in `source.remote.url`, an
+  oauth2 `issuer`, `authorized_uris` and delivery templates, so one package serves every self-hosted instance. The user enters
+  the values when connecting (`variables` on `POST …/connect/fields`,
+  `…/connect/oauth2` and the hosted portal's `/connect/submit`); they are
+  stored in plaintext with the connection (`variables` on the connection DTO)
+  and change only through a reconnect. A URL rendered from them is
+  egress-checked per connection. When the authorization server is chosen per
+  connection, the platform registers one public client per server, integration
+  and space by
+  Dynamic Client Registration (new `integration_oauth_clients.issuer`) and
+  sends each server's responses to a redirect URI of its own
+  (`GET /api/integrations/callback/{tag}`). Migration `0082` adds the two
+  columns; existing rows keep `NULL`. Authoring guide:
+  `docs/guides/writing-an-integration-with-connect.md` → "Connection
+  variables".
+- **System integrations `@appstrate/gitlab-mcp`, `@appstrate/twenty-mcp` and
+  `@appstrate/coolify-mcp`**, backed by each product's own MCP server:
+  GitLab.com or any self-managed instance over OAuth (dynamic client
+  registration, scope `mcp`); Twenty Cloud or a self-hosted server over OAuth
+  or an API key; a Coolify instance over a team API token, after an
+  administrator enables its MCP server.
 
 ### Fixed
+
+- **The CLI no longer loses its login when two `appstrate` processes refresh
+  the token at once** (#1806). Refresh now runs under one cross-process
+  `credentials.lock` beside `credentials.json`, re-reads the token pair under
+  the lock, and login writes the pair and the profile in one hold of it; a
+  background `appstrate code sync` racing another command no longer redeems
+  the same single-use refresh token and gets the session revoked as reuse.
+- **A Claude Code session says when `appstrate code sync` failed at its
+  start** (#1805), instead of silently keeping the cached plugin.
+- **`get.appstrate.dev` no longer passes its release tag to
+  `appstrate install`** (#1788). `bootstrap.sh` read `APPSTRATE_VERSION` as a
+  tag (`v1.0.0-beta.65` or `latest`) and exported it to the installer, which
+  read it as an image tag that GHCR does not publish.
 
 - **A `400 validation_failed` response reports a missing body field with
   `errors[].code: "required"`** (#1790), as documented, instead of
@@ -101,6 +991,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   token issuance and OIDC tokens no longer fail once the secret changes.
 - **A session stays alive while it is used** instead of expiring 7 days after
   sign-in.
+- **Auth e-mails follow the account's language, and a send failure is
+  logged** (#1764). Sign-in links, verification, password reset and change,
+  address change and sign-up on an existing account are written in the
+  account's profile language, French when there is no account yet (a
+  magic-link sign-up). A mail the transport refuses now logs a warning,
+  `auth: auth e-mail not sent`, naming the template; so does a sign-in link
+  the OIDC binding refuses, or a template that fails to render. The flow
+  still answers as before.
 
 ## [1.0.0-beta.65] - 2026-10-07
 

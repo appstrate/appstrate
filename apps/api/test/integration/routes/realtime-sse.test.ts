@@ -885,7 +885,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: ctx.user.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1024,7 +1026,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: member.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: spaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1085,7 +1089,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: other.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: spaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1143,7 +1149,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: ctx.user.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });

@@ -39,7 +39,7 @@
 
 import { createDecipheriv, randomBytes } from "node:crypto";
 
-import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -71,7 +71,7 @@ import {
   writeConnectRunGrant,
 } from "./connect-run-grant.ts";
 import type { ConnectToolExecution, ConnectToolExecutor } from "./orchestrated-strategy.ts";
-import type { CredentialBundle } from "./strategy.ts";
+import { loginRejected, loginTimedOut, type CredentialBundle } from "./strategy.ts";
 
 const RESULT_SENTINEL = "APPSTRATE_CONNECT_RESULT:";
 const ERROR_SENTINEL = "APPSTRATE_CONNECT_ERROR:";
@@ -315,6 +315,7 @@ export async function buildConnectLoginSpec(
       authType: auth.type,
       authorizedUris: [...authorizedUris],
       deliveryHttp,
+      variables: {},
       // The sidecar's MITM substitutes `{{name}}` placeholders only on strings —
       // JSON-stringify non-string credential values so they round-trip cleanly.
       inputs: stringifyInputs(execution.inputs),
@@ -406,10 +407,7 @@ export function parseConnectResult(
         // their input, not a server fault. Surface the tool's diagnostic so the
         // connect form can say "wrong password" / "MFA required" instead of
         // "An internal error occurred", and name the remedy.
-        throw invalidRequest(
-          `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
-          "credentials",
-        );
+        throw loginRejected(diagnostic);
       }
       // Anything else on this channel is a sidecar-internal fault: stay a plain
       // Error so the routes map it to a generic 500 (the raw text is logged
@@ -613,12 +611,7 @@ class ConnectRunExecutor implements ConnectToolExecutor {
         // gateway-timeout tells the caller retrying is the right move, where the
         // generic 500 told them nothing.
         logger.warn("connect-run timed out", { timeoutMs: this.timeoutMs });
-        throw new ApiError({
-          status: 504,
-          code: "timeout",
-          title: "Gateway Timeout",
-          detail: `The connection attempt timed out after ${this.timeoutMs}ms — the login did not complete in time. Please try again.`,
-        });
+        throw loginTimedOut(this.timeoutMs);
       }
       // Parse regardless of exit code: on a non-zero exit the sidecar emits
       // the ERROR sentinel before exiting 1, which carries the real cause.

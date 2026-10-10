@@ -30,12 +30,17 @@ import { DefaultCell } from "../components/default-cell";
 import { TableRowActions } from "../components/table-row-actions";
 import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../lib/integration-presentation";
-import type { IntegrationAuthType, IntegrationConnection } from "../hooks/use-integrations";
+import type {
+  IntegrationAuthType,
+  IntegrationConnection,
+  IntegrationManifestView,
+} from "../hooks/use-integrations";
+import { ScopeSummaryText } from "../components/integration-connect/scope-summary-text";
 import type { ClientRow } from "../lib/integration-clients";
 import {
   AccountCell,
   ConnectionActionsCell,
-  SharedCell,
+  ScopeCell,
   StatusCell,
 } from "./integration-connection-cells";
 
@@ -227,15 +232,16 @@ export function useIntegrationClientColumns({
  * and delete, share and reconnect are all owner-only server-side. A control
  * drawn for a row the caller does not own is a button that answers 403.
  *
- * Tier one is the account and its action end. Status, owner and the share
- * toggle wait for 36rem; granted scopes and expiry wait for 56rem because they
- * are the longest and least often read facts.
+ * Tier one is the account and its action end. Status and the scope with
+ * its share editor wait for 36rem; the owner, the granted scopes and the expiry wait for 56rem
+ * because they are the longest and least often read facts.
  */
 export function useConnectionColumns({
   packageId,
   authKey,
   authType,
   canRenew,
+  manifest,
   userId,
   isAdmin,
   authForConnection,
@@ -246,6 +252,8 @@ export function useConnectionColumns({
   authType: IntegrationAuthType;
   /** False when no OAuth client is usable yet: renewing would 403. */
   canRenew: boolean;
+  /** Names the granted scopes by each auth's `scope_catalog`. */
+  manifest: IntegrationManifestView;
   userId: string | undefined;
   isAdmin: boolean;
   /** Mixed-method tables resolve renew against the row's own authentication. */
@@ -275,7 +283,7 @@ export function useConnectionColumns({
       id: "owner",
       header: t("integration.connection.col.owner"),
       width: "minmax(80px,1fr)",
-      tier: 2,
+      tier: 3,
       cell: (c) => (
         <span className="text-muted-foreground block truncate text-xs">
           {c.owner_name ?? t("integration.connection.ownerUnknown")}
@@ -289,12 +297,12 @@ export function useConnectionColumns({
       tier: 3,
       cell: (c) =>
         c.scopes_granted.length > 0 ? (
-          <span
-            className="text-muted-foreground truncate font-mono text-[0.65rem]"
-            title={c.scopes_granted.join(" ")}
-          >
-            {c.scopes_granted.join(" ")}
-          </span>
+          <ScopeSummaryText
+            manifest={manifest}
+            authKey={authForConnection?.(c).authKey ?? authKey}
+            scopes={c.scopes_granted}
+            className="text-muted-foreground block truncate text-[0.65rem]"
+          />
         ) : (
           <span className="text-muted-foreground text-xs">—</span>
         ),
@@ -313,10 +321,10 @@ export function useConnectionColumns({
     {
       id: "shared",
       header: t("integration.connection.col.shared"),
-      width: "64px",
+      width: "minmax(112px,1fr)",
       tier: 2,
       cell: (c) => (
-        <SharedCell connection={c} packageId={packageId} isOwn={owns(c)} isAdmin={isAdmin} />
+        <ScopeCell connection={c} packageId={packageId} isOwn={owns(c)} isAdmin={isAdmin} />
       ),
     },
     {

@@ -144,7 +144,7 @@ import {
   PACKAGE_TYPE_ROUTE_SEGMENT,
 } from "@appstrate/core/package-files";
 import {
-  collectConnectLoginWarnings,
+  collectLoginCriteriaWarnings,
   collectMetaWarnings,
 } from "../services/integration-import-warnings.ts";
 import { collectAgentImportWarnings } from "../services/agent-import-warnings.ts";
@@ -2639,21 +2639,17 @@ export function createPackagesRouter() {
         force,
       },
     });
-    // Surface engine-subset limitations for integration manifests as
-    // non-blocking warnings (AFPS §7.7). Publishers learn
-    // about unsupported `connect.login` selectors / criteria at import
-    // time rather than chasing the runtime LoginError later. Also lift the
-    // validator's `_meta` Appendix B regex soft-fail warnings to the same
-    // channel so publishers see them on import. Same channel again for an
-    // agent values narrowed by deployment policy — the run applies the
+    // Lift the validator's `_meta` Appendix B regex soft-fail warnings to the
+    // non-blocking warnings channel so publishers see them on import. Same
+    // channel for agent values narrowed by deployment policy — the run applies the
     // effective values regardless, and import is the first author-visible seam.
     // No retired-dependency-key warning here, unlike the bundle path: this
     // route parses through `parseZipWithSkillFallback`, which rejects them
     // outright, so such a manifest is a 400 long before this line.
     const importWarnings = [
-      ...collectConnectLoginWarnings(manifest),
       ...collectMetaWarnings(manifest),
       ...collectAgentImportWarnings(manifest),
+      ...collectLoginCriteriaWarnings(manifest),
     ];
     return c.json(
       {

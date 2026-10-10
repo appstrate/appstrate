@@ -6,7 +6,10 @@ import type { TokenUsage } from "@appstrate/core/token-usage";
 import type { ModelApiShape, PiModelDialect } from "@appstrate/core/sidecar-types";
 import type { ModelGenerationCapabilities } from "@appstrate/core/model-generation";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import type { ConnectionResolutionSource } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionSource,
+  ConnectionResolutionWarningCode,
+} from "@appstrate/core/integration";
 
 export {
   ASSIGNABLE_ORG_ROLES,
@@ -17,7 +20,7 @@ export {
 } from "./member-role-policy.ts";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
-import type { AgentIntegrationEntry } from "./integrations.ts";
+import type { AgentIntegrationEntry, ConnectionScope } from "./integrations.ts";
 export type {
   AccessibleIntegrationConnection,
   AgentIntegrationEntry,
@@ -160,6 +163,14 @@ export interface RunConnectionUsed {
   source: ConnectionResolutionSource;
 }
 
+/** A declared integration the run started bound to no connection, and why. */
+export interface RunIntegrationUnboundWire {
+  integration_package_id: string;
+  code: ConnectionResolutionWarningCode;
+  /** The cascade layer that chose no connection, on `integration_unbound` only. */
+  source: ConnectionResolutionSource | null;
+}
+
 /** Run with enriched display names from LEFT JOINs (dashboard user, end-user, API key, schedule). */
 export type EnrichedRun = RunWireDto & {
   user_name: string | null;
@@ -168,6 +179,8 @@ export type EnrichedRun = RunWireDto & {
   schedule_name: string | null;
   /** Connections resolved for this run, for the "connexions utilisées" panel. Null when the agent declares no integrations. */
   connections_used: RunConnectionUsed[] | null;
+  /** In declaration order; null when the run recorded none (no connection resolution ran). */
+  integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
    * True when the requesting recipient has an unread notification for this run
    * (issue #667). Per-recipient: derived from the `notifications` table for the
@@ -277,6 +290,8 @@ export interface ResourceEntry {
    * Ignored for non-integration resource types.
    */
   auth_key?: string;
+  /** AFPS §4.4 — no run starts without a connection for it. Integration resources only. */
+  required?: boolean;
 }
 
 // --- Run Types ---
@@ -450,21 +465,18 @@ export interface MeConnectionEntry {
   identity: string;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
-  /** Admin/owner sharing toggle (per-org). */
-  shared_with_org: boolean;
+  scope: ConnectionScope;
+  /** Spaces whose members may use it. */
+  shared_spaces: { id: string; name: string }[];
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
-  /**
-   * Number of agents this connection's space RUNS — placed here and switched
-   * on, or on by the deployment's default — that declare this integration in
-   * their dependencies. Used by the UI to surface "reused by N agents" so
-   * members understand that the connection is shared across the org's agents
-   * rather than per-agent.
-   */
+  /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */
   reused_by_agents: number;
-  /** Where this connection lives (the connection is keyed per-space). */
   org: { id: string; name: string };
-  space: { id: string; name: string };
+  /** The one space a space-scoped connection lives in; `null` for an org-scoped one. */
+  space: { id: string; name: string } | null;
+  /** Where an org-scoped connection was connected from; `null` when unknown or space-scoped. */
+  origin_space: { id: string; name: string } | null;
 }
 
 export interface MeConnectionSourceGroup {

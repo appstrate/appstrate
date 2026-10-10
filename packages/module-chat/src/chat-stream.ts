@@ -644,7 +644,7 @@ export async function handleChatStream(
   // API-key bindings carry only the inert proxy key and mint a fresh loopback
   // bearer for every llm-proxy call.
   //
-  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
+  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org/s/:space`), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
@@ -670,8 +670,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  mcpHeaders["x-space-id"] = spaceId;
-  const mcpUrl = platformMcpUrl(origin, orgId);
+  const mcpUrl = platformMcpUrl(origin, orgId, spaceId);
   try {
     const response = await finalize(
       runEngine({
@@ -692,6 +691,7 @@ export async function handleChatStream(
         platformMcp: {
           url: mcpUrl,
           headers: mcpHeaders,
+          spaceId,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on

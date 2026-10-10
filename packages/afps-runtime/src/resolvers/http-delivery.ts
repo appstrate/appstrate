@@ -20,7 +20,7 @@
 
 import { renderCredentialTemplate } from "@appstrate/afps-shared/credential-template";
 
-// The resolver config shape lives once in the zero-dep `@appstrate/afps-shared`
+// The resolver config shape lives once in the zero-internal-dependency `@appstrate/afps-shared`
 // (the canonical `delivery.http` projection target). Re-export it here so
 // consumers importing from `@appstrate/afps-runtime/resolvers` keep their path.
 export type { HttpDeliveryConfig } from "@appstrate/afps-shared/delivery-http";
@@ -105,19 +105,21 @@ export function planHttpDeliveryInjection(
  * Defaults are derived from the auth type per AFPS spec §4.1.4 — `oauth2` sends
  * `Authorization: Bearer <access_token>`, `api_key` sends `X-Api-Key: <api_key>`,
  * `basic` sends `Authorization: Basic base64(username:password)`. Explicit
- * manifest values always win.
+ * manifest values always win. `variables` are the connection's (AFPS §7.12),
+ * rendered for `{$variable.<name>}`.
  */
 export function resolveHttpDelivery(
   authType: string,
   fields: Readonly<Record<string, string>>,
   http: HttpDeliveryConfig | undefined,
+  variables: Readonly<Record<string, string>> = {},
 ): HttpDeliveryPlan | null {
   const defaults = AUTH_TYPE_HTTP_DEFAULTS[authType];
   const headerName = http?.headerName ?? defaults?.headerName ?? "";
   if (!headerName) return null;
 
   const valueFrom = http?.valueFrom ?? defaults?.valueFrom;
-  let value = valueFrom ? renderCredentialTemplate(valueFrom.template, fields) : "";
+  let value = valueFrom ? renderCredentialTemplate(valueFrom.template, fields, { variables }) : "";
   if (valueFrom?.encoding === "base64") value = Buffer.from(value, "utf8").toString("base64");
 
   return {

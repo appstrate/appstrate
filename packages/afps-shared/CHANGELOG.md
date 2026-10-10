@@ -14,6 +14,117 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
+  `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
+  a counter fails `isTokenCount`; keys other than the four counters and `tiers`
+  are dropped; bands failing `isTokenUsageTiers` are dropped and flagged with
+  `tiersDropped`. (#1846)
+- **`isLoopbackHost`** (`./ssrf`): whether a host, in any form `isBlockedHost`
+  parses, is treated as this machine (loopback, `0.0.0.0/8`, `::`,
+  `localhost`, `*.localhost`, or an IPv6 address embedding one of those
+  IPv4s); an unparseable host counts as loopback. Both predicates share one
+  classifier, so `isBlockedHost` is unchanged. (#1819)
+- **`GuardedFetchOptions.blockedHost`** (`./guarded-fetch`): a predicate that
+  replaces the host blocklist on both the literal and the resolved-address
+  layer of every hop, keeping resolution and the address pin (`allowHost`
+  skips both). (#1819)
+
+### Changed
+
+- **BREAKING: `isTokenCount`** (`./token-usage`) accepts only a non-negative
+  safe integer (was any finite non-negative number), the `integer` the AFPS
+  spec and the `llm_usage` columns declare. `isTokenUsageTiers` follows: a band
+  with a fractional counter is malformed. (#1846)
+
+## [0.12.1] — 2026-10-09
+
+### Added
+
+- **`TokenUsage.tiers`** (`./token-usage`) and **`TokenUsageTier`**: usage
+  summed over several requests carries, per price-tier threshold, the tokens of
+  the requests priced at that tier (a subset of the totals), so the sum can be
+  priced exactly. Optional; absent when no request reached a tier. (#1552)
+- **`isTokenUsageTiers`**: the one validation rule for `tiers` — at most
+  `MAX_TOKEN_USAGE_TIERS` bands, strict keys (`input_tokens_above` and the four
+  counters), a positive integer `input_tokens_above` unique across bands, and
+  counters finite and non-negative (`isTokenCount`). Shared by core's
+  `tokenUsageSchema` and the AFPS event guard.
+- **`MAX_TOKEN_USAGE_TIERS`** (16): the band cap.
+- **`isTokenCount`**: a finite, non-negative counter — the rule for every
+  `usage` counter, top-level and in a band.
+- **`TOKEN_USAGE_COUNTERS`**: the four counters, declared once; `TokenUsage`
+  and `TokenUsageTier` are typed from it.
+
+## [0.12.0] — 2026-10-08
+
+Breaking (0.x minor): `parseUrlFormPattern` and `unrenderableAuthorizedUriFields`
+return a `root` with each field.
+
+### Added
+
+- **`./connection-variables`** (AFPS §7.12): `VARIABLE_REF`, `variableRefs`,
+  `isVariableTemplate`, `parseUrlTemplate`, `HOST_LABEL`, `renderUrlVariable` /
+  `renderHostVariable` (one variable under its form's value rule), and
+  `renderUrlTemplate` / `unrenderableUrlTemplateVariables` (each blamed
+  variable with the form it must take, `EXPECTED_URL_VALUE` / `EXPECTED_HOST_VALUE`),
+  which render a URL-valued field (`source.remote.url`, an oauth2 `issuer`) for one connection. URL form: the value is an absolute `http`/`https` URL with a host
+  and no userinfo, query, fragment or `*`; it renders as its serialization, or
+  as its origin and path, every trailing `/` removed, then the template's path.
+  Host form: `.`-separated labels of 1 to 63 letters, digits and `-`, none
+  starting or ending with `-`, lowercased, the rendered host at most 253
+  characters. A value without any `{$…}` renders as itself.
+- **`{$variable.<name>}` in value templates** (`./credential-template`):
+  `unsupportedTemplateExpressions` accepts it, `renderCredentialTemplate`
+  substitutes `opts.variables`, and `substituteCredentialRefs` takes the
+  connection's variables as an optional third argument, rendering both roots
+  in one pass (a variable missing from it renders empty). `TEMPLATE_REF`
+  matches either reference.
+- **`{$variable.<name>}` in `authorized_uris`** (`./authorized-uris`):
+  `renderAuthorizedUris` / `unrenderableAuthorizedUriFields` take the
+  connection's variables. A variable entry renders in the URL form under the
+  URL-form rules, or fills the host of the authority form (alone or ahead of
+  literal labels, before an optional literal port) under the host-form rules;
+  any other entry carrying a variable is dropped. `isHostUnboundedUriPattern`
+  bounds a variable placeholder like a credential one.
+- **`isSelectorOutput`**, **`isJwtOutput`**, **`isJsonNumber`** and
+  **`SimpleOperand`** (`./runtime-expression`): the type guard of a Selector
+  Object output (a non-string output with no `from`) and the jwt-extractor test,
+  shared by the import rule and the login engine; the JSON number test (RFC 8259
+  §6); one parsed side of a `simple` criterion. (#1773)
+
+### Changed
+
+- **BREAKING: `parseUrlFormPattern`** returns `{ root, field, suffix }` and
+  **`UnrenderableUriField`** gains `root` (`"credential" | "variable"`, exported
+  as `TemplateRoot`), so a caller tells a credential field from a variable of
+  the same name.
+- **BREAKING: `simpleCriterionOperands`** (`./runtime-expression`) returns two
+  `SimpleOperand`s (a `ResponseExpression`, or a literal value) and accepts only
+  one `<expr> == <operand>` comparison: exactly one `==`; no other `=`, `!`, `<`,
+  `>`, `&&`, `||`, `(`, `)` outside a quoted literal; each side a response
+  expression `parseResponseExpression` accepts or a literal, at least one side an
+  expression. A literal is a JSON number
+  (`-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?`; `+5`, `.5`, `5.`, `01`, `0x10`
+  are refused), `true`, `false`, `null`, a single-quoted string (`''` is a
+  quote, unescaped in the value), or a double-quoted string holding no double
+  quote. Any other condition is `null`; it used to return the raw sides of the
+  first `==`. (#1773)
+- **BREAKING: `loginBlockIssues` refuses more** (`./runtime-expression`): a
+  `simple` criterion `simpleCriterionOperands` rejects; a criterion `type` other
+  than `simple`, `jsonpath`, `regex`; a selector `type` other than `jsonpath`,
+  `jsonpointer`; an extractor (`from`) carrying a Selector field (`context`,
+  `selector`, `type`); a `jsonpath` criterion or selector outside the
+  `./jsonpath` subset; a `regex` criterion or extractor pattern that does not
+  compile, or an extractor whose `group` (default 1) the pattern does not
+  capture; a `jsonpointer` selector or jwt `path` that is not an RFC 6901
+  pointer; an output named `__proto__`. It reads a block the AFPS schema
+  accepted. (#1773)
+- **BREAKING: `parseResponseExpression`** (`./runtime-expression`) requires an
+  RFC 6901 pointer after `$response.body#`: a `~` not followed by `0` or `1`
+  (`$response.body#/a~x`), which it used to accept, is `null`. (#1773)
+
 ## [0.11.0] — 2026-10-08
 
 Breaking (0.x minor). Publish before any `@appstrate/core` that imports the new
@@ -28,9 +139,36 @@ subpath (core raises its range to `^0.11.0`).
   and egress policy formerly in `@appstrate/afps-runtime`
   (`matchesAuthorizedUriSpec`, `hostLiterallyAllowlisted`,
   `compileEgressPolicy`, `EgressPolicy`). (#1763)
+- **`wildcardMatchStaysWithinBound(pattern, targetHost)`**
+  (`./authorized-uris`): the run-time half of the host bound. An authority
+  `*` spans dots, so an entry matches hosts below a deeper public suffix
+  (`https://*.amazonaws.com/**` matches `sqs.us-east-1.amazonaws.com`); this
+  is true only when the target's registrable domain (Public Suffix List,
+  ICANN and private sections) lies inside the literal labels right of the
+  entry's last wildcard. Always true for an entry whose host holds no
+  wildcard (a literal, a `{$credential.<field>}` host, the URL form); false
+  for an IP target. (#1656)
 - **`substituteCredentialRefs`** (`./credential-template`): each
   `{$credential.<field>}` to its value, a missing or inherited field empty,
   any other `{$…}` left as is. (#1763)
+
+### Changed
+
+- **Breaking: `isHostUnboundedUriPattern` judges a wildcard host with the
+  Public Suffix List** (ICANN and private sections): a wildcard is bounded
+  only when it sits strictly under a registrable domain (eTLD+1) written
+  literally in the entry, and a host one label below it keeps its registrable
+  domain there. An entry that was accepted because its wildcard stayed out of
+  the host's last two labels is now refused when those labels are a public
+  suffix (`https://*.co.uk/**`, `https://*.github.io/**`,
+  `https://*.vercel.app/**`) or when the list makes the children of the
+  suffix public (`https://*.kawasaki.jp/**`). `https://*.example.com/**`,
+  `https://*.example.co.uk/**` and `https://*.someone.github.io/**` stay
+  bounded. A literal host, a `{$credential.<field>}` host and the URL form are
+  judged as before, and so are IP literals and IPv4-shaped hosts. (#1656)
+- **New runtime dependency: `tldts`** (MIT), which embeds the Public Suffix
+  List. The package is no longer described as zero-dependency; it still has no
+  internal one. (#1656)
 
 ### Removed
 

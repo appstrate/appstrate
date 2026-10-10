@@ -38,7 +38,7 @@ export interface ManagedSkill {
  * written by this context.
  *
  * The pinned space is NOT part of it: it selects no skill (D14), it only fills
- * the `X-Space-Id` header of the generated `.mcp.json` — content
+ * the endpoint URL of the generated `.mcp.json` — content
  * `pluginTreeMatches` already compares and rewrites. Switching space installs
  * the same skills, so it is a property of the plugin, not a different owner.
  */

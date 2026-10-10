@@ -66,7 +66,7 @@ const ALIAS_LEVELS = {
 } as const;
 
 function backedBy(providerId: string, apiShape: ModelApiShape, modelId: string): OrgModelInfo {
-  const entry = lookupCatalogModel({ providerId, apiShape, authMode: "api_key" }, modelId)!;
+  const entry = lookupCatalogModel({ providerId, apiShape }, modelId)!;
   return { ...base, aliased: true, modelId, generation: entry.generation };
 }
 
@@ -86,6 +86,18 @@ describe("projectAliasedModel", () => {
     expect(flash).toEqual(pro);
     expect(flash?.reasoning.levels).toEqual(ALIAS_LEVELS);
     expect(opus?.reasoning.levels).toEqual(ALIAS_LEVELS);
+  });
+
+  // What `off` sends fingerprints the backing just as its level set would.
+  it("never reports what `off` sends, whatever the backing", () => {
+    for (const [providerId, apiShape, modelId, off] of [
+      ["opencode-go", "openai-completions", "kimi-k2.7-code", "unsent"],
+      ["anthropic", "anthropic-messages", "claude-sonnet-4-5", "disables"],
+    ] as const) {
+      const backing = backedBy(providerId, apiShape, modelId);
+      expect(backing.generation?.reasoning.off).toBe(off);
+      expect(projectAliasedModel(backing).generation?.reasoning).not.toHaveProperty("off");
+    }
   });
 
   it("passes a non-aliased model through unchanged", () => {

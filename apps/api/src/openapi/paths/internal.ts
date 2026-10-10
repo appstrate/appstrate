@@ -1,6 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
+
+/** A credential endpoint's `410`/`502`: a problem whose `cause` member says why. */
+function credentialFailure(description: string) {
+  const causes = CREDENTIAL_FAILURE_CAUSES.map(
+    (c) => `\`${c}\`: ${CREDENTIAL_FAILURE_SENTENCES[c]}.`,
+  );
+  return {
+    description,
+    content: {
+      "application/problem+json": {
+        schema: {
+          allOf: [
+            { $ref: "#/components/schemas/ProblemDetail" },
+            {
+              type: "object",
+              required: ["cause"],
+              properties: {
+                cause: {
+                  type: "string",
+                  enum: [...CREDENTIAL_FAILURE_CAUSES],
+                  description: `Why the platform did not hand back a refreshed credential. ${causes.join(" ")}`,
+                },
+              },
+            },
+          ],
+        },
+      },
+    },
+  };
+}
+
+const OAUTH_TOKEN_410 = credentialFailure(
+  "`oauth_connection_needs_reconnection`: the credential is flagged `needsReconnection`. The sidecar propagates it to the agent as a 401.",
+);
+
+const OAUTH_TOKEN_502 = credentialFailure("Not refreshed now; the credential stays usable.");
 
 /**
  * The `409` shared by the `/internal/integration-credentials/{scope}/{name}`
@@ -228,15 +266,9 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "410": {
-          description:
-            "Connection needs reconnection (refresh token revoked or missing). Sidecar should propagate as 401 to the agent.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "410": OAUTH_TOKEN_410,
+        "502": OAUTH_TOKEN_502,
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -246,7 +278,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Force a refresh of the access token for an OAuth model provider connection",
       description:
-        "Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on revoked refresh tokens, flips needsReconnection=true on the connection and returns 410.",
+        "Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on a revoked or missing refresh token, flips needsReconnection=true on the connection and returns 410.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         {
@@ -268,14 +300,9 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "410": {
-          description: "Refresh token revoked — connection flagged needsReconnection.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "410": OAUTH_TOKEN_410,
+        "502": OAUTH_TOKEN_502,
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
   },
@@ -306,24 +333,13 @@ export const internalPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": integrationCredentialsConflict409,
-        "410": {
-          description:
-            "The credential is dead and the integration connection has been flagged `needsReconnection`. Three causes, all terminal: the refresh token was revoked upstream; a forced refresh hit an auth that can never be refreshed (no OAuth client / token endpoint, or a non-OAuth auth); or the stored credentials could not be decrypted at all (rotated `CONNECTION_ENCRYPTION_KEY`, corrupted blob) — which is terminal on the plain read too, not only on a forced refresh. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner. Matches the model-provider token endpoint's revoked semantics.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "502": {
-          description:
-            "Transient OAuth refresh failure upstream (network error, IdP 5xx, malformed response). The cached credential may still be valid; the sidecar's listener cooldown will back off and retry on the next 401.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "410": credentialFailure(
+          "`integration_connection_needs_reconnection`: the credential is dead and the integration connection has been flagged `needsReconnection` — on the plain read too when the stored credentials are unreadable. A key id missing from the keyring is NOT a cause: that is the `503`. The sidecar stops retrying and surfaces this to the integration's MCP client as a 401; the run's `metadata.degraded_integrations[]` is stamped so the finished run shows a reconnect banner.",
+        ),
+        "502": credentialFailure(
+          "A proactive OAuth refresh failed; the credential is not refreshed now and may still be valid. The sidecar's listener cooldown backs off and retries on the next 401.",
+        ),
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
@@ -334,7 +350,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Force-refresh OAuth2 credentials for an active integration",
       description:
-        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint; forces a refresh of every OAuth2 auth on the named connection regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. A caller whose `credential_revision` names a credential the connection no longer holds gets the current one (`200`, exactly as the GET) — nothing is refreshed or counted, since its 401 says nothing about the current credential. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
+        "Sidecar-only. Same response shape and same required `connection_id` selector as the GET endpoint. Reports an upstream 401 on the named connection's credential, which is refreshed regardless of its remaining lifetime (OAuth2) or counted as a rejection (an auth nothing can refresh). Called by the MITM listener's `refreshOnUnauthorized` hook. A rejection is evidence only against the credential it names: when `credential_revision` names one the connection no longer holds, the call is a read — `200` exactly as the GET, nothing refreshed or counted. A connection already flagged `needsReconnection` answers `410` without any token exchange, so its refresh token is never spent. An internal fault that is no verdict on the connection (a database error, an incoherent OAuth client configuration) answers `500`, with nothing flagged or counted. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -367,24 +383,13 @@ export const internalPaths = {
           ...integrationCredentialsConflict409,
           description: `${integrationCredentialsConflict409.description} A fourth cause is unique to this operation: \`connect_run_no_refresh\` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched.`,
         },
-        "410": {
-          description:
-            "The credential is dead and the connection has been flagged `needsReconnection` — same semantics and same three causes as the GET endpoint.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
-        "502": {
-          description:
-            "Transient OAuth refresh failure upstream — same semantics as the GET endpoint — or an unrefreshable auth (api_key, basic, custom, oauth2 with no refresh client) rejected upstream; the rejection is counted and the connection is flagged (`410`) once `INTEGRATION_REFRESH_MAX_FAILURES` consecutive rejections are counted. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        "410": credentialFailure(
+          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
+        ),
+        "502": credentialFailure(
+          "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections.",
+        ),
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
         "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },

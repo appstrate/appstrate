@@ -13,9 +13,8 @@ import type { PGlite } from "@electric-sql/pglite";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { decrypt, encrypt } from "@appstrate/connect";
 import { _resetKeyringForTesting } from "../../../../packages/connect/src/encryption.ts";
+import { ENCRYPTED_COLUMNS, countByKid } from "@appstrate/db/encrypted-columns";
 import {
-  ENCRYPTED_COLUMNS,
-  countByKid,
   rekeyRetiredKids,
   reportCounts,
   type Query,
@@ -76,10 +75,10 @@ beforeAll(async () => {
   const inserts: [string, unknown[]][] = [
     [
       `INSERT INTO integration_connections
-         (id, integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted, label)
-       VALUES ('d0370000-0000-4000-8000-000000000001', $1, 'primary', 'a@acme.test', $2, $3, $4, 'A'),
-              ('d0370000-0000-4000-8000-000000000002', $1, 'primary', 'b@acme.test', $2, $3, $5, 'B')`,
-      [GMAIL, SPACE, USER, OLD.conn, alien],
+         (id, integration_package_id, auth_key, account_id, org_id, space_id, user_id, credentials_encrypted, label)
+       VALUES ('d0370000-0000-4000-8000-000000000001', $1, 'primary', 'a@acme.test', $6, $2, $3, $4, 'A'),
+              ('d0370000-0000-4000-8000-000000000002', $1, 'primary', 'b@acme.test', $6, $2, $3, $5, 'B')`,
+      [GMAIL, SPACE, USER, OLD.conn, alien, ORG],
     ],
     [
       `INSERT INTO integration_oauth_clients
@@ -146,7 +145,7 @@ describe("rekey-encrypted-columns", () => {
     const counts = await countByKid(query);
     expect(counts.filter((c) => c.kid === "k1").length).toBe(ENCRYPTED_COLUMNS.length);
     expect(counts.every((c) => c.kid === "k0" || c.count === 1)).toBe(true);
-    expect(counts.find((c) => c.kid === "k0")).toEqual({
+    expect(counts.find((c) => c.kid === "k0")).toMatchObject({
       table: "integration_connections",
       column: "credentials_encrypted",
       kid: "k0",
@@ -155,6 +154,9 @@ describe("rekey-encrypted-columns", () => {
     const lines: string[] = [];
     expect(reportCounts(counts, KEYRING, (l) => lines.push(l))).toBe(false);
     expect(lines.some((l) => l.includes("k0 (UNKNOWN)"))).toBe(true);
+    expect(lines.filter((l) => l.includes("k1 (retired, sample opens)"))).toHaveLength(
+      ENCRYPTED_COLUMNS.length,
+    );
   });
 
   it("re-encrypts the retired kid under the active one, plaintext unchanged", async () => {
@@ -227,6 +229,9 @@ describe("rekey-encrypted-columns", () => {
     expect(result.rekeyed).toBe(0);
     expect(result.failed).toHaveLength(1);
     expect(result.failed[0]).toStartWith("org_proxies.url_encrypted ");
+    const lines: string[] = [];
+    expect(reportCounts(await countByKid(query), KEYRING, (l) => lines.push(l))).toBe(false);
+    expect(lines).toContain("  org_proxies.url_encrypted  k1 (retired, SAMPLE DOES NOT OPEN): 1");
   });
 });
 

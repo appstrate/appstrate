@@ -323,6 +323,66 @@ describe("wrapClient — cancellation", () => {
   });
 });
 
+describe("wrapClient — progress", () => {
+  const TIMEOUT_MS = 300;
+  const RUN_MS = 600;
+  const STEP_MS = 20;
+
+  /**
+   * Runs RUN_MS — twice the timeout — reporting progress every STEP_MS when the
+   * caller asked for it. Records the token it saw.
+   */
+  function reportingTool(seen: { token?: unknown }): AppstrateToolDefinition {
+    return {
+      descriptor: { name: "reporting", inputSchema: { type: "object" } },
+      handler: async (_args, extra) => {
+        const progressToken = extra._meta?.progressToken;
+        seen.token = progressToken;
+        for (let progress = 1; progress <= RUN_MS / STEP_MS; progress++) {
+          await new Promise((r) => setTimeout(r, STEP_MS));
+          if (progressToken !== undefined) {
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: { progressToken, progress },
+            });
+          }
+        }
+        return { content: [{ type: "text", text: "done" }] };
+      },
+    };
+  }
+
+  it("with onProgress: sends a token and treats the timeout as an idle timeout", async () => {
+    const seen: { token?: unknown } = {};
+    const pair = await createInProcessPair([reportingTool(seen)]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, TIMEOUT_MS);
+    try {
+      let received = 0;
+      const res = await wrapped.callTool(
+        { name: "reporting" },
+        { onProgress: () => (received += 1) },
+      );
+      expect(res.content).toEqual([{ type: "text", text: "done" }]);
+      expect(seen.token).toBeDefined();
+      expect(received).toBe(RUN_MS / STEP_MS);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("without onProgress: sends no token and keeps the timeout a hard cap", async () => {
+    const seen: { token?: unknown } = {};
+    const pair = await createInProcessPair([reportingTool(seen)]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, TIMEOUT_MS);
+    try {
+      await expect(wrapped.callTool({ name: "reporting" })).rejects.toThrow();
+      expect(seen.token).toBeUndefined();
+    } finally {
+      await pair.close();
+    }
+  });
+});
+
 describe("wrapClient — surface narrowing", () => {
   it("exposes listTools/callTool via the wrapped client", async () => {
     const [a, b] = InMemoryTransport.createLinkedPair();

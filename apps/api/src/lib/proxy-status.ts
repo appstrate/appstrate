@@ -63,6 +63,11 @@ const PROXY_PROBLEMS = {
     title: "Credential Unusable",
     proxyError: "proxy_configuration_error",
   },
+  encryption_key_unavailable: {
+    status: 503,
+    title: "Service Unavailable",
+    proxyError: "proxy_configuration_error",
+  },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
   invalid_request: { status: 400, title: "Invalid Request" },
   upstream_unresolvable: {

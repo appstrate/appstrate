@@ -91,7 +91,8 @@ import {
 } from "./lib/dual-install-check.ts";
 import { installSignalHandlers, onShutdown } from "./lib/shutdown.ts";
 import { asksForVersion, showVersionFlagInHelp, valueFlagsOf } from "./lib/root-version.ts";
-import { exitWithError } from "./lib/ui.ts";
+import { settleCommand } from "./lib/ui.ts";
+import { CommandExit } from "./lib/io.ts";
 import { CLI_VERSION } from "./lib/version.ts";
 
 // Defense in depth: restore cooked mode on exit. `@clack/prompts`
@@ -102,8 +103,7 @@ import { CLI_VERSION } from "./lib/version.ts";
 // a cooked-mode restore on every exit path is cheap and catches the
 // edge cases clack's own cleanup misses.
 //
-// Wired through both `process.on("exit", …)` (covers normal completion
-// + sync crashes routed through `exitWithError`) and the shutdown
+// Wired through both `process.on("exit", …)` (covers every exit) and the shutdown
 // coordinator (covers signal-driven exits, where the coordinator awaits
 // hooks before calling `process.exit`). The coordinator route is what
 // lets subcommands like `appstrate run` complete their cooperative
@@ -152,9 +152,15 @@ function parseSkillSource(val: string): SkillSource {
 
 // Catch stray unhandled rejections + uncaughts before Bun's default
 // stack-trace dump kicks in — commands are async and may throw after
-// commander's callback completes.
-process.on("unhandledRejection", (err) => exitWithError(err));
-process.on("uncaughtException", (err) => exitWithError(err));
+// commander's callback completes. Whatever still runs is then in an unknown
+// state, so these end the process at once — except a `CommandExit`, an exit
+// already decided, which drains stdio like any other.
+const settleStray = (err: unknown): void => {
+  settleCommand(err);
+  if (!(err instanceof CommandExit)) process.exit();
+};
+process.on("unhandledRejection", settleStray);
+process.on("uncaughtException", settleStray);
 
 const program = new Command();
 
@@ -1196,7 +1202,6 @@ function parseSinkTtl(raw: unknown): number | undefined {
 showVersionFlagInHelp(program);
 if (asksForVersion(process.argv.slice(2), valueFlagsOf(program))) {
   process.stdout.write(`${CLI_VERSION}\n`);
-  process.exit(0);
+} else {
+  program.parseAsync(process.argv).catch(settleCommand);
 }
-
-program.parseAsync(process.argv).catch((err) => exitWithError(err));
