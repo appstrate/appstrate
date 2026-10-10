@@ -131,6 +131,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`@appstrate/twilio` 1.1.0 reaches every `*.twilio.com` product host**
+  (#1904): Messaging Services, Conversations, Studio, Serverless were refused.
+  Its single auth is now documented to take a Twilio API key (`SK…` SID +
+  secret, revocable on its own, recommended) as well as the Account SID and
+  Auth Token: Twilio checks both pairs with the same Basic scheme. The
+  connect form is in French and asks for the SID first: form fields now
+  follow the credential schema's `required` order, since jsonb storage
+  reorders `properties` keys. The tool is still `api_call`; existing
+  connections and agents are unchanged.
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).
   - `shared_with_org` is gone from the connection DTOs (connection list,
