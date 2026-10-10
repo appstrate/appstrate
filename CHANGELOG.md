@@ -230,10 +230,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   system client, an org client or none (API key, basic, fields) makes it
   usable by its owner in every space of the org; a space's own OAuth client,
   an end user, or a delegated credential (API key, third-party token)
-  keeps it in that space. A space whose default OAuth client
-  for that auth is its own uses only the org-wide connections connected from
-  it. The
-  owner shares a connection with chosen spaces; losing access to a space
+  keeps it in that space. Registering a space's own OAuth client changes
+  which client mints its new connections, never which existing ones serve
+  it. The owner shares a connection with chosen spaces; losing access to a space
   withdraws that share only, and deleting a space withdraws it from every
   share. With several of their own connections, a member's run binds the one
   made in the run's space. Promoting a space OAuth client to the org widens

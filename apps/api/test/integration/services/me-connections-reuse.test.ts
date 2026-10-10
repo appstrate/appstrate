@@ -95,7 +95,7 @@ describe("listMeConnections — reused_by_agents", () => {
     await seedAgentRunningIn("@reuse/in-b", b);
   });
 
-  async function seedOwnManualDefaultClient(spaceId: string): Promise<void> {
+  async function seedOwnDefaultClient(spaceId: string): Promise<void> {
     await db.insert(integrationOauthClients).values({
       orgId: ctx.orgId,
       spaceId,
@@ -123,14 +123,9 @@ describe("listMeConnections — reused_by_agents", () => {
     expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
   });
 
-  it("does not count B when B defaults to its own manual client", async () => {
-    await seedOwnManualDefaultClient(b);
-    expect(await reuseOf(await seedConnection({ from: a }))).toBe(1);
-  });
-
-  it("still counts B when the row is shared into it", async () => {
-    await seedOwnManualDefaultClient(b);
-    expect(await reuseOf(await seedConnection({ from: a, sharedSpaceIds: [b] }))).toBe(2);
+  it("still counts B when B defaults to its own OAuth client", async () => {
+    await seedOwnDefaultClient(b);
+    expect(await reuseOf(await seedConnection({ from: a }))).toBe(2);
   });
 
   it("counts a space-scoped row's agents in its own space only", async () => {

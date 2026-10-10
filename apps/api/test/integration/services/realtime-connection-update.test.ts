@@ -6,9 +6,8 @@
  *
  *   1. org_id mismatch           → skip (tenant isolation)
  *   2. space_id mismatch         → skip, unless the row is org-scoped
- *                                  (`space_id` NULL reaches every space of its org
- *                                  but one defaulting to its own manual client,
- *                                  unless the row was made there)
+ *                                  (`space_id` NULL reaches every space of its org,
+ *                                  whatever OAuth client the space registers)
  *   3. userId match              → forward (own dashboard rows)
  *   4. userId mismatch           → skip (cross-actor isolation)
  *   5. no actor on subscriber    → skip (anti-leak default)
@@ -284,76 +283,33 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     expect(send).not.toHaveBeenCalled();
   });
 
-  describe("org row in a space on its own manual client", () => {
-    async function seedManualSpace(name: string): Promise<string> {
-      const { id } = await seedSpace({ orgId: ctx.orgId, name });
-      await db.insert(integrationOauthClients).values({
-        orgId: ctx.orgId,
-        spaceId: id,
-        integrationId: INTEG,
-        authKey: "primary",
-        clientId: `manual-${name}`,
-        clientSecretEncrypted: "x",
-        isDefault: true,
-        autoProvisioned: false,
-      });
-      return id;
-    }
-
-    function subscribeOwner(spaceId: string) {
-      const send = mock((_e: RealtimeEvent) => {});
-      const id = `sub-reach-${spaceId}`;
-      trackSubscriber(id);
-      addSubscriber({
-        id,
-        filter: { readAll: true, orgId: ctx.orgId, spaceId, userId: ctx.user.id },
-        send,
-      });
-      return send;
-    }
-
-    const ops = (send: ReturnType<typeof subscribeOwner>) =>
-      send.mock.calls.map((c) => eventData(c[0]!, "connection_update").operation);
-
-    it("withholds every operation there, not from the origin or an ordinary space", async () => {
-      const manual = await seedManualSpace("Manual");
-      const ordinary = (await seedSpace({ orgId: ctx.orgId, name: "Ordinary" })).id;
-      const inOrigin = subscribeOwner(ctx.defaultSpaceId);
-      const inOrdinary = subscribeOwner(ordinary);
-      const inManual = subscribeOwner(manual);
-
-      const id = await insertConnection({
-        userId: ctx.user.id,
-        spaceId: null,
-        originSpaceId: ctx.defaultSpaceId,
-      });
-      await waitFor(() => ops(inOrdinary).includes("INSERT"));
-      await db.execute(
-        sql`UPDATE integration_connections SET needs_reconnection = true WHERE id = ${id}`,
-      );
-      await waitFor(() => ops(inOrdinary).includes("UPDATE"));
-      await db.execute(sql`DELETE FROM integration_connections WHERE id = ${id}`);
-      await waitFor(() => ops(inOrdinary).includes("DELETE"));
-
-      // One reach query decides every subscriber of an event, so the ordinary
-      // space's delivery proves the manual space's verdict was reached.
-      expect(ops(inOrdinary)).toEqual(["INSERT", "UPDATE", "DELETE"]);
-      expect(ops(inOrigin)).toEqual(["INSERT", "UPDATE", "DELETE"]);
-      expect(inManual).not.toHaveBeenCalled();
+  it("forwards an org-scoped row to a space defaulting to its own OAuth client", async () => {
+    const { id: spaceB } = await seedSpace({ orgId: ctx.orgId, name: "Own client" });
+    await db.insert(integrationOauthClients).values({
+      orgId: ctx.orgId,
+      spaceId: spaceB,
+      integrationId: INTEG,
+      authKey: "primary",
+      clientId: "byo-app",
+      clientSecretEncrypted: "x",
+      isDefault: true,
+    });
+    const send = mock((_e: RealtimeEvent) => {});
+    trackSubscriber("sub-own-client");
+    addSubscriber({
+      id: "sub-own-client",
+      filter: { readAll: true, orgId: ctx.orgId, spaceId: spaceB, userId: ctx.user.id },
+      send,
     });
 
-    it("sends it there when the row was made there", async () => {
-      const origin = await seedManualSpace("Origin");
-      const other = await seedManualSpace("Other");
-      const inOrigin = subscribeOwner(origin);
-      const inOther = subscribeOwner(other);
-
-      await insertConnection({ userId: ctx.user.id, spaceId: null, originSpaceId: origin });
-      await waitFor(() => inOrigin.mock.calls.length >= 1);
-
-      expect(ops(inOrigin)).toEqual(["INSERT"]);
-      expect(inOther).not.toHaveBeenCalled();
+    await insertConnection({
+      userId: ctx.user.id,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
     });
+    await waitFor(() => send.mock.calls.length >= 1);
+
+    expect(eventData(send.mock.calls[0]![0]!, "connection_update").operation).toBe("INSERT");
   });
 
   it("skips a space-scoped row on the owner's subscriber of another space of the org", async () => {

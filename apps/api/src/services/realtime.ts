@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, inArray } from "drizzle-orm";
-import { db, listenClient, type ListenClient } from "@appstrate/db/client";
-import { integrationOauthClients } from "@appstrate/db/schema";
+import { listenClient, type ListenClient } from "@appstrate/db/client";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
@@ -13,7 +11,6 @@ import {
   chatSessionUpdateEventSchema,
   type RealtimeEvent,
 } from "@appstrate/shared-types";
-import { ownManualDefaultClient } from "./connection-reach.ts";
 
 export type { RealtimeEvent };
 
@@ -239,9 +236,9 @@ function handleRunMetric(payload: string): void {
 // row all read off React Query keys that this event invalidates.
 //
 // Tenant filter: the row's org, and its space unless it is org-scoped
-// (`space_id` NULL), which reaches the owner in the spaces `connectionInSpace`
-// admits. The subscriber owns its actor identity (set at SSE auth time) so a
-// member only sees their own rows.
+// (`space_id` NULL), which reaches the owner in every space. The subscriber
+// owns its actor identity (set at SSE auth time) so a member only sees their
+// own rows.
 function receivesConnection(sub: Subscriber, data: ConnectionUpdate): boolean {
   if (!accepts(sub, "connection_update")) return false;
   if (sub.filter.orgId !== data.orgId) return false;
@@ -251,30 +248,6 @@ function receivesConnection(sub: Subscriber, data: ConnectionUpdate): boolean {
   if (sub.filter.userId !== undefined) return data.userId === sub.filter.userId;
   if (sub.filter.endUserId !== undefined) return data.endUserId === sub.filter.endUserId;
   return false;
-}
-
-/** The spaces among `spaceIds` that use their own manual client for the row's auth. */
-async function spacesClosedToOrgRow(
-  data: ConnectionUpdate,
-  spaceIds: string[],
-): Promise<Set<string>> {
-  const rows = await db
-    .selectDistinct({ spaceId: integrationOauthClients.spaceId })
-    .from(integrationOauthClients)
-    .where(
-      and(
-        inArray(integrationOauthClients.spaceId, spaceIds),
-        ownManualDefaultClient(data.integrationPackageId, data.authKey),
-      ),
-    );
-  return new Set(rows.map((r) => r.spaceId!));
-}
-
-function deliverConnectionUpdate(targets: Subscriber[], data: ConnectionUpdate): void {
-  for (const sub of targets) {
-    // Re-read: a stream may have closed while the reach query ran.
-    if (subscribers.has(sub.id)) sub.send({ event: "connection_update", data });
-  }
 }
 
 function handleConnectionUpdate(payload: string): void {
@@ -289,29 +262,9 @@ function handleConnectionUpdate(payload: string): void {
       return;
     }
     const data = parsed.data;
-    const targets = [...subscribers.values()].filter((sub) => receivesConnection(sub, data));
-    const elsewhere =
-      data.spaceId === null
-        ? [...new Set(targets.map((sub) => sub.filter.spaceId))].filter(
-            (id) => id !== data.originSpaceId,
-          )
-        : [];
-    if (elsewhere.length === 0) {
-      deliverConnectionUpdate(targets, data);
-      return;
+    for (const sub of subscribers.values()) {
+      if (receivesConnection(sub, data)) sub.send({ event: "connection_update", data });
     }
-    void spacesClosedToOrgRow(data, elsewhere)
-      .then((closed) =>
-        deliverConnectionUpdate(
-          targets.filter((sub) => !closed.has(sub.filter.spaceId)),
-          data,
-        ),
-      )
-      .catch((err: unknown) => {
-        logger.error("Failed to resolve connection_update reach", {
-          error: getErrorMessage(err),
-        });
-      });
   } catch (err) {
     logger.error("Failed to parse connection_update payload", {
       error: getErrorMessage(err),
