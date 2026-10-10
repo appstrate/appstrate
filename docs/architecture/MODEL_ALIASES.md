@@ -242,7 +242,9 @@ caller's other personal credential or to the organization binding. A run's
 inference through the LLM proxy serves the credential frozen at launch
 (`runs.model_credential_id`) and is not re-resolved during the run: a credential
 the payer adds mid-run changes nothing, and one removed mid-run stops serving
-that run's calls. The sidecar's token door (`/internal/oauth-token/{credentialId}`)
+that run's calls: the run's next call is refused, never served by whatever
+serves the model now (only a system model or an alias launches without a
+credential id). The sidecar's token door (`/internal/oauth-token/{credentialId}`)
 gives a subscription's token only to a platform run pinned to that credential,
 launched by its owner with no API key (`runs.api_key_id` NULL); any other run is
 refused. `llm_usage.credential_id` records the credential that served each call.

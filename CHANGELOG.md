@@ -518,8 +518,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `model_credential_required`.
 
 - **Organization setting `personal_model_credentials`** (#1875), in
-  organization settings. Off refuses new personal credentials; existing ones
-  serve nothing. Leaving the organization deletes the member's personal
+  organization settings. Off refuses new personal credentials, and existing
+  ones serve no new call or run; a run already started keeps the credential it
+  launched with until it ends. Leaving the organization deletes the member's personal
   credentials and their pairings.
 
 - **`integrations_configuration.<id>.required`** (AFPS §4.4, afps-spec#28):

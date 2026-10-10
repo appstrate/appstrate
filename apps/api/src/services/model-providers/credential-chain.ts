@@ -16,7 +16,7 @@ function familyOf(providerId: string): string {
 }
 
 /** A subscription (oauth2) credential: always personal, never served by the LLM proxy. */
-function isSubscription(providerId: string): boolean {
+export function isSubscription(providerId: string): boolean {
   return getModelProvider(providerId)?.authMode === "oauth2";
 }
 

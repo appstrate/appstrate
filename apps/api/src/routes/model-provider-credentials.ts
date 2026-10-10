@@ -258,6 +258,14 @@ async function resolveTestTarget(
   if (!callerKey) throw invalidRequest("API key is required", "api_key");
   const cfg = getModelProvider(body.providerId);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
+  // Same line as creation: a custom endpoint is an organization credential, so only
+  // its managers may point a probe at a host of their choosing.
+  if (cfg.baseUrlOverridable && !caller.writesOrg) {
+    throw invalidRequest(
+      `Provider ${cfg.providerId} with a custom endpoint is an organization credential only`,
+      "providerId",
+    );
+  }
   if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
     throw invalidRequest(
       `Provider ${cfg.providerId} does not accept a base URL override`,
@@ -346,7 +354,7 @@ export function createModelProviderCredentialsRouter() {
   });
 
   // POST /api/model-provider-credentials
-  router.post("/", requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
+  router.post("/", rateLimit(10), requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
     const caller = callerOf(c);
     const user = c.get("user");
     const data = await readJsonBody(c, createSchema);

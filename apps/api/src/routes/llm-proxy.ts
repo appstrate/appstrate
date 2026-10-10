@@ -142,7 +142,7 @@ export function createRunLlmProxyRouter() {
       return proxyAndLog(c, apiShape, limits, {
         principal: { kind: "run", orgId },
         payerUserId: null,
-        pinned: { credentialId: run.modelCredentialId },
+        pinned: { credentialId: run.modelCredentialId, source: run.modelSource },
         runId,
         chatSessionId: null,
         presetId: run.modelId,

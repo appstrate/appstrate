@@ -411,7 +411,9 @@ describe("model resolution — a member's own credential first", () => {
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialId: subscription.id,
     });
-    expect(await loadPinnedModel(ctx.orgId, model.id, mine.id)).toMatchObject({
+    expect(
+      await loadPinnedModel(ctx.orgId, model.id, { credentialId: mine.id, source: "org" }),
+    ).toMatchObject({
       credentialSource: "org",
       credentialId: mine.id,
       apiKey: "sk-alice",

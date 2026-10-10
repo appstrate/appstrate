@@ -18,7 +18,13 @@
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
-import { loadModel, loadPinnedModel, requireBoundModel, type BoundModel } from "../org-models.ts";
+import {
+  loadModel,
+  loadPinnedModel,
+  requireBoundModel,
+  type BoundModel,
+  type PinnedModelCredential,
+} from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import {
@@ -57,9 +63,9 @@ interface ProxyCallInputs {
   payerUserId: string | null;
   /**
    * A run's own inference: its preset is served by the credential frozen at launch
-   * (`runs.model_credential_id`, null for an organization key), never by a chain.
+   * (`runs.model_credential_id`, `runs.model_source`), never by a chain.
    */
-  pinned?: { credentialId: string | null };
+  pinned?: PinnedModelCredential;
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /**
@@ -416,7 +422,7 @@ async function resolvePresetForOrg(
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     loaded = inputs.pinned
-      ? await loadPinnedModel(orgId, presetId, inputs.pinned.credentialId)
+      ? await loadPinnedModel(orgId, presetId, inputs.pinned)
       : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)

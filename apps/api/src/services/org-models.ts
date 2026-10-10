@@ -2,7 +2,7 @@
 
 import { and, eq, getTableColumns } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { modelProviderCredentials, orgModels } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels, type CredentialSource } from "@appstrate/db/schema";
 import { getSystemModels, isSystemModel, type ModelDefinition } from "./model-registry.ts";
 import {
   type CatalogScope,
@@ -33,6 +33,7 @@ import type { ModelMetadata, OrgModelInfo, TestResult } from "@appstrate/shared-
 import { loadInferenceCredentials, loadCredentialMetadata } from "./model-providers/credentials.ts";
 import {
   applicableCredentialIds,
+  isSubscription,
   listPersonalCredentials,
   servesModel,
   type PersonalCredential,
@@ -621,7 +622,7 @@ function personalCredentialNotBindable(): ApiError {
     code: "personal_credential_not_bindable",
     title: "Invalid Request",
     detail:
-      "A model can only be bound to an organization credential. Without one, each member serves it with their own credential.",
+      "A model can only be bound to an organization API key: a subscription or a member's own credential is never shared. Without one, each member serves it with their own credential.",
     param: "credentialId",
   });
 }
@@ -648,7 +649,9 @@ async function resolveOrgBinding(
   }
   const credential = await loadCredentialBinding(orgId, input.credentialId);
   if (!credential) throw invalidRequest("credentialId is unknown", "credentialId");
-  if (credential.ownerUserId !== null) throw personalCredentialNotBindable();
+  if (credential.ownerUserId !== null || isSubscription(credential.providerId)) {
+    throw personalCredentialNotBindable();
+  }
   if (input.providerId !== undefined && input.providerId !== credential.providerId) {
     throw invalidRequest(
       `providerId must be '${credential.providerId}', the provider of this credential`,
@@ -1329,19 +1332,32 @@ export async function loadModel(
   );
 }
 
+/** What a run froze at launch: `runs.model_credential_id` and `runs.model_source`. */
+export interface PinnedModelCredential {
+  credentialId: string | null;
+  source: CredentialSource | null;
+}
+
 /**
- * The model a run was launched on, served by the credential frozen at launch
- * (`runs.model_credential_id`): no chain and no payer check, since that choice was
- * made then. `credentialId` null is the unpinned run, resolved as {@link loadModel}
- * with no payer. `null` when the model is missing or disabled, or the pinned
- * credential no longer serves it.
+ * The model a run was launched on, served by the credential frozen at launch: no
+ * chain and no payer check, since that choice was made then. `null` when the model
+ * is missing or disabled, or the pinned credential no longer serves it.
+ *
+ * Only a system model or an alias launches without a credential id. Any other
+ * unpinned run lost its credential mid-run (`ON DELETE SET NULL`), and falling
+ * back to whatever serves the model now would switch who pays.
  */
 export async function loadPinnedModel(
   orgId: string,
   modelDbId: string,
-  credentialId: string | null,
+  pin: PinnedModelCredential,
 ): Promise<ResolvedModel | null> {
-  if (credentialId === null) return loadModel(orgId, modelDbId, null);
+  const { credentialId, source } = pin;
+  if (credentialId === null) {
+    const resolved = await loadModel(orgId, modelDbId, null);
+    const launchedUnpinned = resolved?.aliased === true || source === "system";
+    return resolved && launchedUnpinned && resolved.credentialSource === source ? resolved : null;
+  }
   return resolveModelCached(orgId, modelDbId, `pin:${credentialId}`, () =>
     resolvePinnedModel(orgId, modelDbId, credentialId),
   );

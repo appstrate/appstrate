@@ -1578,13 +1578,13 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
 
     const pinnedPersonal = await proxyAs(run, h.presetId, {
       payerUserId: null,
-      pinned: { credentialId: h.personalCredentialId },
+      pinned: { credentialId: h.personalCredentialId, source: "org" },
     });
     expect(pinnedPersonal.authorization).toBe("Bearer sk-personal");
 
     const pinnedOrg = await proxyAs(run, h.presetId, {
       payerUserId: null,
-      pinned: { credentialId: h.orgCredentialId },
+      pinned: { credentialId: h.orgCredentialId, source: "org" },
     });
     expect(pinnedOrg.authorization).toBe("Bearer sk-org");
   });
@@ -1596,7 +1596,10 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     await db
       .delete(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, h.personalCredentialId));
-    const frozen = { payerUserId: null, pinned: { credentialId: h.orgCredentialId } };
+    const frozen = {
+      payerUserId: null,
+      pinned: { credentialId: h.orgCredentialId, source: "org" as const },
+    };
     expect((await proxyAs(run, h.presetId, frozen)).authorization).toBe("Bearer sk-org");
 
     await db.insert(modelProviderCredentials).values({
