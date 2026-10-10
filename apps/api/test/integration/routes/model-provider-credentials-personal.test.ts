@@ -219,6 +219,51 @@ describe("personal model credentials — routes", () => {
     });
   });
 
+  describe("privacy", () => {
+    it("an admin sees no email on a member's personal OAuth credential", async () => {
+      await createOAuthCredential({
+        orgId: admin.orgId,
+        userId: member.user.id,
+        label: "Member subscription",
+        providerId: OAUTH_PROVIDER,
+        accessToken: "at-member",
+        refreshToken: "rt-member",
+        email: "member@example.test",
+      });
+
+      const adminRows = await listCredentials(admin);
+      expect(adminRows.find((c) => c.label === "Member subscription")).toMatchObject({
+        owner_id: member.user.id,
+        oauth_email: null,
+      });
+
+      const ownRows = await listCredentials(member);
+      expect(ownRows.find((c) => c.label === "Member subscription")).toMatchObject({
+        oauth_email: "member@example.test",
+      });
+    });
+
+    it("a personal label does not suffix a label held by another member's personal credential", async () => {
+      await createApiKeyCredential({
+        orgId: admin.orgId,
+        userId: otherMember.user.id,
+        label: "Shared label",
+        providerId: FIXED_KEY_PROVIDER,
+        apiKey: "sk-other",
+        ownerUserId: otherMember.user.id,
+      });
+
+      const res = await createCredential(member, {
+        label: "Shared label",
+        providerId: FIXED_KEY_PROVIDER,
+        api_key: "sk-member-same-label",
+        owner_type: "user",
+      });
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as CredentialRow).label).toBe("Shared label");
+    });
+  });
+
   describe("editing and deleting", () => {
     it("a member edits its own personal credential", async () => {
       const id = await createApiKeyCredential({
@@ -372,6 +417,59 @@ describe("personal model credentials — routes", () => {
         ownerUserId: otherMember.user.id,
       });
       expect((await probe(member, id)).status).toBe(404);
+    });
+
+    it("the org policy off refuses probes that spend a member's personal key", async () => {
+      const id = await createApiKeyCredential({
+        orgId: admin.orgId,
+        userId: member.user.id,
+        label: "Member key",
+        providerId: FIXED_KEY_PROVIDER,
+        apiKey: "sk-member",
+        ownerUserId: member.user.id,
+      });
+      // `discover` needs org write, and a personal credential is visible to its owner alone.
+      const adminOwn = await createApiKeyCredential({
+        orgId: admin.orgId,
+        userId: admin.user.id,
+        label: "Admin key",
+        providerId: FIXED_KEY_PROVIDER,
+        apiKey: "sk-admin",
+        ownerUserId: admin.user.id,
+      });
+      await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
+
+      const own = await probe(member, id);
+      expect(own.status).toBe(403);
+      expect(((await own.json()) as { code: string }).code).toBe(
+        "personal_model_credentials_disabled",
+      );
+
+      const inline = await app.request(`${CREDENTIALS}/test`, {
+        method: "POST",
+        headers: jsonHeaders(member),
+        body: JSON.stringify({
+          providerId: FIXED_KEY_PROVIDER,
+          base_url: FIXED_KEY_BASE_URL,
+          credentialId: id,
+        }),
+      });
+      expect(inline.status).toBe(403);
+      expect(((await inline.json()) as { code: string }).code).toBe(
+        "personal_model_credentials_disabled",
+      );
+
+      const discover = await app.request(`${CREDENTIALS}/discover`, {
+        method: "POST",
+        headers: jsonHeaders(admin),
+        body: JSON.stringify({ credentialId: adminOwn }),
+      });
+      expect(discover.status).toBe(403);
+      expect(((await discover.json()) as { code: string }).code).toBe(
+        "personal_model_credentials_disabled",
+      );
+
+      expect((await probe(admin, await orgKey())).status).toBe(200);
     });
 
     it("the inline test treats an organization credential as absent for a member", async () => {

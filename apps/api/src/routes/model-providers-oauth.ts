@@ -231,6 +231,9 @@ export function createModelProvidersOAuthRouter() {
         // Reconnect targets the caller's own subscription only; anything else reads as absent.
         await assertCredentialEditable(caller, input.credentialId, "edit");
         const credential = await getOrgModelProviderCredential(caller, input.credentialId);
+        if (credential && credential.owner_id !== user.id) {
+          throw notFound("Model provider credential not found");
+        }
         if (
           !credential ||
           credential.source !== "custom" ||

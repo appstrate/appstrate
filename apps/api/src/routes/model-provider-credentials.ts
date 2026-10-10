@@ -19,7 +19,7 @@ import {
 } from "../middleware/require-permission.ts";
 import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
-  assertCredentialEditable,
+  assertCredentialProbeAllowed,
   canSeeCredential,
   createApiKeyCredential,
   dedupeCredentialLabel,
@@ -169,6 +169,7 @@ async function resolveDiscoverTarget(
     if (!(await canSeeCredential(caller, body.credentialId))) {
       throw notFound("Model provider credential not found");
     }
+    await assertCredentialProbeAllowed(caller.orgId, body.credentialId);
     const creds = await loadInferenceCredentials(caller.orgId, body.credentialId);
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
@@ -235,6 +236,7 @@ async function resolveTestTarget(
     }
     // A credential the caller may not see reads as absent: the inline target then applies.
     const visible = await canSeeCredential(caller, body.credentialId);
+    if (visible) await assertCredentialProbeAllowed(caller.orgId, body.credentialId);
     const creds = visible ? await loadInferenceCredentials(caller.orgId, body.credentialId) : null;
     if (creds) {
       const overridable = getModelProvider(creds.providerId)?.baseUrlOverridable === true;
@@ -371,6 +373,7 @@ export function createModelProviderCredentialsRouter() {
     const label = await dedupeCredentialLabel(
       caller.orgId,
       data.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+      personal ? user.id : null,
     );
 
     try {
@@ -500,6 +503,7 @@ export function createModelProviderCredentialsRouter() {
         ? caller.readsOrg
         : await canSeeCredential(caller, id);
       if (!visible) throw notFound("Model provider credential not found");
+      await assertCredentialProbeAllowed(caller.orgId, id);
       const creds = await loadInferenceCredentials(caller.orgId, id);
       if (!creds) {
         throw notFound("Model provider credential not found");
@@ -528,11 +532,10 @@ export function createModelProviderCredentialsRouter() {
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
     }
-    await assertCredentialEditable(caller, id, "edit");
     const data = await readJsonBody(c, updateSchema);
     try {
       const { api_key: apiKey, ...auditData } = data;
-      await updateModelProviderCredential(caller.orgId, id, { ...auditData, apiKey });
+      await updateModelProviderCredential(caller, id, { ...auditData, apiKey });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.updated",
         resourceType: "model_provider_credential",
@@ -562,9 +565,8 @@ export function createModelProviderCredentialsRouter() {
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id, "delete");
     }
-    await assertCredentialEditable(caller, id, "delete");
     try {
-      await deleteModelProviderCredential(caller.orgId, id);
+      await deleteModelProviderCredential(caller, id);
       await recordAuditFromContext(c, {
         action: "model_provider_credential.deleted",
         resourceType: "model_provider_credential",
@@ -575,6 +577,7 @@ export function createModelProviderCredentialsRouter() {
       // `org_models.credential_id` has ON DELETE RESTRICT — surface the
       // PG `foreign_key_violation` (23503) as a 409 with an actionable
       // message rather than a generic 500.
+      if (err instanceof ApiError) throw err;
       if (isForeignKeyViolation(err)) {
         throw conflict(
           "credential_in_use",

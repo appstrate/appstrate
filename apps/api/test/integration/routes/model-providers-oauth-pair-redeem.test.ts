@@ -18,7 +18,13 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { createPairing } from "../../../src/services/model-providers/pairings.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import {
   createOAuthCredential,
@@ -165,6 +171,90 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.orgId, ctx.orgId));
     expect(rows).toHaveLength(0);
+  });
+
+  it("a reconnect pairing redeemed by anyone but the subscription's holder changes nothing", async () => {
+    const holder = await memberContext(ctx, "member");
+    const subscription = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: holder.user.id,
+      providerId: "test-oauth",
+      label: "Holder's",
+      accessToken: "holder-access",
+      refreshToken: "holder-refresh",
+    });
+    const [before] = await db
+      .select({ ciphertext: modelProviderCredentials.credentialsEncrypted })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, subscription));
+    // A pairing the admin opened on that row, as one minted before it became personal.
+    const pairing = await createPairing({
+      userId: ctx.user.id,
+      orgId: ctx.orgId,
+      providerId: "test-oauth",
+      platformUrl: "http://localhost:3000",
+      ttlSeconds: 300,
+      reconnectCredentialId: subscription,
+    });
+
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify({ ...VALID_BODY("test-oauth"), access_token: "admin-access" }),
+    });
+
+    expect(res.status).toBe(404);
+    const [after] = await db
+      .select({
+        ciphertext: modelProviderCredentials.credentialsEncrypted,
+        ownerUserId: modelProviderCredentials.ownerUserId,
+      })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, subscription));
+    expect(after!.ciphertext).toBe(before!.ciphertext);
+    expect(after!.ownerUserId).toBe(holder.user.id);
+  });
+
+  it("refuses to mint a reconnect pairing on a subscription the caller does not hold", async () => {
+    const holder = await memberContext(ctx, "member");
+    const subscription = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: holder.user.id,
+      providerId: "test-oauth",
+      label: "Holder's",
+      accessToken: "holder-access",
+      refreshToken: "holder-refresh",
+    });
+    const res = await app.request("/api/model-providers-oauth/pairing", {
+      method: "POST",
+      headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ providerId: "test-oauth", credentialId: subscription }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses a holder's reconnect once the organization turned personal credentials off", async () => {
+    const subscription = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      providerId: "test-oauth",
+      label: "Mine",
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+    });
+    const pairing = await mintPairing(ctx, "test-oauth", subscription);
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+
+    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
+      method: "POST",
+      headers: bearerHeaders(pairing.token),
+      body: JSON.stringify(VALID_BODY("test-oauth")),
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "personal_model_credentials_disabled",
+    );
   });
 
   it("does NOT emit Deprecation / Link successor-version response headers", async () => {

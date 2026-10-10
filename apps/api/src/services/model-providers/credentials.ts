@@ -19,7 +19,7 @@
  */
 
 import type { Context } from "hono";
-import { eq, gt, sql } from "drizzle-orm";
+import { eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, user } from "@appstrate/db/schema";
 import { encryptCredentials, decryptCredentials } from "@appstrate/connect";
@@ -425,6 +425,8 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
 
 interface ReconnectOAuthCredentialInput {
   orgId: string;
+  /** The member redeeming the pairing: only the subscription's holder may reconnect it. */
+  userId: string;
   id: string;
   providerId: string;
   accessToken: string;
@@ -440,67 +442,66 @@ interface ReconnectOAuthCredentialInput {
  * stay stable. Fresh identity wins; omitted identity slots are preserved when
  * the old blob is still decryptable. A corrupt OAuth blob is recoverable by
  * design — reconnect is the user-facing repair path for that state too.
+ *
+ * Judged at write time, not at the pairing's mint: the row must be the redeeming
+ * member's own subscription, the member still in the organization (their
+ * membership lock, the one the organization exit takes) and personal credentials
+ * allowed. `false` (the route's 404) otherwise.
  */
 export async function reconnectOAuthCredential(
   input: ReconnectOAuthCredentialInput,
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
-    .from(modelProviderCredentials)
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId: input.orgId,
-        extra: [
-          eq(modelProviderCredentials.id, input.id),
-          eq(modelProviderCredentials.providerId, input.providerId),
-        ],
-      }),
-    )
-    .limit(1);
-  if (!row) return false;
+  const where = scopedWhere(modelProviderCredentials, {
+    orgId: input.orgId,
+    extra: [
+      eq(modelProviderCredentials.id, input.id),
+      eq(modelProviderCredentials.providerId, input.providerId),
+      eq(modelProviderCredentials.ownerUserId, input.userId),
+    ],
+  });
+  // Read before the transaction: the settings read is not on `tx` (one connection on PGlite).
+  await assertPersonalModelCredentialsAllowed(input.orgId);
+  const updated = await db.transaction(async (tx) => {
+    if (!(await lockOrgMember(tx, input.orgId, input.userId))) return false;
+    const [row] = await tx
+      .select({ credentialsEncrypted: modelProviderCredentials.credentialsEncrypted })
+      .from(modelProviderCredentials)
+      .where(where)
+      .for("update");
+    if (!row) return false;
 
-  // Only the old identity is read: an unreadable blob, or one under a missing key, is absent.
-  const existing = decryptForDisplay(
-    () => decryptCredentials<CredentialsBlob>(row.credentialsEncrypted),
-    { credentialId: input.id },
-  );
-  const existingOAuth =
-    existing !== KEY_UNAVAILABLE && existing?.kind === "oauth" ? existing : null;
-  const expiresAt = input.expiresAt ?? null;
-  const accountId = input.accountId ?? existingOAuth?.accountId;
-  const email = input.email ?? existingOAuth?.email;
-  const blob: OAuthBlob = {
-    kind: "oauth",
-    accessToken: input.accessToken,
-    refreshToken: input.refreshToken,
-    expiresAt,
-    needsReconnection: false,
-    ...(accountId ? { accountId } : {}),
-    ...(email ? { email } : {}),
-  };
-
-  const updated = await db
-    .update(modelProviderCredentials)
-    .set({
-      credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
-      expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
-      refreshFailureCount: 0,
-      updatedAt: new Date(),
-    })
-    .where(
-      scopedWhere(modelProviderCredentials, {
-        orgId: input.orgId,
-        extra: [
-          eq(modelProviderCredentials.id, input.id),
-          eq(modelProviderCredentials.providerId, input.providerId),
-        ],
-      }),
-    )
-    .returning({ id: modelProviderCredentials.id });
-
-  if (updated.length === 0) return false;
-  clearResolvedModelCache();
-  return true;
+    // Only the old identity is read: an unreadable blob, or one under a missing key, is absent.
+    const existing = decryptForDisplay(
+      () => decryptCredentials<CredentialsBlob>(row.credentialsEncrypted),
+      { credentialId: input.id },
+    );
+    const existingOAuth =
+      existing !== KEY_UNAVAILABLE && existing?.kind === "oauth" ? existing : null;
+    const expiresAt = input.expiresAt ?? null;
+    const accountId = input.accountId ?? existingOAuth?.accountId;
+    const email = input.email ?? existingOAuth?.email;
+    const blob: OAuthBlob = {
+      kind: "oauth",
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      expiresAt,
+      needsReconnection: false,
+      ...(accountId ? { accountId } : {}),
+      ...(email ? { email } : {}),
+    };
+    await tx
+      .update(modelProviderCredentials)
+      .set({
+        credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
+        expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
+        refreshFailureCount: 0,
+        updatedAt: new Date(),
+      })
+      .where(where);
+    return true;
+  });
+  if (updated) clearResolvedModelCache();
+  return updated;
 }
 
 // ─── Update ────────────────────────────────────────────────────────────────
@@ -513,10 +514,12 @@ interface UpdateModelProviderCredentialPatch {
 }
 
 export async function updateModelProviderCredential(
-  orgId: string,
+  caller: ModelCredentialCaller,
   id: string,
   patch: UpdateModelProviderCredentialPatch,
 ): Promise<void> {
+  await assertCredentialEditable(caller, id, "edit");
+  const orgId = caller.orgId;
   const updates: Record<string, unknown> = {};
   if (patch.label !== undefined) updates.label = patch.label;
   if (patch.baseUrlOverride !== undefined) updates.baseUrlOverride = patch.baseUrlOverride;
@@ -596,6 +599,18 @@ export async function canSeeCredential(
 }
 
 /**
+ * The probe rule, shared by every door that spends a stored credential's key: a
+ * personal credential serves no call while the org has personal credentials off.
+ */
+export async function assertCredentialProbeAllowed(
+  orgId: string,
+  credentialId: string,
+): Promise<void> {
+  const row = await loadCredentialBinding(orgId, credentialId);
+  if (row && row.ownerUserId !== null) await assertPersonalModelCredentialsAllowed(orgId);
+}
+
+/**
  * The editability rule, shared by PATCH, DELETE and pairing reconnect: an
  * organization credential needs `writesOrg` (`deletesOrg` to delete it); a
  * personal one must be the caller's own, except that a `deletesOrg` holder may
@@ -619,18 +634,32 @@ export async function assertCredentialEditable(
 // ─── Label derivation ──────────────────────────────────────────────────────
 
 /**
- * Make `base` unique within an org's credential labels by appending ` (2)`,
+ * Make `base` unique within one owner's credential labels by appending ` (2)`,
  * ` (3)`, … on collision (same suffix scheme as org models). Always run a
  * label through this before persisting — including caller-supplied ones —
  * so two connections to the same provider never share a name. The
  * `connect-helper` CLI sends a default label (`ChatGPT`, `Claude`) on every
  * redeem, so deriving only when the label is absent would never dedupe.
+ * Scoped to the owner (`null` = organization) so no member sees another's labels.
  */
-export async function dedupeCredentialLabel(orgId: string, base: string): Promise<string> {
+export async function dedupeCredentialLabel(
+  orgId: string,
+  base: string,
+  ownerUserId: string | null,
+): Promise<string> {
   const rows = await db
     .select({ label: modelProviderCredentials.label })
     .from(modelProviderCredentials)
-    .where(scopedWhere(modelProviderCredentials, { orgId }));
+    .where(
+      scopedWhere(modelProviderCredentials, {
+        orgId,
+        extra: [
+          ownerUserId === null
+            ? isNull(modelProviderCredentials.ownerUserId)
+            : eq(modelProviderCredentials.ownerUserId, ownerUserId),
+        ],
+      }),
+    );
   return dedupeLabel(
     base,
     rows.map((r) => r.label),
@@ -894,10 +923,14 @@ export async function clearModelCredentialRejections(orgId: string, id: string):
 
 // ─── Delete ────────────────────────────────────────────────────────────────
 
-export async function deleteModelProviderCredential(orgId: string, id: string): Promise<void> {
+export async function deleteModelProviderCredential(
+  caller: ModelCredentialCaller,
+  id: string,
+): Promise<void> {
+  await assertCredentialEditable(caller, id, "delete");
   await db.delete(modelProviderCredentials).where(
     scopedWhere(modelProviderCredentials, {
-      orgId,
+      orgId: caller.orgId,
       extra: [eq(modelProviderCredentials.id, id)],
     }),
   );
@@ -1006,7 +1039,11 @@ export async function listOrgModelProviderCredentials(
         source: "custom",
         authMode: cfg?.authMode ?? "api_key",
         providerId: r.providerId,
-        oauth_email: isOauth ? (blob.email ?? null) : null,
+        // A member's personal account email is shown to its owner alone.
+        oauth_email:
+          isOauth && (r.ownerUserId === null || r.ownerUserId === caller.userId)
+            ? (blob.email ?? null)
+            : null,
         // Flagged or undecryptable: the model list badges the same cases and points here.
         needs_reconnection: blob === null || !!blob?.needsReconnection,
         owner_type: r.ownerUserId === null ? "org" : "user",

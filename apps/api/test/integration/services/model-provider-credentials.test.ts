@@ -60,6 +60,15 @@ import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { corruptCredentialBlob } from "../../helpers/seed.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 
+/** An organization administrator of `orgId`: manages its organization credentials. */
+const orgAdmin = (orgId: string) => ({
+  orgId,
+  userId: null,
+  readsOrg: true,
+  writesOrg: true,
+  deletesOrg: true,
+});
+
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
 
 /** An org manager's view: every row of the org, and the right to change any of them. */
@@ -241,7 +250,7 @@ describe("model-provider-credentials service — api_key path", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
 
-    await updateModelProviderCredential(ctx.orgId, id, { apiKey: "new-secret" });
+    await updateModelProviderCredential(orgAdmin(ctx.orgId), id, { apiKey: "new-secret" });
 
     const [after] = await db
       .select({ blob: modelProviderCredentials.credentialsEncrypted })
@@ -266,7 +275,7 @@ describe("model-provider-credentials service — api_key path", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
 
-    await updateModelProviderCredential(ctx.orgId, id, { label: "renamed" });
+    await updateModelProviderCredential(orgAdmin(ctx.orgId), id, { label: "renamed" });
 
     const [after] = await db
       .select({
@@ -279,7 +288,7 @@ describe("model-provider-credentials service — api_key path", () => {
     expect(after!.label).toBe("renamed");
   });
 
-  it("cross-org isolation — load returns null and update is a silent no-op", async () => {
+  it("cross-org isolation — load returns null, update and delete are refused", async () => {
     const ctxA = await createTestContext({ orgSlug: "mpc-svc-iso-a" });
     const ctxB = await createTestContext({ orgSlug: "mpc-svc-iso-b" });
     const id = await createApiKeyCredential({
@@ -291,11 +300,15 @@ describe("model-provider-credentials service — api_key path", () => {
     });
 
     expect(await loadInferenceCredentials(ctxB.orgId, id)).toBeNull();
-    await updateModelProviderCredential(ctxB.orgId, id, { apiKey: "stolen" });
+    await expect(
+      updateModelProviderCredential(orgAdmin(ctxB.orgId), id, { apiKey: "stolen" }),
+    ).rejects.toMatchObject({ status: 404 });
     const own = await loadInferenceCredentials(ctxA.orgId, id);
     expect(own!.apiKey).toBe("secret-a");
 
-    await deleteModelProviderCredential(ctxB.orgId, id);
+    await expect(deleteModelProviderCredential(orgAdmin(ctxB.orgId), id)).rejects.toMatchObject({
+      status: 404,
+    });
     const stillOwn = await loadInferenceCredentials(ctxA.orgId, id);
     expect(stillOwn).not.toBeNull();
   });
@@ -357,7 +370,10 @@ describe("model-provider-credentials service — oauth path", () => {
       expiresAt: null,
     });
     await expect(
-      updateModelProviderCredential(ctx.orgId, id, { apiKey: "intruder" }),
+      // A subscription is its holder's: only they edit it.
+      updateModelProviderCredential({ ...orgAdmin(ctx.orgId), userId: ctx.user.id }, id, {
+        apiKey: "intruder",
+      }),
     ).rejects.toThrow(/Cannot rotate apiKey/);
   });
 
@@ -383,10 +399,10 @@ describe("model-provider-credentials service — oauth path", () => {
     const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
-    // email preserved (only surface in list, not in load).
-    const list = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).filter(
-      (k) => k.source === "custom",
-    );
+    // email preserved (only surface in list, not in load), shown to the holder.
+    const list = (
+      await listOrgModelProviderCredentials({ ...adminCaller(ctx.orgId), userId: ctx.user.id })
+    ).filter((k) => k.source === "custom");
     expect(list[0]!.oauth_email).toBe("x@example.test");
   });
 
@@ -444,7 +460,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(await flagged(orgId, id)).toBe(true);
     expect(await loadInferenceCredentials(orgId, id)).toBeNull();
 
-    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    await updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: "sk-rotated" });
     expect(await flagged(orgId, id)).toBe(false);
     expect((await loadInferenceCredentials(orgId, id))!.apiKey).toBe("sk-rotated");
     const [row] = await db
@@ -457,7 +473,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
   it("never flags a key the row no longer holds", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-rotated");
     for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    await updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: "sk-rotated" });
     for (let i = 0; i < 6; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(false);
   });
@@ -466,12 +482,12 @@ describe("model-provider-credentials service — upstream rejections of an api k
     const { orgId, id } = await apiKeyCredential("mpc-reject-race");
     for (let round = 0; round < 10; round++) {
       const key = `sk-round-${round}`;
-      await updateModelProviderCredential(orgId, id, { apiKey: key });
+      await updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: key });
       for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, key);
       const next = `sk-round-${round}-next`;
       await Promise.all([
         recordModelCredentialRejection(orgId, id, key),
-        updateModelProviderCredential(orgId, id, { apiKey: next }),
+        updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: next }),
       ]);
       expect((await loadInferenceCredentials(orgId, id))?.apiKey).toBe(next);
       expect(await flagged(orgId, id)).toBe(false);
@@ -579,7 +595,11 @@ describe("model-provider-credentials service — aggregator + inference loader",
         email: "user@example.com",
       });
 
-      const list = await listOrgModelProviderCredentials(adminCaller(org.id));
+      // The holder sees their subscription's email; another admin would not.
+      const list = await listOrgModelProviderCredentials({
+        ...adminCaller(org.id),
+        userId: user.id,
+      });
       const oauth = list.find((k) => k.id === imported.credentialId);
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
@@ -652,7 +672,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         code: "encryption_key_unavailable",
       });
       // The repair gesture never reads the old blob.
-      await updateModelProviderCredential(ctx.orgId, apiKeyId, { apiKey: "sk-rotated" });
+      await updateModelProviderCredential(orgAdmin(ctx.orgId), apiKeyId, { apiKey: "sk-rotated" });
       expect((await loadInferenceCredentials(ctx.orgId, apiKeyId))!.apiKey).toBe("sk-rotated");
     });
   });
