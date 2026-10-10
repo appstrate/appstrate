@@ -649,6 +649,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   arbitrary JavaScript in the server process, and `browser_file_upload` and
   `browser_drop`, which read files from the server's disk, never the agent's.
   No `allow_undeclared_tools`: a new upstream tool is reviewed first.
+  `default_tools` lists every declared tool that is not hidden, so an agent
+  that selects no tools (the chat's default) gets the browser rather than a run
+  that fails at boot with zero tools registered.
 
 - **Model capabilities say what reasoning level `off` puts on the wire**
   (#1774). `OrgModel.generation` and the provider registry's models carry
