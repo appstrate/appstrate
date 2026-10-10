@@ -35,6 +35,7 @@ function model(over: Partial<OrgModelInfo>): OrgModelInfo {
     aliased: false,
     iconUrl: null,
     source: "custom",
+    binding: "org",
     credentialId: "c1",
     billed_to: "org",
     created_by: null,

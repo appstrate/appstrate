@@ -23,7 +23,7 @@ export const modelProviderCredentialsPaths = {
           name: "fields",
           in: "query",
           description:
-            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400.",
+            "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400.",
           schema: { type: "string" },
         },
       ],
@@ -73,6 +73,11 @@ export const modelProviderCredentialsPaths = {
                         defaultBaseUrl: { type: "string" },
                         baseUrlOverridable: { type: "boolean" },
                         authMode: { type: "string", enum: ["api_key", "oauth2"] },
+                        personal_allowed: {
+                          type: "boolean",
+                          description:
+                            "Whether members may bring their own credential for this provider. `false` when the endpoint is the organization's to choose: a personal credential is refused with `personal_credential_custom_endpoint`.",
+                        },
                         featured: {
                           type: "boolean",
                           description:
@@ -186,6 +191,8 @@ export const modelProviderCredentialsPaths = {
                     owner_type: "org",
                     owner_id: null,
                     owner_name: null,
+                    allowed_actions: ["edit", "delete", "test"],
+                    bindable: false,
                     created_by: "usr_cm3abc123",
                     createdAt: "2026-01-10T08:00:00Z",
                     updatedAt: "2026-01-10T08:00:00Z",
@@ -344,7 +351,11 @@ export const modelProviderCredentialsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error, including `personal_credential_custom_endpoint` (param `providerId`) when a personal credential is tested on a provider whose endpoint is the organization's to choose.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -553,7 +564,11 @@ export const modelProviderCredentialsPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "Validation error. `invalid_request` (param `api_key`) when `api_key` is sent for an OAuth credential: reconnect it instead.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:

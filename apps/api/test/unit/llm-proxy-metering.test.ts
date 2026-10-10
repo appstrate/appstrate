@@ -1056,9 +1056,9 @@ describe("drainProxyMetering", () => {
 });
 
 /**
- * Credential attribution on the proxy row (#1875): a call served by a personal
- * key is customer-supplied spend (`org`) attributed to that key's row, and a
- * platform-supplied call names no credential row.
+ * Credential attribution on the proxy row (#1875): a call served by a member's
+ * own key is that member's spend (`user`), attributed to the key's row and to
+ * the member; a platform-supplied call names no credential row.
  */
 describe("recordProxyUsage — credential attribution", () => {
   async function entryServedBy(resolved: Partial<BoundModel>): Promise<LlmUsageEntry> {
@@ -1085,15 +1085,27 @@ describe("recordProxyUsage — credential attribution", () => {
     return written[0]!;
   }
 
-  it("attributes a personal-key call to that credential, as org-supplied spend", async () => {
-    const entry = await entryServedBy({ credentialSource: "org", credentialId: "cred_personal" });
-    expect(entry.credentialSource).toBe("org");
+  it("attributes a personal-key call to that credential and to its payer", async () => {
+    const entry = await entryServedBy({
+      credentialSource: "user",
+      credentialId: "cred_personal",
+      payerUserId: "u_1",
+    });
+    expect(entry.credentialSource).toBe("user");
     expect(entry.credentialId).toBe("cred_personal");
+    expect(entry.payerUserId).toBe("u_1");
+  });
+
+  it("names no payer for an organization-supplied call", async () => {
+    const entry = await entryServedBy({ credentialSource: "org", credentialId: "cred_org" });
+    expect(entry.credentialSource).toBe("org");
+    expect(entry.payerUserId).toBeNull();
   });
 
   it("names no credential row for a platform-supplied call", async () => {
     const entry = await entryServedBy({ credentialSource: "system" });
     expect(entry.credentialSource).toBe("system");
     expect(entry.credentialId).toBeNull();
+    expect(entry.payerUserId).toBeNull();
   });
 });

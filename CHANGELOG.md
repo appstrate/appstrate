@@ -142,6 +142,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **API: one payer vocabulary, the member payer recorded in the ledger**
+  (#1909). Wire changes on the model and credential endpoints:
+  - `billed_to` gains `system` (a built-in model, paid by the platform); it
+    takes the values of `MODEL_PAYERS` (`system`, `org`, `user`) or `null`.
+  - `binding` (`org` | `member` | `managed`) is required on every model: `org`
+    bound to one credential, `member` unbound (each member serves it), `managed`
+    an alias. `credentialId` is `null` for `member` and `managed`.
+  - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
+    `bindable`. `reconnect` is the pairing route's own rule: the holder's OAuth
+    credential, flagged or not; any other `credentialId` on a pairing is a 404. The registry gains `personal_allowed`.
+  - `model_source` takes `user` (a member's own credential), with `org` and
+    `system` (`credential_source` is `MODEL_PAYERS`).
+  - `personal_model_credentials` is always served in the organization settings.
+  - `PATCH /api/models/{id}` refuses an unbinding with `409 model_scheduled`
+    carrying `schedule_ids` when enabled schedules run the model (through their
+    override, their agent's model in their space or the organization default).
+    `model_credential_required` on a schedule write is judged on its effective
+    model.
+  - `llm_usage.payer_user_id` and `runs.payer_user_id` record the member whose
+    credential paid; a run's OAuth door compares against `runs.payer_user_id`.
+
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
   credential is paid by the organization, and a built-in model by the platform,

@@ -5,7 +5,7 @@
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
-import type { CredentialSource } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { logger } from "../lib/logger.ts";
 import {
   buildRunContext,
@@ -496,7 +496,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   let versionRef: string;
   let proxyLabel: string | null;
   let modelLabel: string;
-  let modelSource: CredentialSource;
+  let modelSource: ModelPayer;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
   // Declared integrations this run will start WITHOUT. Persisted as run logs
@@ -646,6 +646,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
+        payerUserId: plan.llmConfig.payerUserId ?? null,
         consumedFileIds: params.consumedFileIds,
       },
     ),

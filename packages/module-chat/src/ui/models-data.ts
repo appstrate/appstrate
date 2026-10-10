@@ -12,6 +12,7 @@ import {
   modelGenerationCapabilitiesSchema,
   type ModelGenerationCapabilities,
 } from "@appstrate/core/model-generation";
+import { MODEL_PAYERS, type ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Runtime shape of a single `/api/models` row we depend on. The endpoint
@@ -32,7 +33,7 @@ const orgModelOptionSchema = z.object({
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
-  billed_to: z.enum(["user", "org"]).nullable().optional(),
+  billed_to: z.enum(MODEL_PAYERS).nullable().optional(),
 });
 
 export interface OrgModelOption {
@@ -50,7 +51,7 @@ export interface OrgModelOption {
    */
   provider_name?: string | null;
   /** Who pays for the caller: their own credential, the org's, or `null` (they must add one). */
-  billed_to?: "user" | "org" | null;
+  billed_to?: ModelPayer | null;
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;

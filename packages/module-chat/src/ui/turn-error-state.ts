@@ -121,9 +121,11 @@ function withFix(
   { text, memberText, policyDisabledText, fix }: Fixable,
   t: ChatTranslate,
   can: ChatCan,
-  personalModelCredentials: boolean,
+  personalModelCredentials: boolean | undefined,
 ): Pick<TurnErrorState, "text" | "action"> {
   const { permissions, label, href } = FIX[fix];
+  // Until the policy is known, neither the link nor the refusal is claimed.
+  if (fix === "personalModels" && personalModelCredentials === undefined) return { text: t(text) };
   // A personal credential cannot be added while the organization refuses them:
   // the link would lead to a form answering 403, so only the sentence is shown.
   if (fix === "personalModels" && !personalModelCredentials)
@@ -142,7 +144,7 @@ function classifiedState(
   category: ClientTurnError["category"],
   t: ChatTranslate,
   can: ChatCan,
-  personalModelCredentials: boolean,
+  personalModelCredentials: boolean | undefined,
 ): Pick<TurnErrorState, "text" | "action"> {
   return category === "credential_unavailable"
     ? withFix(DEAD_CREDENTIAL, t, can, personalModelCredentials)
@@ -171,8 +173,8 @@ export function turnErrorState(
   t: ChatTranslate,
   can: ChatCan,
   // Whether the organization lets members bring personal model credentials
-  // (`personal_model_credentials`); absent means allowed, as on the server.
-  personalModelCredentials = true,
+  // (`personal_model_credentials`).
+  personalModelCredentials: boolean | undefined,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
   // A turn cut by the wall-clock ceiling can ALSO have been failing upstream

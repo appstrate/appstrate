@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`MODEL_PAYERS`** / **`ModelPayer`** (`@appstrate/core/model-payer`): who
+  pays a model call, `system` | `org` | `user`, in `credential_source` enum
+  order. **`orgSettingsReadSchema`** (`@appstrate/core/permissions`): the org
+  settings as served, with `personal_model_credentials` read as its effective
+  value (`true` when absent). The stored and PATCH shape `orgSettingsSchema` is
+  unchanged.
+
 - **`personal_model_credentials` org setting** (`orgSettingsSchema`, absent =
   allowed) and the **`model-provider-credentials:connect`** permission action
   (`@appstrate/core/permissions`): a member brings their own model credential.
@@ -79,6 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking for module consumers:** the `credentialSource` unions in
+  `BeforeUsageParams`, `LlmUsageLedgerRow` and `PlatformServices.usage.list`,
+  and `RunStatusChangeParams.modelSource`, now take `ModelPayer`, which adds
+  `"user"`. A chat turn reports the owner of the credential it spends:
+  `"user"` for a member's own key or subscription, `"org"` for an organization
+  one (a subscription turn always reported `"org"`).
+
 - **BREAKING: the chat platform services take the session user.**
   `PlatformServices.resolveChatModel(orgId, presetId, userId)` and
   `checkUsageAllowed({ …, userId })` (`@appstrate/core/module`): a member's own
@@ -90,6 +104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ChatUsageRecord.credentialId`** (`@appstrate/core/chat-contract`), both
   required: the credential a subscription turn spends, recorded in
   `llm_usage.credential_id` (`null` in a usage record with none).
+- **BREAKING: `PlatformServices.checkUsageAllowed` takes no `subscription`
+  flag** (`@appstrate/core/module`): the platform derives the turn's
+  `credentialSource` from the model it resolves for the session user. A caller
+  still passing `subscription` fails to typecheck.
 - **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
   (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
   manifest declares them, which the sidecar's runner egress listeners read to

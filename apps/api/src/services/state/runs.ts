@@ -37,7 +37,6 @@ import {
   chatSessions,
   type PricingStatus,
   type InferenceRoute,
-  type CredentialSource,
 } from "@appstrate/db/schema";
 import {
   activeRunStatusValues,
@@ -60,6 +59,7 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import {
   resolvedConnectionMapSchema,
   runIntegrationsUnboundSchema,
@@ -584,7 +584,7 @@ interface CreateRunParams {
   versionRef?: string;
   proxyLabel?: string;
   modelLabel?: string;
-  modelSource?: CredentialSource;
+  modelSource?: ModelPayer;
   /** The model the run launched with — see `runs.model_id`. */
   modelId: string | null;
   /** Who serves the run's inference — see `runs.inference_route`. Null on a remote-origin run. */
@@ -661,6 +661,8 @@ interface CreateRunParams {
    * platform-origin runs whose model resolves to an OAuth provider.
    */
   modelCredentialId?: string | null;
+  /** The member whose own credential pays the run: see `runs.payer_user_id`. */
+  payerUserId?: string | null;
 }
 
 export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
@@ -763,6 +765,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
       modelCredentialId: params.modelCredentialId ?? null,
+      payerUserId: params.payerUserId ?? null,
       ...(params.connectionOverrides !== undefined
         ? { connectionOverrides: params.connectionOverrides }
         : {}),
@@ -1047,7 +1050,7 @@ export async function getRunAttribution(
   packageId: string | null;
   status: RunStatus;
   runOrigin: "platform" | "remote";
-  modelSource: CredentialSource | null;
+  modelSource: ModelPayer | null;
   spaceId: string;
   userId: string | null;
   endUserId: string | null;
@@ -2052,7 +2055,7 @@ const settledSql = sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status
 export async function listLlmUsage(args: {
   afterId?: number;
   limit?: number;
-  credentialSource?: "system" | "org";
+  credentialSource?: ModelPayer;
 }): Promise<LlmUsageLedgerRow[]> {
   const afterId = args.afterId ?? 0;
   const limit = Math.min(

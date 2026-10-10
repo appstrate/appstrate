@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CredentialSource } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import type { AppstrateRunPlan, FileReference } from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage } from "../types/index.ts";
@@ -131,7 +131,7 @@ export async function buildRunContext(params: {
   versionRef: string;
   proxyLabel: string | null;
   modelLabel: string;
-  modelSource: CredentialSource;
+  modelSource: ModelPayer;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
   /**

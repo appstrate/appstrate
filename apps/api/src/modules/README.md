@@ -73,7 +73,7 @@ export default myModule;
 
 An **out-of-tree** module (its own repo, `@appstrate/core` from npm) declares nothing extra: put `@appstrate/core` in its `package.json` like any dependency, and the platform reads the range from there.
 
-The loader checks that range against the platform's `CORE_VERSION` at boot. It exists because the module→platform direction is invisible to `tsc`: a stale module calling a platform service whose signature moved (core 6.0.0 made `checkUsageAllowed`'s `subscription` flag required) fails **silently**, not loudly (issue #973). When no range is resolvable the loader warns and boots anyway. In-tree modules (`workspace:*`) are exempt — `tsc` already gates them.
+The loader checks that range against the platform's `CORE_VERSION` at boot. It exists because the module→platform direction is invisible to `tsc`: a stale module calling a platform service whose signature moved fails **silently**, not loudly (issue #973). When no range is resolvable the loader warns and boots anyway. In-tree modules (`workspace:*`) are exempt — `tsc` already gates them.
 
 A mismatch refuses to boot by default, naming the module and both versions. `MODULE_CONTRACT_ENFORCE=warn` downgrades it to a log line — the escape hatch for an operator running a module that has not been republished against the core major the platform ships.
 

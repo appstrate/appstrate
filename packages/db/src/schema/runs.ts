@@ -327,6 +327,13 @@ export const runs = pgTable(
     modelCredentialId: uuid("model_credential_id").references(() => modelProviderCredentials.id, {
       onDelete: "set null",
     }),
+    /**
+     * The member whose own credential pays this run's inference: set iff
+     * `model_source = 'user'`, stamped at launch, the one fact every later
+     * door compares against. No FK: it outlives the member and the credential.
+     * NULL = not recorded.
+     */
+    payerUserId: text("payer_user_id"),
   },
   (table) => [
     index("idx_runs_status").on(table.status),
@@ -640,6 +647,9 @@ export const llmUsage = pgTable(
     // platform-key calls and on rows predating this column. No FK: the ledger
     // is append-only and a credential can be deleted after the fact.
     credentialId: uuid("credential_id"),
+    // The member whose own credential paid the call: set iff `credential_source
+    // = 'user'`. No FK, same reason as `credentialId`. NULL = not recorded.
+    payerUserId: text("payer_user_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens"),
