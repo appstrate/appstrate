@@ -9,7 +9,7 @@ import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { CredentialFields } from "../credential-fields.tsx";
-import { initialCredentialValues } from "../credential-schema.ts";
+import { deriveFieldNames, initialCredentialValues } from "../credential-schema.ts";
 import type { IntegrationManifestAuth } from "../../../hooks/use-integrations.ts";
 
 await i18nReady;
@@ -78,6 +78,19 @@ describe("CredentialFields — the served schema, verbatim", () => {
     // Optional fields follow the required ones.
     const ssh = html(SSH_AUTH);
     expect(ssh.indexOf("field-input-host_key")).toBeLessThan(ssh.indexOf("field-input-port"));
+  });
+
+  it("ignores a `required` entry naming no declared field, and a non-array `required`", () => {
+    const auth = (required: unknown) =>
+      ({
+        type: "custom",
+        credentials: {
+          schema: { type: "object", required, properties: { b: { type: "string" }, a: {} } },
+        },
+      }) as unknown as IntegrationManifestAuth;
+    expect(deriveFieldNames(auth(["a", "ghost"]))).toEqual(["a", "b"]);
+    expect(deriveFieldNames(auth("a"))).toEqual(["b", "a"]);
+    expect(deriveFieldNames(auth({ 0: "a" }))).toEqual(["b", "a"]);
   });
 
   it("renders no input for an auth whose declared properties are empty", () => {
