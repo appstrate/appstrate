@@ -22,7 +22,6 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
-import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 
 getTestApp(); // boots the model registry
 
@@ -59,11 +58,11 @@ describe("org-models — aliased flag (DB path)", () => {
       enabled: true,
     });
 
-    const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.aliased).toBe(false);
 
-    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.aliased).toBe(false);
     // Non-aliased: alias id and real model id describe the same model.
@@ -83,11 +82,11 @@ describe("org-models — aliased flag (DB path)", () => {
       aliased: true,
     });
 
-    const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.aliased).toBe(true);
 
-    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.aliased).toBe(true);
     // The user-selected alias is the row id; the real backing is hidden behind it.
@@ -117,9 +116,9 @@ describe("org-models — aliased flag (DB path)", () => {
       medium: "supported",
       high: "supported",
     } as const;
-    const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed!.generation?.reasoning.levels).toEqual(levels);
-    expect((await loadModel(ctx.orgId, model.id, NO_PAYER))!.generation?.reasoning.levels).toEqual(
+    expect((await loadModel(ctx.orgId, model.id, null))!.generation?.reasoning.levels).toEqual(
       levels,
     );
   });

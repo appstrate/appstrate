@@ -28,9 +28,14 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
-import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
+import {
+  credentialPayer,
+  loadModel,
+  modelNeedsReconnection,
+  requireBoundModel,
+} from "./org-models.ts";
+import { loadCredentialBinding } from "./model-providers/credentials.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
-import { userPayer } from "./model-providers/payer.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
@@ -51,8 +56,7 @@ export async function resolveChatModel(
   presetId: string,
   userId: string,
 ): Promise<ChatModelResolution> {
-  const payer = userPayer(userId);
-  const resolved = await loadModel(orgId, presetId, payer);
+  const resolved = await loadModel(orgId, presetId, userId);
   if (!resolved) {
     // A model that resolves to nothing because its stored credential is dead —
     // oauth flagged needs-reconnection, or (either auth mode) a secret that no
@@ -62,7 +66,7 @@ export async function resolveChatModel(
     // already returned null, so nothing is resolvable and no spend can happen
     // on either branch: this only decides which error the user is shown, and
     // "reconnect that credential" is the actionable one.
-    if (await modelNeedsReconnection(orgId, presetId, payer)) {
+    if (await modelNeedsReconnection(orgId, presetId, userId)) {
       return { subscription: true, needsReconnection: true };
     }
     return { subscription: false };
@@ -93,11 +97,11 @@ export async function resolveChatModel(
   // one of theirs asks for a reconnect, none at all for a credential to add.
   if (
     resolved.credentialSource === null &&
-    (await modelNeedsReconnection(orgId, presetId, payer))
+    (await modelNeedsReconnection(orgId, presetId, userId))
   ) {
     return { subscription: true, needsReconnection: true };
   }
-  const { credentialId, credentialSource, payerUserId } = requireBoundModel(resolved, payer);
+  const { credentialId } = requireBoundModel(resolved, userId);
   if (!credentialId) {
     return { subscription: true, needsReconnection: true };
   }
@@ -125,8 +129,6 @@ export async function resolveChatModel(
       reasoning: resolved.reasoning ?? false,
       input: resolved.input ?? null,
       credentialId,
-      credentialSource,
-      payerUserId: payerUserId ?? null,
       accessToken: token.accessToken,
     },
   };
@@ -139,10 +141,10 @@ export async function resolveChatModel(
  * `recordProxyUsage`.
  *
  * The in-process engine serves subscriptions only (oauth2 claude-code/codex).
- * The row's payer is the one `resolveChatModel` resolved for the turn, the owner
- * of the credential that served it: a member's own subscription stamps
- * `credentialSource="user"` with that member as `payerUserId`, an organization
- * subscription `"org"` with no payer. Cost is derived here from the token counts + the
+ * The row's payer is derived here from the credential that served the turn, never
+ * taken from the module: a member's own subscription stamps `credentialSource="user"`
+ * with that member as `payerUserId`, an organization subscription `"org"` with no
+ * payer. Cost is derived here from the token counts + the
  * model's catalog rates with Pi's `calculateCost`, like the proxy/runner rows.
  * Its tier bands (`record.tiers`) price each model call at its tier.
  *
@@ -206,6 +208,11 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
     context: { source: "chat", chatSessionId: record.chatSessionId, realModel: record.modelId },
   });
   try {
+    const { credentialSource, payerUserId } = record.credentialId
+      ? credentialPayer(
+          (await loadCredentialBinding(record.orgId, record.credentialId))?.ownerUserId,
+        )
+      : { credentialSource: null, payerUserId: undefined };
     await recordLlmUsageReliably(
       {
         source: "proxy",
@@ -216,8 +223,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
         realModel: record.modelId,
         api: record.apiShape,
         credentialId: record.credentialId,
-        credentialSource: record.credentialSource,
-        payerUserId: record.payerUserId,
+        credentialSource,
+        payerUserId: payerUserId ?? null,
         inputTokens,
         outputTokens,
         cacheReadTokens,
@@ -284,14 +291,13 @@ export async function checkUsageAllowed(args: {
   // A platform rule, not an admission decision: it holds with or without a module.
   // A model the organization leaves to each member, which the session user holds
   // no credential for, is refused here.
-  const payer = userPayer(args.userId);
-  const resolved = await loadModel(args.orgId, args.presetId, payer);
+  const resolved = await loadModel(args.orgId, args.presetId, args.userId);
   // Nothing resolves, so nothing can be spent: the turn is refused downstream
   // (unknown model, or a credential to reconnect) and there is no payer to report.
   if (resolved === null) return null;
   let credentialSource: ModelPayer;
   try {
-    credentialSource = requireBoundModel(resolved, payer).credentialSource;
+    credentialSource = requireBoundModel(resolved, args.userId).credentialSource;
   } catch (err) {
     if (err instanceof ApiError) {
       return { code: err.code, message: err.message, status: err.status };

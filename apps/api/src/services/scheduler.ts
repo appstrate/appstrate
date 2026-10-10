@@ -38,7 +38,6 @@ import { actorFromIds, actorMatch, type Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import { NO_PAYER } from "./model-providers/payer.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -620,7 +619,7 @@ export async function triggerScheduledRun(
         orgId,
         actor,
         // A schedule never spends a personal credential: organization credentials only.
-        payer: NO_PAYER,
+        payerUserId: null,
         input: resolvedInput,
         modelId: finalModelId,
         generationConfig: packageSettings.generationConfig,

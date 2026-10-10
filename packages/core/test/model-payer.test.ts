@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { MODEL_PAYERS } from "../src/model-payer.ts";
 import { orgSettingsReadSchema, orgSettingsSchema } from "../src/permissions.ts";
-
-describe("MODEL_PAYERS", () => {
-  it("lists the payers in pg enum label order", () => {
-    expect([...MODEL_PAYERS]).toEqual(["system", "org", "user"]);
-  });
-});
 
 describe("orgSettingsReadSchema", () => {
   it("defaults personal_model_credentials to true", () => {

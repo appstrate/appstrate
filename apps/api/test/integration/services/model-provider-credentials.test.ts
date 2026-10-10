@@ -1088,13 +1088,13 @@ describe("model-provider-credentials service — credentialActions", () => {
     source: "custom",
     ownerUserId: null,
     authMode: "api_key",
-    needsReconnection: false,
+    providerId: "openai",
   } as const;
   const personalKey = { ...orgKey, ownerUserId: "owner" } as const;
   const personalSubscription = {
     ...personalKey,
     authMode: "oauth2",
-    needsReconnection: true,
+    providerId: "test-oauth",
   } as const;
 
   it("a reader without write gets only test on an organization credential", () => {
@@ -1113,20 +1113,25 @@ describe("model-provider-credentials service — credentialActions", () => {
     expect(credentialActions(owner, personalKey, false)).toEqual(["edit", "delete"]);
   });
 
-  it("an owner of a flagged subscription also gets reconnect", () => {
+  it("an owner of a subscription also gets reconnect, and loses it with the policy off", () => {
     expect(credentialActions(owner, personalSubscription, true)).toEqual([
       "edit",
       "delete",
       "test",
       "reconnect",
     ]);
+    expect(credentialActions(owner, personalSubscription, false)).toEqual(["edit", "delete"]);
+  });
+
+  it("only the owner of a subscription gets reconnect", () => {
+    expect(credentialActions(admin, personalSubscription, true)).toEqual(["delete"]);
   });
 
   it("a reader gets only test on a built-in credential", () => {
     expect(
       credentialActions(
         reader,
-        { source: "built-in", ownerUserId: null, authMode: "api_key", needsReconnection: false },
+        { source: "built-in", ownerUserId: null, authMode: "api_key" },
         true,
       ),
     ).toEqual(["test"]);

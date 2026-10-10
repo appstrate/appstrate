@@ -19,7 +19,6 @@ import { createTestContext } from "../../helpers/auth.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { seedOrgModelProviderOAuth, seedOrgModel } from "../../helpers/seed.ts";
-import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 
 // Minimal adapter for the `test-oauth` provider's apiShape. None of its
 // methods should run — the subscription guard throws before forwarding.
@@ -68,7 +67,7 @@ describe("proxyLlmCall — OAuth-subscription rejection", () => {
           orgId: ctx.orgId,
           userId: ctx.user.id,
         },
-        payer: NO_PAYER,
+        payerUserId: null,
         runId: null,
         chatSessionId: null,
         requestId: "req_test",

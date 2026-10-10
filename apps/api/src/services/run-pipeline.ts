@@ -21,7 +21,6 @@ import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import { requireBoundModel, resolveModelCascade } from "./org-models.ts";
-import type { Payer } from "./model-providers/payer.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -89,10 +88,10 @@ interface RunPipelineParams {
   orgId: string;
   actor: Actor | null;
   /**
-   * Whose personal model credentials may serve the run: `requestPayer(c)` on the
-   * route, `NO_PAYER` for a schedule.
+   * Whose personal model credentials may serve the run, or `null` for none (a
+   * schedule, an API key, a delegate): the door's `requestPayerUserId(c)`.
    */
-  payer: Payer;
+  payerUserId: string | null;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   /**
@@ -376,7 +375,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     scheduleId,
     spaceId,
     apiKeyId,
-    payer,
+    payerUserId,
   } = params;
   // Per-call-graph manifest memo: reuse the caller's Map (run route — shares
   // loads with its earlier `resolveRunPreflight` call) or create one scoped
@@ -391,8 +390,13 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   //
   // The admission gate and the run context share this resolution. A member-paid
   // model with no credential of the payer's is refused before the gate.
-  const modelCascade = await resolveModelCascade(orgId, params.agent.id, modelId ?? null, payer);
-  if (modelCascade) requireBoundModel(modelCascade.model, payer);
+  const modelCascade = await resolveModelCascade(
+    orgId,
+    params.agent.id,
+    modelId ?? null,
+    payerUserId,
+  );
+  if (modelCascade) requireBoundModel(modelCascade.model, payerUserId);
   const credentialSourceForGate = modelCascade?.model.credentialSource ?? null;
 
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,

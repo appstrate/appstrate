@@ -12,7 +12,6 @@ import {
   scopeFromActor,
 } from "./state/package-persistence.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
-import { NO_PAYER } from "./model-providers/payer.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
@@ -221,7 +220,7 @@ export async function buildRunContext(params: {
     throw new ModelNotConfiguredError();
   }
   // The pipeline refused an unbound model before admission; this narrows the type.
-  const modelResult = requireBoundModel(modelCascade.model, NO_PAYER);
+  const modelResult = requireBoundModel(modelCascade.model, null);
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose

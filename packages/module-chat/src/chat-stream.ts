@@ -702,20 +702,14 @@ export async function handleChatStream(
         onError: (error) => logAndMarkStreamError(error, requestId),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
-          // Only a subscription turn meters inline, on the subscription its engine
-          // spends, paid by whom the platform resolved for it.
-          const served =
-            subscription.subscription && "model" in subscription ? subscription.model : null;
-          void deps
-            .recordChatUsage({
-              ...record,
-              credentialId: served?.credentialId ?? null,
-              credentialSource: served?.credentialSource ?? null,
-              payerUserId: served?.payerUserId ?? null,
-            })
-            .catch((err) => {
-              logger.warn("chat usage metering failed", { err: String(err) });
-            });
+          // Only a subscription turn meters inline, on the subscription its engine spends.
+          const credentialId =
+            subscription.subscription && "model" in subscription
+              ? subscription.model.credentialId
+              : null;
+          void deps.recordChatUsage({ ...record, credentialId }).catch((err) => {
+            logger.warn("chat usage metering failed", { err: String(err) });
+          });
         },
       }),
     );

@@ -49,9 +49,8 @@ import type { AppEnv } from "../../types/index.ts";
 import {
   isBindableCredential,
   providerAllowsPersonalCredentials,
-  requestPayer,
+  requestPayerUserId,
 } from "./credential-chain.ts";
-import { payerUserIdOf } from "./payer.ts";
 
 /**
  * Who is asking about model provider credentials, and what the org grants them.
@@ -61,7 +60,7 @@ import { payerUserIdOf } from "./payer.ts";
  */
 export interface ModelCredentialCaller {
   orgId: string;
-  /** The payer (`requestPayer`): `null` for a delegate, which owns nothing. */
+  /** The payer (`requestPayerUserId`): `null` for a delegate, which owns nothing. */
   userId: string | null;
   /** Holds `model-provider-credentials:read` (org-wide view). */
   readsOrg: boolean;
@@ -78,7 +77,7 @@ export function requestModelCredentialCaller(c: Context<AppEnv>): ModelCredentia
   const permissions = c.get("permissions") ?? new Set<string>();
   return {
     orgId: c.get("orgId"),
-    userId: payerUserIdOf(requestPayer(c)),
+    userId: requestPayerUserId(c),
     readsOrg: permissions.has("model-provider-credentials:read"),
     writesOrg: permissions.has("model-provider-credentials:write"),
     deletesOrg: permissions.has("model-provider-credentials:delete"),
@@ -315,7 +314,7 @@ export function personalCredentialCustomEndpoint(
 }
 
 /** {@link personalModelCredentialsAllowed} as a refusal, for the personal-creation doors. */
-export async function assertPersonalModelCredentialsAllowed(orgId: string): Promise<void> {
+async function assertPersonalModelCredentialsAllowed(orgId: string): Promise<void> {
   if (await personalModelCredentialsAllowed(orgId)) return;
   throw personalModelCredentialsDisabled();
 }
@@ -608,32 +607,26 @@ export async function loadCredentialBinding(
  * The probe rule, shared by every door that spends a stored credential's key to
  * test it and by the `test` action the list serializes. An organization
  * credential is probed by `readsOrg`; a personal one by its owner alone, holding
- * `readsOrg` or `connects`, while `personalAllowed` (the organization's policy).
+ * `readsOrg` or `connects`, and only while the organization allows personal
+ * credentials: {@link mayProbeCredential} refuses (403), the list omits `test`.
  */
-function mayProbe(
-  caller: ModelCredentialCaller,
-  ownerUserId: string | null,
-  personalAllowed: boolean,
-): boolean {
+function mayProbe(caller: ModelCredentialCaller, ownerUserId: string | null): boolean {
   if (ownerUserId === null) return caller.readsOrg;
-  return ownerUserId === caller.userId && personalAllowed && (caller.readsOrg || caller.connects);
+  return ownerUserId === caller.userId && (caller.readsOrg || caller.connects);
 }
 
 /**
- * {@link mayProbe} for a stored credential. The owner of a personal one is
- * refused (403) while the organization has them off. `false`: the caller cannot
- * see it, so it reads as absent.
+ * {@link mayProbe} for a stored credential. `false`: the caller cannot see it,
+ * so it reads as absent.
  */
 export async function mayProbeCredential(
   caller: ModelCredentialCaller,
   id: string,
 ): Promise<boolean> {
   const row = await loadCredentialBinding(caller.orgId, id);
-  if (!row) return false;
-  if (row.ownerUserId !== null && row.ownerUserId === caller.userId) {
-    await assertPersonalModelCredentialsAllowed(caller.orgId);
-  }
-  return mayProbe(caller, row.ownerUserId, true);
+  if (!row || !mayProbe(caller, row.ownerUserId)) return false;
+  if (row.ownerUserId !== null) await assertPersonalModelCredentialsAllowed(caller.orgId);
+  return true;
 }
 
 /**
@@ -654,32 +647,56 @@ function mayManageCredential(
     : caller.deletesOrg || (own && caller.connects);
 }
 
+/** A credential as the action rules read it. */
+interface CredentialFacts {
+  source: "built-in" | "custom";
+  ownerUserId: string | null;
+  authMode: "api_key" | "oauth2";
+  providerId?: string | null;
+}
+
+/**
+ * The reconnect rule, shared by the list's `reconnect` action and the pairing
+ * route: the caller's own OAuth subscription of `providerId`, re-paired by a
+ * `connects` holder while `personalAllowed` (the organization's policy).
+ */
+export function mayReconnectCredential(
+  caller: ModelCredentialCaller,
+  credential: CredentialFacts,
+  providerId: string,
+  personalAllowed: boolean,
+): boolean {
+  return (
+    personalAllowed &&
+    caller.connects &&
+    credential.source === "custom" &&
+    credential.authMode === "oauth2" &&
+    credential.providerId === providerId &&
+    credential.ownerUserId !== null &&
+    credential.ownerUserId === caller.userId
+  );
+}
+
 /**
  * The actions the caller may take on one credential, as the list serializes them.
  * `personalAllowed` is the organization's `personal_model_credentials` policy.
  */
 export function credentialActions(
   caller: ModelCredentialCaller,
-  credential: {
-    source: "built-in" | "custom";
-    ownerUserId: string | null;
-    authMode: "api_key" | "oauth2";
-    needsReconnection: boolean;
-  },
+  credential: CredentialFacts,
   personalAllowed: boolean,
 ): ModelProviderCredentialAction[] {
   if (credential.source === "built-in") return caller.readsOrg ? ["test"] : [];
-  const own = credential.ownerUserId !== null && credential.ownerUserId === caller.userId;
+  const { ownerUserId } = credential;
   const actions: ModelProviderCredentialAction[] = [];
-  if (mayManageCredential(caller, credential.ownerUserId, "edit")) actions.push("edit");
-  if (mayManageCredential(caller, credential.ownerUserId, "delete")) actions.push("delete");
-  if (mayProbe(caller, credential.ownerUserId, personalAllowed)) actions.push("test");
+  if (mayManageCredential(caller, ownerUserId, "edit")) actions.push("edit");
+  if (mayManageCredential(caller, ownerUserId, "delete")) actions.push("delete");
+  if (mayProbe(caller, ownerUserId) && (ownerUserId === null || personalAllowed)) {
+    actions.push("test");
+  }
   if (
-    credential.authMode === "oauth2" &&
-    credential.needsReconnection &&
-    own &&
-    caller.connects &&
-    personalAllowed
+    credential.providerId &&
+    mayReconnectCredential(caller, credential, credential.providerId, personalAllowed)
   ) {
     actions.push("reconnect");
   }
@@ -1011,10 +1028,10 @@ export async function deleteModelProviderCredential(
       providerId: modelProviderCredentials.providerId,
       label: modelProviderCredentials.label,
     });
+  if (!deleted) throw notFound("Model provider credential not found");
   // Any model backed by the deleted credential is now unresolvable — drop cached
   // resolutions so they don't serve a stale (now-deleted) secret.
   clearResolvedModelCache();
-  if (!deleted) throw notFound("Model provider credential not found");
   return deleted;
 }
 
@@ -1099,7 +1116,7 @@ export async function listOrgModelProviderCredentials(
         owner_name: null,
         allowed_actions: credentialActions(
           caller,
-          { source: "built-in", ownerUserId: null, authMode: "api_key", needsReconnection: false },
+          { source: "built-in", ownerUserId: null, authMode: "api_key" },
           personalAllowed,
         ),
         bindable: false,
@@ -1143,7 +1160,7 @@ export async function listOrgModelProviderCredentials(
             source: "custom",
             ownerUserId: r.ownerUserId,
             authMode,
-            needsReconnection,
+            providerId: r.providerId,
           },
           personalAllowed,
         ),

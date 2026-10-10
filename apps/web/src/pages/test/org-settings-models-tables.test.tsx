@@ -151,6 +151,18 @@ describe("the credentials table, where a subscription needs reconnecting", () =>
   });
 });
 
+describe("the credentials table, where a subscription the holder may re-pair is healthy", () => {
+  const html = credentialsPage([
+    { ...BOB_SUBSCRIPTION, allowed_actions: ["edit", "delete", "test", "reconnect"] },
+  ]);
+
+  it("does not offer the reconnect", () => {
+    expect(rowOf(html, `data-testid="credential-row-${BOB_SUBSCRIPTION.id}"`)).not.toContain(
+      settingsFr["credentials.oauth.reconnect"],
+    );
+  });
+});
+
 describe("the models table, for the credential each model names", () => {
   const model = (over: Partial<OrgModelInfo>): OrgModelInfo => ({
     id: "mdl_1",

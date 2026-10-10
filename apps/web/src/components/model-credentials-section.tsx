@@ -198,7 +198,8 @@ export function CredentialsSection({
                         {isOauth && (
                           <>
                             {can("edit") && editButton}
-                            {can("reconnect") && pk.providerId && (
+                            {/* The server allows re-pairing any own subscription; the row offers it once it fails. */}
+                            {can("reconnect") && pk.needs_reconnection && pk.providerId && (
                               <Button
                                 variant="ghost"
                                 size="sm"

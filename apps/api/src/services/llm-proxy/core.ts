@@ -46,18 +46,17 @@ import {
   recordModelCredentialRejection,
 } from "../model-providers/credentials.ts";
 import type { ModelSwap } from "@appstrate/core/sidecar-types";
-import type { Payer } from "../model-providers/payer.ts";
 
 interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
-  /** The public route's payer (`requestPayer(c)`), for a member-paid model. */
-  payer: Payer;
   /**
-   * A run's own inference: the credential it launched with (`runs.model_credential_id`)
-   * and the payer it recorded at launch (`runs.payer_user_id`).
+   * Who pays for a member-paid model: the public route's `requestPayerUserId(c)`, or
+   * the payer a run recorded at launch (`runs.payer_user_id`).
    */
-  run?: { credentialId: string | null; payerUserId: string | null };
+  payerUserId: string | null;
+  /** A run's own inference: the credential it launched with (`runs.model_credential_id`). */
+  runCredentialId?: string | null;
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /**
@@ -414,9 +413,12 @@ async function resolvePresetForOrg(
   let loaded: Awaited<ReturnType<typeof loadModel>>;
   try {
     loaded =
-      inputs.run !== undefined
-        ? await loadRunModel(orgId, presetId, inputs.run)
-        : await loadModel(orgId, presetId, inputs.payer, { viaProxy: true });
+      inputs.runCredentialId !== undefined
+        ? await loadRunModel(orgId, presetId, {
+            credentialId: inputs.runCredentialId,
+            payerUserId: inputs.payerUserId,
+          })
+        : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
     // and keeps its status; anything else reads as "not enabled", cause kept.
@@ -432,7 +434,7 @@ async function resolvePresetForOrg(
   if (loaded.apiShape !== expectedApi) {
     throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape, loaded.aliased);
   }
-  return requireBoundModel(loaded, inputs.payer);
+  return requireBoundModel(loaded, inputs.payerUserId);
 }
 
 function joinUpstreamUrl(base: string, path: string): string {

@@ -57,12 +57,6 @@ import {
 import { openaiResponsesAdapter } from "../../../src/services/llm-proxy/openai-responses.ts";
 import type { LlmProxyPrincipal } from "../../../src/services/llm-proxy/types.ts";
 import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
-import {
-  NO_PAYER,
-  persistedPayer,
-  userPayer,
-  type Payer,
-} from "../../../src/services/model-providers/payer.ts";
 import { loadModel } from "../../../src/services/org-models.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import {
@@ -1446,9 +1440,9 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
   const UPSTREAM_BASE = "https://api.openai.test/v1";
 
   /** A run's payment as the run router passes it: the payer the run recorded, and its launch credential. */
-  const runPayment = (credentialId: string | null, payerUserId: string | null) => ({
-    payer: persistedPayer(payerUserId),
-    run: { credentialId, payerUserId },
+  const runPayment = (runCredentialId: string | null, payerUserId: string | null) => ({
+    payerUserId,
+    runCredentialId,
   });
 
   beforeEach(async () => {
@@ -1550,17 +1544,14 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
   }
 
   /**
-   * Proxy one non-streaming call as `principal`, paid as `payer` (the public
-   * route's `requestPayer(c)`), or served by a run's launch credential (`run`,
-   * with the payer the run recorded). Returns the key the upstream saw.
+   * Proxy one non-streaming call as `principal`, paid by `payerUserId` (the public
+   * route's `requestPayerUserId(c)`, or the payer a run recorded), served by a run's
+   * launch credential when `runCredentialId` is set. Returns the key the upstream saw.
    */
   async function proxyAs(
     principal: LlmProxyPrincipal,
     presetId: string,
-    payment: {
-      payer: Payer;
-      run?: { credentialId: string | null; payerUserId: string | null };
-    },
+    payment: { payerUserId: string | null; runCredentialId?: string | null },
     onUpstream: () => void = () => {},
   ): Promise<{ status: number; authorization: string | null }> {
     let authorization: string | null = null;
@@ -1595,7 +1586,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const result = await proxyAs(
       { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId },
       h.presetId,
-      { payer: userPayer(h.ctx.user.id) },
+      { payerUserId: h.ctx.user.id },
     );
 
     expect(result.status).toBe(200);
@@ -1612,7 +1603,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const result = await proxyAs(
       { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId },
       h.boundPresetId,
-      { payer: userPayer(h.ctx.user.id) },
+      { payerUserId: h.ctx.user.id },
     );
 
     expect(result.status).toBe(200);
@@ -1634,12 +1625,12 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
       userId: h.ctx.user.id,
     } as const;
 
-    expect((await proxyAs(principal, h.boundPresetId, { payer: NO_PAYER })).authorization).toBe(
+    expect((await proxyAs(principal, h.boundPresetId, { payerUserId: null })).authorization).toBe(
       "Bearer sk-org",
     );
     let upstreamCalls = 0;
     await expect(
-      proxyAs(principal, h.presetId, { payer: NO_PAYER }, () => {
+      proxyAs(principal, h.presetId, { payerUserId: null }, () => {
         upstreamCalls++;
       }),
     ).rejects.toMatchObject({ status: 409, code: "model_credential_required" });
@@ -1695,7 +1686,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     const publicCall = await proxyAs(
       { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId },
       h.presetId,
-      { payer: userPayer(h.ctx.user.id) },
+      { payerUserId: h.ctx.user.id },
     );
     expect(publicCall.authorization).toBe("Bearer sk-added-later");
 
@@ -1762,16 +1753,14 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
       ownerUserId: ctx.user.id,
     });
     // Control: outside the proxy the subscription does serve the model.
-    expect((await loadModel(ctx.orgId, presetId, userPayer(ctx.user.id)))?.credentialId).toBe(
-      subscription.id,
-    );
+    expect((await loadModel(ctx.orgId, presetId, ctx.user.id))?.credentialId).toBe(subscription.id);
 
     let upstreamCalls = 0;
     await expect(
       proxyAs(
         { kind: "jwt_user", userId: ctx.user.id, orgId: ctx.orgId },
         presetId,
-        { payer: userPayer(ctx.user.id) },
+        { payerUserId: ctx.user.id },
         () => {
           upstreamCalls++;
         },
@@ -1786,7 +1775,7 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
 
     await expect(
       proxyAs({ kind: "jwt_user", userId: ctx.user.id, orgId: ctx.orgId }, presetId, {
-        payer: userPayer(ctx.user.id),
+        payerUserId: ctx.user.id,
       }),
     ).rejects.toMatchObject({ status: 409, code: "model_credential_required" });
     expect(await db.select().from(llmUsage)).toHaveLength(0);

@@ -9,7 +9,6 @@ import type { AppEnv } from "../../types/index.ts";
 import { isUserPrincipal } from "../../lib/principal.ts";
 import { lookupCatalogModel } from "../model-catalog.ts";
 import { personalModelCredentialsAllowed } from "./credentials.ts";
-import { NO_PAYER, userPayer, type Payer } from "./payer.ts";
 import { getModelProvider } from "./registry.ts";
 
 /** The catalog family a provider's models belong to (a wrapper serves its catalog provider's ids). */
@@ -42,15 +41,15 @@ interface PersonalCredential {
 }
 
 /**
- * The personal credentials `payer` owns in `orgId`, read once per call.
+ * The personal credentials `payerUserId` owns in `orgId` (none for `null`), read once per call.
  * The owner query runs first (indexed, and almost always empty); the org policy
  * is read only when there is a credential to switch off.
  */
 export async function listPersonalCredentials(
   orgId: string,
-  payer: Payer,
+  payerUserId: string | null,
 ): Promise<PersonalCredential[]> {
-  if (payer.kind !== "user") return [];
+  if (!payerUserId) return [];
   const rows = await db
     .select({
       id: modelProviderCredentials.id,
@@ -61,7 +60,7 @@ export async function listPersonalCredentials(
     .where(
       and(
         eq(modelProviderCredentials.orgId, orgId),
-        eq(modelProviderCredentials.ownerUserId, payer.userId),
+        eq(modelProviderCredentials.ownerUserId, payerUserId),
       ),
     );
   if (rows.length === 0) return [];
@@ -93,12 +92,12 @@ export function applicableCredentialIds(
 }
 
 /**
- * The payer of a call of this request: the caller when it is the platform user
- * itself (see `isUserPrincipal`), never a delegate (API key, third-party OAuth
- * token) or an end user.
+ * The user whose personal credentials may serve a call of this request: the caller
+ * when it is the platform user itself (see `isUserPrincipal`), never a delegate
+ * (API key, third-party OAuth token) or an end user.
  */
-export function requestPayer(c: Context<AppEnv>): Payer {
-  return isUserPrincipal(c) ? userPayer(c.get("user").id) : NO_PAYER;
+export function requestPayerUserId(c: Context<AppEnv>): string | null {
+  return isUserPrincipal(c) ? c.get("user").id : null;
 }
 
 /**

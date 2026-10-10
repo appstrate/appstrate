@@ -21,8 +21,10 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { connectHelperCommand } from "../lib/connect-helper.ts";
 import {
-  assertPersonalModelCredentialsAllowed,
   getOrgModelProviderCredential,
+  mayReconnectCredential,
+  personalModelCredentialsAllowed,
+  personalModelCredentialsDisabled,
   requestModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
 
@@ -224,23 +226,27 @@ export function createModelProvidersOAuthRouter() {
       const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
       // A subscription is always personal: minting a pairing creates one, so the org policy applies.
-      await assertPersonalModelCredentialsAllowed(orgId);
+      const personalAllowed = await personalModelCredentialsAllowed(orgId);
+      if (!personalAllowed) throw personalModelCredentialsDisabled();
 
       if (input.credentialId) {
-        // Reconnect targets the caller's own subscription only; anything else reads as absent.
+        // Reconnect targets the caller's own subscription of this provider; anything else reads as absent.
         const credential = await getOrgModelProviderCredential(caller, input.credentialId);
-        if (!credential || credential.owner_id !== user.id) {
-          throw notFound("Model provider credential not found");
-        }
         if (
-          credential.source !== "custom" ||
-          credential.authMode !== "oauth2" ||
-          credential.providerId !== input.providerId
+          !credential ||
+          !mayReconnectCredential(
+            caller,
+            {
+              source: credential.source,
+              ownerUserId: credential.owner_id,
+              authMode: credential.authMode,
+              providerId: credential.providerId,
+            },
+            input.providerId,
+            personalAllowed,
+          )
         ) {
-          throw invalidRequest(
-            "credentialId must identify an OAuth credential for providerId in the current organization",
-            "credentialId",
-          );
+          throw notFound("Model provider credential not found");
         }
       }
 

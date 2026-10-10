@@ -229,19 +229,21 @@ A credential may be bound to a model only when it is an organization API key:
 as `bindable`.
 
 The payer is the user whose personal credentials may serve step 3, or nobody.
-Only a user principal pays: `requestPayer(c)` returns a `Payer` for the caller
-when `isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `NO_PAYER`
-otherwise. Each door computes it once per request and passes it down. A `Payer`
-is `{ kind: "user", userId }` or `{ kind: "none" }` (`services/model-providers/payer.ts`).
+Only a user principal pays: `requestPayerUserId(c)` returns the caller's user id
+when `isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `null`
+otherwise. Each door computes it once per request and passes it down.
 
 - a session, CLI, MCP instance token or chat loopback: that user;
 - an API key, a third-party OAuth token, an end user or an OIDC end-user token: nobody;
 - a schedule: nobody, whoever wrote it or is its actor. A schedule is judged on
   its effective model (its override, else the agent's model in its space, else
   the organization default), which must be bound (`409 model_credential_required`
-  otherwise). A member-paid model cannot be a schedule's `model_id_override`, and
-  a model a schedule overrides with cannot be unbound (`PATCH /api/models/{id}`,
-  `409 model_scheduled`, with the overriding schedule ids in `schedule_ids`);
+  otherwise) when a write creates it, moves its model or enables it. A model
+  enabled schedules run that way cannot be unbound (`PATCH /api/models/{id}`,
+  `409 model_scheduled`, with their ids in `schedule_ids`). Other writes that
+  move the effective model (the organization default, an agent's model in a
+  space) are not refused: a schedule that then fires a member-paid model records
+  a failed run;
 - a run: the payer its launch door computed, recorded as `runs.payer_user_id` at
   launch. It is the one fact every later door compares against: the sidecar's
   OAuth door and a run's personal credential both require the payer to match it.

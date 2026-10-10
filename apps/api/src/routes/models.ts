@@ -24,7 +24,7 @@ import {
   resolveCatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
-import { requestPayer } from "../services/model-providers/credential-chain.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
 import {
   listCatalogModels,
@@ -233,7 +233,7 @@ export function createModelsRouter() {
   // GET /api/models — list all models (system + DB)
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const models = await listOrgModels(orgId, requestPayer(c));
+    const models = await listOrgModels(orgId, requestPayerUserId(c));
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
     //
@@ -347,7 +347,7 @@ export function createModelsRouter() {
       // see the resolved state without a follow-up fetch (#657). The row was
       // just inserted — failing to re-project it (e.g. credential became
       // unreachable mid-request) is a server-side inconsistency.
-      const model = await getOrgModel(orgId, id, requestPayer(c));
+      const model = await getOrgModel(orgId, id, requestPayerUserId(c));
       if (!model) throw internalError();
       return c.json(model, 201);
     } catch (err) {
@@ -444,7 +444,7 @@ export function createModelsRouter() {
       // when no DB row is flagged) — so callers see the resulting state
       // without a follow-up GET (#657). When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
-      const all = await listOrgModels(orgId, requestPayer(c));
+      const all = await listOrgModels(orgId, requestPayerUserId(c));
       const def = all.find((m) => m.is_default);
       // Project in case the effective default is a model alias (Threat A).
       return def ? c.json(projectAliasedModel(def)) : c.body(null, 204);
@@ -530,7 +530,7 @@ export function createModelsRouter() {
     // `aliased` is already public on the projection, so a 400 here discloses
     // nothing new; the message names no binding detail. Non-aliased models are
     // untouched — their contract is reaching the provider, not hiding it.
-    const existing = await getOrgModel(orgId, modelId, requestPayer(c));
+    const existing = await getOrgModel(orgId, modelId, requestPayerUserId(c));
     if (existing?.aliased) {
       throw invalidRequest("Connection testing is not available for a managed model.");
     }
@@ -655,7 +655,7 @@ export function createModelsRouter() {
       // — it rejects env-declared models, while an alias is an ordinary DB row
       // — so without this projection the update route is a read oracle for
       // every backing an org admin (or a `models:write` API key) can name.
-      const model = await getOrgModel(orgId, modelId, requestPayer(c));
+      const model = await getOrgModel(orgId, modelId, requestPayerUserId(c));
       if (!model) throw notFound("Model not found");
       return c.json(projectAliasedModel(model));
     } catch (err) {

@@ -306,8 +306,6 @@ describe("chat admission gate (handleChatStream)", () => {
             input: null,
             accessToken: "at-test",
             credentialId: "cred-test",
-            credentialSource: "user",
-            payerUserId: "user-test",
           },
         }),
         dispatchPaths,

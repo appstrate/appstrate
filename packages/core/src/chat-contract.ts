@@ -26,7 +26,6 @@ import type { TokenUsageTier } from "@appstrate/afps-shared/token-usage";
 // from the model-provider surface it mirrors.
 import type { ModelCost, ModelInputModality } from "./module.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
-import type { ModelPayer } from "./model-payer.ts";
 
 /**
  * A subscription (oauth2) model resolved for one chat turn: the real upstream
@@ -53,10 +52,6 @@ export interface SubscriptionChatModel {
    * ledger attributes the turn to it (`llm_usage.credential_id`).
    */
   credentialId: string;
-  /** Who pays that credential: its owner, `"user"` for a member's own, `"org"` for the organization's. */
-  credentialSource: ModelPayer;
-  /** The member who owns that credential — set iff `credentialSource` is `"user"`. */
-  payerUserId: string | null;
   /**
    * Fresh subscription access token — pi-ai emits the OAuth request shape
    * from it natively, including any account routing header (codex decodes
@@ -154,10 +149,6 @@ export interface ChatUsageRecord {
   cost: ModelCost | null;
   /** The credential that served the turn (`llm_usage.credential_id`), or null. */
   credentialId: string | null;
-  /** Who pays that credential (`llm_usage.credential_source`), or null with no credential. */
-  credentialSource: ModelPayer | null;
-  /** The member who owns that credential (`llm_usage.payer_user_id`), or null. */
-  payerUserId: string | null;
   durationMs: number;
 }
 

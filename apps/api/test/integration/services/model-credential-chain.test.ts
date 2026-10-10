@@ -39,7 +39,6 @@ import {
 } from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
-import { NO_PAYER, userPayer } from "../../../src/services/model-providers/payer.ts";
 
 getTestApp(); // boots the model and provider registries
 
@@ -133,18 +132,18 @@ describe("model resolution — a member's own credential serves an unbound model
     });
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
-    expect(await loadModel(ctx.orgId, model.id, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialSource: "org",
       credentialId: org.id,
       apiKey: "sk-org",
     });
-    expect(await loadModel(ctx.orgId, model.id, userPayer(bob.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, bob.user.id)).toMatchObject({
       credentialSource: "org",
       credentialId: org.id,
       apiKey: "sk-org",
     });
     // An API key spends no member's credential.
-    expect(await loadModel(ctx.orgId, model.id, NO_PAYER)).toMatchObject({ credentialId: org.id });
+    expect(await loadModel(ctx.orgId, model.id, null)).toMatchObject({ credentialId: org.id });
   });
 
   it("never serves an aliased model with a personal key", async () => {
@@ -159,13 +158,13 @@ describe("model resolution — a member's own credential serves an unbound model
     });
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
-    expect(await loadModel(ctx.orgId, alias.id, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, alias.id, ctx.user.id)).toMatchObject({
       credentialSource: "org",
       credentialId: org.id,
       apiKey: "sk-org",
       aliased: true,
     });
-    expect(billedTo(await listOrgModels(ctx.orgId, userPayer(ctx.user.id)), alias.id)).toBe("org");
+    expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), alias.id)).toBe("org");
   });
 
   it("resolves an unbound model unbound for a member without a key, and on the member's own key once they add one", async () => {
@@ -174,12 +173,12 @@ describe("model resolution — a member's own credential serves an unbound model
       providerId: "anthropic",
     });
 
-    const without = await loadModel(ctx.orgId, unbound, userPayer(bob.user.id));
+    const without = await loadModel(ctx.orgId, unbound, bob.user.id);
     expect(without).toMatchObject({ credentialSource: null, apiKey: "", providerId: "anthropic" });
     expect(without!.credentialId).toBeUndefined();
 
     await personalAnthropicKey(bob.user.id, "sk-bob");
-    expect(await loadModel(ctx.orgId, unbound, userPayer(bob.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, unbound, bob.user.id)).toMatchObject({
       credentialSource: "user",
       apiKey: "sk-bob",
     });
@@ -190,11 +189,11 @@ describe("model resolution — a member's own credential serves an unbound model
       credentialId: null,
       providerId: "anthropic",
     });
-    const model = await loadModel(ctx.orgId, unbound, userPayer(bob.user.id));
+    const model = await loadModel(ctx.orgId, unbound, bob.user.id);
 
     let thrown: unknown;
     try {
-      requireBoundModel(model!, userPayer(bob.user.id));
+      requireBoundModel(model!, bob.user.id);
     } catch (err) {
       thrown = err;
     }
@@ -203,8 +202,8 @@ describe("model resolution — a member's own credential serves an unbound model
     expect((thrown as ApiError).code).toBe("model_credential_required");
 
     await personalAnthropicKey(bob.user.id, "sk-bob");
-    const withKey = await loadModel(ctx.orgId, unbound, userPayer(bob.user.id));
-    expect(requireBoundModel(withKey!, userPayer(bob.user.id)).credentialSource).toBe("user");
+    const withKey = await loadModel(ctx.orgId, unbound, bob.user.id);
+    expect(requireBoundModel(withKey!, bob.user.id).credentialSource).toBe("user");
   });
 
   it("ignores personal credentials on an unbound model while the organization has switched them off", async () => {
@@ -215,7 +214,7 @@ describe("model resolution — a member's own credential serves an unbound model
       .set({ orgSettings: { personal_model_credentials: false } })
       .where(eq(organizations.id, ctx.orgId));
 
-    expect(await loadModel(ctx.orgId, unbound, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, unbound, ctx.user.id)).toMatchObject({
       credentialSource: null,
       apiKey: "",
     });
@@ -230,15 +229,15 @@ describe("model resolution — a member's own credential serves an unbound model
     // member's decrypted key to the other.
     for (let round = 0; round < 3; round++) {
       const [alice, bobResolved] = await Promise.all([
-        loadModel(ctx.orgId, model.id, userPayer(ctx.user.id)),
-        loadModel(ctx.orgId, model.id, userPayer(bob.user.id)),
+        loadModel(ctx.orgId, model.id, ctx.user.id),
+        loadModel(ctx.orgId, model.id, bob.user.id),
       ]);
       expect(alice!.apiKey).toBe("sk-alice");
       expect(bobResolved!.apiKey).toBe("sk-bob");
 
       const [bobAgain, aliceAgain] = await Promise.all([
-        loadModel(ctx.orgId, model.id, userPayer(bob.user.id)),
-        loadModel(ctx.orgId, model.id, userPayer(ctx.user.id)),
+        loadModel(ctx.orgId, model.id, bob.user.id),
+        loadModel(ctx.orgId, model.id, ctx.user.id),
       ]);
       expect(bobAgain!.apiKey).toBe("sk-bob");
       expect(aliceAgain!.apiKey).toBe("sk-alice");
@@ -249,15 +248,11 @@ describe("model resolution — a member's own credential serves an unbound model
     await setDefaultModel(ctx.orgId, await unboundModel());
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
-    expect(
-      await resolveModel(ctx.orgId, "@acme/agent", null, userPayer(ctx.user.id)),
-    ).toMatchObject({
+    expect(await resolveModel(ctx.orgId, "@acme/agent", null, ctx.user.id)).toMatchObject({
       credentialSource: "user",
       apiKey: "sk-alice",
     });
-    expect(
-      await resolveModel(ctx.orgId, "@acme/agent", null, userPayer(bob.user.id)),
-    ).toMatchObject({
+    expect(await resolveModel(ctx.orgId, "@acme/agent", null, bob.user.id)).toMatchObject({
       credentialSource: null,
       apiKey: "",
     });
@@ -274,11 +269,11 @@ describe("model resolution — a member's own credential serves an unbound model
     ]);
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
-    expect(await loadModel(ctx.orgId, "sys-claude", userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, "sys-claude", ctx.user.id)).toMatchObject({
       credentialSource: "system",
       apiKey: "sk-system",
     });
-    expect(await loadModel(ctx.orgId, "sys-claude", userPayer(bob.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, "sys-claude", bob.user.id)).toMatchObject({
       credentialSource: "system",
       apiKey: "sk-system",
     });
@@ -328,7 +323,7 @@ describe("model resolution — a member's own credential serves an unbound model
       providerId: "anthropic",
     });
 
-    expect((await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === id)).toMatchObject({
+    expect((await listOrgModels(ctx.orgId, null)).find((m) => m.id === id)).toMatchObject({
       credentialId: null,
       providerId: "anthropic",
       needs_reconnection: false,
@@ -351,16 +346,16 @@ describe("model resolution — a member's own credential serves an unbound model
     });
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
-    const forAlice = await listOrgModels(ctx.orgId, userPayer(ctx.user.id));
+    const forAlice = await listOrgModels(ctx.orgId, ctx.user.id);
     // The org binding pays, even for a member holding a personal key of its family.
     expect(billedTo(forAlice, bound.id)).toBe("org");
     expect(billedTo(forAlice, unbound)).toBe("user");
 
-    const forBob = await listOrgModels(ctx.orgId, userPayer(bob.user.id));
+    const forBob = await listOrgModels(ctx.orgId, bob.user.id);
     expect(billedTo(forBob, bound.id)).toBe("org");
     expect(billedTo(forBob, unbound)).toBeNull();
 
-    expect(billedTo(await listOrgModels(ctx.orgId, NO_PAYER), bound.id)).toBe("org");
+    expect(billedTo(await listOrgModels(ctx.orgId, null), bound.id)).toBe("org");
   });
 
   it("the LLM proxy's chain skips a personal subscription and serves the member's own API key on an unbound model", async () => {
@@ -374,12 +369,10 @@ describe("model resolution — a member's own credential serves an unbound model
     });
     clearResolvedModelCache();
 
-    expect(await loadModel(ctx.orgId, model.id, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialId: subscription.id,
     });
-    expect(
-      await loadModel(ctx.orgId, model.id, userPayer(ctx.user.id), { viaProxy: true }),
-    ).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id, { viaProxy: true })).toMatchObject({
       credentialSource: "user",
       credentialId: mine.id,
       apiKey: "sk-alice",
@@ -398,7 +391,7 @@ describe("model resolution — a member's own credential serves an unbound model
     clearResolvedModelCache();
 
     // The chain now prefers the subscription; the run launched before it keeps its credential.
-    expect(await loadModel(ctx.orgId, model.id, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialId: subscription.id,
     });
     expect(
@@ -421,7 +414,7 @@ describe("model resolution — a member's own credential serves an unbound model
     await db.update(orgModels).set({ credentialId: org.id }).where(eq(orgModels.id, model.id));
     clearResolvedModelCache();
 
-    expect(await loadModel(ctx.orgId, model.id, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       apiKey: "sk-org",
     });
     expect(
@@ -480,7 +473,7 @@ describe("model resolution — a member's own credential serves an unbound model
     expect(unbound).toMatchObject({ credentialSource: null, apiKey: "" });
     let thrown: unknown;
     try {
-      requireBoundModel(unbound!, NO_PAYER);
+      requireBoundModel(unbound!, null);
     } catch (err) {
       thrown = err;
     }
@@ -515,11 +508,11 @@ describe("model resolution — a member's own credential serves an unbound model
       .where(eq(modelProviderCredentials.id, mine.id));
     const next = await personalAnthropicKey(ctx.user.id, "sk-alice-next");
 
-    expect(await loadModel(ctx.orgId, model.id, userPayer(ctx.user.id))).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialSource: "user",
       credentialId: next.id,
       apiKey: "sk-alice-next",
     });
-    expect(billedTo(await listOrgModels(ctx.orgId, userPayer(ctx.user.id)), model.id)).toBe("user");
+    expect(billedTo(await listOrgModels(ctx.orgId, ctx.user.id), model.id)).toBe("user");
   });
 });

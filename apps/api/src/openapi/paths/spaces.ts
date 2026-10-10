@@ -595,10 +595,10 @@ export const spacesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Or `modelId` would leave enabled schedules of this agent in this space with no `model_id_override` running a model served only by each member's own credential — the model named, or the organization default for `null` (`model_scheduled`, with the `schedule_ids` extension). Nothing in the patch is written.",
+            "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
           content: {
             "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ScheduleIdsProblem" },
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
             },
           },
         },

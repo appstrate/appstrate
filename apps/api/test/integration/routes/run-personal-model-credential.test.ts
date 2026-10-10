@@ -39,7 +39,6 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
-import { userPayer } from "../../../src/services/model-providers/payer.ts";
 import { createOrgModel, loadModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
@@ -507,7 +506,7 @@ describe("run admission — the credential a run spends is the one admitted", ()
     expect(await stampedCredentials()).toEqual([{ modelCredentialId: personalId }]);
     // Discrimination: a fresh resolution after the gate finds no credential at all.
     clearResolvedModelCache();
-    const resolvedAfterGate = await loadModel(ctx.orgId, orgModelId, userPayer(member.user.id));
+    const resolvedAfterGate = await loadModel(ctx.orgId, orgModelId, member.user.id);
     expect(resolvedAfterGate?.credentialSource).toBeNull();
   });
 

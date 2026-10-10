@@ -63,8 +63,6 @@ function oauthModel(overrides: Partial<SubscriptionChatModel> = {}): Subscriptio
     baseUrl: "https://api.anthropic.com",
     accessToken: "oauth-secret-in-memory",
     credentialId: "cred-test",
-    credentialSource: "user",
-    payerUserId: "user-test",
     input: ["text", "image"],
     contextWindow: 200_000,
     maxTokens: 16_384,

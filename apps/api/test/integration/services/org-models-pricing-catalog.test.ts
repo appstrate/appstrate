@@ -6,7 +6,6 @@
  * explicit override still wins over the catalog.
  */
 
-import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { listOrgModels, loadModel } from "../../../src/services/org-models.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -40,7 +39,7 @@ describe("loadModel — catalog fallback", () => {
       enabled: true,
       cost: null,
     });
-    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.cost).not.toBeNull();
     // Sanity check the canonical numbers — the catalog ships gpt-4o at
@@ -67,7 +66,7 @@ describe("loadModel — catalog fallback", () => {
       // Hypothetical enterprise discount — half the public list price.
       cost: { input: 1.25, output: 5, cacheRead: 0, cacheWrite: 0 },
     });
-    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved!.cost!.input).toBeCloseTo(1.25, 4);
     expect(resolved!.cost!.output).toBeCloseTo(5, 4);
   });
@@ -90,7 +89,7 @@ describe("loadModel — catalog fallback", () => {
       enabled: true,
       cost: null,
     });
-    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.cost).toBeNull();
   });
@@ -117,7 +116,7 @@ describe("loadModel — catalog fallback", () => {
       // Drizzle column is nullable — leave the four catalog-derivable
       // fields out so the resolver picks them up live from the catalog.
     });
-    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.contextWindow).toBeGreaterThan(0);
     expect(resolved!.input).toContain("text");
@@ -138,7 +137,7 @@ describe("loadModel — catalog fallback", () => {
         providerId: cred.providerId,
         modelId,
       });
-      return (await loadModel(ctx.orgId, model.id, NO_PAYER))!.piProvider;
+      return (await loadModel(ctx.orgId, model.id, null))!.piProvider;
     };
     expect(await piProviderOf("moonshot", "kimi-k2.6")).toBe("moonshotai");
     expect(await piProviderOf("openai-compatible", "my-model")).toBeNull();
@@ -166,10 +165,10 @@ describe("loadModel — catalog fallback", () => {
         modelId,
         reasoning,
       });
-      const resolved = (await loadModel(ctx.orgId, model.id, NO_PAYER))!;
+      const resolved = (await loadModel(ctx.orgId, model.id, null))!;
       if (baseUrl) expect(resolved.baseUrl).toBe(baseUrl);
       const generation = resolved.generation?.reasoning;
-      const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id)!
+      const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id)!
         .generation?.reasoning;
       expect(listed).toEqual(generation!);
       return generation;
@@ -193,7 +192,7 @@ describe("loadModel — catalog fallback", () => {
   // `invalid input syntax for type uuid`, surfacing as a 500. loadModel now
   // swallows the cast failure and resolves null ("not found").
   it("returns null (no throw) for a non-UUID modelDbId", async () => {
-    const resolved = await loadModel(ctx.orgId, "gpt-5.5", NO_PAYER);
+    const resolved = await loadModel(ctx.orgId, "gpt-5.5", null);
     expect(resolved).toBeNull();
   });
 });

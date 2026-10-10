@@ -48,9 +48,7 @@ import {
   requireBoundModel,
   resolveModelCascade,
   validateGenerationOverride,
-  type ModelCascade,
 } from "../services/org-models.ts";
-import { NO_PAYER } from "../services/model-providers/payer.ts";
 import { getSpacePackageSettings, type SpacePackageSettings } from "../services/space-packages.ts";
 import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
 import { getPackage } from "../services/package-catalog.ts";
@@ -491,6 +489,7 @@ export function createSchedulesRouter() {
 
       // Reject a `model_id_override` that references no real model up front, so
       // a bad id fails at schedule-create time instead of silently each tick.
+      // Kept for its 404: the cascade below falls through silently on an unknown id.
       await assertExplicitModelExists(scope.orgId, data.model_id_override);
       // A schedule has no payer: its EFFECTIVE model (override, else the agent's model here,
       // else the org default) must be bound to an organization credential.
@@ -498,9 +497,9 @@ export function createSchedulesRouter() {
         scope.orgId,
         agent.id,
         data.model_id_override ?? packageSettings.modelId ?? null,
-        NO_PAYER,
+        null,
       );
-      if (scheduled) requireBoundModel(scheduled.model, NO_PAYER);
+      if (scheduled) requireBoundModel(scheduled.model, null);
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
         generationConfigOverride = validateGenerationOverride(
@@ -701,32 +700,32 @@ export function createSchedulesRouter() {
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
-    // the field isn't part of this patch).
+    // the field isn't part of this patch). Kept for its 404: the cascade below
+    // falls through silently on an unknown id.
     await assertExplicitModelExists(scope.orgId, data.model_id_override);
-    const effectiveModelOverride =
-      data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
-    let scheduled: Promise<ModelCascade> | undefined;
-    const scheduledModel = () =>
-      (scheduled ??= resolveModelCascade(
-        scope.orgId,
-        existing.packageId,
-        effectiveModelOverride ?? packageSettings.modelId ?? null,
-        NO_PAYER,
-      ));
-    // Judged when the patch moves the model or arms the row; a patch that only reduces
-    // what the row does stays applicable.
-    if (data.model_id_override !== undefined || data.enabled === true) {
-      const s = await scheduledModel();
-      if (s) requireBoundModel(s.model, NO_PAYER);
-    }
     let generationConfigOverride = data.generation_config_override;
-    if (
+    const reconcilesGeneration =
       (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||
       (generationConfigOverride === undefined &&
         data.model_id_override !== undefined &&
-        existing.generation_config_override)
-    ) {
-      const selectedModel = (await scheduledModel())?.model ?? null;
+        !!existing.generation_config_override);
+    // Judged when the patch moves the model or arms the row; a patch that only reduces
+    // what the row does stays applicable.
+    const judgesModel = data.model_id_override !== undefined || data.enabled === true;
+    const effectiveModelOverride =
+      data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
+    const scheduled =
+      judgesModel || reconcilesGeneration
+        ? await resolveModelCascade(
+            scope.orgId,
+            existing.packageId,
+            effectiveModelOverride ?? packageSettings.modelId ?? null,
+            null,
+          )
+        : null;
+    if (judgesModel && scheduled) requireBoundModel(scheduled.model, null);
+    if (reconcilesGeneration) {
+      const selectedModel = scheduled?.model ?? null;
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
         generationConfigOverride = validateGenerationOverride(

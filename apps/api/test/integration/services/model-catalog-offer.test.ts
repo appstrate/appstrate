@@ -5,7 +5,6 @@
  * served, and what a system model takes from it.
  */
 
-import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { listPiModels } from "@appstrate/runner-pi/pi-model";
 import { getTestApp } from "../../helpers/app.ts";
@@ -124,7 +123,7 @@ describe("live model catalog — what an org and a system model get", () => {
         models: [{ id: "m-next", modelId: id }],
       },
     ]);
-    expect(await loadModel(ctx.orgId, "m-next", NO_PAYER)).toMatchObject({
+    expect(await loadModel(ctx.orgId, "m-next", null)).toMatchObject({
       modelId: id,
       credentialSource: "system",
       dialect: null,

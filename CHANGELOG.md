@@ -150,13 +150,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     bound to one credential, `member` unbound (each member serves it), `managed`
     an alias. `credentialId` is `null` for `member` and `managed`.
   - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
-    `bindable`. The registry gains `personal_allowed`.
+    `bindable`. `reconnect` is the pairing route's own rule: the holder's OAuth
+    credential, flagged or not; any other `credentialId` on a pairing is a 404. The registry gains `personal_allowed`.
   - `model_source` takes `user` (a member's own credential), with `org` and
     `system` (`credential_source` is `MODEL_PAYERS`).
   - `personal_model_credentials` is always served in the organization settings.
   - `PATCH /api/models/{id}` refuses an unbinding with `409 model_scheduled`
-    carrying `schedule_ids`. `model_credential_required` on a schedule is judged
-    on its effective model.
+    carrying `schedule_ids` when enabled schedules run the model (through their
+    override, their agent's model in their space or the organization default).
+    `model_credential_required` on a schedule write is judged on its effective
+    model.
   - `llm_usage.payer_user_id` and `runs.payer_user_id` record the member whose
     credential paid; a run's OAuth door compares against `runs.payer_user_id`.
 
