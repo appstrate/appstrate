@@ -320,12 +320,7 @@ export function manifestSchemaWrapper(
 ): ManifestSchemaWrapper | undefined {
   const raw = manifest[key] as ManifestSchemaWrapper | undefined;
   if (!raw) return undefined;
-  return {
-    schema: raw.schema,
-    file_constraints: raw.file_constraints,
-    ui_hints: raw.ui_hints,
-    property_order: raw.property_order,
-  };
+  return raw;
 }
 
 /** Convert the manifest input/output wrappers into SchemaField arrays for the form. */
@@ -349,7 +344,7 @@ export function manifestToSchemaFields(
 
 type Scalar = string | number | boolean;
 
-export type FileKind = "none" | "single" | "multiple";
+type FileKind = "none" | "single" | "multiple";
 
 /** A keyword value as shown in a text input; `locked` = it cannot be edited as text (shown as JSON). */
 export interface TextValue {
@@ -446,8 +441,8 @@ export function setItemsEnum(prop: JSONSchema7, values: Scalar[]): JSONSchema7 {
   return setKeyword(prop, "items", Object.keys(rest).length > 0 ? rest : undefined);
 }
 
-/** Numeric constraint input → number, or undefined (keyword removed) when empty or not a number. */
-export function toNumber(text: string): number | undefined {
+/** Numeric input → number, or undefined when empty or not a number. */
+function parseNumber(text: string): number | undefined {
   if (!text.trim()) return undefined;
   const n = Number(text);
   return Number.isFinite(n) ? n : undefined;
@@ -455,11 +450,17 @@ export function toNumber(text: string): number | undefined {
 
 // ─── Text adapters (default, enum, items.enum) ──────────────
 
-const NON_NEGATIVE_INTEGER = ["minLength", "maxLength", "maxItems"];
+export type NumericKeyword =
+  "minimum" | "maximum" | "multipleOf" | "minLength" | "maxLength" | "maxItems";
 
-/** Numeric keyword input → number; undefined (keyword removed) when empty or invalid for that keyword. */
-export function toKeywordNumber(keyword: string, text: string): number | undefined {
-  const n = toNumber(text);
+const NON_NEGATIVE_INTEGER: string[] = ["minLength", "maxLength", "maxItems", "maxSize"];
+
+/** Numeric keyword (or file `maxSize`) input → number; undefined (removed) when empty or invalid for it. */
+export function toKeywordNumber(
+  keyword: NumericKeyword | "maxSize",
+  text: string,
+): number | undefined {
+  const n = parseNumber(text);
   if (n === undefined) return undefined;
   if (NON_NEGATIVE_INTEGER.includes(keyword)) return Number.isInteger(n) && n >= 0 ? n : undefined;
   if (keyword === "multipleOf") return n > 0 ? n : undefined;
@@ -471,7 +472,7 @@ export function textToValue(text: string, type: string): Scalar | undefined {
   if (type === "string") return text || undefined;
   if (!text.trim()) return undefined;
   if (type === "number" || type === "integer") {
-    const n = toNumber(text);
+    const n = parseNumber(text);
     return n !== undefined && type === "integer" ? Math.round(n) : n;
   }
   if (type === "boolean") {

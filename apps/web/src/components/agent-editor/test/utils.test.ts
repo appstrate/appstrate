@@ -22,7 +22,6 @@ import {
   textToList,
   textToValue,
   toKeywordNumber,
-  toNumber,
   valueToText,
   manifestToSchemaFields,
   manifestToMetadata,
@@ -476,7 +475,7 @@ describe("schemaToFields / fieldsToSchema", () => {
   });
 });
 
-// ─── Lossless round-trip (#1896) ────────────────────────────
+// ─── Lossless round-trip ────────────────────────────
 
 describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
   const FILE_PDF = { type: "string", format: "uri", contentMediaType: "application/pdf" } as const;
@@ -733,7 +732,7 @@ describe("text adapters", () => {
   });
 
   it("toKeywordNumber validates per keyword", () => {
-    for (const k of ["minLength", "maxLength", "maxItems"]) {
+    for (const k of ["minLength", "maxLength", "maxItems"] as const) {
       expect(toKeywordNumber(k, "3")).toBe(3);
       expect(toKeywordNumber(k, "0")).toBe(0);
       expect(toKeywordNumber(k, "-1")).toBeUndefined();
@@ -746,12 +745,13 @@ describe("text adapters", () => {
     expect(toKeywordNumber("maximum", "abc")).toBeUndefined();
   });
 
-  it("toNumber is undefined for empty or non-numeric text", () => {
-    expect(toNumber("")).toBeUndefined();
-    expect(toNumber("  ")).toBeUndefined();
-    expect(toNumber("-")).toBeUndefined();
-    expect(toNumber("Infinity")).toBeUndefined();
-    expect(toNumber("-2.5")).toBe(-2.5);
+  it("toKeywordNumber is undefined for empty or non-numeric text; maxSize is a byte count", () => {
+    for (const text of ["", "  ", "-", "Infinity"]) {
+      expect(toKeywordNumber("minimum", text)).toBeUndefined();
+    }
+    expect(toKeywordNumber("maxSize", "1024")).toBe(1024);
+    expect(toKeywordNumber("maxSize", "-1")).toBeUndefined();
+    expect(toKeywordNumber("maxSize", "1.5")).toBeUndefined();
   });
 
   it("shows editable scalars as text", () => {

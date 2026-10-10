@@ -4,13 +4,7 @@
 import Mustache from "mustache";
 import { jsonText } from "@appstrate/afps-shared/json-text";
 
-/**
- * Writer that interpolates through {@link jsonText} and never HTML-escapes.
- * Both value hooks are overridden because `{{{x}}}` / `{{&x}}` go through
- * `unescapedValue`, which bypasses the escape function entirely. A missing or
- * null value renders as the empty string (mustache appends the result as-is,
- * so "" is identical to the `undefined` it would otherwise return).
- */
+/** `{{{x}}}` / `{{&x}}` go through `unescapedValue`, bypassing `escape`, so both hooks are overridden. */
 class PromptWriter extends Mustache.Writer {
   override escapedValue(token: string[], context: Mustache.Context): string {
     return interpolate(token, context);

@@ -16,6 +16,10 @@ describe("jsonText", () => {
     expect(jsonText(null)).toBe("null");
   });
 
+  it("renders an absent value as the empty string", () => {
+    expect(jsonText(undefined)).toBe("");
+  });
+
   it("renders objects as JSON", () => {
     expect(jsonText({ a: 1, b: "x" })).toBe('{"a":1,"b":"x"}');
     expect(jsonText({ a: { b: [1, { c: null }] } })).toBe('{"a":{"b":[1,{"c":null}]}}');

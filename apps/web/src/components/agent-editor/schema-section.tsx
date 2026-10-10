@@ -46,7 +46,7 @@ import {
   textToList,
   textToValue,
   toKeywordNumber,
-  toNumber,
+  type NumericKeyword,
   valueToText,
   type TextValue,
 } from "./utils";
@@ -93,8 +93,6 @@ const STRING_FORMAT_OPTIONS = [
   { value: "color", label: "Color" },
   { value: "uri", label: "URL" },
 ];
-
-type NumericKeyword = "minimum" | "maximum" | "multipleOf" | "minLength" | "maxLength" | "maxItems";
 
 function emptyField(): SchemaField {
   return { _id: crypto.randomUUID(), key: "", required: false, prop: { type: "string" } };
@@ -332,7 +330,7 @@ function SortableFieldCard({
               <DraftInput
                 placeholder={t("editor.fieldMaxSize")}
                 text={field.maxSize !== undefined ? String(field.maxSize) : ""}
-                onCommit={(text) => onUpdate(index, { maxSize: toNumber(text) })} // canonical-casing-exempt: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
+                onCommit={(text) => onUpdate(index, { maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal (carve-out); manifest write via fieldsToSchema → `max_size`
                 className="h-7 min-w-[100px] flex-1 text-xs"
               />
               <div className="flex items-center gap-1.5">

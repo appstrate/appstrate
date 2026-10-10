@@ -764,7 +764,7 @@ describe("renderPlatformPrompt", () => {
     });
   });
 
-  describe("User Input value rendering (#1896)", () => {
+  describe("User Input value rendering", () => {
     const cases: Array<[string, unknown, string]> = [
       ["object", { a: 1 }, '{"a":1}'],
       ["array of primitives", ["x,y", 2], '["x,y",2]'],

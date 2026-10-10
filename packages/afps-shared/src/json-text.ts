@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Text form of an arbitrary JSON value: strings pass through unchanged,
- * everything else is JSON-encoded so a reader can recover the value
- * unambiguously (`String({})` yields `[object Object]`, and `String(["a,b"])`
- * is indistinguishable from `["a", "b"]`). Numbers, booleans and `null` read
- * exactly as `String()` would. `undefined` is excluded by the type because
- * `JSON.stringify(undefined)` is `undefined`.
+ * Text form of a JSON value: strings pass through, anything else is JSON-encoded
+ * (`String({})` is `[object Object]`, `String(["a,b"])` is ambiguous). Absent values render as "".
  */
-export function jsonText(value: NonNullable<unknown> | null): string {
-  return typeof value === "string" ? value : JSON.stringify(value);
+export function jsonText(value: unknown): string {
+  return typeof value === "string" ? value : (JSON.stringify(value) ?? "");
 }

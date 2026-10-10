@@ -16,8 +16,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ### Added
 
-- **`jsonText`** (`./json-text`): the one "a string passes through, any other
-  JSON value is `JSON.stringify`-ed" rule, replacing the private copies. (#1896)
+- **`jsonText`** (`./json-text`): a string passes through, any other JSON
+  value is `JSON.stringify`-ed (`""` when absent) — the one rule for rendering a JSON value as text. (#1896)
 - **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
   `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
   a counter fails `isTokenCount`; keys other than the four counters and `tiers`
