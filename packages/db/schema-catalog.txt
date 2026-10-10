@@ -178,7 +178,6 @@ column llm_usage.cache_write_tokens integer
 column llm_usage.chat_session_id text
 column llm_usage.cost_usd double precision not null default 0
 column llm_usage.created_at timestamp with time zone not null default now()
-column llm_usage.credential_id uuid
 column llm_usage.credential_source credential_source
 column llm_usage.duration_ms integer
 column llm_usage.id bigint not null default nextval('llm_usage_id_seq'::regclass)

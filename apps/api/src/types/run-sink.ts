@@ -44,8 +44,6 @@ export interface RunSinkContext {
    * module listeners can distinguish billable from non-billable runs.
    */
   modelSource: CredentialSource | null;
-  /** `runs.model_credential_id`, carried onto the runner's ledger rows. */
-  modelCredentialId: string | null;
   /** Who serves the run's inference (`runs.inference_route`) — decides whether it has a runner ledger row. */
   inferenceRoute: InferenceRoute | null;
   /**

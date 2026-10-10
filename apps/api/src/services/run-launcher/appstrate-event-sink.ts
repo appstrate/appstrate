@@ -50,7 +50,6 @@ export async function persistRunEvent(
     | {
         writeLedger: true;
         modelSource: CredentialSource | null;
-        modelCredentialId: string | null;
         inferenceRoute: InferenceRoute | null;
         modelCost?: ModelCost | null;
       } = {},
@@ -156,7 +155,6 @@ export async function persistRunEvent(
             cost,
             usage,
             modelSource: opts.modelSource,
-            modelCredentialId: opts.modelCredentialId,
             inferenceRoute: opts.inferenceRoute,
             modelCost: opts.modelCost,
           },
@@ -210,8 +208,6 @@ export async function writeRunnerLedgerRow(
     usage: TokenUsage | null;
     /** Run's model source — stamped as `credential_source`. */
     modelSource: CredentialSource | null;
-    /** Run's pinned credential (`runs.model_credential_id`) — stamped as the ledger `credentialId`. */
-    modelCredentialId: string | null;
     /** Run's inference route — see {@link isServedByLlmProxy}. */
     inferenceRoute: InferenceRoute | null;
     /** Run's kickoff rate snapshot — prices the row and classifies it. */
@@ -257,7 +253,6 @@ export async function writeRunnerLedgerRow(
         orgId: scope.orgId,
         runId,
         credentialSource: row.modelSource,
-        credentialId: row.modelCredentialId,
         inputTokens: row.usage?.input_tokens ?? 0,
         outputTokens: row.usage?.output_tokens ?? 0,
         cacheReadTokens: row.usage?.cache_read_input_tokens ?? null,

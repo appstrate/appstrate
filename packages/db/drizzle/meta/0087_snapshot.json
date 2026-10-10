@@ -3110,12 +3110,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "credential_id": {
-          "name": "credential_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "input_tokens": {
           "name": "input_tokens",
           "type": "integer",

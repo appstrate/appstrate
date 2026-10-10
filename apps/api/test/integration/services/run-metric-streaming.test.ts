@@ -89,7 +89,6 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     return persistRunEvent(db, { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, runId, e, {
       writeLedger: true,
       modelSource: null,
-      modelCredentialId: null,
       inferenceRoute: null,
     });
   }

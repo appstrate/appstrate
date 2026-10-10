@@ -636,10 +636,6 @@ export const llmUsage = pgTable(
     // run rows are backfilled from `runs.model_source`; chat / un-attributed
     // rows stay NULL (a downstream consumer treats NULL as non-attributable).
     credentialSource: credentialSourceEnum("credential_source"),
-    // The credential that served the call, personal or organization. NULL on
-    // platform-key calls and on rows predating this column. No FK: the ledger
-    // is append-only and a credential can be deleted after the fact.
-    credentialId: uuid("credential_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens"),

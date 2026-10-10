@@ -101,7 +101,7 @@ export interface PiChatInput {
   /** Maps a thrown error to a client-safe message. */
   onError: (error: unknown) => string;
   /** Persist one metered `llm_usage` row for the turn (fire-and-forget). */
-  recordUsage: (record: Omit<ChatUsageRecord, "credentialId">) => void;
+  recordUsage: (record: ChatUsageRecord) => void;
   /**
    * Build the Pi `AgentSession` this turn drives. Production omits it and the
    * SDK's own `createAgentSession` is used — everything else about the turn

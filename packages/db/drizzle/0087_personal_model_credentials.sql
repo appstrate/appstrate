@@ -6,5 +6,4 @@ CREATE INDEX "idx_model_provider_credentials_owner" ON "model_provider_credentia
 ALTER TABLE "org_models" ADD COLUMN "provider_id" text;--> statement-breakpoint
 UPDATE "org_models" m SET "provider_id" = c."provider_id" FROM "model_provider_credentials" c WHERE c."id" = m."credential_id";--> statement-breakpoint
 ALTER TABLE "org_models" ALTER COLUMN "provider_id" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "org_models" ALTER COLUMN "credential_id" DROP NOT NULL;--> statement-breakpoint
-ALTER TABLE "llm_usage" ADD COLUMN "credential_id" uuid;
+ALTER TABLE "org_models" ALTER COLUMN "credential_id" DROP NOT NULL;
