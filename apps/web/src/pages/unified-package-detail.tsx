@@ -754,22 +754,27 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </Tabs>
       )}
 
-      <CreateVersionModal
-        open={newVersion.value !== null}
-        onClose={newVersion.close}
-        type={type}
-        packageId={packageId}
-        hasUnarchivedChanges={hasTimestampChanges}
-        etag={(agentDetail ?? pkgDetail)?.etag}
-      />
+      {/* Mounted only while open: any way of closing a form modal abandons its input. */}
+      {newVersion.value !== null && (
+        <CreateVersionModal
+          open
+          onClose={newVersion.close}
+          type={type}
+          packageId={packageId}
+          hasUnarchivedChanges={hasTimestampChanges}
+          etag={(agentDetail ?? pkgDetail)?.etag}
+        />
+      )}
 
-      <ForkPackageModal
-        open={fork.value !== null}
-        onClose={fork.close}
-        packageId={packageId}
-        defaultName={name ?? ""}
-        type={type}
-      />
+      {fork.value !== null && (
+        <ForkPackageModal
+          open
+          onClose={fork.close}
+          packageId={packageId}
+          defaultName={name ?? ""}
+          type={type}
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmAction}

@@ -567,7 +567,7 @@ function PackageEditorInner({
       // The same checker the write routes run — fixed here, not via a 400.
       const frontmatter = skillFrontmatterError(content);
       if (frontmatter) {
-        return { error: t(frontmatter.key), tab: "files" };
+        return { error: t(frontmatter.key, frontmatter.params), tab: "files" };
       }
       return null;
     },
@@ -825,6 +825,7 @@ function IntegrationEditorInner({
       {activeTab === "tools" &&
         (embedded ? (
           <IntegrationToolsSection
+            integrationId={packageId ?? "new"}
             inspection={toolInspection}
             edit={{ manifest: state.manifest, onChange: onManifestChange }}
             showBasis={false}

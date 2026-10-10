@@ -6,6 +6,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
@@ -51,6 +52,7 @@ import {
 } from "../../lib/permission-labels";
 import { rolesPageDeeds } from "./rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
+import { parseViewAsPreset, viewAsPresetParam } from "../../lib/view-as-preset";
 
 type RoleView = "list" | "matrix";
 type RoleTab = "org" | "space";
@@ -93,12 +95,21 @@ export function OrgSettingsRolesPage() {
   const presets = (roles ?? []).filter((r) => r.kind === "preset");
   const custom = (roles ?? []).filter((r) => r.kind === "custom");
 
+  // A row previews its own role: the dialog opens pre-filled, at an address.
+  const previewSpaceRole = deeds.includes("view-as")
+    ? (role: RoleObject) => viewAsParam.open(viewAsPresetParam({ kind: "space", key: role.key }))
+    : undefined;
+  const previewOrgRole = deeds.includes("view-as")
+    ? (role: ViewAsOrgRole) => viewAsParam.open(viewAsPresetParam({ kind: "org", role }))
+    : undefined;
   const presetColumns = useRoleColumns({
+    onPreview: previewSpaceRole,
     canDelete: () => false,
     isDeleting: false,
     onDelete: () => {},
   });
   const customColumns = useRoleColumns({
+    onPreview: previewSpaceRole,
     canDelete: () => canDelete,
     isDeleting: deleteRole.isPending,
     onDelete: (role) => {
@@ -207,7 +218,8 @@ export function OrgSettingsRolesPage() {
           ]}
         />
       </div>
-      {tab === "org" && (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList />)}
+      {tab === "org" &&
+        (view === "matrix" ? <OrgRolesMatrix /> : <OrgRolesList onPreview={previewOrgRole} />)}
       {tab === "space" && (
         <>
           {view === "matrix" ? (
@@ -266,7 +278,9 @@ export function OrgSettingsRolesPage() {
       )}
       {target && !editable && <RoleViewModal role={target} onClose={roleParam.close} />}
 
-      {viewAsParam.value !== null && canPreview && <ViewAsDialog onClose={viewAsParam.close} />}
+      {viewAsParam.value !== null && canPreview && (
+        <ViewAsDialog preset={parseViewAsPreset(viewAsParam.value)} onClose={viewAsParam.close} />
+      )}
 
       <ConfirmModal
         open={!!confirmDelete}

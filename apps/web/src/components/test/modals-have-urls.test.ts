@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A modal that is a place has an address (DESIGN_SYSTEM.md, section 9).
+ * A real modal has an address (DESIGN_SYSTEM.md, section 9).
  *
  * A modal opened by local `useState` cannot be linked, does not survive a
  * reload and is not closed by Back. `useModalParam` (`hooks/use-modal-param.ts`)
  * keeps the open state in the URL instead. This scan reads the sources, with no
  * DOM, and fails on a modal-like element whose `open` / `onClose` /
  * `onOpenChange` is driven by a `useState` of the same file, unless the pair is
- * listed in EXCEPTIONS with the reason it is not a place.
+ * listed in EXCEPTIONS with its reason.
  *
- * An exception is one of three things: the confirmation of an act, the single
- * display of a secret, or a step inside a flow already at an address. The first
- * two are named by their component (`ConfirmModal`, `SecretRevealModal`) and
- * need no line below. Anything else is listed, with one line of reason, and an
- * entry that no longer matches code fails too: the list cannot rot.
+ * Every real modal of the studio (all of `apps/web` outside the chat) has an
+ * address. What has none is only: the confirmation of an act (`ConfirmModal`, `UnsavedChangesModal`,
+ * the re-authentication, the activation closure), the single display of a secret
+ * (`SecretRevealModal`), the chat (`packages/module-chat`), whose message cards have
+ * no stable address, and what is not a modal at all (a popover that turns into a
+ * sheet on a phone). The first two are named by their component and need no line
+ * below. Anything else is listed, with one line of reason that falls in those
+ * categories, and an entry that no longer matches code fails too: the list cannot rot.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -44,19 +47,13 @@ const EXCEPTIONS: Exception[] = [
     file: "apps/web/src/components/notification-bell.tsx",
     tag: "Sheet",
     state: "open",
-    reason: "A popover that becomes a bottom sheet on a phone: a menu, not a place.",
-  },
-  {
-    file: "apps/web/src/components/onboarding-quick-connect.tsx",
-    tag: "Modal",
-    state: "dialogOpen",
-    reason: "OAuth pairing in progress: its token lives in memory, a reload cannot resume it.",
+    reason: "A popover that becomes a bottom sheet on a phone: not a modal, a menu.",
   },
   {
     file: "apps/web/src/pages/preferences/security.tsx",
     tag: "ReauthModal",
     state: "pendingUnlink",
-    reason: "Re-authentication confirming an act (unlinking an account): a confirmation.",
+    reason: "Re-authentication confirming an act (unlinking an account): a confirmation of an act.",
   },
   {
     file: "apps/web/src/components/org-catalogue-modal.tsx",
@@ -65,52 +62,22 @@ const EXCEPTIONS: Exception[] = [
     reason: "Confirms an activation and what it drags along: a confirmation of an act.",
   },
   {
-    file: "apps/web/src/components/map-primitives.tsx",
-    tag: "Modal",
-    state: "open",
-    reason: "A concept's explanation (help text of a card title): not a place.",
-  },
-  {
-    file: "apps/web/src/components/map-primitives.tsx",
-    tag: "Modal",
-    state: "listOpen",
-    reason: "The overflow of a card's rows, one of many cards on the map: no address of its own.",
-  },
-  {
-    file: "apps/web/src/components/package-detail/integration-structure.tsx",
-    tag: "Modal",
-    state: "expanded",
-    reason: "Full-screen view of the same map: a display mode, not a place.",
-  },
-  {
-    file: "apps/web/src/components/package-detail/package-tool-catalog.tsx",
-    tag: "Modal",
-    state: "selected",
-    reason: "Read-only inspection in a catalog embedded several times per page: no unique address.",
-  },
-  {
-    file: "apps/web/src/modules/agent-map/map-panel-dialog.tsx",
-    tag: "ModelFormModal",
-    state: "adding",
-    reason: "Adding a model from inside a map panel, which is itself at `?mapPanel=model`.",
-  },
-  {
     file: "packages/module-chat/src/ui/chat-run-progress-card.tsx",
     tag: "Modal",
     state: "open",
-    reason: "Detail of a card inside a chat message: one of many, no stable address.",
+    reason: "Chat: the detail of a card inside a message, one of many, no stable address.",
   },
   {
     file: "packages/module-chat/src/ui/tool-uis.tsx",
     tag: "Modal",
     state: "open",
-    reason: "Detail of a tool call inside a chat message: one of many, no stable address.",
+    reason: "Chat: the detail of a tool call inside a message, one of many, no stable address.",
   },
   {
     file: "packages/module-chat/src/ui/thread-list.tsx",
     tag: "Dialog",
     state: "confirmingDelete",
-    reason: "Confirmation of deleting a conversation.",
+    reason: "Chat: the confirmation of deleting a conversation, a confirmation of an act.",
   },
 ];
 
@@ -224,7 +191,8 @@ describe("modals have URLs", () => {
       .filter((f) => !listed(f))
       .map((f) => `${f.file}: <${f.tag}> is opened by useState \`${f.state}\``);
     // Port it to `useModalParam` (a URL parameter named by the object and the act:
-    // `?newWebhook=1`, `?editModel=<id>`), or, if it is not a place, list it above.
+    // `?newWebhook=1`, `?editModel=<id>`). List it above only if it is a confirmation,
+    // a secret shown once, the chat, or not a modal.
     expect(unlisted).toEqual([]);
   });
 

@@ -13,7 +13,6 @@
  * the manifest. These panels save themselves.
  */
 
-import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
@@ -30,6 +29,7 @@ import {
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { NewScheduleForm } from "../../components/new-schedule-modal";
+import { useModalParam } from "../../hooks/use-modal-param";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useModels, useModelFormHandler } from "../../hooks/use-models";
 import { agentMapQueryKeyPrefix } from "./use-agent-map";
@@ -68,10 +68,9 @@ function NewSchedulePanel({ packageId, onDone }: { packageId: string; onDone: ()
 function ModelPanel({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "agent-map", "settings"]);
   const { data: orgModels } = useModels();
-  const [adding, setAdding] = useState(false);
-  const { isPending, onSubmit } = useModelFormHandler({
-    onSuccess: () => setAdding(false),
-  });
+  // Adding a model is a place of its own, over `?mapPanel=model`: `?newModel=1`.
+  const adding = useModalParam("newModel");
+  const { isPending, onSubmit } = useModelFormHandler({ onSuccess: adding.close });
   const hasModels = (orgModels?.length ?? 0) > 0;
 
   return (
@@ -81,13 +80,13 @@ function ModelPanel({ packageId }: { packageId: string }) {
       ) : (
         <p className="text-muted-foreground text-sm">{t("settings:models.empty")}</p>
       )}
-      <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+      <Button variant="outline" size="sm" onClick={() => adding.open()}>
         <Plus className="mr-1.5 size-3.5" />
         {t("settings:models.add")}
       </Button>
       <ModelFormModal
-        open={adding}
-        onClose={() => setAdding(false)}
+        open={adding.value !== null}
+        onClose={adding.close}
         model={null}
         isPending={isPending}
         onSubmit={onSubmit}

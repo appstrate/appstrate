@@ -14,7 +14,6 @@ import { EndUserMetadataEditor } from "./end-user-metadata-editor";
 import { entriesToMetadata, type MetadataEntry } from "../lib/end-user-metadata";
 
 interface Props {
-  open: boolean;
   onClose: () => void;
 }
 
@@ -24,7 +23,8 @@ type FormData = {
   externalId: string;
 };
 
-export function EndUserCreateModal({ open, onClose }: Props) {
+/** Mounted only while open: any way of closing it (Annuler, outside, Escape, Back) abandons the input. */
+export function EndUserCreateModal({ onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateEndUser();
   const [metadata, setMetadata] = useState<MetadataEntry[]>([]);
@@ -32,19 +32,11 @@ export function EndUserCreateModal({ open, onClose }: Props) {
   const {
     register,
     handleSubmit,
-    reset,
     setError,
     formState: { errors },
   } = useForm<FormData>({
     defaultValues: { name: "", email: "", externalId: "" },
   });
-
-  const handleClose = () => {
-    reset({ name: "", email: "", externalId: "" });
-    setMetadata([]);
-    createMutation.reset();
-    onClose();
-  };
 
   const onFormSubmit = (data: FormData) => {
     const payload: NonNullable<Parameters<typeof createMutation.mutate>[0]["body"]> = {};
@@ -57,7 +49,7 @@ export function EndUserCreateModal({ open, onClose }: Props) {
     createMutation.mutate(
       { body: payload },
       {
-        onSuccess: () => handleClose(),
+        onSuccess: onClose,
         onError: (err) => {
           setError("root", { message: errorMessage(err) });
         },
@@ -65,16 +57,14 @@ export function EndUserCreateModal({ open, onClose }: Props) {
     );
   };
 
-  if (!open) return null;
-
   return (
     <Modal
-      open={open}
-      onClose={handleClose}
+      open
+      onClose={onClose}
       title={t("spaces.createEndUserTitle")}
       actions={
         <>
-          <Button type="button" variant="outline" onClick={handleClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
           <Button type="submit" form="create-end-user-form" disabled={createMutation.isPending}>

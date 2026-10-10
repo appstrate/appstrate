@@ -32,11 +32,43 @@ type FormData = {
 };
 
 export function WebhookCreateModal({ levels }: Props) {
+  const { t } = useTranslation(["settings"]);
+  const param = useModalParam(NEW_WEBHOOK_PARAM);
+  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
+
+  // Step 2: the secret, shown once. It has no address: the creation's one goes away as it appears.
+  if (createdSecret) {
+    return (
+      <SecretRevealModal
+        open
+        onClose={() => setCreatedSecret(null)}
+        title={t("settings:webhooks.created")}
+        secret={createdSecret}
+      />
+    );
+  }
+  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
+  // outside, Escape, Back) abandons what was typed.
+  if (param.value === null) return null;
+  return (
+    <WebhookCreateForm
+      levels={levels}
+      onClose={param.close}
+      onCreated={(secret) => {
+        setCreatedSecret(secret);
+        param.close();
+      }}
+    />
+  );
+}
+
+function WebhookCreateForm({
+  levels,
+  onClose,
+  onCreated,
+}: Props & { onClose: () => void; onCreated: (secret: string) => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateWebhook();
-  const param = useModalParam(NEW_WEBHOOK_PARAM);
-
-  const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
   const [payloadMode, setPayloadMode] = useState<"full" | "summary">("full");
   const [chosenLevel, setChosenLevel] = useState<Level>("space");
@@ -51,22 +83,11 @@ export function WebhookCreateModal({ levels }: Props) {
   const {
     register,
     handleSubmit,
-    reset,
     setError,
     formState: { errors },
   } = useForm<FormData>({
     defaultValues: { url: "" },
   });
-
-  const handleClose = () => {
-    reset({ url: "" });
-    setCreatedSecret(null);
-    setSelectedEvents([]);
-    setPayloadMode("full");
-    setChosenLevel("space");
-    createMutation.reset();
-    param.close();
-  };
 
   function onFormSubmit(data: FormData) {
     if (selectedEvents.length === 0) {
@@ -82,11 +103,7 @@ export function WebhookCreateModal({ levels }: Props) {
         payloadMode,
       },
       {
-        onSuccess: (result) => {
-          // The secret is shown once and has no address: the creation's one goes away.
-          setCreatedSecret(result.secret);
-          param.close();
-        },
+        onSuccess: (result) => onCreated(result.secret),
         onError: (err) => {
           setError("root", { message: errorMessage(err) });
         },
@@ -96,27 +113,14 @@ export function WebhookCreateModal({ levels }: Props) {
 
   const onSubmit = handleSubmit(onFormSubmit);
 
-  // Step 2: show the secret
-  if (createdSecret) {
-    return (
-      <SecretRevealModal
-        open
-        onClose={handleClose}
-        title={t("settings:webhooks.created")}
-        secret={createdSecret}
-      />
-    );
-  }
-
-  // Step 1: creation form
   return (
     <Modal
-      open={param.value !== null}
-      onClose={handleClose}
+      open
+      onClose={onClose}
       title={t("settings:webhooks.createTitle")}
       actions={
         <>
-          <Button variant="outline" type="button" onClick={handleClose}>
+          <Button variant="outline" type="button" onClick={onClose}>
             {t("common:btn.cancel")}
           </Button>
           <Button type="submit" form="create-webhook-form" disabled={createMutation.isPending}>

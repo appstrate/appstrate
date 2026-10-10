@@ -10,8 +10,12 @@
  * measure the columns.
  */
 import { useTranslation } from "react-i18next";
+import { Eye } from "lucide-react";
+import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
 import type { OrgRole } from "@appstrate/shared-types";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
+import { TableRowActions } from "../../components/table-row-actions";
 import { roleI18nKey } from "../../hooks/use-permissions";
 
 export const ORG_ROLES_ORDER: readonly OrgRole[] = ["owner", "admin", "member", "guest"];
@@ -44,7 +48,16 @@ export const ORG_ROLE_SPACE_ACCESS: Record<OrgRole, "all" | "open" | "assigned">
   guest: "assigned",
 };
 
-export function useOrgRoleColumns(): DataColumn<OrgRole>[] {
+function isPreviewable(role: OrgRole): role is ViewAsOrgRole {
+  return (VIEW_AS_ORG_ROLES as readonly OrgRole[]).includes(role);
+}
+
+/** `onPreview` is absent when the caller may not preview a role; owner and admin never are (a preview only removes). */
+export function useOrgRoleColumns({
+  onPreview,
+}: {
+  onPreview?: (role: ViewAsOrgRole) => void;
+} = {}): DataColumn<OrgRole>[] {
   const { t } = useTranslation(["settings", "common"]);
   return [
     {
@@ -70,6 +83,21 @@ export function useOrgRoleColumns(): DataColumn<OrgRole>[] {
           {t(`orgRolesGuide.access.${ORG_ROLE_SPACE_ACCESS[role]}`)}
         </span>
       ),
+    },
+    {
+      id: "actions",
+      header: "",
+      width: "48px",
+      align: "end",
+      cell: (role) =>
+        onPreview && isPreviewable(role) ? (
+          <TableRowActions menuLabel={t("roles.moreActions", { name: t(roleI18nKey(role)) })}>
+            <DropdownMenuItem onSelect={() => onPreview(role)}>
+              <Eye />
+              {t("viewAs.rowAction")}
+            </DropdownMenuItem>
+          </TableRowActions>
+        ) : null,
     },
   ];
 }

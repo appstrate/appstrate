@@ -89,9 +89,9 @@ describe("failed mutations", () => {
     );
 
     expect(toastError).toHaveBeenCalledTimes(1);
-    // Translated lead, and the permission the server named kept after it.
+    // One sentence of ours: the server's English detail never reaches the toast.
     expect(toastError.mock.calls[0]![0]).toBe(
-      "Action refusée : Insufficient permissions: members:invite required",
+      "Vous n'avez pas les droits nécessaires pour cette action.",
     );
   });
 

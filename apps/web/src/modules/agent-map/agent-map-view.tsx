@@ -39,6 +39,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import { MapControls } from "../../components/map-controls";
+import { useMapFullscreen } from "../../hooks/use-map-fullscreen";
 import { styleMapEdge } from "../../components/map-edge";
 import { Badge } from "@appstrate/ui/components/badge";
 
@@ -375,11 +376,10 @@ export function AgentMapView({
   const panelParam = useModalParam("mapPanel");
   const issuesParam = useModalParam("agentDiagnostics");
   const issuesOpen = issuesParam.value === "all" && Boolean(diagnosticResult);
-  const [expanded, setExpanded] = useState(false);
+  const { expanded, toggle: toggleFullscreen, close: collapse } = useMapFullscreen();
   const [hoveredRelation, setHoveredRelation] = useState<string | null>(null);
   const [selectedRelation, setSelectedRelation] = useState<string | null>(null);
   const activeRelation = hoveredRelation ?? selectedRelation;
-  const collapse = useCallback(() => setExpanded(false), []);
   useEscape(expanded, collapse);
 
   const closeIssues = useCallback(() => {
@@ -685,7 +685,7 @@ export function AgentMapView({
             onPaneClick={() => setSelectedRelation(null)}
           >
             <Background gap={24} size={1} />
-            <MapControls expanded={expanded} onToggle={() => setExpanded((value) => !value)} />
+            <MapControls expanded={expanded} onToggle={toggleFullscreen} />
             <MeasuredSemanticLayout layoutKey={layoutKey} setNodes={setNodes} />
             {requestedDiagnostic && requestedNodeId && (
               <FocusDiagnosticTarget

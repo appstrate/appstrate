@@ -6,6 +6,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ArrowUpRight, ChevronRight, Info, Pencil, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { useModalParam } from "../hooks/use-modal-param";
 import { Modal } from "./modal";
 import {
   Tooltip,
@@ -60,13 +61,16 @@ function CardActionButton({ action }: { action: CardAction }) {
  */
 function ConceptTitle({
   concept,
+  cardKey,
   children,
 }: {
   concept: string | { title: string; body: string };
+  /** The card's stable key: the explanation opens at `?mapConcept=<cardKey>`. */
+  cardKey: string;
   children: React.ReactNode;
 }) {
   const { t } = useTranslation(["agents", "agent-map"]);
-  const [open, setOpen] = useState(false);
+  const param = useModalParam("mapConcept");
   const title =
     typeof concept === "string" ? t(`agent-map:concept.${concept}.title`) : concept.title;
   const body = typeof concept === "string" ? t(`agent-map:concept.${concept}.body`) : concept.body;
@@ -78,7 +82,7 @@ function ConceptTitle({
           <TooltipTrigger asChild>
             <button
               type="button"
-              onClick={() => setOpen(true)}
+              onClick={() => param.open(cardKey)}
               aria-label={explanation}
               className={`${ACTION_CLASS} block min-w-0 flex-1 truncate text-left text-[10px] font-semibold tracking-wide whitespace-nowrap uppercase`}
             >
@@ -88,7 +92,7 @@ function ConceptTitle({
           <TooltipContent side="top">{explanation}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
-      <Modal open={open} onClose={() => setOpen(false)} title={title}>
+      <Modal open={param.value === cardKey} onClose={param.close} title={title}>
         <div className="space-y-3 text-sm leading-relaxed">
           {body.split("\n\n").map((paragraph) => (
             <p key={paragraph.slice(0, 24)}>{paragraph}</p>
@@ -153,10 +157,15 @@ export function MapCard({
   emptyAction?: { label: string; onClick: () => void } | undefined;
 }) {
   const { t } = useTranslation(["agent-map"]);
-  const [listOpen, setListOpen] = useState(false);
+  // A card is named in the URL by what it already has that is stable: its relation id
+  // (both maps give one to the cards that have rows) or, on the agent map, its concept.
+  // Never its position. The explanation and the full list open at `?mapConcept=` and
+  // `?mapCardList=`.
+  const cardKey = relationId ?? (typeof concept === "string" ? concept : undefined);
+  const listParam = useModalParam("mapCardList");
   const rows = Children.toArray(children);
   const previewLimit = horizontal ? 4 : PREVIEW_ROW_COUNT;
-  const hasOverflow = count !== undefined && rows.length > previewLimit;
+  const hasOverflow = cardKey !== undefined && count !== undefined && rows.length > previewLimit;
   const preview = hasOverflow ? rows.slice(0, previewLimit) : rows;
   const resolvedEmptyAction =
     emptyAction ??
@@ -205,8 +214,10 @@ export function MapCard({
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="text-muted-foreground shrink-0 [&>svg]:size-3.5">{icon}</span>
             <span className="flex min-w-0 flex-1 items-center gap-2">
-              {concept ? (
-                <ConceptTitle concept={concept}>{title}</ConceptTitle>
+              {concept && cardKey ? (
+                <ConceptTitle concept={concept} cardKey={cardKey}>
+                  {title}
+                </ConceptTitle>
               ) : (
                 <span className="min-w-0 flex-1 truncate text-[10px] font-semibold tracking-wide uppercase">
                   {title}
@@ -250,7 +261,7 @@ export function MapCard({
         {hasOverflow && (
           <button
             type="button"
-            onClick={() => setListOpen(true)}
+            onClick={() => listParam.open(cardKey)}
             className="border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground nodrag nopan flex w-full items-center justify-between border-t px-3 py-2 text-left text-[11px] font-medium transition-colors"
           >
             {t("agent-map:viewMore", { count: rows.length - previewLimit })}
@@ -258,7 +269,11 @@ export function MapCard({
           </button>
         )}
       </div>
-      <Modal open={listOpen} onClose={() => setListOpen(false)} title={title}>
+      <Modal
+        open={cardKey !== undefined && listParam.value === cardKey}
+        onClose={listParam.close}
+        title={title}
+      >
         <div className="max-h-[60vh] space-y-1 overflow-y-auto">{rows}</div>
       </Modal>
     </>

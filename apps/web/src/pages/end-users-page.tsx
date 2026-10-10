@@ -209,7 +209,7 @@ function EndUsersPageContent() {
         </Button>
       )}
 
-      <EndUserCreateModal open={newEndUser.value !== null} onClose={newEndUser.close} />
+      {newEndUser.value !== null && <EndUserCreateModal onClose={newEndUser.close} />}
 
       {selectedUserId && selectedUser && (
         <EndUserDetailModal

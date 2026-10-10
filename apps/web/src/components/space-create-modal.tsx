@@ -18,30 +18,30 @@ export const NEW_SPACE_PARAM = "newSpace";
 type FormData = { name: string };
 
 export function SpaceCreateModal() {
+  const param = useModalParam(NEW_SPACE_PARAM);
+  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
+  // outside, Escape, Back) abandons what was typed.
+  if (param.value === null) return null;
+  return <SpaceCreateForm onClose={param.close} />;
+}
+
+function SpaceCreateForm({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateSpace();
-  const param = useModalParam(NEW_SPACE_PARAM);
 
   const {
     register,
     handleSubmit,
-    reset,
     setError,
     showError,
     formState: { errors },
   } = useAppForm<FormData>({ defaultValues: { name: "" } });
 
-  const handleClose = () => {
-    reset({ name: "" });
-    createMutation.reset();
-    param.close();
-  };
-
   const onFormSubmit = (data: FormData) => {
     createMutation.mutate(
       { body: { name: data.name.trim() } },
       {
-        onSuccess: () => handleClose(),
+        onSuccess: onClose,
         onError: (err) => {
           setError("root", { message: errorMessage(err) });
         },
@@ -49,16 +49,14 @@ export function SpaceCreateModal() {
     );
   };
 
-  if (param.value === null) return null;
-
   return (
     <Modal
       open
-      onClose={handleClose}
+      onClose={onClose}
       title={t("spaces.createTitle")}
       actions={
         <>
-          <Button type="button" variant="outline" onClick={handleClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
           <Button

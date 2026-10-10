@@ -443,9 +443,10 @@ function renderBanner(
 describe("banner", () => {
   it("names the role, the space role and the space, with an exit", () => {
     const html = renderBanner(PERSONA, "org_a");
-    expect(html).toContain("Vous voyez l'organisation avec le rôle");
+    expect(html).toContain("Aperçu avec le rôle");
     expect(html).toContain("Membre");
     expect(html).toContain("Lecteur");
+    expect(html).toContain("dans l'espace <strong");
     expect(html).toContain("Marketing");
     expect(html).toContain("Quitter");
   });
@@ -466,23 +467,43 @@ describe("banner", () => {
       listedSpace({ id: "spc_2", name: "Ventes" }),
     ];
     const elsewhere = renderBanner(PERSONA, "org_a", { spaceId: "spc_2", spaces });
-    expect(elsewhere).toContain("Lecteur");
-    expect(elsewhere).toContain("Marketing");
     expect(elsewhere).toContain("Ventes");
     expect(elsewhere).toContain("Opérateur");
-    expect(elsewhere).toContain("espace ouvert");
+    expect(elsewhere).toContain("que cet espace donne à tout membre de l'organisation");
+    // Where the user is comes first: the persona's space role is not the news there.
+    expect(elsewhere).not.toContain("Lecteur");
 
     // In the persona's own space the assignment already says it all.
     const home = renderBanner(PERSONA, "org_a", { spaceId: "spc_1", spaces });
-    expect(home).not.toContain("espace ouvert");
+    expect(home).not.toContain("tout membre de l'organisation");
     expect(home).not.toContain("Opérateur");
   });
 
-  it("says nothing about a space the persona cannot enter", () => {
+  it("names the default role of the space an organization-only persona stands in", () => {
+    const spaces = [listedSpace({ id: "spc_2", name: "Ventes" })];
+    const html = renderBanner({ orgId: "org_a", orgRole: "member", space: null }, "org_a", {
+      spaceId: "spc_2",
+      spaces,
+    });
+    expect(html).toContain("Ventes");
+    expect(html).toContain("Opérateur");
+  });
+
+  it("says a persona with no space to enter has access to none", () => {
+    const guest = { orgId: "org_a", orgRole: "guest", space: null } as const;
+    expect(renderBanner(guest, "org_a", { spaceId: "spc_9", spaces: [] })).toContain(
+      "Ce rôle n'a accès à aucun espace.",
+    );
+    // A closed space is listed but cannot be entered: still no space to stand in.
     const closed = listedSpace({ id: "spc_3", name: "Direction", access: "none", role: null });
-    const html = renderBanner(PERSONA, "org_a", { spaceId: "spc_3", spaces: [closed] });
-    expect(html).toContain("Lecteur");
-    expect(html).not.toContain("Direction");
+    expect(renderBanner(guest, "org_a", { spaceId: "spc_9", spaces: [closed] })).toContain(
+      "aucun espace",
+    );
+    // Not said while a space is there to stand in.
+    const open = listedSpace({ id: "spc_2", name: "Ventes" });
+    expect(renderBanner(PERSONA, "org_a", { spaceId: "spc_2", spaces: [open] })).not.toContain(
+      "aucun espace",
+    );
   });
 
   // A persona restricts the caller without replacing them, so every capability
@@ -490,10 +511,10 @@ describe("banner", () => {
   // preview. The banner is the one place that boundary is stated.
   it("states that what the previewer created stays visible, whatever the persona", () => {
     const withSpace = renderBanner(PERSONA, "org_a");
-    expect(withSpace).toContain("Ce que vous avez créé reste visible");
+    expect(withSpace).toContain("montre encore ce que vous avez créé");
 
     const orgOnly = renderBanner({ orgId: "org_a", orgRole: "guest", space: null }, "org_a");
-    expect(orgOnly).toContain("Ce que vous avez créé reste visible");
+    expect(orgOnly).toContain("montre encore ce que vous avez créé");
   });
 
   it("renders nothing outside the previewed organization", () => {

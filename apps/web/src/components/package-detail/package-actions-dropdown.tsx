@@ -494,24 +494,29 @@ export function PackageActionsDropdown({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <MoveHomeSpaceDialog
-        open={moveHome.value === packageId}
-        onClose={moveHome.close}
-        packageId={packageId}
-        type={type}
-        homeSpaceId={homeSpaceId}
-      />
-      <SharePackageDialog
-        open={share.value === packageId}
-        onClose={share.close}
-        packageId={packageId}
-        type={type}
-        homeSpaceId={homeSpaceId}
-        canPublish={homeWritable === true}
-        onMoveHome={() => {
-          moveHome.open(packageId, SHARE_PARAM);
-        }}
-      />
+      {/* Mounted only while open: any way of closing a form modal abandons its input. */}
+      {moveHome.value === packageId && (
+        <MoveHomeSpaceDialog
+          open
+          onClose={moveHome.close}
+          packageId={packageId}
+          type={type}
+          homeSpaceId={homeSpaceId}
+        />
+      )}
+      {share.value === packageId && (
+        <SharePackageDialog
+          open
+          onClose={share.close}
+          packageId={packageId}
+          type={type}
+          homeSpaceId={homeSpaceId}
+          canPublish={homeWritable === true}
+          onMoveHome={() => {
+            moveHome.open(packageId, SHARE_PARAM);
+          }}
+        />
+      )}
     </>
   );
 }

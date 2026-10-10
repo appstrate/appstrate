@@ -322,6 +322,7 @@ function IntegrationSettings({
                 if (section === "tools")
                   return (
                     <IntegrationToolsSection
+                      integrationId={packageId}
                       inspection={detail.tool_catalog_inspection}
                       allowUndeclaredTools={detail.allow_undeclared_tools}
                     />
@@ -385,6 +386,7 @@ function IntegrationSettings({
             description={t("integrationEditor.description.tools", { ns: "agents" })}
           />
           <IntegrationToolsSection
+            integrationId={packageId}
             inspection={detail.tool_catalog_inspection}
             allowUndeclaredTools={detail.allow_undeclared_tools}
             showBasis={false}

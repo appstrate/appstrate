@@ -18,6 +18,7 @@
  */
 
 import { useState } from "react";
+import { useModalTarget } from "../hooks/use-modal-param";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
@@ -48,15 +49,24 @@ const PROVIDER_DESCRIPTION_KEYS: Record<string, string> = {
 interface CardProps {
   entry: ProviderRegistryEntry;
   alreadyConnected: boolean;
+  /** The pairing modal is open: `?connectProvider=<providerId>` names this card. */
+  dialogOpen: boolean;
+  onOpenDialog: () => void;
+  onCloseDialog: () => void;
 }
 
-function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
+function QuickConnectCard({
+  entry,
+  alreadyConnected,
+  dialogOpen,
+  onOpenDialog,
+  onCloseDialog,
+}: CardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { seed } = useAutoSeedFeaturedModels();
 
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);
-  const oauthDismiss = usePairingDismissConfirm(() => setDialogOpen(false));
+  const oauthDismiss = usePairingDismissConfirm(onCloseDialog);
 
   // Inline lookup to satisfy `react-hooks/static-components` — the rule
   // flags PascalCase consts assigned from helper calls. Equivalent to
@@ -65,7 +75,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
 
   const openDialog = () => {
     if (alreadyConnected || working) return;
-    setDialogOpen(true);
+    onOpenDialog();
   };
 
   const handleConnected = async (newId: string) => {
@@ -143,7 +153,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
           <OAuthPairingBody
             providerId={entry.providerId}
             onConnected={(newId) => {
-              setDialogOpen(false);
+              onCloseDialog();
               void handleConnected(newId);
             }}
             onBusyChange={oauthDismiss.onBusyChange}
@@ -160,6 +170,13 @@ export function OnboardingQuickConnect() {
   const credentialsQuery = useModelProviderCredentials();
 
   const entries = quickConnectProviders(registryQuery.data);
+  // A pairing has an address. Its token lives in memory, so a reload does not resume it:
+  // the modal opens again and starts a fresh pairing (the old token expires on its own).
+  const connect = useModalTarget(
+    "connectProvider",
+    registryQuery.data && entries,
+    (entry) => entry.providerId,
+  );
 
   if (entries.length === 0) return null;
 
@@ -176,6 +193,9 @@ export function OnboardingQuickConnect() {
             key={entry.providerId}
             entry={entry}
             alreadyConnected={alreadyConnected}
+            dialogOpen={connect.target?.providerId === entry.providerId}
+            onOpenDialog={() => connect.open(entry.providerId)}
+            onCloseDialog={connect.close}
           />
         );
       })}

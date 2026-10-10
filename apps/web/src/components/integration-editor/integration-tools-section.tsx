@@ -47,11 +47,14 @@ const NO_ENTRIES: IntegrationToolInspectionEntry[] = [];
 
 export function IntegrationToolsSection({
   inspection,
+  integrationId,
   allowUndeclaredTools,
   edit,
   showBasis = true,
 }: {
   inspection?: IntegrationToolInspection;
+  /** The integration whose tools these are: it names a tool's inspection in the URL. */
+  integrationId?: string;
   /** Read-only: whether the saved package lets agents call undeclared tools. */
   allowUndeclaredTools?: boolean;
   /** Off under the Outils heading, whose description says where the list comes from. */
@@ -109,6 +112,7 @@ export function IntegrationToolsSection({
       <PackageToolCatalog
         tools={[]}
         inspection={{ basis: inspection?.basis ?? "manifest", entries }}
+        integrationId={integrationId}
         showBasis={showBasis}
         actions={
           edit && (

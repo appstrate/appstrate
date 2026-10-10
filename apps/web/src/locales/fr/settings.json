@@ -1286,6 +1286,7 @@
   "viewAs.rolesEmpty": "Aucun rôle prévisualisable dans cet espace.",
   "viewAs.submit": "Prévisualiser",
   "viewAs.trigger": "Prévisualiser un rôle",
+  "viewAs.rowAction": "Prévisualiser",
   "orgSettings.dashboardSsoDisable": "Désactiver",
   "orgSettings.dashboardSsoDisabled": "SSO collaborateurs désactivé",
   "orgSettings.expiresColumn": "Expire le",

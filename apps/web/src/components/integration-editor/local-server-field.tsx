@@ -135,13 +135,15 @@ export function LocalServerField({
         )}
       </div>
 
-      <ImportModal
-        open={importParam.value !== null}
-        onClose={importParam.close}
-        onImported={(result) => {
-          if (result.type === "mcp-server") onChange({ serverName: result.packageId });
-        }}
-      />
+      {importParam.value !== null && (
+        <ImportModal
+          open
+          onClose={importParam.close}
+          onImported={(result) => {
+            if (result.type === "mcp-server") onChange({ serverName: result.packageId });
+          }}
+        />
+      )}
     </>
   );
 }

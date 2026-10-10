@@ -314,16 +314,17 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe(fr["apiError.slug_taken"]);
   });
 
-  it("keeps the server detail behind the lead of a catch-all code", async () => {
-    await i18n.changeLanguage("fr");
+  it("says a 403 in one sentence of ours, in both languages, without the server's English", async () => {
     const err = await problem({
       code: "forbidden",
       status: 403,
       detail: "Insufficient permissions: members:invite required",
     });
-    expect(errorMessage(err)).toBe(
-      "Action refusée : Insufficient permissions: members:invite required",
-    );
+    await i18n.changeLanguage("fr");
+    expect(errorMessage(err)).toBe("Vous n'avez pas les droits nécessaires pour cette action.");
+    await i18n.changeLanguage("en");
+    expect(errorMessage(err)).toBe("You do not have permission to do this.");
+    await i18n.changeLanguage("fr");
   });
 
   it("says what to change for an undeclared connection choice, not the server's English", async () => {
@@ -425,7 +426,10 @@ describe("errorMessage", () => {
         { field: "content", code: "skill_invalid_frontmatter", message: "Map keys must be unique" },
       ],
     });
-    expect(errorMessage(err)).toBe(agentsFr["editor.errorSkillInvalidFrontmatter"]);
+    // No position in the checker's sentence, none in ours.
+    expect(errorMessage(err)).toBe(
+      agentsFr["editor.errorSkillInvalidFrontmatter"].replace("{{position}}", ""),
+    );
     expect(errorMessage(err)).not.toContain("Map keys must be unique");
   });
 

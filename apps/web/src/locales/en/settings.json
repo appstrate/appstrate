@@ -1286,6 +1286,7 @@
   "viewAs.rolesEmpty": "No previewable role in this space.",
   "viewAs.submit": "Preview",
   "viewAs.trigger": "Preview a role",
+  "viewAs.rowAction": "Preview",
   "orgSettings.dashboardSsoDisable": "Disable",
   "orgSettings.dashboardSsoDisabled": "Team SSO disabled",
   "orgSettings.expiresColumn": "Expires",

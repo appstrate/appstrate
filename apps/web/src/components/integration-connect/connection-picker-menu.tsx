@@ -134,6 +134,14 @@ export function PickerMenu({
       ? t("detail.integrationMemberPicker.addVia", { label: tl })
       : t("detail.integrationMemberPicker.addConnection");
   };
+  // "Hériter" names what is inherited when the cascade already resolves to a connection.
+  const inheritedLabels = candidates
+    .filter((c) => resolvedConnectionIds.includes(c.id))
+    .map((c) => c.label);
+  const inheritLabel =
+    inheritedLabels.length > 0
+      ? t("detail.integrationMemberPicker.inheritNamed", { name: inheritedLabels.join(" · ") })
+      : t("detail.integrationMemberPicker.inherit");
   const trigger = triggerKind(picker);
   const triggerLabel = {
     unavailable: () => setLabel(storedIds, unavailableIds),
@@ -202,9 +210,9 @@ export function PickerMenu({
               // Toggling must not close the menu — "Valider" writes.
               onSelect={(e) => {
                 if (oneClick) {
-                  // The row is ticked: clicking it again unticks it, back to the cascade.
-                  const ticked = explicitIds?.length === 1 && explicitIds[0] === c.id;
-                  void persist(ticked ? null : [c.id]);
+                  // Back to the cascade is the "Hériter" entry, never a second click on the row.
+                  if (explicitIds?.length === 1 && explicitIds[0] === c.id) return;
+                  void persist([c.id]);
                   return;
                 }
                 e.preventDefault();
@@ -340,6 +348,18 @@ export function PickerMenu({
             })}
           </DropdownMenuLabel>
         )}
+        {/* The way back to the cascade, always on offer: a radio like "no connection", checked
+            while nothing is picked. */}
+        <DropdownMenuItem
+          role="menuitemradio"
+          aria-checked={explicitIds === null}
+          disabled={busy || explicitIds === null}
+          onSelect={() => void persist(null)}
+          data-testid={`member-pick-reset-${integrationId}`}
+        >
+          <Check className={`size-3.5 ${explicitIds === null ? "" : "opacity-0"}`} />
+          <span>{overrideMode ? inheritLabel : t("detail.integrationMemberPicker.automatic")}</span>
+        </DropdownMenuItem>
         {!required && (
           <DropdownMenuItem
             // A radio, like the rows are checkboxes: its state is read out, not only drawn.
@@ -351,20 +371,6 @@ export function PickerMenu({
           >
             <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
             <NoConnectionLabel />
-          </DropdownMenuItem>
-        )}
-        {explicitIds !== null && (
-          <DropdownMenuItem
-            disabled={busy}
-            onSelect={() => void persist(null)}
-            data-testid={`member-pick-reset-${integrationId}`}
-          >
-            <Check className="size-3.5 opacity-0" />
-            <span className="text-muted-foreground">
-              {overrideMode
-                ? t("detail.integrationMemberPicker.inherit")
-                : t("detail.integrationMemberPicker.resetToAuto")}
-            </span>
           </DropdownMenuItem>
         )}
         {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}

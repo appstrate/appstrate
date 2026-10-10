@@ -79,7 +79,9 @@ test.describe("View as role", () => {
 
     await expect(banner(page)).toBeVisible();
     await expect(banner(page)).toContainText("Lecteur");
-    await expect(banner(page)).not.toContainText(/espace ouvert|open space/);
+    await expect(banner(page)).not.toContainText(
+      /tout membre de l'organisation|every organization member/,
+    );
 
     await page.goto(agentUrl);
     await expect(runButton(page)).toHaveCount(0);
@@ -89,7 +91,9 @@ test.describe("View as role", () => {
     await new Sidebar(page).switchSpace(elsewhere.name);
     await expect(banner(page)).toContainText(elsewhere.name);
     await expect(banner(page)).toContainText(/Opérateur|Operator/);
-    await expect(banner(page)).toContainText(/espace ouvert|open space/);
+    await expect(banner(page)).toContainText(
+      /tout membre de l'organisation|every organization member/,
+    );
 
     await banner(page)
       .getByRole("button", { name: /^(Quitter|Exit)$/ })

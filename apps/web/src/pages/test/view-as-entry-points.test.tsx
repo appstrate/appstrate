@@ -269,6 +269,16 @@ describe("permission gating on the roles page", () => {
     });
     expect(html).toContain("Responsable assistance");
     expect(rolesPageDeeds({ canWrite: false, canPreview: true })).toEqual(["view-as"]);
+    // The row's menu holds the one deed left to this caller: previewing the role.
+    expect(html).toContain("Plus d’actions pour Responsable assistance");
+  });
+
+  it("offers a row no menu to someone who may neither delete nor preview", () => {
+    const html = renderAs("member", <OrgSettingsRolesPage />, {
+      customRoles: [custom],
+      path: "/org-settings/roles?tab=space",
+    });
+    expect(html).toContain("Responsable assistance");
     expect(html).not.toContain("Plus d’actions pour Responsable assistance");
   });
 });

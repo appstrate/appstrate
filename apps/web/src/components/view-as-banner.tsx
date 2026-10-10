@@ -13,7 +13,7 @@ import {
   useViewAsStopped,
 } from "../stores/view-as-store";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
+import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { useSpaces } from "../hooks/use-spaces";
@@ -24,9 +24,11 @@ import { useSpaces } from "../hooks/use-spaces";
  * permission-denied page. Not dismissible: hiding it would leave an admin
  * acting under a downgraded authority with no sign of it.
  *
- * Outside the persona's own space the persona is only its org role, so the
- * banner also names the role it holds in the space being looked at — "Lecteur
- * dans Default" over a page answered for Marketing otherwise reads as a preview
+ * It says first what holds WHERE THE USER IS. In the persona's own space that
+ * is both roles. Anywhere else the persona is only its org role, which gives an
+ * implicit member of an open space that space's default role (`resolveSpaceRole`)
+ * and nothing for a guest: the banner says which, because
+ * "Lecteur dans Default" over a page answered for Marketing reads as a preview
  * that does not work.
  *
  * It also states the preview's one boundary: a persona RESTRICTS the caller
@@ -57,12 +59,13 @@ export function ViewAsBanner() {
   // A persona applies in ONE organization; elsewhere the caller is themselves.
   if (!persona || persona.orgId !== orgId) return null;
 
-  const key = persona.space ? "viewAs.bannerSpace" : "viewAs.banner";
-  const here =
-    persona.space && currentSpaceId !== persona.space.spaceId
-      ? spaces?.find((s) => s.id === currentSpaceId)
-      : undefined;
+  const inPersonaSpace = !!persona.space && currentSpaceId === persona.space.spaceId;
+  const key = inPersonaSpace ? "viewAs.bannerSpace" : "viewAs.banner";
+  const here = inPersonaSpace ? undefined : spaces?.find((s) => s.id === currentSpaceId);
   const hereRole = here?.access === "member" ? spaceRoleLabel(here.role, t) : null;
+  // A guest holds no space of its own: the app then has none to stand in, and
+  // "no access to this page" is all it says unless the banner explains.
+  const noSpace = !inPersonaSpace && !!spaces && !spaces.some(isSpaceEnterable);
 
   return (
     <Alert
@@ -70,7 +73,7 @@ export function ViewAsBanner() {
       data-testid="view-as-banner"
       className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-2"
     >
-      <span>
+      <span className="min-w-64 flex-1">
         <Trans
           t={t}
           i18nKey={key}
@@ -81,7 +84,7 @@ export function ViewAsBanner() {
           }}
           components={{ b: <strong className="font-semibold" /> }}
         />
-        {here && hereRole && (
+        {hereRole && here && (
           <>
             {" "}
             <Trans
@@ -92,6 +95,7 @@ export function ViewAsBanner() {
             />
           </>
         )}
+        {noSpace && <> {t("viewAs.bannerNoSpace")}</>}
         <span className="block text-xs font-normal opacity-80">{t("viewAs.bannerOwn")}</span>
       </span>
       <Button variant="outline" size="sm" onClick={() => exitViewAs()}>

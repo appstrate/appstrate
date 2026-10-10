@@ -12,6 +12,7 @@
  * server's matrix.
  */
 import { useTranslation } from "react-i18next";
+import type { ViewAsOrgRole } from "@appstrate/core/permissions";
 import {
   Table,
   TableBody,
@@ -31,9 +32,9 @@ import {
   useOrgRoleColumns,
 } from "./org-role-columns";
 
-export function OrgRolesList() {
+export function OrgRolesList({ onPreview }: { onPreview?: (role: ViewAsOrgRole) => void }) {
   const { t } = useTranslation(["settings", "common"]);
-  const columns = useOrgRoleColumns();
+  const columns = useOrgRoleColumns({ onPreview });
   return (
     <DataTable
       label={t("roles.tabOrg")}

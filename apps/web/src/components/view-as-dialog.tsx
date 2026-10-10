@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { VIEW_AS_ORG_ROLES, type ViewAsOrgRole } from "@appstrate/core/permissions";
@@ -20,9 +21,11 @@ import { RoleCatalogState } from "./role-catalog-state";
 import { fetchOrgsAs, useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
-import { useSpaceRoleOptions } from "../hooks/use-roles";
+import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
+import { modalReturnTarget, useBackgroundLocation } from "../lib/modal-route";
 import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
+import type { ViewAsPreset } from "../lib/view-as-preset";
 
 /** "No space" option. Not the empty string — Radix refuses an empty item value. */
 const NO_SPACE = "none";
@@ -31,6 +34,8 @@ interface ViewAsDialogProps {
   onClose: () => void;
   /** Space the trigger is about. Defaults to the space the user is in. */
   spaceId?: string;
+  /** The role whose row opened the dialog: it arrives chosen (`?view-as=<kind>:<key>`). */
+  preset?: ViewAsPreset | null;
 }
 
 /**
@@ -47,17 +52,24 @@ interface ViewAsDialogProps {
  * Eligibility is not decided here — the triggers show only for an owner or an
  * administrator, and the server refuses anyone else (`view_as_forbidden`).
  */
-export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
+export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
   const orgId = useCurrentOrgId();
   const currentSpaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const { data: spaces } = useSpaces();
+  const navigate = useNavigate();
+  const background = useBackgroundLocation();
 
-  const initialSpaceId = spaceId ?? currentSpaceId ?? NO_SPACE;
-  const [orgRole, setOrgRole] = useState<ViewAsOrgRole>("member");
+  // An organization role is previewed on its own: a space would ask for a second choice.
+  const initialSpaceId =
+    preset?.kind === "org" ? NO_SPACE : (spaceId ?? currentSpaceId ?? NO_SPACE);
+  const [orgRole, setOrgRole] = useState<ViewAsOrgRole>(
+    preset?.kind === "org" ? preset.role : "member",
+  );
   const [selectedSpaceId, setSelectedSpaceId] = useState(initialSpaceId);
-  const [roleValue, setRoleValue] = useState("");
+  /** `null` follows the preset; any pick, even "none", is the user's own. */
+  const [pickedRole, setPickedRole] = useState<string | null>(null);
   const [entering, setEntering] = useState(false);
   /** A closed or unmounted dialog must never commit a pending preview. */
   const abandoned = useRef(false);
@@ -79,12 +91,23 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
   const inSpace = selectedSpaceId !== NO_SPACE;
   const {
     options,
+    roles,
     rolesKnown,
     isLoading: rolesLoading,
     error: rolesError,
     refetch: refetchRoles,
   } = useSpaceRoleOptions(inSpace ? selectedSpaceId : undefined, inSpace);
   const space = spaces?.find((s) => s.id === selectedSpaceId);
+  const presetRole =
+    preset?.kind === "space" ? roles?.find((r) => r.key === preset.key) : undefined;
+  const roleValue =
+    pickedRole ??
+    (presetRole
+      ? spaceRoleValue({
+          preset_role: presetRole.kind === "preset" ? presetRole.key : null,
+          custom_role_id: presetRole.id,
+        })
+      : "");
   // Grantability is per space, so the catalog is what says whether this pair is
   // previewable. Unknown is not empty: until the catalog lands there is nothing
   // to judge the choice against.
@@ -121,8 +144,14 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
     // org role — an implicit member of open spaces — and a banner naming
     // "Lecteur dans Default" over a page answered for another space reads as
     // a preview that does not work.
+    const movesSpace = !!space && !!roleOption && space.id !== currentSpaceId;
     if (space && roleOption) switchSpace(space.id);
-    close();
+    // The settings overlay this was opened in goes with it: the preview is for
+    // looking at the app. Back to the screen the overlay covered, unless the
+    // space changed under it (that screen belongs to the other space): home.
+    abandoned.current = true;
+    const target = modalReturnTarget(movesSpace ? null : background);
+    navigate(target.to, { replace: true, state: target.state });
   };
 
   return (
@@ -163,7 +192,7 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
               value={selectedSpaceId}
               onValueChange={(value) => {
                 setSelectedSpaceId(value);
-                setRoleValue("");
+                setPickedRole("");
               }}
             >
               <SelectTrigger id="view-as-space">
@@ -184,7 +213,7 @@ export function ViewAsDialog({ onClose, spaceId }: ViewAsDialogProps) {
             <Field>
               <Label htmlFor="view-as-space-role">{t("viewAs.spaceRoleLabel")}</Label>
               {catalogUsable ? (
-                <Select value={roleValue || undefined} onValueChange={setRoleValue}>
+                <Select value={roleValue || undefined} onValueChange={setPickedRole}>
                   <SelectTrigger id="view-as-space-role">
                     <SelectValue placeholder={t("viewAs.spaceRolePlaceholder")} />
                   </SelectTrigger>

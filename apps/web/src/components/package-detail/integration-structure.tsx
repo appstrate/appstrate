@@ -27,6 +27,7 @@ import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { readIntegrationSource } from "../../lib/package-manifest";
 import { MapCard, MapRow, BoundaryNode } from "../map-primitives";
 import { MapControls } from "../map-controls";
+import { useMapFullscreen } from "../../hooks/use-map-fullscreen";
 import { styleMapEdge } from "../map-edge";
 import { Modal } from "../modal";
 import { CopyBlock } from "../copy-block";
@@ -194,7 +195,7 @@ export function IntegrationMap({
   renderPanel: (section: string, openPanel: (section: string) => void) => ReactNode;
 }) {
   const { t } = useTranslation("settings");
-  const [expanded, setExpanded] = useState(false);
+  const { expanded, toggle: toggleFullscreen, close: closeFullscreen } = useMapFullscreen();
   // The section's settings open at `?structurePanel=<section>`; the callback rides in node data.
   const panelParam = useModalParam("structurePanel");
   const panel = panelParam.value;
@@ -627,7 +628,7 @@ export function IntegrationMap({
         }}
       >
         <Background gap={24} size={1} />
-        <MapControls expanded={expanded} onToggle={() => setExpanded((value) => !value)} />
+        <MapControls expanded={expanded} onToggle={toggleFullscreen} />
       </ReactFlow>
     </div>
   );
@@ -647,7 +648,7 @@ export function IntegrationMap({
       {expanded ? (
         <Modal
           open
-          onClose={() => setExpanded(false)}
+          onClose={closeFullscreen}
           title={t("integration.structure.map")}
           className="h-[calc(100dvh-2rem)] !w-[calc(100vw-2rem)] !max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)]"
         >

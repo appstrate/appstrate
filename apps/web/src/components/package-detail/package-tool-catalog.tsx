@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Wrench } from "lucide-react";
 import type {
@@ -14,6 +14,7 @@ import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
 import { Modal } from "../modal";
 import { SettingsHeading } from "../settings/settings-heading";
+import { useModalParam } from "../../hooks/use-modal-param";
 
 export interface PackageTool {
   name: string;
@@ -27,6 +28,7 @@ export function PackageToolCatalog({
   tools,
   selection,
   inspection,
+  integrationId,
   title,
   actions,
   rowActions,
@@ -41,6 +43,12 @@ export function PackageToolCatalog({
   rowActions?: (tool: PackageTool) => ReactNode;
   tools: PackageTool[];
   inspection?: IntegrationToolInspection;
+  /**
+   * Names the catalog in the URL, since a page can hold several: a tool's
+   * inspection opens at `?inspectTool=<integrationId>:<tool name>`, and only the
+   * catalog of that integration answers.
+   */
+  integrationId?: string;
   selection?: {
     values: ReadonlySet<string>;
     onToggle: (name: string) => void;
@@ -54,7 +62,7 @@ export function PackageToolCatalog({
   const [exposures, setExposures] = useState<string[]>([]);
   const [rules, setRules] = useState<string[]>([]);
   const [origins, setOrigins] = useState<string[]>([]);
-  const [selected, setSelected] = useState<PackageTool | null>(null);
+  const inspectParam = useModalParam("inspectTool");
   // Inspection is read-only and must never feed a bundle selection control.
   const inventory = !selection ? inspection : undefined;
   const catalog: PackageTool[] = inventory
@@ -65,6 +73,18 @@ export function PackageToolCatalog({
         inspection: entry,
       }))
     : tools;
+  const inspectPrefix = `${integrationId ?? ""}:`;
+  const inspected =
+    inventory && inspectParam.value?.startsWith(inspectPrefix)
+      ? inspectParam.value.slice(inspectPrefix.length)
+      : null;
+  const selected = catalog.find((tool) => tool.name === inspected) ?? null;
+  // A link to a tool this catalog does not hold (renamed, removed) drops the parameter.
+  const { close: closeInspect } = inspectParam;
+  const stale = inspected !== null && selected === null;
+  useEffect(() => {
+    if (stale) closeInspect();
+  }, [stale, closeInspect]);
   const hasScopes = (tool: PackageTool) =>
     Object.values(tool.permissions ?? {}).some((scopes) => scopes.length > 0);
   const hasRules = (tool: PackageTool) => hasScopes(tool) || !!tool.inspection?.hidden_reason;
@@ -310,7 +330,9 @@ export function PackageToolCatalog({
         columns={columns}
         rows={rows}
         rowKey={(tool) => tool.name}
-        rowAction={inventory ? setSelected : undefined}
+        rowAction={
+          inventory ? (tool) => inspectParam.open(`${inspectPrefix}${tool.name}`) : undefined
+        }
         rowLabel={(tool) => ti("integration.inventory.inspect", { name: tool.name })}
         surface="integrated"
         columnMode="scroll"
@@ -322,11 +344,7 @@ export function PackageToolCatalog({
           />
         }
       />
-      <Modal
-        open={selected !== null}
-        onClose={() => setSelected(null)}
-        title={selected?.name ?? ""}
-      >
+      <Modal open={selected !== null} onClose={inspectParam.close} title={selected?.name ?? ""}>
         {selected?.inspection && (
           <div className="space-y-5 text-sm">
             {selected.description && <p>{selected.description}</p>}

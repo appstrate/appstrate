@@ -291,6 +291,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
       </SettingRow>
       {choices.length > 0 && (
         <div className="space-y-4">
+          <ScheduleConnectionRefusals choices={choices} />
           <ScheduleActorConnectionChoice
             choices={choices}
             integrations={integrations ?? []}
@@ -314,12 +315,9 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
           </Button>
         </div>
       )}
-      {/* A choice to make is the form's state, not a failed save. */}
-      <SaveFeedback
-        pending={update.isPending}
-        success={update.isSuccess}
-        error={update.isError && choices.length === 0}
-      />
+      {/* A choice to make is the form's state, and any other refusal puts the field back and
+          is toasted: no « Erreur d'enregistrement » under a field that shows the stored value. */}
+      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={false} />
     </>
   );
 }

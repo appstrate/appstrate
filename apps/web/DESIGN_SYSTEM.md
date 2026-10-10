@@ -140,7 +140,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - A linked object (a schedule's agent) is shown as its preview card (identity
   tile, name, description, arrow), never as a bare link.
 - "Inherit" is always an explicit option and names what it inherits
-  (« Hériter (Mistral Medium) »).
+  (« Hériter (Mistral Medium) »). A connection picker lists it in every mode, one
+  connection included, as a radio checked while nothing is picked (« Résolution
+  automatique » for a member's own pin); clicking the ticked row again does nothing.
 
 ## 5. Choosing a value
 
@@ -210,7 +212,9 @@ A `Select` never holds hundreds of entries.
   pencil on a row that has no editable whole, no empty menu for one deed. A
   control that is the setting (role, default, share) stays in its own column.
   A row is a link through the first cell (`rowHref`), a titled element inside it
-  needs `relative z-10`.
+  needs `relative z-10`. A menu deed that opens the page's own modal pre-filled
+  on the row says so in the modal's URL value (`?view-as=space:viewer`, the
+  roles page's « Prévisualiser »), the same modal as the page's Actions menu.
 - States: `LoadingState`, `EmptyState` (says what to do and where the button
   is: never promise a button that is not on screen), `ErrorState error=…`, and
   for an unreadable resource `ResourceErrorState`
@@ -247,11 +251,16 @@ A `Select` never holds hundreds of entries.
 - Always `<Modal>` (`components/modal.tsx`), never `Dialog` directly; the
   two-pane overlay is `PanelDialog`. A popover that needs the whole width on a
   phone becomes a bottom `Sheet` there (`notification-bell.tsx`).
-- **Every modal that is a place has a URL** (`useModalParam`,
-  `hooks/use-modal-param.ts`): a creation, an edition, a detail, a setting, a
-  choice of an element, a form. It can be linked, reloads onto the same modal on
-  the same object, Back closes it, the hash and the router state ride along.
-  Opening pushes, closing replaces. Never `useState` for it.
+- **A real modal has a URL; only the confirmations, the secrets shown once and
+  the chat have none** (`useModalParam`, `hooks/use-modal-param.ts`). A
+  creation, an edition, a detail, a setting, a choice of an element, a form, an
+  explanation, a full-screen view, a pairing: all of them. It can be linked,
+  reloads onto the same modal on the same object, Back closes it, the hash and
+  the router state ride along. Opening pushes, closing replaces. Never
+  `useState` for it, and no exception of convenience (« it is only a help
+  text », « there are many of them on the page », « it is a display mode »): the
+  value names what is open (a card's stable key, `<integrationId>:<tool>`), and
+  never a position.
   - **Naming**: the param is named by the act and the object, in camelCase.
     `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows. A
     value is `1` when there is no object, the object's id otherwise (a composite
@@ -270,19 +279,35 @@ A `Select` never holds hundreds of entries.
     away as the secret appears (`ApiKeyCreateModal`, `WebhookCreateModal`,
     `OAuthClientFormModal`): the secret has no address and does not survive a
     reload.
-  - **Exceptions, without a URL**: (1) the confirmation of an act
+  - **A modal repeated on a page** is named by what the repeated thing already
+    has that is stable: a map card by its relation id or, on the agent map, its
+    concept (`?mapConcept=<card>`, `?mapCardList=<card>`), a tool of a catalog by
+    `?inspectTool=<integrationId>:<tool name>` (the catalog answers only for its
+    own integration). Full-screen maps are `?fullscreenMap=1`
+    (`useMapFullscreen`). A modal opened over another has its own param
+    (`?newModel=1` over `?mapPanel=model`).
+  - **A pairing in progress** (`?connectProvider=<providerId>` in the
+    onboarding) is a place too: its token lives in memory, so a reload reopens
+    the modal and mints a new pairing instead of resuming the old one (which
+    expires on its own).
+  - **Without a URL, and only these**: (1) the confirmation of an act
     (`ConfirmModal`, the re-authentication that confirms one, the activation
-    closure): reopening « Supprimer X » from a link would be a trap; (2) the
-    single display of a secret (`RevealedSecret`, `SecretRevealModal`, the key
-    just created): the secret is not there after a reload. A step inside a flow
-    that is already at an address, a pairing in progress, a help text and a
-    display mode are not places either. Each one is listed.
+    closure, the deletion of a chat thread): reopening « Supprimer X » from a
+    link would be a trap; (2) the single display of a secret (`RevealedSecret`,
+    `SecretRevealModal`, the key just created): the secret is not there after a
+    reload; (3) the chat (`packages/module-chat`), whose message cards have no
+    stable address; (4) what is not a modal, such as the notification bell, a
+    popover that becomes a sheet on a phone. Each one is listed.
   - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
     and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open` or
     `onClose` is driven by a `useState`, unless the pair is in its `EXCEPTIONS`
     list with one line of reason. The list also fails when an entry no longer
     matches code. Port the modal to `useModalParam` first; add an exception only
-    when it is not a place.
+    for the four cases above.
+- **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
+  Escape, Back): the form is mounted only while its param is set (`{param.value !== null && <Form />}`,
+  or the host returns `null`), so it reopens empty on a creation and on the stored values on an
+  edition. Never keep a draft in a component that stays mounted while the modal is closed.
 - Destructive acts: `ConfirmModal` (`components/confirm-modal.tsx`). Its title
   names the act (« Supprimer la planification ? »), its body says what changes,
   its button repeats the verb through `confirmLabel` (« Supprimer »), never
@@ -303,7 +328,9 @@ A `Select` never holds hundreds of entries.
   `<ErrorState error>` in a panel, the global mutation toast for a failed
   write (no `onError` that toasts again, `lib/mutation-error.ts`). A refusal is
   worded by its `code` (`apiError.<code>` in `locales/{fr,en}/common.json`). A
-  raw server payload (JSON, an English sentence) never reaches the screen.
+  raw server payload (JSON, an English sentence) never reaches the screen: a 403
+  `forbidden` carries only an English `detail`, so it is one sentence of ours
+  (« Vous n'avez pas les droits nécessaires pour cette action. »).
 - **What ended a run** is stored verbatim (an English platform line, a model
   provider's JSON body); a screen shows it through `runErrorText`
   (`lib/run-error.ts`), never `run.error` as is.
@@ -311,8 +338,11 @@ A `Select` never holds hundreds of entries.
   or a result the screen does not show. No success toast where the row or the
   field already shows the change.
 - An expected refusal that asks for a choice (a 409 naming candidates) is a
-  form state with the choice, not « Erreur d'enregistrement ». Any other refusal
-  puts the control back on the stored value (`ActorSelect` in a schedule's identity).
+  form state with the choice, said by `ScheduleConnectionRefusals` wherever the
+  write can be refused (Connexions and Identité of a schedule), not
+  « Erreur d'enregistrement ». Any other refusal puts the control back on the
+  stored value and is toasted, with no inline error under it (`ActorSelect` in a
+  schedule's identity).
 - **Tooltips** explain an icon or a disabled control, never carry the only copy
   of information. They are shadcn `Tooltip` wrapped in a `TooltipProvider`
   (`delayDuration` 250 or 300). A disabled control gets its reason through

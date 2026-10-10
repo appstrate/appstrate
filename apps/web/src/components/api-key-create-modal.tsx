@@ -69,76 +69,22 @@ function buildResourceSummary(
 
 export function ApiKeyCreateModal({ onKeyCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
-  const createMutation = useCreateApiKey();
   const param = useModalParam(NEW_API_KEY_PARAM);
   const { data: availableScopes } = useAvailableScopes();
-
-  const [createdKey, setCreatedKey] = useState<string | null>(null);
-  const [createdScopes, setCreatedScopes] = useState<string[]>([]);
-  const [selectedScopes, setSelectedScopes] = useState<string[] | null>(null);
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    control,
-    setError,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { name: "", expiresIn: "90" },
-  });
-
-  const handleClose = () => {
-    reset({ name: "", expiresIn: "90" });
-    setCreatedKey(null);
-    setCreatedScopes([]);
-    setSelectedScopes(null);
-    createMutation.reset();
-    param.close();
-  };
-
-  const effectiveScopes = selectedScopes !== null ? selectedScopes : (availableScopes ?? []);
-  const allSelected = availableScopes ? effectiveScopes.length === availableScopes.length : true;
-
-  function onFormSubmit(data: FormData) {
-    const expiresAt = computeExpiresAt(data.expiresIn);
-
-    createMutation.mutate(
-      {
-        body: {
-          name: data.name.trim(),
-          expiresAt,
-          scopes: allSelected ? undefined : effectiveScopes,
-        },
-      },
-      {
-        onSuccess: (result) => {
-          // The key is shown once and has no address: the creation's one goes away.
-          setCreatedKey(result.key ?? null);
-          param.close();
-          setCreatedScopes(result.scopes ?? []);
-          if (result.key) onKeyCreated?.(result.key);
-        },
-        onError: (err) => {
-          setError("root", { message: errorMessage(err) });
-        },
-      },
-    );
-  }
-
-  const onSubmit = handleSubmit(onFormSubmit);
+  const [created, setCreated] = useState<{ key: string; scopes: string[] } | null>(null);
 
   // ── Success state ──
-  if (createdKey) {
+  if (created) {
     const summary =
-      availableScopes && createdScopes.length > 0
-        ? buildResourceSummary(createdScopes, availableScopes)
+      availableScopes && created.scopes.length > 0
+        ? buildResourceSummary(created.scopes, availableScopes)
         : [];
-    const isFullAccess = availableScopes ? createdScopes.length === availableScopes.length : true;
+    const isFullAccess = availableScopes ? created.scopes.length === availableScopes.length : true;
+    const done = () => setCreated(null);
 
     return (
-      <Modal open onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
-        <RevealedSecret secret={createdKey} warning={t("apiKeys.createdWarning")} />
+      <Modal open onClose={done} title={t("apiKeys.created")} className="sm:max-w-lg">
+        <RevealedSecret secret={created.key} warning={t("apiKeys.createdWarning")} />
 
         {/* Scopes granted */}
         <div className="border-border mt-4 border-t pt-3">
@@ -164,22 +110,88 @@ export function ApiKeyCreateModal({ onKeyCreated }: Props) {
         </div>
 
         <div className="border-border mt-4 flex justify-end gap-2 border-t pt-4">
-          <Button onClick={handleClose}>{t("btn.done")}</Button>
+          <Button onClick={done}>{t("btn.done")}</Button>
         </div>
       </Modal>
     );
   }
 
+  // The form exists only while the modal is open, so any way of closing it (Annuler, a click
+  // outside, Escape, Back) abandons what was typed.
+  if (param.value === null) return null;
+  return (
+    <ApiKeyCreateForm
+      availableScopes={availableScopes}
+      onClose={param.close}
+      onCreated={(key, scopes) => {
+        setCreated({ key, scopes });
+        param.close();
+        onKeyCreated?.(key);
+      }}
+    />
+  );
+}
+
+function ApiKeyCreateForm({
+  availableScopes,
+  onClose,
+  onCreated,
+}: {
+  availableScopes: string[] | undefined;
+  onClose: () => void;
+  onCreated: (key: string, scopes: string[]) => void;
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  const createMutation = useCreateApiKey();
+  const [selectedScopes, setSelectedScopes] = useState<string[] | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    control,
+    setError,
+    formState: { errors },
+  } = useForm<FormData>({
+    defaultValues: { name: "", expiresIn: "90" },
+  });
+
+  const effectiveScopes = selectedScopes !== null ? selectedScopes : (availableScopes ?? []);
+  const allSelected = availableScopes ? effectiveScopes.length === availableScopes.length : true;
+
+  function onFormSubmit(data: FormData) {
+    const expiresAt = computeExpiresAt(data.expiresIn);
+
+    createMutation.mutate(
+      {
+        body: {
+          name: data.name.trim(),
+          expiresAt,
+          scopes: allSelected ? undefined : effectiveScopes,
+        },
+      },
+      {
+        onSuccess: (result) => {
+          if (result.key) onCreated(result.key, result.scopes ?? []);
+        },
+        onError: (err) => {
+          setError("root", { message: errorMessage(err) });
+        },
+      },
+    );
+  }
+
+  const onSubmit = handleSubmit(onFormSubmit);
+
   // ── Creation form ──
   return (
     <Modal
-      open={param.value !== null}
-      onClose={handleClose}
+      open
+      onClose={onClose}
       title={t("apiKeys.createTitle")}
       className="sm:max-w-lg"
       actions={
         <>
-          <Button variant="outline" type="button" onClick={handleClose}>
+          <Button variant="outline" type="button" onClick={onClose}>
             {t("btn.cancel")}
           </Button>
           <Button

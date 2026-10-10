@@ -19,6 +19,21 @@ export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
   skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
 };
 
+/**
+ * Where a YAML parser stopped, said in the reader's language: « (ligne 3, colonne 14) », or "".
+ * Only the two numbers are read from the checker's sentence, never its English. The parser counts
+ * from the first line after the opening `---`, so the line is shifted onto SKILL.md's own.
+ */
+export function yamlPosition(message: string): string {
+  const match = /\bline (\d+), column (\d+)/.exec(message);
+  if (!match) return "";
+  return i18n.t("editor.errorSkillYamlPosition", {
+    line: Number(match[1]) + 1,
+    column: match[2],
+    ns: "agents",
+  });
+}
+
 /** Item codes whose sentence is `common:apiError.<code>`, or the server's own message. */
 type CommonSentenceCode =
   | "integration_not_active"
@@ -87,7 +102,8 @@ export function refusalMessage(err: Refusal): string | null {
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
     // the first segment is the prefix.
     const field = err.param?.slice(err.param.indexOf(".") + 1) || err.param || "";
-    return i18n.t(agentsKey, { field, message, detail: message, ns: "agents" });
+    const position = code === "skill_invalid_frontmatter" ? yamlPosition(message) : "";
+    return i18n.t(agentsKey, { field, message, detail: message, position, ns: "agents" });
   }
   const key = `apiError.${code}`;
   if (!i18n.exists(key, { ns: "common" })) return null;
