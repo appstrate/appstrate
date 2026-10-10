@@ -50,9 +50,11 @@ import {
   integrationOauthClients,
   packages,
   runs,
+  integrationConnectionShares,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -179,9 +181,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
           opts.credentialsEncrypted ??
           encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
         scopesGranted: [],
-        sharedSpaceIds: opts.shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.shared ? [ctx.defaultSpaceId] : []);
     return row!.id;
   }
 
@@ -600,9 +602,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
         userId: owner.userId,
-        sharedSpaceIds: owner.shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, owner.shared ? [ctx.defaultSpaceId] : []);
     return row!.id;
   }
 
@@ -937,8 +939,11 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const held = await heldRevision(connectionId);
     await db
+      .delete(integrationConnectionShares)
+      .where(eq(integrationConnectionShares.connectionId, connectionId));
+    await db
       .update(integrationConnections)
-      .set({ sharedSpaceIds: [], refreshFailureCount: 2 })
+      .set({ refreshFailureCount: 2 })
       .where(eq(integrationConnections.id, connectionId));
 
     expect((await reportSuccess(connectionId, held)).status).toBe(204);

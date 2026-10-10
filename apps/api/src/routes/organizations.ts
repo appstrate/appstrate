@@ -53,6 +53,7 @@ import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
+import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 
@@ -517,7 +518,7 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
   const orgId = c.req.param("orgId")!;
   const targetUserId = c.req.param("userId")!;
 
-  const { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds, deletedModelCredentialIds } =
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares, deletedModelCredentialIds } =
     await removeMember(orgId, targetUserId, memberActor(c));
   await recordAuditFromContext(c, {
     action: "org.member_removed",
@@ -528,13 +529,9 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
     // §3.6). Named here because this is the event an owner comes back to when
     // deciding whether to convert one or sweep it: the sweeper's own log line
     // arrives 30 days later, and by then the space is gone.
-    after: {
-      orphanedSpaceIds,
-      revokedApiKeyIds,
-      unsharedConnectionIds,
-      deletedModelCredentialIds,
-    },
+    after: { orphanedSpaceIds, revokedApiKeyIds, deletedModelCredentialIds },
   });
+  await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);
 });
 
@@ -548,7 +545,7 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 
   // Promoting to owner/admin drops the member's explicit space grants; the audit
   // is the only record of what a later demotion will NOT restore.
-  const { previousRole, revoked, unsharedConnectionIds } = await updateMemberRole(
+  const { previousRole, revoked, unsharedShares } = await updateMemberRole(
     orgId,
     targetUserId,
     data.role,
@@ -566,9 +563,10 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
         customRoleId: row.customRoleId,
       })),
     },
-    after: { role: data.role, unsharedConnectionIds },
+    after: { role: data.role },
     orgIdOverride: orgId,
   });
+  await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
 
   // Bare updated resource — same serializer as the members list in
   // GET /orgs/:orgId (issue #657).
@@ -600,20 +598,16 @@ router.post("/:orgId/leave", async (c) => {
 
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-  const { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds, deletedModelCredentialIds } =
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares, deletedModelCredentialIds } =
     await leaveOrganization(orgId, user.id);
   await recordAuditFromContext(c, {
     action: "org.member_left",
     resourceType: "member",
     resourceId: user.id,
     orgIdOverride: orgId,
-    after: {
-      orphanedSpaceIds,
-      revokedApiKeyIds,
-      unsharedConnectionIds,
-      deletedModelCredentialIds,
-    },
+    after: { orphanedSpaceIds, revokedApiKeyIds, deletedModelCredentialIds },
   });
+  await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);
 });
 

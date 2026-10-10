@@ -41,9 +41,10 @@ import {
   removeScheduleJobs,
 } from "../../../src/services/scheduler.ts";
 import { deleteOwnConnection } from "../../../src/services/integration-connections.ts";
-import { updateConnection } from "../../../src/services/integration-pins-service.ts";
+import { unshareConnection } from "../../../src/services/connection-shares.ts";
 import { leaveOrganization, updateMemberRole } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
 describeRequiresRedis("scheduler service", () => {
@@ -1069,11 +1070,10 @@ describeRequiresRedis("scheduler service", () => {
 
       // What `DELETE /api/me/connections/:id` does: the service prunes, the route drops the jobs
       // of the schedules it disabled.
-      const { disabledScheduleIds } = (await deleteOwnConnection(actor, gone!, {
-        kind: "bound",
-        orgId,
-        spaceId: defaultSpaceId,
-      }))!;
+      const { disabledScheduleIds } = (await deleteOwnConnection(
+        { kind: "delegated", actor, orgId, spaceId: defaultSpaceId },
+        gone!,
+      ))!;
       expect(disabledScheduleIds).toEqual([]);
       await removeScheduleJobs(disabledScheduleIds);
 
@@ -1115,11 +1115,10 @@ describeRequiresRedis("scheduler service", () => {
         connectionOverrides: { [integrationId]: [row!.id] },
       });
 
-      const { disabledScheduleIds } = (await deleteOwnConnection(actor, row!.id, {
-        kind: "bound",
-        orgId,
-        spaceId: defaultSpaceId,
-      }))!;
+      const { disabledScheduleIds } = (await deleteOwnConnection(
+        { kind: "delegated", actor, orgId, spaceId: defaultSpaceId },
+        row!.id,
+      ))!;
       expect(disabledScheduleIds).toEqual([schedule.id]);
       await removeScheduleJobs(disabledScheduleIds);
 
@@ -1160,10 +1159,10 @@ describeRequiresRedis("scheduler service", () => {
           userId: admin.id,
           credentialsEncrypted: "x",
           scopesGranted: [],
-          sharedSpaceIds: [closed.id],
           label: "admin's",
         })
         .returning({ id: integrationConnections.id });
+      await seedShares(conn!.id, [closed.id]);
       const schedule = await createSchedule({ orgId, spaceId: closed.id }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [conn!.id] },
@@ -1289,7 +1288,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
       .returning({ id: integrationConnections.id });
     const created = await read(actor, { [integrationId]: [kept!.id, gone!.id] });
 
-    await deleteOwnConnection(actor, gone!.id, { kind: "bound", ...scope });
+    await deleteOwnConnection({ kind: "delegated", actor, ...scope }, gone!.id);
 
     await expect(
       updateSchedule(scope, created, { name: "renamed" }, null, undefined),
@@ -1312,28 +1311,24 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
           userId: member.user.id,
           credentialsEncrypted: "x",
           scopesGranted: [],
-          sharedSpaceIds: [ctx.defaultSpaceId],
           label,
         })),
       )
       .returning({ id: integrationConnections.id });
+    await seedShares(deleted!.id, [ctx.defaultSpaceId]);
+    await seedShares(unshared!.id, [ctx.defaultSpaceId]);
     const reads = [
       await read(actor, { [integrationId]: [deleted!.id] }),
       await read(actor, { [integrationId]: [unshared!.id] }),
     ];
 
     const owner: Actor = { type: "user", id: member.user.id };
-    await deleteOwnConnection(owner, deleted!.id, { kind: "bound", ...scope });
-    await updateConnection({
+    await deleteOwnConnection({ kind: "delegated", actor: owner, ...scope }, deleted!.id);
+    await unshareConnection({
       connectionId: unshared!.id,
-      viewer: {
-        actor: owner,
-        spaceId: scope.spaceId,
-        governs: false,
-        boundSpaceId: null,
-        permissionsIn: async () => new Set(),
-      },
-      sharedSpaceIds: [],
+      spaceId: scope.spaceId,
+      integrationId: null,
+      caller: testCaller({ kind: "person", actor: owner }, { spaceId: scope.spaceId }),
     });
 
     for (const created of reads) {
@@ -1420,7 +1415,7 @@ describe("schedule disabled_reason", () => {
       connectionOverrides: { [integrationId]: [gone!.id] },
     });
 
-    await deleteOwnConnection(actor, gone!.id, { kind: "bound", ...scope });
+    await deleteOwnConnection({ kind: "delegated", actor, ...scope }, gone!.id);
 
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));
     expect(row).toMatchObject({ enabled: false, disabledReason: "connection_deleted" });
@@ -1452,10 +1447,10 @@ describe("schedule disabled_reason", () => {
       .set({ enabled: false, nextRunAt: null })
       .where(eq(schedules.id, created.id));
 
-    const { disabledScheduleIds } = (await deleteOwnConnection(actor, gone!.id, {
-      kind: "bound",
-      ...scope,
-    }))!;
+    const { disabledScheduleIds } = (await deleteOwnConnection(
+      { kind: "delegated", actor, ...scope },
+      gone!.id,
+    ))!;
 
     expect(disabledScheduleIds).toEqual([]);
     const [row] = await db.select().from(schedules).where(eq(schedules.id, created.id));

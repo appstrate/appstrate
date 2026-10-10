@@ -67,9 +67,8 @@ export async function runUnshareSpaceAccessLoss(options: {
       await tx.execute("SET LOCAL statement_timeout = '120s'");
       const orgs = await tx.select({ id: organizations.id }).from(organizations);
       for (const org of orgs) {
-        const { connectionIds: ids } = await unshareConnectionsOfOwnersWithoutAccess(tx, {
-          orgId: org.id,
-        });
+        const { shares } = await unshareConnectionsOfOwnersWithoutAccess(tx, { orgId: org.id });
+        const ids = [...new Set(shares.map((share) => share.connectionId))];
         if (ids.length === 0) continue;
         out(`  org ${org.id}: ${ids.length} — ${ids.join(", ")}`);
         unshared.push(...ids);

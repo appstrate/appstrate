@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageSourceValues } from "@appstrate/db/schema";
+import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
+import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
 
 /**
  * OpenAPI paths for the AFPS integration marketplace.
@@ -174,31 +176,67 @@ const connectionVariablesSchema = {
 } as const;
 
 // CASING: this connection wire shape mixes camelCase and snake_case by policy,
-// not by oversight. `id`, `expiresAt`, `createdAt`, `updatedAt` are the
+// not by oversight. `id`, `spaceId`, `expiresAt`, `createdAt`, `updatedAt` are the
 // universal DB-convention carve-outs (camelCase everywhere per
 // docs/CASING_CONVENTIONS.md); every other field (`integration_package_id`, `auth_key`, `account_id`,
 // `identity_claims`, `scopes_granted`, `needs_reconnection`, `owner_type`,
-// `owner_id`, `shared_space_ids`, `client_ref`) is snake_case wire. Matches the
+// `owner_id`, `shared_here`, `client_ref`) is snake_case wire. Matches the
 // serializer output (spec==runtime) — do NOT normalize either way.
 export const connectionScopeSchema = {
   type: "string",
-  enum: ["org", "space"],
+  enum: [...CONNECTION_SCOPES],
   description:
     "Where the connection is usable, fixed by the OAuth client that minted it. `org`: minted by a system, org-tier or auto-provisioned client, or an API-key/basic/custom auth — usable from every space of the org. `space`: minted by a space's own OAuth client, owned by an end user, or created by a delegated credential (API key, third-party token) — it lives in that one space.",
 } as const;
 
-/** The projection every non-owner reads: the current space only, and only when shared into it. */
+export const connectionActionsSchema = {
+  type: "array",
+  items: { type: "string", enum: [...CONNECTION_ACTIONS] },
+  description:
+    "What the caller may do with this connection: `rename`, `share` (into a space it reaches) or `unshare_here` (withdraw it from the current space).",
+} as const;
+
+export const spaceIdSchema = {
+  type: ["string", "null"],
+  description: "The one space a space-scoped connection lives in; `null` for an org-scoped one.",
+} as const;
+
+export const sharedHereSchema = {
+  type: "boolean",
+  description:
+    "Whether the connection is shared into the space the request is made from. `false` where the request names no space (the account surface, connect responses).",
+} as const;
+
+/** The owner only (absent otherwise): the spaces the connection is shared into. */
 export const sharedSpaceIdsSchema = {
   type: "array",
   items: { type: "string" },
   description:
-    "Spaces whose members may use the connection by an explicit pick. The owner's own session reads the full set on the lists and the edit; any other read — another member, a delegated credential, a connect response — reads `[<current space>]` when it is shared into the current space, else `[]`.",
+    "Owner only: the spaces whose members may use the connection by an explicit pick — every one, or to a credential bound to a space, that space at most. Absent for anyone else.",
 } as const;
 
+/** The owner only (absent otherwise). */
 export const originSpaceIdSchema = {
   type: ["string", "null"],
   description:
-    "The space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. Projected as `shared_space_ids` is (outside the owner's own session, only when it is the current space); `null` otherwise, for a space-scoped connection, or once that space is deleted.",
+    "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else.",
+} as const;
+
+/** A space by id and name. */
+export const namedSpaceSchema = {
+  type: "object",
+  required: ["id", "name"],
+  properties: {
+    id: { type: "string" },
+    name: { type: "string" },
+  },
+} as const;
+
+export const shareableSpacesSchema = {
+  type: "array",
+  items: namedSpaceSchema,
+  description:
+    "The spaces this caller may share the connection into now — a credential bound to a space, that space at most. The owner's only.",
 } as const;
 
 export const integrationConnectionSchema = {
@@ -216,8 +254,8 @@ export const integrationConnectionSchema = {
     "owner_id",
     "label",
     "scope",
-    "shared_space_ids",
-    "origin_space_id",
+    "spaceId",
+    "shared_here",
     "client_ref",
     "variables",
     "createdAt",
@@ -249,8 +287,18 @@ export const integrationConnectionSchema = {
         "User-given name. Always present — the column is NOT NULL, because a run binding several connections of one integration addresses each by its label.",
     },
     scope: connectionScopeSchema,
+    spaceId: spaceIdSchema,
+    shared_here: sharedHereSchema,
     shared_space_ids: sharedSpaceIdsSchema,
     origin_space_id: originSpaceIdSchema,
+    allowed_actions: {
+      ...connectionActionsSchema,
+      description: `${connectionActionsSchema.description} List surfaces only.`,
+    },
+    shareable_spaces: {
+      ...shareableSpacesSchema,
+      description: `${shareableSpacesSchema.description} List surfaces only.`,
+    },
     client_ref: {
       type: ["string", "null"],
       description:
@@ -633,28 +681,14 @@ const problemJson = {
 
 /** Shared by both connection-edit doors: this one and `PATCH /api/me/connections/{connectionId}`. */
 export const connectionUpdateDescription =
-  "The owner may rename the connection and set the WHOLE set of spaces it is shared into " +
-  "(`shared_space_ids` replaces it): sharing is the owner's consent. A governor (`integrations:configure` " +
-  "in the space the request is made from) may rename a space-scoped connection of that space, and withdraw " +
-  "any connection from that space by sending the projection it reads without it (`[]`); nothing else. " +
-  "A connection may be shared into a space of its org it serves: an org-scoped one into any space, a " +
-  "space-scoped one only into its own space. Every target space must still be reached by the owning member, an added one " +
-  "takes a sharer holding `integrations:connect` there (403), and one that blocks user connections for the " +
-  "integration also `integrations:configure` (403 `connection_blocked_by_admin`). A credential bound to a space (an API key, a space-bound token) sees " +
-  "and edits that space's share only: its `shared_space_ids` is `[]` or that space, other targets stay " +
-  "untouched, and it renames only a connection scoped to it. Sharing an end user's connection " +
-  "is refused with 409 `end_user_connection_not_shareable`. Removing a space is refused with 409 " +
-  "`connection_pinned` while an admin pin or an org default of THAT space names the connection. A member pin " +
-  "does not block it: that member's next run fails with `pinned_connection_unavailable` until they pick " +
-  "again. Removing a space disables, in the same transaction, every enabled schedule of that space of " +
-  "another actor than the owner whose `connection_overrides` name the connection " +
-  "(`disabled_reason: connection_unshared`, jobs removed), its overrides kept: while the connection stays " +
-  "unreachable, re-enabling it requires a new choice. The owner's own schedules are untouched. A label is " +
-  "unique per owner among the connections of the integration sharing its scope, compared verbatim: renaming " +
-  "to one another holds is refused with 409 `connection_label_taken`. Each space added or removed is " +
-  "audited on its own (`integration.connection.share_added` / `share_removed`). Scopes are not edited " +
-  "here: for an agent that needs more scopes, create a new connection with them rather than reconnecting " +
-  "a shared one, which widens every agent that uses it.";
+  "Renames the connection. The owner may rename any of their connections; a governor (`integrations:configure` " +
+  "in the space the request is made from) may rename a space-scoped connection of that space, and nothing else. " +
+  "A credential bound to a space renames only a connection scoped to it. A label is unique per owner among the " +
+  "connections of the integration sharing its scope, compared verbatim: renaming to one another holds is refused " +
+  "with 409 `connection_label_taken`. Sharing a connection into a space is a separate door: " +
+  "`PUT` and `DELETE` on `.../connections/{connectionId}/shares/{spaceId}`. Scopes are not edited here: for an " +
+  "agent that needs more scopes, create a new connection with them rather than reconnecting a shared one, which " +
+  "widens every agent that uses it.";
 
 export const connectionUpdateRequestBody = {
   required: true,
@@ -662,7 +696,7 @@ export const connectionUpdateRequestBody = {
     "application/json": {
       schema: {
         type: "object",
-        minProperties: 1,
+        required: ["label"],
         properties: {
           label: {
             type: "string",
@@ -670,14 +704,6 @@ export const connectionUpdateRequestBody = {
             maxLength: CONNECTION_LABEL_MAX,
             description:
               "A rename; the label cannot be cleared. It reaches the agent's model verbatim, so a whitespace-only label, one starting or ending with whitespace, or one holding a control character (line breaks and tabs included), a zero-width/invisible character or a bidirectional-override character is refused with 400, and one another connection of the same owner holds with 409 `connection_label_taken`.",
-          },
-          shared_space_ids: {
-            type: "array",
-            items: { type: "string", minLength: 1, maxLength: 100 },
-            maxItems: 100,
-            uniqueItems: true,
-            description:
-              "The WHOLE set of spaces whose members may bind this connection by an explicit pick; this write replaces it. `[]` shares it nowhere.",
           },
         },
         additionalProperties: false,
@@ -687,16 +713,56 @@ export const connectionUpdateRequestBody = {
 } as const;
 
 export const connectionUpdateRefusals400 =
-  "Refused: no field, a malformed label, a repeated space id (`validation_failed`), or an added target that is not (or no longer) a space of the connection's org, or one it does not serve — another space than its own for a space-scoped connection, a space whose default OAuth client is its own for an org-scoped one (`invalid_share_target`).";
+  "Refused: a missing or malformed label (`validation_failed`).";
 
 export const connectionUpdateConflicts = {
   description:
-    "Removing a space whose admin pin or org default names the connection (`connection_pinned`), renaming it to a label another connection of the same owner holds (`connection_label_taken`), sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member does not reach — removed concurrently, or the space closed (`connection_owner_without_access`)",
+    "Renaming the connection to a label another connection of the same owner holds (`connection_label_taken`)",
   headers: STD_RESPONSE_HEADERS,
   content: {
     "application/problem+json": {
       schema: { $ref: "#/components/schemas/ProblemDetail" },
     },
+  },
+} as const;
+
+const connectionSharePutDescription =
+  "Shares the connection into `spaceId`. Owner only. The target must be a space of the connection's org that the owning member reaches, and one the connection can serve: an org-scoped connection into any space of its org, a space-scoped one only into its own space. An end user's connection is never shared. The sharer must hold `integrations:connect` in the target space, and a space blocking user connections for the integration also needs `integrations:configure` there. Idempotent: a connection already shared into the space answers 204 again. The share is audited in the target space as `integration.connection.share_added`.";
+
+const connectionShareDeleteDescription =
+  "Withdraws the connection from `spaceId`. The owner may withdraw it from any space it is shared into; a principal holding `integrations:configure` may withdraw it from the space the request is made from only. Refused with 409 `connection_pinned` while an admin pin or an org default of that space names the connection. In the same transaction, every enabled schedule of that space of another actor than the owner whose `connection_overrides` name the connection is disabled (`disabled_reason: connection_unshared`, jobs removed), its overrides kept. Idempotent: 204 whether the share existed or not. The withdrawal is audited in the target space as `integration.connection.share_removed`.";
+
+export const connectionSharePutConflicts = {
+  description:
+    "Sharing an end user's connection (`end_user_connection_not_shareable`), or sharing it into a space its owning member no longer reaches (`connection_owner_without_access`)",
+  headers: STD_RESPONSE_HEADERS,
+  content: problemJson,
+} as const;
+
+export const connectionShareDeleteConflicts = {
+  description:
+    "Withdrawing it from a space whose admin pin or org default names the connection (`connection_pinned`)",
+  headers: STD_RESPONSE_HEADERS,
+  content: problemJson,
+} as const;
+
+export const connectionShareSpaceIdParam = {
+  name: "spaceId",
+  in: "path",
+  required: true,
+  description: "Space the connection is shared into (`spc_…`).",
+  schema: { type: "string", pattern: SPACE_ID_RE.source },
+} as const;
+
+export const connectionShareEndpoints = {
+  put: {
+    description: connectionSharePutDescription,
+    refusals400:
+      "A malformed `spaceId` (`invalid_request`), or a target that is not (or no longer) a space of the connection's org, or one the connection cannot serve — another space than its own for a space-scoped connection (`invalid_share_target`).",
+  },
+  delete: {
+    description: connectionShareDeleteDescription,
+    refusals400: "A malformed `spaceId` (`invalid_request`).",
   },
 } as const;
 
@@ -1416,7 +1482,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name`, have `identity_claims` redacted to `null`, and project `shared_space_ids` and `origin_space_id` (see their descriptions).",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1448,7 +1514,7 @@ export const integrationsPaths = {
     patch: {
       operationId: "updateIntegrationConnectionMetadata",
       tags: ["Integrations"],
-      summary: "Rename an integration connection and/or set the spaces it is shared into",
+      summary: "Rename an integration connection",
       description: connectionUpdateDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1477,7 +1543,7 @@ export const integrationsPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but asked for more than a governor may: renaming an org-scoped connection, or any `shared_space_ids` other than the current projection minus this space. Also: a delegated credential editing another space's share or renaming a connection not scoped to this space, and a requested target — added or kept — blocking user connections for the integration where the caller lacks `integrations:configure` (`connection_blocked_by_admin`).",
+            "The caller neither owns the connection nor holds `integrations:configure` in this space, or holds it but renames an org-scoped connection (a governor renames only a space-scoped connection of this space). Also a delegated credential renaming a connection not scoped to its bound space.",
         },
         "404": {
           $ref: "#/components/responses/NotFound",
@@ -1485,6 +1551,76 @@ export const integrationsPaths = {
             "No connection with this id: of the caller and reaching this space, or scoped to or shared into it.",
         },
         "409": connectionUpdateConflicts,
+      },
+    },
+  },
+  "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}": {
+    put: {
+      operationId: "shareIntegrationConnection",
+      tags: ["Integrations"],
+      summary: "Share one of the caller's connections into a space",
+      description: connectionShareEndpoints.put.description,
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        connectionIdParam,
+        connectionShareSpaceIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "Shared into the space (or already shared there)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionShareEndpoints.put.refusals400,
+        },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller is not the owner of the connection; a credential bound to another space than the target; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id visible from this space: unknown, another integration's, or not reaching this space.",
+        },
+        "409": connectionSharePutConflicts,
+      },
+    },
+    delete: {
+      operationId: "unshareIntegrationConnection",
+      tags: ["Integrations"],
+      summary: "Withdraw one of the caller's connections from a space",
+      description: connectionShareEndpoints.delete.description,
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+        connectionIdParam,
+        connectionShareSpaceIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "Withdrawn from the space (or not shared there)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionShareEndpoints.delete.refusals400,
+        },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The caller is neither the owner nor a principal holding `integrations:configure` in the space the request is made from; a governor naming another space than the request's; or a credential bound to another space than the target.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id visible from this space: unknown, another integration's, or not reaching this space.",
+        },
+        "409": connectionShareDeleteConflicts,
       },
     },
   },

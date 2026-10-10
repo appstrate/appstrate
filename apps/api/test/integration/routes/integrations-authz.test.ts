@@ -46,10 +46,12 @@ import { and, eq } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections,
+  integrationConnectionShares,
   integrationPins,
   packageShares,
   spacePackages,
 } from "@appstrate/db/schema";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -496,10 +498,10 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         userId: opts.userId,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedSpaceIds: opts.shared ? [opts.spaceId ?? ctx.defaultSpaceId] : [],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    if (opts.shared) await seedShares(row!.id, [opts.spaceId ?? ctx.defaultSpaceId]);
     return row!.id;
   }
 
@@ -544,11 +546,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     await addOrgMember(ctx.orgId, member.id, "member");
     const connId = await seedConn({ userId: member.id });
 
-    const res = await app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
-      method: "PATCH",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ shared_space_ids: [ctx.defaultSpaceId] }),
-    });
+    const res = await shareRequest(connId, true, authHeaders(ctx));
     // Admin is allowed to edit metadata in general, but sharing is consent —
     // only the owner may give it.
     expect(res.status).toBe(403);
@@ -560,31 +558,29 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
   });
 
   /** Share `connId` into (or withdraw it from) the default space, as the session behind `headers`. */
-  function patchShared(connId: string, shared: boolean, headers: Record<string, string>) {
-    return app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
-      method: "PATCH",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ shared_space_ids: shared ? [ctx.defaultSpaceId] : [] }),
-    });
+  function shareRequest(connId: string, shared: boolean, headers: Record<string, string>) {
+    return app.request(
+      `/api/integrations/@myorg/gmail/connections/${connId}/shares/${ctx.defaultSpaceId}`,
+      { method: shared ? "PUT" : "DELETE", headers },
+    );
   }
 
-  async function isShared(connId: string): Promise<boolean | undefined> {
-    const [row] = await db
-      .select({ shared: integrationConnections.sharedSpaceIds })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    return row?.shared.includes(ctx.defaultSpaceId);
+  async function isShared(connId: string): Promise<boolean> {
+    const rows = await db
+      .select({ spaceId: integrationConnectionShares.spaceId })
+      .from(integrationConnectionShares)
+      .where(eq(integrationConnectionShares.connectionId, connId));
+    return rows.some((row) => row.spaceId === ctx.defaultSpaceId);
   }
 
-  it("lets an integrations:configure holder unshare a colleague's connection (200)", async () => {
+  it("lets an integrations:configure holder unshare a colleague's connection (204)", async () => {
     const member = await createTestUser({ email: "sharer@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
     const connId = await seedConn({ userId: member.id, shared: true });
 
-    const res = await patchShared(connId, false, authHeaders(ctx));
+    const res = await shareRequest(connId, false, authHeaders(ctx));
 
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(((await res.json()) as { shared_space_ids: string[] }).shared_space_ids).toEqual([]);
+    expect(res.status, await res.clone().text()).toBe(204);
     expect(await isShared(connId)).toBe(false);
   });
 
@@ -594,7 +590,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const member = await createTestUser({ email: "operator@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
 
-    const res = await patchShared(connId, false, memberHeaders(member.cookie, ctx));
+    const res = await shareRequest(connId, false, memberHeaders(member.cookie, ctx));
 
     expect(res.status).toBe(403);
     expect(await isShared(connId)).toBe(true);
@@ -613,7 +609,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       connectionIds: [connId],
     });
 
-    const res = await patchShared(connId, false, authHeaders(ctx));
+    const res = await shareRequest(connId, false, authHeaders(ctx));
 
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code?: string }).code).toBe("connection_pinned");
@@ -676,11 +672,17 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       scopes: ["integrations:connect"],
     });
 
-    const res = await patchShared(row!.id, true, {
-      Authorization: `Bearer ${key.rawKey}`,
-      "X-Space-Id": ctx.defaultSpaceId,
-      "Appstrate-User": endUser.id,
-    });
+    const res = await app.request(
+      `/api/integrations/@myorg/gmail/connections/${row!.id}/shares/${ctx.defaultSpaceId}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${key.rawKey}`,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "Appstrate-User": endUser.id,
+        },
+      },
+    );
 
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code?: string }).code).toBe(
@@ -716,10 +718,10 @@ describe("integrations:configure is never grantable to an API key", () => {
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedSpaceIds: [ctx.defaultSpaceId],
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, [ctx.defaultSpaceId]);
     return row!.id;
   }
 

@@ -24,6 +24,7 @@ import type { JobQueue } from "../infra/queue/index.ts";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { emptyAndDeletePersonalSpace, listSweepablePersonalSpaces } from "./spaces.ts";
+import { recordSharesRemoved } from "./connection-shares.ts";
 
 interface SweepResult {
   sweptSpaces: number;
@@ -49,7 +50,8 @@ export async function sweepOrphanedPersonalSpaces(now = new Date()): Promise<Swe
   let failedSpaces = 0;
   for (const space of due) {
     try {
-      const counts = await emptyAndDeletePersonalSpace(space.orgId, space.id);
+      const { counts, removedShares } = await emptyAndDeletePersonalSpace(space.orgId, space.id);
+      await recordSharesRemoved(null, space.orgId, removedShares, "space_deleted");
       sweptSpaces++;
       logger.info("Swept an orphaned personal space", {
         spaceId: space.id,

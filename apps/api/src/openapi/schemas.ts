@@ -36,7 +36,9 @@ import {
   connectionIdSetJsonSchema,
   connectionScopeSchema,
   originSpaceIdSchema,
+  sharedHereSchema,
   sharedSpaceIdsSchema,
+  spaceIdSchema,
 } from "./paths/integrations.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
@@ -2253,8 +2255,8 @@ export const schemas = {
             "owner_name",
             "scopes_granted",
             "scope",
-            "shared_space_ids",
-            "origin_space_id",
+            "spaceId",
+            "shared_here",
             "needs_reconnection",
             "missing_scopes",
             "is_own",
@@ -2273,6 +2275,8 @@ export const schemas = {
             owner_name: { type: ["string", "null"] },
             scopes_granted: { type: "array", items: { type: "string" } },
             scope: connectionScopeSchema,
+            spaceId: spaceIdSchema,
+            shared_here: sharedHereSchema,
             shared_space_ids: sharedSpaceIdsSchema,
             origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },

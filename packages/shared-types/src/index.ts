@@ -20,10 +20,14 @@ export {
 } from "./member-role-policy.ts";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
-import type { AgentIntegrationEntry, ConnectionScope } from "./integrations.ts";
+import type { AgentIntegrationEntry, ConnectionAction, ConnectionScope } from "./integrations.ts";
+export { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "./integrations.ts";
 export type {
   AccessibleIntegrationConnection,
   AgentIntegrationEntry,
+  ConnectionAction,
+  ConnectionReach,
+  ConnectionScope,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
@@ -465,6 +469,10 @@ export interface MeConnectionEntry {
   scope: ConnectionScope;
   /** Spaces whose members may use it. */
   shared_spaces: { id: string; name: string }[];
+  /** Actions the caller may take on this connection. */
+  allowed_actions: ConnectionAction[];
+  /** Spaces the caller may share this connection into. */
+  shareable_spaces: { id: string; name: string }[];
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
   /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */

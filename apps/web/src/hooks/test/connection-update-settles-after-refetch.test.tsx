@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A connection update (label or sharing) stays pending until the connection
- * list has been refetched. The share editor is disabled while `pending`; were
- * the mutation to settle first, it would re-enable on the stale
- * `shared_space_ids` and a second pick would send `[B]` instead of `[A, B]`.
+ * A connection write (rename or share into a space) stays pending until the
+ * connection list has been refetched. The share editor is disabled while
+ * `pending`; were the mutation to settle first, it would re-enable on the stale
+ * `shared_here` and a second pick would act on the wrong state.
  *
  * No DOM: a probe captures each hook during a static render, the list query is
  * kept active by a bare observer whose fetch is held open by hand.
@@ -19,8 +19,9 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api, client } = await import("../../api/client.ts");
 const { render } = await import("../../test/render.tsx");
-const { useUpdateIntegrationConnection } = await import("../use-integrations.ts");
-const { useUpdateMeIntegrationConnection } = await import("../use-me-connections.ts");
+const { useConnectionShare, useRenameIntegrationConnection } =
+  await import("../use-integrations.ts");
+const { useRenameMeConnection } = await import("../use-me-connections.ts");
 
 const header = { "X-Org-Id": undefined, "X-Space-Id": undefined };
 const ME_LIST_KEY = $api.queryOptions("get", "/api/me/connections", {}).queryKey;
@@ -61,6 +62,7 @@ beforeEach(() => {
   stubs = [
     spyOn(toast, "success").mockImplementation(() => 0),
     spyOn(client, "PATCH").mockResolvedValue({ data: { id: "conn_1" } }),
+    spyOn(client, "PUT").mockResolvedValue({ response: new Response(null, { status: 204 }) }),
   ];
 });
 afterEach(() => {
@@ -74,21 +76,39 @@ describe("connection update — settles after the list refetch", () => {
     run: (qc: QueryClient) => Promise<unknown>;
   }[] = [
     {
-      name: "user-scope (/api/me/connections)",
+      name: "user-scope rename (/api/me/connections)",
       key: ME_LIST_KEY,
       run: (qc: QueryClient) =>
-        capture(() => useUpdateMeIntegrationConnection(), qc).mutateAsync({
+        capture(() => useRenameMeConnection(), qc).mutateAsync({
           connectionId: "conn_1",
-          body: { shared_space_ids: ["spc_a"] },
+          body: { label: "Work" },
         }),
     },
     {
-      name: "space-scope (/api/integrations/{packageId}/connections)",
+      name: "user-scope share (/api/me/connections/{connectionId}/shares/{spaceId})",
+      key: ME_LIST_KEY,
+      run: (qc: QueryClient) =>
+        capture(() => useConnectionShare("share"), qc).mutateAsync({
+          connectionId: "conn_1",
+          spaceId: "spc_a",
+        }),
+    },
+    {
+      name: "space-scope rename (/api/integrations/{packageId}/connections)",
       key: SPACE_LIST_KEY,
       run: (qc: QueryClient) =>
-        capture(() => useUpdateIntegrationConnection(), qc).mutateAsync({
+        capture(() => useRenameIntegrationConnection(), qc).mutateAsync({
           params: { path: { packageId: "@acme/gmail", connectionId: "conn_1" } },
-          body: { shared_space_ids: ["spc_a"] },
+          body: { label: "Work" },
+        }),
+    },
+    {
+      name: "space-scope share (/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId})",
+      key: SPACE_LIST_KEY,
+      run: (qc: QueryClient) =>
+        capture(() => useConnectionShare("share", "@acme/gmail"), qc).mutateAsync({
+          connectionId: "conn_1",
+          spaceId: "spc_a",
         }),
     },
   ];

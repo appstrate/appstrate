@@ -39,6 +39,7 @@ import {
 import { twoAuthApiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { getSchedule, updateSchedule } from "../../../src/services/scheduler.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -412,10 +413,7 @@ describe("schedule writes for another actor — only what both reach", () => {
   }
 
   async function share(id: string): Promise<void> {
-    await db
-      .update(integrationConnections)
-      .set({ sharedSpaceIds: [ctx.defaultSpaceId] })
-      .where(eq(integrationConnections.id, id));
+    await seedShares(id, [ctx.defaultSpaceId]);
   }
 
   it("lists none of the actor's private connections as candidates", async () => {

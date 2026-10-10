@@ -50,18 +50,6 @@ export const integrationPins = pgTable(
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     /** The bound set; `{}` pins to no connection (no row = no pin). */
     connectionIds: uuid("connection_ids").array().notNull(),
-    /**
-     * Who set the pin — admin id for admin pins, same as `user_id` for member
-     * pins.
-     *
-     * WRITTEN, NEVER READ — written at four sites in
-     * `integration-pins-service.ts`, never SELECTed, filtered, or serialized
-     * into any DTO or OpenAPI response, and write-only since the column was
-     * introduced (no reader was ever removed). Kept rather than dropped because
-     * an admin pin's author is plausibly wanted in the UI — that is the open
-     * decision, and dropping would discard attribution already collected.
-     */
-    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

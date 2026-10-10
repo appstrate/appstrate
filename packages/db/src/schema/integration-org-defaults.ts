@@ -25,13 +25,13 @@
  * Resolver cascade: see `apps/api/src/services/integration-connection-resolver.ts`.
  *
  * Same invariants as admin pins: every referenced connection MUST be
- * shared with this space (`shared_space_ids`, validated in the org-defaults
+ * shared into this space (`integration_connection_shares`, validated in the org-defaults
  * service — an admin can't coerce a member's personal connection), and `connection_ids`
  * carries no FK, as `integration_pins.connection_ids` does not: Postgres has no
  * FK on array elements, so deleting a named connection is refused by the
  * service (`assertConnectionsUnpinned`) and the resolver fails loudly on an id
  * that no longer resolves. An end user's cascade delete removes none of them:
- * see the `integration_connections_end_user_not_shared` CHECK.
+ * an end user's connection is never shared (`assertConnectionShareable`).
  */
 
 import {
@@ -45,7 +45,6 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
 
@@ -64,15 +63,6 @@ export const integrationOrgDefaults = pgTable(
     connectionIds: uuid("connection_ids").array().notNull(),
     /** true = org-wide force (locks members); false = soft default (members can deviate). */
     enforce: boolean("enforce").notNull().default(false),
-    /**
-     * Admin who set the default.
-     *
-     * WRITTEN, NEVER READ — same shape as `integration_pins.created_by`:
-     * written by `integration-org-defaults-service.ts`, never read back into
-     * any response. Kept for the same reason (attribution an admin UI would
-     * plausibly want) rather than dropped.
-     */
-    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

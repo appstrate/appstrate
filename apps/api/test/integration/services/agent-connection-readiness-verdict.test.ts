@@ -19,6 +19,7 @@ import { activatePackage, deactivatePackage } from "../../../src/services/space-
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
@@ -96,10 +97,10 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
         needsReconnection: over.dead ?? false,
-        sharedSpaceIds: [ctx.defaultSpaceId],
         label: `conn-${seq}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, [ctx.defaultSpaceId]);
     return row!.id;
   }
 
@@ -126,10 +127,9 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      actor: { type: "user", id: ctx.user.id },
+      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
-      wholeReach: true,
       version: "draft",
     });
     return readiness.integrations.find((i) => i.integration_package_id === integrationId)!;

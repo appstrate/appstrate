@@ -89,6 +89,8 @@ export type AppEnv = {
     principalKind: import("@appstrate/core/module").PrincipalKind;
     apiKeyId: string | null;
     spaceId: string; // from API key auth or resolved by space-context middleware (X-Space-Id)
+    /** The space the credential itself pins (API key, strategy); `X-Space-Id` never sets it. */
+    credentialSpaceId?: string;
     /**
      * Resolved space row (id/orgId/isDefault) set by
      * `requireSpaceContext()` alongside `spaceId`. Services called from

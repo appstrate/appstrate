@@ -44,6 +44,7 @@ import {
   spacePackages,
   integrationConnections,
   integrationOrgDefaults,
+  integrationConnectionShares,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { auditForeignConnectionUse } from "../../../src/services/credential-proxy/connection-audit.ts";
@@ -59,6 +60,7 @@ import {
   seedProxyIntegration,
   seedProxyConnection,
 } from "../../helpers/credential-proxy-fixtures.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -825,9 +827,9 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
           outputs: { api_key: `tok-${accountId}` },
         }),
         scopesGranted: [],
-        sharedSpaceIds: shared ? [ctx.defaultSpaceId] : [],
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, shared ? [ctx.defaultSpaceId] : []);
     return row!.id;
   }
 
@@ -1073,9 +1075,8 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set, els
     expect((await call({ "X-Run-Id": runId })).status).toBe(200);
 
     await db
-      .update(integrationConnections)
-      .set({ sharedSpaceIds: [] })
-      .where(eq(integrationConnections.id, shared));
+      .delete(integrationConnectionShares)
+      .where(eq(integrationConnectionShares.connectionId, shared));
 
     expect((await call({ "X-Run-Id": runId })).status).toBe(404);
     expect(upstreamAuth).toEqual(["Bearer tok-shared"]);

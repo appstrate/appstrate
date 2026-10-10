@@ -137,7 +137,7 @@ export class OrchestratedStrategy implements IntegrationConnectStrategy {
       expiresAt: bundle.expiresAt ? new Date(bundle.expiresAt) : null,
       needsReconnection: false,
       variables,
-      ...(ctx.connectionId ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
+      ...(ctx.target ? {} : { packageId: ctx.integrationId, authKey: ctx.authKey }),
     });
     // insert / update-owned always return a summary (or throw).
     return summary!;

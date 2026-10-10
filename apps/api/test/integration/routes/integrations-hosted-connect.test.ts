@@ -599,7 +599,7 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
   /**
    * Mint a capability token straight from claims. The mint route validates
    * `connection_id` against the caller's rows, and this case needs claims it
-   * would refuse: a malformed id makes `getCurrentScopesGranted`'s row read
+   * would refuse: a malformed id makes `readReconnectTarget`'s row read
    * throw at the database the way a real fault there would. That read runs
    * after the jti is burned and before anything is sent upstream — the window
    * this test pins.
@@ -633,6 +633,22 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
     const again = await startConnect(token);
     expect(again.status).toBe(500);
     expect(await again.text()).not.toContain("already been used");
+  });
+
+  it("refuses with 404 a link whose connection is gone, sending nothing upstream", async () => {
+    const { connectUrl } = buildConnectUrl(
+      connectClaimsFor({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        packageId: "@myorg/gsuite",
+        authKey: "google",
+        connectionId: crypto.randomUUID(),
+      }),
+    );
+    const res = await startConnect(new URL(connectUrl).searchParams.get("token")!);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain("no longer exists");
   });
 });
 

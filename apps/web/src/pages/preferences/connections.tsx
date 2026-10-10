@@ -11,8 +11,9 @@ import {
   useMyConnections,
   useConnectionDeleteImpact,
   useDisconnectIntegrationConnection,
-  useUpdateMeIntegrationConnection,
+  useRenameMeConnection,
 } from "../../hooks/use-me-connections";
+import { useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
 import { LoadingState, EmptyState } from "../../components/page-states";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -121,22 +122,33 @@ function LabelEditor({
 function ConnectionRow({
   conn,
   onDisconnect,
-  onUpdateLabel,
-  onChangeShares,
+  onRename,
+  onShare,
+  onUnshare,
   disconnecting,
-  updating,
+  renaming,
+  sharing,
 }: {
   conn: MeConnectionEntry;
   onDisconnect: () => void;
-  onUpdateLabel?: (label: string, onSuccess: () => void) => void;
-  onChangeShares: (sharedSpaceIds: string[]) => void;
+  onRename: (label: string, onSuccess: () => void) => void;
+  onShare: (spaceId: string) => void;
+  onUnshare: (spaceId: string) => void;
   disconnecting: boolean;
-  updating: boolean;
+  renaming: boolean;
+  sharing: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   // A pin or default names it: delete answers 409 until removed there.
   const lockKey = connectionLockHintKey(conn.locked_by);
   const lockHint = lockKey ? t(lockKey) : null;
+  const canRename = conn.allowed_actions.includes("rename");
+  const canShare = conn.allowed_actions.includes("share");
+  // Shareable spaces and the ones it is already shared into, one entry each.
+  const shareTargets = [
+    ...conn.shareable_spaces,
+    ...conn.shared_spaces.filter((s) => !conn.shareable_spaces.some((c) => c.id === s.id)),
+  ];
 
   const rows: { label: string; value: React.ReactNode }[] = [];
 
@@ -202,8 +214,8 @@ function ConnectionRow({
       <div className="flex flex-1 flex-col gap-2">
         {/* Header: label (editable for integration) + status */}
         <div className="flex flex-wrap items-center gap-2">
-          {onUpdateLabel ? (
-            <LabelEditor current={conn.label} saving={updating} onSave={onUpdateLabel} />
+          {canRename ? (
+            <LabelEditor current={conn.label} saving={renaming} onSave={onRename} />
           ) : (
             <span className="text-foreground text-sm font-medium">{conn.label}</span>
           )}
@@ -224,16 +236,18 @@ function ConnectionRow({
         <div className="flex flex-wrap items-center gap-2">
           <ConnectionShareEditor
             connectionId={conn.connection_id}
-            orgId={conn.org.id}
             scope={conn.scope}
-            sharedSpaceIds={conn.shared_spaces.map((s) => s.id)}
-            ownSpaceId={conn.space?.id ?? null}
+            rowSpaceId={conn.space?.id ?? null}
             hereSpaceId={null}
-            canEditShares
+            targets={shareTargets}
+            sharedSpaceIds={conn.shared_spaces.map((s) => s.id)}
+            sharedHere={false}
+            canShare={canShare}
             canUnshareHere={false}
             lockHint={null}
-            pending={updating}
-            onChange={onChangeShares}
+            pending={sharing}
+            onShare={onShare}
+            onUnshare={onUnshare}
           />
           {lockHint && <span className="text-muted-foreground text-[0.65rem]">{lockHint}</span>}
         </div>
@@ -324,7 +338,9 @@ export function PreferencesConnectionsPage() {
   const canBrowseIntegrations = useCanReach()("/integrations");
 
   const disconnectIntegration = useDisconnectIntegrationConnection();
-  const updateIntegration = useUpdateMeIntegrationConnection();
+  const renameIntegration = useRenameMeConnection();
+  const shareIntegration = useConnectionShare("share");
+  const unshareIntegration = useConnectionShare("unshare");
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [confirmState, setConfirmState] = useState<{
@@ -405,7 +421,8 @@ export function PreferencesConnectionsPage() {
                   <ConnectionRow
                     conn={conn}
                     disconnecting={disconnectIntegration.isPending}
-                    updating={updateIntegration.isPending}
+                    renaming={renameIntegration.isPending}
+                    sharing={shareIntegration.isPending || unshareIntegration.isPending}
                     onDisconnect={() =>
                       setConfirmState({
                         kind: "integration",
@@ -414,17 +431,17 @@ export function PreferencesConnectionsPage() {
                         connectionId: conn.connection_id,
                       })
                     }
-                    onUpdateLabel={(label, onSuccess) =>
-                      updateIntegration.mutate(
+                    onRename={(label, onSuccess) =>
+                      renameIntegration.mutate(
                         { connectionId: conn.connection_id, body: { label } },
                         { onSuccess },
                       )
                     }
-                    onChangeShares={(sharedSpaceIds) =>
-                      updateIntegration.mutate({
-                        connectionId: conn.connection_id,
-                        body: { shared_space_ids: sharedSpaceIds },
-                      })
+                    onShare={(spaceId) =>
+                      shareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
+                    }
+                    onUnshare={(spaceId) =>
+                      unshareIntegration.mutate({ connectionId: conn.connection_id, spaceId })
                     }
                   />
                 )}

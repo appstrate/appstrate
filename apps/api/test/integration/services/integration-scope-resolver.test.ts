@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `getCurrentScopesGranted` reads the `scopesGranted` of the single connection
- * being reconnected (keyed by `connectionId`, actor-filtered) so the kickoff
- * keeps re-consent a superset of that account's grant.
+ * `readReconnectTarget` reads the row being reconnected (keyed by `connectionId`, actor-filtered)
+ * so the kickoff keeps re-consent a superset of that account's `scopesGranted`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -11,7 +10,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import { getCurrentScopesGranted } from "../../../src/services/integration-scope-resolver.ts";
+import { readReconnectTarget } from "../../../src/services/integration-scope-resolver.ts";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -60,16 +59,16 @@ describe("integration-scope-resolver", () => {
     });
   });
 
-  describe("getCurrentScopesGranted", () => {
-    it("returns empty when the connection id doesn't exist", async () => {
-      const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+  describe("readReconnectTarget", () => {
+    it("returns null when the connection id doesn't exist", async () => {
+      const reconnect = await readReconnectTarget({
+        connectionId: "00000000-0000-0000-0000-000000000000",
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
-        connectionId: "00000000-0000-0000-0000-000000000000",
       });
-      expect(granted).toEqual([]);
+      expect(reconnect).toBeNull();
     });
 
     it("returns the scopesGranted of the targeted connection only (not other accounts)", async () => {
@@ -100,14 +99,14 @@ describe("integration-scope-resolver", () => {
         credentialsEncrypted: "x",
         scopesGranted: ["read", "send"],
       });
-      const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      const reconnect = await readReconnectTarget({
+        connectionId: target!.id,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
-        connectionId: target!.id,
       });
-      expect(granted).toEqual(["read"]);
+      expect(reconnect?.scopesGranted ?? []).toEqual(["read"]);
     });
 
     it("doesn't return another actor's connection scopes (ownership filter)", async () => {
@@ -126,14 +125,14 @@ describe("integration-scope-resolver", () => {
           scopesGranted: ["admin"],
         })
         .returning({ id: integrationConnections.id });
-      const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      const reconnect = await readReconnectTarget({
+        connectionId: foreign!.id,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
-        connectionId: foreign!.id,
       });
-      expect(granted).toEqual([]);
+      expect(reconnect?.scopesGranted ?? []).toEqual([]);
     });
   });
 });
