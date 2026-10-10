@@ -2073,12 +2073,15 @@ describe("session directory", () => {
 // each invocation and, like a master, leaves a file at the ControlPath.
 describe("server shutdown", () => {
   // A command ending in a `block` line reports pid 4242 and runs on until killed; one ending in
-  // `hang` records its own pid and runs on without reporting any.
+  // `hang` records its own pid and runs on without reporting any. With FAKE_SSH_STOP_HANG, the stop
+  // of pid 4242 records its own pid and runs on.
   const FAKE_SSH = `#!/bin/sh
 printf '%s\\n' "$@" ::end:: >> "$FAKE_SSH_LOG"
 for a in "$@"; do case "$a" in ControlPath=*) cp="\${a#ControlPath=}" ;; -O) ctl=1 ;; esac; last="$a"; done
 [ -n "$cp" ] && [ -z "$ctl" ] && : > "$cp"
-case "$last" in *"
+case "$last" in *"kill -TERM -4242"*)
+  [ -n "$FAKE_SSH_STOP_HANG" ] && { echo $$ > "$FAKE_SSH_LOG.stop.pid"; exec sleep 30; } ;;
+*"
 block")
   printf '%s4242\\n' "$(printf '%s\\n' "$last" | sed -n "1s/^sh -c 'echo \\(appstrate-ssh-pid-[0-9a-f]*=\\).*/\\1/p")"
   exec sleep 30 ;;
@@ -2197,6 +2200,30 @@ exit 0
     expect(await child.exited).toBe(143);
     for (let i = 0; i < 50 && alive(); i++) await Bun.sleep(20);
     expect(alive()).toBe(false);
+  });
+
+  // A stop already under way when the ceiling hits is left to finish: killing its client would
+  // leave the command running on the target.
+  it("leaves a remote stop running when the shutdown ceiling hits", async () => {
+    const { child, invocations } = await spawnServer({ FAKE_SSH_STOP_HANG: "1" });
+    const call = { name: "ssh_exec", arguments: { command: "block" } };
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: call })}\n`,
+    );
+    child.stdin.flush();
+    for (let i = 0; i < 250 && !invocations().some((r) => r.at(-1) === "block"); i++) {
+      await Bun.sleep(20);
+    }
+    child.kill("SIGTERM");
+    expect(await child.exited).toBe(143);
+    const pidFile = join(scratch, "ssh.log.stop.pid");
+    expect(existsSync(pidFile)).toBe(true);
+    const pid = Number(readFileSync(pidFile, "utf8").trim());
+    try {
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      process.kill(pid, "SIGKILL");
+    }
   });
 
   // The master binds `<ControlPath>.<16 characters>`, and the bind fails past

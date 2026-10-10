@@ -396,6 +396,8 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** On abort, the process is kept until its stdout holds `text`, at most `ms`. */
   abortAfterStdout?: { text: string; ms: number };
+  /** Left running by an early exit: a remote stop already under way finishes on its own. */
+  outlivesExit?: boolean;
 }
 
 /** Injectable so tests exercise the tool logic without an sshd. */
@@ -426,7 +428,7 @@ export const runProcess: Runner = (argv, opts) => {
     stdout: "pipe",
     stderr: "pipe",
   });
-  liveChildren.add(proc);
+  if (!opts.outlivesExit) liveChildren.add(proc);
   const budget = opts.outputBytes ?? EXEC_OUTPUT_BYTES;
   const out = new OutputCapture(budget);
   const err = new OutputCapture(budget);
@@ -968,6 +970,7 @@ async function stopRemote(
   }
   const res = await s.run(["ssh", ...buildSshArgs(s.cfg, s.paths, stopScript(pid))], {
     ceilingMs: STOP_CEILING_MS,
+    outlivesExit: true,
   });
   const outcome =
     { 0: "terminated", 3: "already_exited", 4: "still_running" }[res.code ?? -1] ?? "unknown";
