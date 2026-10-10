@@ -982,8 +982,6 @@ export interface OrgModelInfo extends ModelMetadata {
    * model aliases — see {@link apiShape}.
    */
   credentialId: string | null;
-  /** Label of {@link credentialId}; `null` when it is `null`. */
-  credential_label: string | null;
   /**
    * Who pays for a call to this model, as seen by the caller: `user` when their
    * own personal credential serves it, `org` when an organization or platform

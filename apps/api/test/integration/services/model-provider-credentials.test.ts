@@ -28,6 +28,7 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
+import { getTestApp } from "../../helpers/app.ts";
 import {
   createTestContext,
   createTestUser,
@@ -38,7 +39,7 @@ import { ApiError } from "../../../src/lib/errors.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import {
   assertCredentialEditable,
-  canSeeCredential,
+  mayProbeCredential,
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
@@ -68,6 +69,8 @@ const orgAdmin = (orgId: string) => ({
   writesOrg: true,
   deletesOrg: true,
 });
+
+getTestApp(); // boots the model and provider registries
 
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
 
@@ -840,7 +843,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
     await truncateAll();
   });
 
-  it("canSeeCredential: an org credential needs readsOrg, a personal one its owner alone", async () => {
+  it("mayProbeCredential: an org credential needs readsOrg, a personal one its owner alone", async () => {
     const ctx = await createTestContext({ orgSlug: "mpc-svc-visible" });
     const member = await memberContext(ctx, "member");
     const reader = await memberContext(ctx, "member");
@@ -872,16 +875,50 @@ describe("model-provider-credentials service — visibility and the personal-cre
       readsOrg: true,
     };
 
-    expect(await canSeeCredential(memberCaller, orgCredentialId)).toBe(false);
-    expect(await canSeeCredential(readerCaller, orgCredentialId)).toBe(true);
-    expect(await canSeeCredential(memberCaller, personalId)).toBe(true);
-    expect(await canSeeCredential(readerCaller, personalId)).toBe(false);
-    expect(await canSeeCredential(memberCaller, crypto.randomUUID())).toBe(false);
+    expect(await mayProbeCredential(memberCaller, orgCredentialId)).toBe(false);
+    expect(await mayProbeCredential(readerCaller, orgCredentialId)).toBe(true);
+    expect(await mayProbeCredential(memberCaller, personalId)).toBe(true);
+    expect(await mayProbeCredential(readerCaller, personalId)).toBe(false);
+    expect(await mayProbeCredential(memberCaller, crypto.randomUUID())).toBe(false);
 
     const otherOrg = await createTestContext({ orgSlug: "mpc-svc-visible-b" });
-    expect(await canSeeCredential({ ...readerCaller, orgId: otherOrg.orgId }, personalId)).toBe(
+    expect(await mayProbeCredential({ ...readerCaller, orgId: otherOrg.orgId }, personalId)).toBe(
       false,
     );
+  });
+
+  it("mayProbeCredential refuses the owner's personal credential with 403 while the org policy is off", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-probe-policy" });
+    const personalId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "My subscription",
+      providerId: "test-oauth",
+      accessToken: "at",
+      refreshToken: "rt",
+    });
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiKey: "sk-org",
+    });
+    const caller: ModelCredentialCaller = {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      readsOrg: true,
+      writesOrg: true,
+      deletesOrg: true,
+    };
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+
+    const error = await mayProbeCredential(caller, personalId).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
+    expect((error as ApiError).code).toBe("personal_model_credentials_disabled");
+    // The org credential stays probeable.
+    expect(await mayProbeCredential(caller, orgCredentialId)).toBe(true);
   });
 
   it("assertCredentialEditable: deleting takes delete, editing takes write, on org and member rows", async () => {

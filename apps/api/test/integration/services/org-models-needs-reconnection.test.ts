@@ -339,7 +339,7 @@ describe("org-models — a member's own credential never serves a bound model", 
     // The organization pays for a bound model: Alice's own key does not stand in for it.
     for (const payer of [alice.user.id, bob.user.id]) {
       const listed = (await listOrgModels(ctx.orgId, payer)).find((m) => m.id === model.id);
-      expect(listed).toMatchObject({ needs_reconnection: true, billed_to: null });
+      expect(listed).toMatchObject({ needs_reconnection: true, billed_to: "org" });
     }
     const refused = await assertExplicitModelExists(ctx.orgId, model.id).catch(
       (err: unknown) => err,

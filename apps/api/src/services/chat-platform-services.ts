@@ -27,39 +27,28 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { recordLlmUsageReliably } from "./llm-usage-retry.ts";
 import { resolvePricingStatus } from "./pricing-provenance.ts";
 import { cumulativeCostUsd } from "./token-cost.ts";
-import {
-  recordChatTurnAdmission,
-  recordSubscriptionTurn,
-  takeSubscriptionTurn,
-} from "./system-proxy-admission.ts";
-import {
-  credentialPin,
-  loadModel,
-  loadPinnedModel,
-  modelNeedsReconnection,
-  requireBoundModel,
-} from "./org-models.ts";
+import { loadModel, modelNeedsReconnection, requireBoundModel } from "./org-models.ts";
+import { isSystemModel } from "./model-registry.ts";
 import { getModelProvider } from "./model-providers/registry.ts";
 import { resolveOAuthTokenForSidecar } from "./model-providers/token-resolver.ts";
 import { isOrgDeletionReserved, orgDeletingError } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
-import { ApiError, conflict } from "../lib/errors.ts";
+import { ApiError } from "../lib/errors.ts";
 import { logger } from "../lib/logger.ts";
 import { db } from "@appstrate/db/client";
 
 /**
  * Resolve the chosen chat model preset to its real upstream binding for one
- * chat turn, for the session user `userId` (their personal subscription serves
- * it first). Only oauth-subscription (authMode `oauth2`) models take the Pi
- * chat-engine path; everything else returns `{ subscription: false }` so the
- * chat module binds the same engine to the llm-proxy instead. The subscription
- * a turn resolves is recorded under `turnId`: admission checks that one.
+ * chat turn, for the session user `userId` (their own subscription serves a model
+ * the organization leaves unbound). Only oauth-subscription (authMode `oauth2`)
+ * models take the Pi chat-engine path; everything else returns
+ * `{ subscription: false }` so the chat module binds the same engine to the
+ * llm-proxy instead.
  */
 export async function resolveChatModel(
   orgId: string,
   presetId: string,
   userId: string,
-  turnId: string,
 ): Promise<ChatModelResolution> {
   const resolved = await loadModel(orgId, presetId, userId);
   if (!resolved) {
@@ -122,7 +111,6 @@ export async function resolveChatModel(
     throw err;
   }
 
-  recordSubscriptionTurn({ orgId, userId, turnId }, presetId, credentialPin(resolved));
   return {
     subscription: true,
     model: {
@@ -249,8 +237,8 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  * Chat admission gate — the chat-surface entry into the `beforeUsage` hook.
  *
  * The chat module calls this before starting ANY turn — built-in, API-key, or
- * oauth-subscription. The gate resolves the credential the turn spends
- * SERVER-SIDE (the session user's payer, via `loadModel`) so the chat module stays
+ * oauth-subscription. The gate resolves system-provided vs. org-owned
+ * SERVER-SIDE (`isSystemModel` on the chosen preset) so the chat module stays
  * dumb — it has no model-registry access — but that resolution is REPORTED as
  * the `credentialSource` fact, not used to pre-filter:
  *
@@ -284,38 +272,18 @@ export async function checkUsageAllowed(args: {
   presetId: string;
   sessionId: string | null;
   subscription: boolean;
-  turnId: string;
   userId: string;
 }): Promise<UsageRejection | null> {
   // Returned, not thrown: this seam renders a rejection as the problem response.
   const err = (await isOrgDeletionReserved(db, args.orgId)) ? orgDeletingError() : null;
   if (err) return { code: err.code, message: err.message, status: err.status };
 
-  const turn = { orgId: args.orgId, userId: args.userId, turnId: args.turnId };
-  let resolved: Awaited<ReturnType<typeof loadModel>> | undefined;
-  if (args.subscription) {
-    // A subscription turn is admitted on the credential `resolveChatModel` handed
-    // the engine, checked again now: never a second, independent resolution. No
-    // record means no token was handed (a reconnect answer): nothing to spend.
-    const recorded = takeSubscriptionTurn(turn);
-    resolved = recorded
-      ? recorded.presetId === args.presetId
-        ? await loadPinnedModel(args.orgId, args.presetId, recorded.pin)
-        : null
-      : undefined;
-    if (resolved === null) {
-      const err = conflict(
-        "model_credential_changed",
-        "The model's access changed while this message was being sent. Send it again.",
-      );
-      return { code: err.code, message: err.message, status: err.status };
-    }
-  } else {
-    // A platform rule, not an admission decision: it holds with or without a module.
-    // A preset that resolves but serves no credential the session user can spend is
-    // refused here; one that does not resolve at all fails at model resolution.
-    resolved = await loadModel(args.orgId, args.presetId, args.userId);
-    if (resolved && resolved.credentialSource === null) {
+  // A platform rule, not an admission decision: it holds with or without a module.
+  // A model the organization leaves to each member, which the session user holds
+  // no credential for, is refused here (a subscription turn was refused upstream).
+  if (!args.subscription) {
+    const resolved = await loadModel(args.orgId, args.presetId, args.userId);
+    if (resolved?.credentialSource === null) {
       try {
         requireBoundModel(resolved, args.userId);
       } catch (err) {
@@ -327,16 +295,7 @@ export async function checkUsageAllowed(args: {
     }
   }
 
-  const credentialSource = args.subscription ? "org" : (resolved?.credentialSource ?? "org");
-  // The credential the turn is admitted on, which its proxy calls then spend. A
-  // subscription turn talks to its provider directly, never through the proxy.
-  const admit = () => {
-    if (resolved && !args.subscription) {
-      recordChatTurnAdmission(turn, args.presetId, credentialPin(resolved));
-    }
-    return null;
-  };
-  if (!hasHook("beforeUsage")) return admit();
+  if (!hasHook("beforeUsage")) return null;
   // Fail-closed on a caller that omits `subscription` — the flag became
   // REQUIRED in @appstrate/core 6.0.0, and only an out-of-tree module built
   // against an older core can reach here without it (in-tree callers are
@@ -358,10 +317,13 @@ export async function checkUsageAllowed(args: {
     orgId: args.orgId,
     context: "chat",
     sessionId: args.sessionId,
-    credentialSource,
+    // A chat turn resolves its model on the platform before admission, so the
+    // credential source is always determinable here (never `null`, unlike a
+    // remote-origin run).
+    credentialSource: args.subscription || !isSystemModel(args.presetId) ? "org" : "system",
     // A turn executes in the platform's own process — never on a
     // caller-supplied host. True of the in-process chat engine too.
     executionPlane: "platform",
   });
-  return rejection ?? admit();
+  return rejection ?? null;
 }

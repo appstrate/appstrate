@@ -21,8 +21,7 @@
  *   - run context  → one dispatch per proxy call (the call IS the unit).
  *   - chat context → zero dispatches; first-party chat already gated the turn
  *     at admission, and the signed loopback identity validated here proves
- *     this call is that same turn, served on the credential the turn was
- *     admitted on (`recordChatTurnAdmission`).
+ *     this call is that same turn.
  *   - run inference → zero dispatches, likewise: the preflight gate admitted
  *     the launch, and the run token proves this is that run's own inference.
  *   - no context   → a platform-supplied call is REFUSED (400
@@ -30,11 +29,10 @@
  *     (see the deliberate gap documented below).
  */
 
-import { createCache } from "@appstrate/core/cache";
-import type { BoundModel, PinnedModelCredential } from "./org-models.ts";
+import type { BoundModel } from "./org-models.ts";
 import { getRunningRunCountForOrg, refuseReservedForDeletion } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
-import { ApiError, conflict } from "../lib/errors.ts";
+import { ApiError } from "../lib/errors.ts";
 import { db } from "@appstrate/db/client";
 
 type SystemProxyUsageContext =
@@ -159,86 +157,4 @@ export async function enforceSystemProxyAdmission(args: {
     title: rejection.status === 402 ? "Payment Required" : "Usage Rejected",
     detail: rejection.message,
   });
-}
-
-/**
- * The credential each chat turn was admitted on, served to the turn's proxy calls
- * instead of a fresh chain resolution. Keyed by the turn id the chat signs into
- * its inference bearer, so concurrent turns never share an entry. The chat engine
- * reaches the proxy through this process's own loopback, so a process-local entry
- * sees every call of the turn; it outlives the turn (`ENGINE_LOOPBACK_TTL_MS`, module-chat).
- */
-const admittedChatTurns = createCache<{ presetId: string; pin: PinnedModelCredential }>({
-  name: "chat-turn-admission",
-  ttlMs: 30 * 60_000,
-  max: 10_000,
-});
-
-interface ChatTurn {
-  orgId: string;
-  userId: string;
-  turnId: string;
-}
-
-const chatTurnKey = (turn: ChatTurn) => `${turn.orgId}:${turn.userId}:${turn.turnId}`;
-
-/** Remember the credential a chat turn was admitted on, for its preset. */
-export function recordChatTurnAdmission(
-  turn: ChatTurn,
-  presetId: string,
-  pin: PinnedModelCredential,
-): void {
-  admittedChatTurns.set(chatTurnKey(turn), { presetId, pin });
-}
-
-/**
- * The credential a chat turn's proxy call must spend. A call no admission covers
- * (no turn id, an unknown turn, another preset) is refused: it would otherwise
- * resolve a credential, and a payer, nobody admitted.
- */
-export function admittedChatTurnPin(
-  turn: Omit<ChatTurn, "turnId"> & { turnId: string | null },
-  presetId: string,
-): PinnedModelCredential {
-  const admitted = turn.turnId
-    ? admittedChatTurns.peek(chatTurnKey({ ...turn, turnId: turn.turnId }))
-    : undefined;
-  if (!admitted || admitted.presetId !== presetId) {
-    // The chat classifies a proxied failure by its wording: no "credential" here.
-    throw conflict(
-      "model_credential_changed",
-      "This chat turn was not admitted on this model. Send the message again.",
-    );
-  }
-  return admitted.pin;
-}
-
-/**
- * The subscription each chat turn resolved for its engine (`resolveChatModel`),
- * taken once by the turn's admission. A subscription turn never reaches the proxy,
- * so this is its own map, never readable by {@link admittedChatTurnPin}.
- */
-const resolvedSubscriptionTurns = createCache<{ presetId: string; pin: PinnedModelCredential }>({
-  name: "chat-subscription-turn",
-  ttlMs: 5 * 60_000,
-  max: 10_000,
-});
-
-/** Remember the subscription credential a chat turn's engine was handed. */
-export function recordSubscriptionTurn(
-  turn: ChatTurn,
-  presetId: string,
-  pin: PinnedModelCredential,
-): void {
-  resolvedSubscriptionTurns.set(chatTurnKey(turn), { presetId, pin });
-}
-
-/** The subscription a chat turn resolved, once; `undefined` when none was recorded. */
-export function takeSubscriptionTurn(
-  turn: ChatTurn,
-): { presetId: string; pin: PinnedModelCredential } | undefined {
-  const key = chatTurnKey(turn);
-  const recorded = resolvedSubscriptionTurns.peek(key);
-  resolvedSubscriptionTurns.invalidate(key);
-  return recorded;
 }

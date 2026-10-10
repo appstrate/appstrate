@@ -130,10 +130,8 @@ const baseResponses = {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
       "metered usage is admitted. `model_credential_required` — the preset is an " +
-      "unbound model and the payer (the run's user, or the caller) has no usable " +
-      "personal credential for it. `model_credential_changed` — a first-party chat " +
-      "call no turn admission covers (the turn is served only on the credential " +
-      "admitted for it). RFC 9457 problem+json.",
+      "unbound model and the caller has no usable personal credential for it (a " +
+      "run: the credential it launched with is gone). RFC 9457 problem+json.",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },

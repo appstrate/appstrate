@@ -131,7 +131,6 @@
   "turn.error.manageBilling": "Gérer la facturation",
   "turn.error.manageModels": "Gérer les modèles",
   "turn.error.needsReconnection": "Votre abonnement pour le modèle sélectionné a expiré ou a été révoqué. Reconnectez-le dans vos préférences, puis réessayez.",
-  "turn.error.modelCredentialChanged": "L'accès à ce modèle a changé pendant l'envoi du message. Renvoyez-le.",
   "turn.error.orgDeleting": "Cette organisation est en cours de suppression.",
   "turn.error.requestId": "Identifiant de requête : {{id}}",
   "turn.retry": "Réessayer",

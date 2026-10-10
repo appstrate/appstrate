@@ -131,7 +131,6 @@
   "turn.error.manageBilling": "Manage billing",
   "turn.error.manageModels": "Manage models",
   "turn.error.needsReconnection": "Your subscription for the selected model expired or was revoked. Reconnect it in your preferences, then try again.",
-  "turn.error.modelCredentialChanged": "The model's access changed while this message was being sent. Send it again.",
   "turn.error.orgDeleting": "This organization is being deleted.",
   "turn.error.requestId": "Request ID: {{id}}",
   "turn.retry": "Retry",

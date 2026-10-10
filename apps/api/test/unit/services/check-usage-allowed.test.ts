@@ -35,13 +35,6 @@ import { db } from "@appstrate/db/client";
 import { organizations, orgModels } from "@appstrate/db/schema";
 import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
-import {
-  admittedChatTurnPin,
-  recordChatTurnAdmission,
-  recordSubscriptionTurn,
-} from "../../../src/services/system-proxy-admission.ts";
-import { deleteModelProviderCredential } from "../../../src/services/model-providers/credentials.ts";
-import { ApiError } from "../../../src/lib/errors.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext } from "../../helpers/auth.ts";
@@ -57,22 +50,11 @@ import type {
 
 const SYSTEM_PRESET = "sys-chat-model";
 
-/** The error `fn` throws, or `undefined` when it returns. */
-function thrownBy(fn: () => unknown): unknown {
-  try {
-    fn();
-  } catch (err) {
-    return err;
-  }
-  return undefined;
-}
-
 /** The test organization and its session user, created fresh for each test. */
 let ORG_ID = "";
 let USER_ID = "";
 /** An org-owned model bound to the org's own API key (not a system preset). */
 let orgPresetId = "";
-let orgKeyId = "";
 
 /** An unbound openai org model: each member's own key of the family serves it. */
 async function seedUnboundOpenAiPreset(): Promise<string> {
@@ -148,7 +130,6 @@ describe("checkUsageAllowed", () => {
       enabled: true,
     });
     orgPresetId = model.id;
-    orgKeyId = orgKey.id;
   });
 
   afterAll(async () => {
@@ -172,35 +153,29 @@ describe("checkUsageAllowed", () => {
     return unbound!.id;
   }
 
-  it("refuses a turn on a model no credential serves, before the hook is dispatched", async () => {
+  it("refuses a turn on a model no credential of the session user serves, with or without a hook", async () => {
+    const presetId = await seedUnboundModel();
+    const turn = {
+      orgId: ORG_ID,
+      presetId,
+      sessionId: "chs_unbound",
+      subscription: false,
+      userId: USER_ID,
+    };
+    // A platform rule, not an admission decision: OSS refuses it too.
+    expect(await checkUsageAllowed(turn)).toMatchObject({
+      code: "model_credential_required",
+      status: 409,
+    });
+
+    // With a hook, the turn is refused before the hook is dispatched.
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
-
-    const result = await checkUsageAllowed({
-      orgId: ORG_ID,
-      presetId: await seedUnboundModel(),
-      sessionId: "chs_unbound",
-      subscription: false,
-      turnId: "turn_test",
-      userId: USER_ID,
+    expect(await checkUsageAllowed(turn)).toMatchObject({
+      code: "model_credential_required",
+      status: 409,
     });
-
-    expect(result).toMatchObject({ code: "model_credential_required", status: 409 });
     expect(calls).toHaveLength(0);
-  });
-
-  it("refuses a turn on a model no credential serves when no module provides the hook", async () => {
-    // A platform rule, not an admission decision: OSS refuses it too.
-    const result = await checkUsageAllowed({
-      orgId: ORG_ID,
-      presetId: await seedUnboundModel(),
-      sessionId: "chs_unbound",
-      subscription: false,
-      turnId: "turn_test",
-      userId: USER_ID,
-    });
-
-    expect(result).toMatchObject({ code: "model_credential_required", status: 409 });
   });
 
   it("dispatches the hook for a preset that does not resolve, reporting credentialSource 'org'", async () => {
@@ -217,7 +192,6 @@ describe("checkUsageAllowed", () => {
       presetId: "00000000-0000-4000-a000-0000000000d9",
       sessionId: "chs_missing",
       subscription: false,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -252,7 +226,6 @@ describe("checkUsageAllowed", () => {
         presetId: SYSTEM_PRESET,
         sessionId: "chs_reserved",
         subscription: false,
-        turnId: "turn_test",
         userId: USER_ID,
       });
 
@@ -274,7 +247,6 @@ describe("checkUsageAllowed", () => {
           presetId: SYSTEM_PRESET,
           sessionId: "chs_reserved",
           subscription: false,
-          turnId: "turn_test",
           userId: USER_ID,
         }),
       ).toBeNull();
@@ -293,7 +265,6 @@ describe("checkUsageAllowed", () => {
       presetId: orgPresetId,
       sessionId: "chs_1",
       subscription: false,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -327,7 +298,6 @@ describe("checkUsageAllowed", () => {
       presetId: orgPresetId,
       sessionId: "chs_1",
       subscription: false,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -342,7 +312,6 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_1",
       subscription: false,
-      turnId: "turn_test",
       userId: USER_ID,
     });
     expect(result).toBeNull();
@@ -360,7 +329,6 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: "chs_42",
       subscription: false,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -386,7 +354,6 @@ describe("checkUsageAllowed", () => {
       presetId: SYSTEM_PRESET,
       sessionId: null,
       subscription: false,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -404,17 +371,12 @@ describe("checkUsageAllowed", () => {
     // the SYSTEM preset precisely because that is where the two disagree.
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
-    recordSubscriptionTurn({ orgId: ORG_ID, userId: USER_ID, turnId: "turn_test" }, SYSTEM_PRESET, {
-      credentialId: null,
-      source: "system",
-    });
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
       presetId: SYSTEM_PRESET,
       sessionId: "chs_sub",
       subscription: true,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
@@ -440,71 +402,17 @@ describe("checkUsageAllowed", () => {
       [gateModule({ code: "subscription_suspended", message: "Suspended", status: 402 }, calls)],
       fakeInitCtx(),
     );
-    recordSubscriptionTurn({ orgId: ORG_ID, userId: USER_ID, turnId: "turn_test" }, orgPresetId, {
-      credentialId: orgKeyId,
-      source: "org",
-    });
 
     const result = await checkUsageAllowed({
       orgId: ORG_ID,
       presetId: orgPresetId,
       sessionId: "chs_sub",
       subscription: true,
-      turnId: "turn_test",
       userId: USER_ID,
     });
 
     expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });
     expect(calls).toHaveLength(1);
-  });
-
-  it("admits a subscription turn no credential was handed for (a reconnect answer), pinning nothing", async () => {
-    const calls: BeforeUsageParams[] = [];
-    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
-
-    const result = await checkUsageAllowed({
-      orgId: ORG_ID,
-      presetId: orgPresetId,
-      sessionId: "chs_sub",
-      subscription: true,
-      turnId: "turn_unresolved",
-      userId: USER_ID,
-    });
-
-    expect(result).toBeNull();
-    expect(calls).toHaveLength(1);
-    expect(
-      thrownBy(() =>
-        admittedChatTurnPin(
-          { orgId: ORG_ID, userId: USER_ID, turnId: "turn_unresolved" },
-          orgPresetId,
-        ),
-      ),
-    ).toBeInstanceOf(ApiError);
-  });
-
-  it("refuses a subscription turn whose resolved credential stopped serving before admission", async () => {
-    // Resolved for the engine, then deleted: admission never re-resolves onto another credential.
-    recordSubscriptionTurn({ orgId: ORG_ID, userId: USER_ID, turnId: "turn_gone" }, orgPresetId, {
-      credentialId: orgKeyId,
-      source: "org",
-    });
-    await db.update(orgModels).set({ credentialId: null }).where(eq(orgModels.id, orgPresetId));
-    await deleteModelProviderCredential(
-      { orgId: ORG_ID, userId: null, readsOrg: true, writesOrg: true, deletesOrg: true },
-      orgKeyId,
-    );
-
-    const result = await checkUsageAllowed({
-      orgId: ORG_ID,
-      presetId: orgPresetId,
-      sessionId: "chs_sub",
-      subscription: true,
-      turnId: "turn_gone",
-      userId: USER_ID,
-    });
-
-    expect(result).toMatchObject({ code: "model_credential_changed", status: 409 });
   });
 
   it("rejects a caller that omits `subscription` (module built against core < 6.0.0)", async () => {
@@ -541,11 +449,9 @@ describe("checkUsageAllowed", () => {
     ).resolves.toBeNull();
   });
 
-  it("pins an admitted chat turn to the credential that admitted it, for its turn id, preset and user", async () => {
-    // An unbound org model: the member's own key of its family is the credential the
-    // turn is admitted on.
-    const OPENAI_PRESET = await seedUnboundOpenAiPreset();
-    const personal = await seedOrgModelProviderKey({
+  it("admits a turn on an unbound model the session user holds a personal key for, reporting credentialSource 'org'", async () => {
+    const presetId = await seedUnboundOpenAiPreset();
+    await seedOrgModelProviderKey({
       orgId: ORG_ID,
       createdBy: USER_ID,
       ownerUserId: USER_ID,
@@ -553,97 +459,26 @@ describe("checkUsageAllowed", () => {
       providerId: "openai",
       apiKey: "sk-mine",
     });
-    const admitted = { credentialId: personal.id, source: "org" as const };
-    const turnId = "turn_pin";
+    const calls: BeforeUsageParams[] = [];
+    await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
+
     expect(
       await checkUsageAllowed({
         orgId: ORG_ID,
-        presetId: OPENAI_PRESET,
-        sessionId: "chs_pin",
+        presetId,
+        sessionId: "chs_personal",
         subscription: false,
-        turnId,
         userId: USER_ID,
       }),
     ).toBeNull();
-
-    // The turn's calls are held to the personal key it was admitted on.
-    expect(admittedChatTurnPin({ orgId: ORG_ID, userId: USER_ID, turnId }, OPENAI_PRESET)).toEqual(
-      admitted,
-    );
-
-    // A turn with no session is admitted and pinned the same way.
-    const ephemeralTurnId = "turn_pin_ephemeral";
-    expect(
-      await checkUsageAllowed({
+    expect(calls).toEqual([
+      {
         orgId: ORG_ID,
-        presetId: OPENAI_PRESET,
-        sessionId: null,
-        subscription: false,
-        turnId: ephemeralTurnId,
-        userId: USER_ID,
-      }),
-    ).toBeNull();
-    expect(
-      admittedChatTurnPin(
-        { orgId: ORG_ID, userId: USER_ID, turnId: ephemeralTurnId },
-        OPENAI_PRESET,
-      ),
-    ).toEqual(admitted);
-
-    // No admission covers another turn, another preset or another user, nor a
-    // call that carries no turn id: each is refused, never re-routed.
-    const otherUserId = "00000000-0000-4000-a000-0000000000e1";
-    const refused: Array<[Parameters<typeof admittedChatTurnPin>[0], string]> = [
-      [{ orgId: ORG_ID, userId: USER_ID, turnId: "turn_unknown" }, OPENAI_PRESET],
-      [{ orgId: ORG_ID, userId: USER_ID, turnId }, SYSTEM_PRESET],
-      [{ orgId: ORG_ID, userId: otherUserId, turnId }, OPENAI_PRESET],
-      [{ orgId: ORG_ID, userId: USER_ID, turnId: null }, OPENAI_PRESET],
-    ];
-    for (const [turn, presetId] of refused) {
-      const refusal = thrownBy(() => admittedChatTurnPin(turn, presetId));
-      expect(refusal).toBeInstanceOf(ApiError);
-      expect((refusal as ApiError).status).toBe(409);
-      expect((refusal as ApiError).code).toBe("model_credential_changed");
-    }
-  });
-
-  it("keeps the pins of two concurrent turns of one user apart, each keyed by its turn id", async () => {
-    const OPENAI_PRESET = await seedUnboundOpenAiPreset();
-    const first = await seedOrgModelProviderKey({
-      orgId: ORG_ID,
-      createdBy: USER_ID,
-      ownerUserId: USER_ID,
-      label: "Mine",
-      providerId: "openai",
-      apiKey: "sk-mine",
-    });
-    const personal = await seedOrgModelProviderKey({
-      orgId: ORG_ID,
-      createdBy: USER_ID,
-      ownerUserId: USER_ID,
-      label: "Mine, later",
-      providerId: "openai",
-      apiKey: "sk-mine-later",
-    });
-    const turnA = { orgId: ORG_ID, userId: USER_ID, turnId: "turn_A" };
-    const turnB = { orgId: ORG_ID, userId: USER_ID, turnId: "turn_B" };
-
-    // Turn A is admitted on the member's first key; turn B, same user, session and
-    // preset, is admitted afterwards on a key they added later.
-    recordChatTurnAdmission(turnA, OPENAI_PRESET, { credentialId: first.id, source: "org" });
-    recordChatTurnAdmission(turnB, OPENAI_PRESET, {
-      credentialId: personal.id,
-      source: "org",
-    });
-
-    // Each turn still spends the credential it was admitted on.
-    expect(admittedChatTurnPin(turnA, OPENAI_PRESET)).toEqual({
-      credentialId: first.id,
-      source: "org",
-    });
-    expect(admittedChatTurnPin(turnB, OPENAI_PRESET)).toEqual({
-      credentialId: personal.id,
-      source: "org",
-    });
+        context: "chat",
+        sessionId: "chs_personal",
+        credentialSource: "org",
+        executionPlane: "platform",
+      },
+    ]);
   });
 });

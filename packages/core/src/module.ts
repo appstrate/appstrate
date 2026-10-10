@@ -1460,17 +1460,10 @@ export interface PlatformServices {
    * access — this is the seam that resolves the credential + token server-side,
    * so the real subscription token never enters the module's own resolution
    * (only the returned in-memory string, used to build the Pi `AuthStorage`).
-   * `userId` is the session user: their own personal subscription serves the
-   * turn, and an org-wide model they hold no credential for is unbound.
-   * `turnId` names the turn: the subscription it resolves is the one
-   * {@link checkUsageAllowed} admits, and nothing else.
+   * `userId` is the session user: their own subscription serves a model the
+   * organization leaves unbound.
    */
-  resolveChatModel(
-    orgId: string,
-    presetId: string,
-    userId: string,
-    turnId: string,
-  ): Promise<ChatModelResolution>;
+  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
   /**
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for
@@ -1558,12 +1551,6 @@ export interface PlatformServices {
     presetId: string;
     sessionId: string | null;
     subscription: boolean;
-    /**
-     * Identifies the turn: the turn's proxy calls are served on the credential
-     * admitted for it, so the caller carries it to them (the chat module signs it
-     * into its inference bearer).
-     */
-    turnId: string;
     /** The session user: the payer whose personal credentials the turn may spend. */
     userId: string;
   }): Promise<UsageRejection | null>;

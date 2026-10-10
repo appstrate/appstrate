@@ -276,8 +276,6 @@ describe("chat admission gate (handleChatStream)", () => {
         // Ephemeral turn (no session id in the body) → nothing to attribute.
         sessionId: null,
         subscription: true,
-        // The turn's id, signed into its inference bearer: a string, fresh per turn.
-        turnId: expect.any(String),
         userId: ctx.user.id,
       },
     ]);

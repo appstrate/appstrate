@@ -94,11 +94,6 @@ interface LoopbackClaims extends LoopbackIdentity {
    * header. Absent on the MCP bearer and on ephemeral (unpersisted) turns.
    */
   chatSessionId?: string | null;
-  /**
-   * The chat turn this inference bearer belongs to: the platform serves the
-   * turn's proxy calls on the credential it admitted for this id. Inference bearer only.
-   */
-  turnId?: string;
   /** The skills the turn's prompt injected, as served; MCP bearer only (→ `read_skill`). */
   injectedSkills?: InjectedSkills;
 }
@@ -113,7 +108,7 @@ function mint(
   permissions: readonly string[],
   firstPartyLoopback: boolean,
   ttlMs: number,
-  turn?: { chatSessionId?: string | null; turnId?: string },
+  chatSessionId?: string | null,
   viewAs?: unknown,
   injectedSkills?: InjectedSkills,
 ): string {
@@ -123,8 +118,7 @@ function mint(
       exp: Date.now() + ttlMs,
       permissions: [...permissions],
       firstPartyLoopback,
-      ...(turn?.chatSessionId ? { chatSessionId: turn.chatSessionId } : {}),
-      ...(turn?.turnId ? { turnId: turn.turnId } : {}),
+      ...(chatSessionId ? { chatSessionId } : {}),
       ...(viewAs !== undefined ? { viewAs } : {}),
       ...(injectedSkills && Object.keys(injectedSkills.skills).length > 0
         ? { injectedSkills }
@@ -152,12 +146,15 @@ function mint(
  */
 export function mintLoopbackToken(
   identity: LoopbackIdentity,
-  opts?: { ttlMs?: number; chatSessionId?: string | null; turnId?: string },
+  opts?: { ttlMs?: number; chatSessionId?: string | null },
 ): string {
-  return mint(identity, INFERENCE_PERMISSIONS, true, opts?.ttlMs ?? TOKEN_TTL_MS, {
-    chatSessionId: opts?.chatSessionId,
-    turnId: opts?.turnId,
-  });
+  return mint(
+    identity,
+    INFERENCE_PERMISSIONS,
+    true,
+    opts?.ttlMs ?? TOKEN_TTL_MS,
+    opts?.chatSessionId,
+  );
 }
 
 /**
@@ -185,15 +182,7 @@ export function mintMcpLoopbackToken(
   opts?: { ttlMs?: number },
 ): string {
   const { permissions, viewAs, injectedSkills, ...rest } = identity;
-  return mint(
-    rest,
-    permissions,
-    false,
-    opts?.ttlMs ?? TOKEN_TTL_MS,
-    undefined,
-    viewAs,
-    injectedSkills,
-  );
+  return mint(rest, permissions, false, opts?.ttlMs ?? TOKEN_TTL_MS, null, viewAs, injectedSkills);
 }
 
 export const chatLoopbackStrategy: AuthStrategy = {
@@ -243,19 +232,22 @@ export const chatLoopbackStrategy: AuthStrategy = {
       permissions,
       // Opaque strategy metadata (→ `c.get("authExtra")`, and `adoptViewAs` for
       // the preview). `chatSessionId` is stamped on the usage row by the
-      // llm-proxy, `turnId` picks the turn's admitted credential there; `viewAs`
-      // is re-published before any permission is resolved.
-      ...(() => {
-        const extra = {
-          ...(typeof claims.chatSessionId === "string"
-            ? { chatSessionId: claims.chatSessionId }
-            : {}),
-          ...(typeof claims.turnId === "string" ? { turnId: claims.turnId } : {}),
-          ...(claims.viewAs !== undefined ? { viewAs: claims.viewAs } : {}),
-          ...(injectedSkills !== undefined ? { [INJECTED_SKILLS_AUTH_EXTRA]: injectedSkills } : {}),
-        };
-        return Object.keys(extra).length > 0 ? { extra } : {};
-      })(),
+      // llm-proxy; `viewAs` is re-published before any permission is resolved.
+      ...(claims.chatSessionId !== undefined ||
+      claims.viewAs !== undefined ||
+      injectedSkills !== undefined
+        ? {
+            extra: {
+              ...(typeof claims.chatSessionId === "string"
+                ? { chatSessionId: claims.chatSessionId }
+                : {}),
+              ...(claims.viewAs !== undefined ? { viewAs: claims.viewAs } : {}),
+              ...(injectedSkills !== undefined
+                ? { [INJECTED_SKILLS_AUTH_EXTRA]: injectedSkills }
+                : {}),
+            },
+          }
+        : {}),
     };
   },
 };

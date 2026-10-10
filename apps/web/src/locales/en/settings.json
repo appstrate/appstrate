@@ -1258,7 +1258,7 @@
   "models.form.chooseIdentity": "Choose a credential",
   "credentials.col.owner": "Owner",
   "orgSettings.personalModelCredentialsTitle": "Allow personal model credentials",
-  "orgSettings.personalModelCredentialsDesc": "Members can add their own key or subscription. When off, models use only organization credentials.",
+  "orgSettings.personalModelCredentialsDesc": "Members can add their own key or subscription for the models set to \"Each member uses their own credential\". When off, those models can no longer be used; the others stay paid by the organization.",
   "orgSettings.personalModelCredentialsEnable": "Enable",
   "orgSettings.personalModelCredentialsDisable": "Disable",
   "orgSettings.personalModelCredentialsEnabled": "Personal model credentials allowed.",

@@ -1258,7 +1258,7 @@
   "models.form.chooseIdentity": "Choisir un identifiant",
   "credentials.col.owner": "Propriétaire",
   "orgSettings.personalModelCredentialsTitle": "Autoriser les identifiants de modèle personnels",
-  "orgSettings.personalModelCredentialsDesc": "Les membres peuvent ajouter leur propre clé ou abonnement. Désactivé, les modèles n'utilisent que les identifiants de l'organisation.",
+  "orgSettings.personalModelCredentialsDesc": "Les membres peuvent ajouter leur propre clé ou abonnement pour les modèles où « Chaque membre utilise son propre identifiant ». Désactivé, ces modèles deviennent inutilisables ; les autres restent payés par l'organisation.",
   "orgSettings.personalModelCredentialsEnable": "Activer",
   "orgSettings.personalModelCredentialsDisable": "Désactiver",
   "orgSettings.personalModelCredentialsEnabled": "Identifiants de modèle personnels autorisés.",

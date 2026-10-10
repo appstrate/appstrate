@@ -21,7 +21,6 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { connectHelperCommand } from "../lib/connect-helper.ts";
 import {
-  assertCredentialEditable,
   assertPersonalModelCredentialsAllowed,
   getOrgModelProviderCredential,
   requestModelCredentialCaller,
@@ -229,13 +228,11 @@ export function createModelProvidersOAuthRouter() {
 
       if (input.credentialId) {
         // Reconnect targets the caller's own subscription only; anything else reads as absent.
-        await assertCredentialEditable(caller, input.credentialId, "edit");
         const credential = await getOrgModelProviderCredential(caller, input.credentialId);
-        if (credential && credential.owner_id !== user.id) {
+        if (!credential || credential.owner_id !== user.id) {
           throw notFound("Model provider credential not found");
         }
         if (
-          !credential ||
           credential.source !== "custom" ||
           credential.authMode !== "oauth2" ||
           credential.providerId !== input.providerId

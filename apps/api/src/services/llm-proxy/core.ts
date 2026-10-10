@@ -18,14 +18,7 @@
  * caching blocks, extended-thinking, tool use — all pass untouched.
  */
 
-import { admittedChatTurnPin } from "../system-proxy-admission.ts";
-import {
-  loadModel,
-  loadPinnedModel,
-  requireBoundModel,
-  type BoundModel,
-  type PinnedModelCredential,
-} from "../org-models.ts";
+import { loadModel, loadRunModel, requireBoundModel, type BoundModel } from "../org-models.ts";
 import { logger } from "../../lib/logger.ts";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import {
@@ -57,18 +50,10 @@ import type { ModelSwap } from "@appstrate/core/sidecar-types";
 interface ProxyCallInputs {
   adapter: LlmProxyAdapter;
   principal: LlmProxyPrincipal;
-  /**
-   * The public route's payer (`requestPayerUserId(c)`): whose personal credentials
-   * may serve the call, a subscription excluded. Unused when `pinned` is set.
-   */
+  /** The public route's payer (`requestPayerUserId(c)`), for a member-paid model. */
   payerUserId: string | null;
-  /**
-   * A run's own inference: its preset is served by the credential frozen at launch
-   * (`runs.model_credential_id`, `runs.model_source`), never by a chain.
-   */
-  pinned?: PinnedModelCredential;
-  /** A first-party chat turn: its preset is served by the credential the turn was admitted on. */
-  chatTurn?: { userId: string; turnId: string | null };
+  /** A run's own inference: the credential it launched with (`runs.model_credential_id`). */
+  runCredentialId?: string | null;
   /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
   runId: string | null;
   /**
@@ -423,13 +408,11 @@ async function resolvePresetForOrg(
 ): Promise<BoundModel> {
   const orgId = inputs.principal.orgId;
   let loaded: Awaited<ReturnType<typeof loadModel>>;
-  const pin =
-    inputs.pinned ??
-    (inputs.chatTurn ? admittedChatTurnPin({ orgId, ...inputs.chatTurn }, presetId) : undefined);
   try {
-    loaded = pin
-      ? await loadPinnedModel(orgId, presetId, pin)
-      : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
+    loaded =
+      inputs.runCredentialId !== undefined
+        ? await loadRunModel(orgId, presetId, inputs.runCredentialId)
+        : await loadModel(orgId, presetId, inputs.payerUserId, { viaProxy: true });
   } catch (err) {
     // An `ApiError` is `loadModel`'s own verdict (409 `model_provider_unregistered`)
     // and keeps its status; anything else reads as "not enabled", cause kept.
@@ -445,8 +428,6 @@ async function resolvePresetForOrg(
   if (loaded.apiShape !== expectedApi) {
     throw new LlmProxyModelApiMismatchError(presetId, expectedApi, loaded.apiShape, loaded.aliased);
   }
-  // An unbound model names no credential to spend: a 409 `model_credential_required`
-  // for the caller, not a fallback to some other credential.
   return requireBoundModel(loaded, inputs.payerUserId);
 }
 

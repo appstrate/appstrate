@@ -165,7 +165,6 @@ describe("the models table, for the credential each model names", () => {
     iconUrl: null,
     source: "custom",
     credentialId: "cred_org",
-    credential_label: "Clé équipe",
     billed_to: "org",
     created_by: null,
     createdAt: CREATED,
@@ -176,7 +175,6 @@ describe("the models table, for the credential each model names", () => {
   const unbound = model({
     id: "mdl_each",
     credentialId: null,
-    credential_label: null,
     billed_to: null,
   });
   const html = render(
@@ -190,6 +188,7 @@ describe("the models table, for the credential each model names", () => {
       onSetDefault={() => {}}
       canWrite={false}
       canDelete={false}
+      credentialLabels={new Map([["cred_org", "Clé équipe"]])}
     />,
     { queryClient: seededClient() },
   );

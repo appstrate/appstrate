@@ -94,8 +94,6 @@ export async function buildRunContext(params: {
   modelId?: string | null;
   /** The model resolved for `modelId` and the payer, admitted by the caller's gate. */
   modelCascade: ModelCascade;
-  /** The payer the cascade was resolved for; words an unbound model's refusal. */
-  payerUserId: string | null;
   /** Persisted agent defaults; undefined asks this service to load them. */
   generationConfig?: ModelGenerationSettings | null;
   /** Invocation layer; null/omitted fields inherit the agent defaults. */
@@ -221,9 +219,8 @@ export async function buildRunContext(params: {
   if (!modelCascade) {
     throw new ModelNotConfiguredError();
   }
-  // An unbound model (no usable credential for this payer) is refused here,
-  // before the keyless check below would read its empty key.
-  const modelResult = requireBoundModel(modelCascade.model, params.payerUserId);
+  // The pipeline refused an unbound model before admission; this narrows the type.
+  const modelResult = requireBoundModel(modelCascade.model, null);
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose

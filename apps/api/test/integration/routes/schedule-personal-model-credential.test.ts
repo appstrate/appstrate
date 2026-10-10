@@ -164,7 +164,7 @@ describe("schedule payer — organization credentials only", () => {
     const body = (await res.json()) as { code: string; detail: string };
     expect(res.status).toBe(409);
     expect(body.code).toBe("model_credential_required");
-    expect(body.detail).toContain("organization credentials only");
+    expect(body.detail).toContain("bound to an organization credential");
   });
 
   it("refuses to unbind a model a schedule overrides with", async () => {

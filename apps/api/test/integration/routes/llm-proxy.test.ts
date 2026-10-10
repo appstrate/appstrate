@@ -36,7 +36,7 @@ import { encryptCredentials } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import {
   seedApiKey,
@@ -56,9 +56,9 @@ import {
 } from "../../../src/services/llm-proxy/core.ts";
 import { openaiResponsesAdapter } from "../../../src/services/llm-proxy/openai-responses.ts";
 import type { LlmProxyPrincipal } from "../../../src/services/llm-proxy/types.ts";
-import { recordChatTurnAdmission } from "../../../src/services/system-proxy-admission.ts";
 import { clearResolvedModelCache } from "../../../src/services/resolved-model-cache.ts";
 import { loadModel } from "../../../src/services/org-models.ts";
+import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import {
   CACHE_STATUS_HIT as HIT,
   CACHE_STATUS_MISS as MISS,
@@ -1523,15 +1523,28 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     };
   }
 
+  /** Bind the unbound model to the org key (dropping the bound twin, which holds that binding). */
+  async function bindToOrgKey(h: {
+    presetId: string;
+    boundPresetId: string;
+    orgCredentialId: string;
+  }) {
+    await db.delete(orgModels).where(eq(orgModels.id, h.boundPresetId));
+    await db
+      .update(orgModels)
+      .set({ credentialId: h.orgCredentialId })
+      .where(eq(orgModels.id, h.presetId));
+  }
+
   /**
    * Proxy one non-streaming call as `principal`, paid as `payer` (the public
-   * route's `requestPayerUserId(c)`, or a run's pinned credential). Returns the
+   * route's `requestPayerUserId(c)`, or a run's launch credential). Returns the
    * key the upstream saw.
    */
   async function proxyAs(
     principal: LlmProxyPrincipal,
     presetId: string,
-    payer: Pick<Parameters<typeof proxyLlmCall>[0], "payerUserId" | "pinned" | "chatTurn">,
+    payer: Pick<Parameters<typeof proxyLlmCall>[0], "payerUserId" | "runCredentialId">,
     onUpstream: () => void = () => {},
   ): Promise<{ status: number; authorization: string | null }> {
     let authorization: string | null = null;
@@ -1616,154 +1629,93 @@ describe("POST /api/llm-proxy/* — personal model credentials", () => {
     expect(upstreamCalls).toBe(0);
   });
 
-  it("a run serves the credential frozen at launch: the pinned personal key on an unbound model, the org credential on a bound one", async () => {
+  it("a run serves the credential it launched with: the personal key on an unbound model, the org credential on a bound one", async () => {
     const h = await buildPersonalHarness();
     const run = { kind: "run", orgId: h.ctx.orgId } as const;
 
-    const pinnedPersonal = await proxyAs(run, h.presetId, {
+    const personal = await proxyAs(run, h.presetId, {
       payerUserId: null,
-      pinned: { credentialId: h.personalCredentialId, source: "org" },
+      runCredentialId: h.personalCredentialId,
     });
-    expect(pinnedPersonal.authorization).toBe("Bearer sk-personal");
+    expect(personal.authorization).toBe("Bearer sk-personal");
 
-    const pinnedOrg = await proxyAs(run, h.boundPresetId, {
+    const org = await proxyAs(run, h.boundPresetId, {
       payerUserId: null,
-      pinned: { credentialId: h.orgCredentialId, source: "org" },
+      runCredentialId: h.orgCredentialId,
     });
-    expect(pinnedOrg.authorization).toBe("Bearer sk-org");
+    expect(org.authorization).toBe("Bearer sk-org");
   });
 
-  it("a run keeps the credential frozen at launch after its payer adds a key", async () => {
+  it("a run keeps its launch credential after its payer adds a key and after an admin binds the model", async () => {
     const h = await buildPersonalHarness();
     const run = { kind: "run", orgId: h.ctx.orgId } as const;
-    const frozen = {
-      payerUserId: null,
-      pinned: { credentialId: h.personalCredentialId, source: "org" as const },
-    };
-    expect((await proxyAs(run, h.presetId, frozen)).authorization).toBe("Bearer sk-personal");
+    const launched = { payerUserId: null, runCredentialId: h.personalCredentialId };
+    expect((await proxyAs(run, h.presetId, launched)).authorization).toBe("Bearer sk-personal");
 
-    // The payer adds a key that ranks ahead of the pinned one (personal keys rank oldest first).
+    // The payer adds a key that ranks ahead of the launch one (personal keys rank oldest first).
     await addPersonalKey(h.ctx, "sk-added-later", new Date("2020-01-01T00:00:00Z"));
+    clearResolvedModelCache();
 
-    expect((await proxyAs(run, h.presetId, frozen)).authorization).toBe("Bearer sk-personal");
-    // The payer's own public call now sees the new key: the pin is what kept the run.
+    expect((await proxyAs(run, h.presetId, launched)).authorization).toBe("Bearer sk-personal");
+    // The payer's own public call now sees the new key: the run's launch credential is what kept it.
     const publicCall = await proxyAs(
       { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId },
       h.presetId,
       { payerUserId: h.ctx.user.id },
     );
     expect(publicCall.authorization).toBe("Bearer sk-added-later");
+
+    // An admin binds the model to the org key mid-run: the run still spends its launch key.
+    await bindToOrgKey(h);
+    clearResolvedModelCache();
+    expect((await proxyAs(run, h.presetId, launched)).authorization).toBe("Bearer sk-personal");
   });
 
-  it("a run whose pinned credential was deleted is refused, never re-routed", async () => {
+  it("a run whose personal credential was deleted is refused, never served by another member's key, and served by the org once the model is bound", async () => {
     const h = await buildPersonalHarness();
     const run = { kind: "run", orgId: h.ctx.orgId } as const;
-    // The run launched on the payer's personal key; the deletion nulls its pin (ON DELETE SET NULL).
-    await db
-      .delete(modelProviderCredentials)
-      .where(eq(modelProviderCredentials.id, h.personalCredentialId));
-
-    let upstreamCalls = 0;
-    await expect(
-      proxyAs(
-        run,
-        h.presetId,
-        { payerUserId: null, pinned: { credentialId: null, source: "org" } },
-        () => {
-          upstreamCalls++;
-        },
-      ),
-    ).rejects.toBeInstanceOf(LlmProxyUnsupportedModelError);
-    expect(upstreamCalls).toBe(0);
-    expect(await db.select().from(llmUsage)).toHaveLength(0);
-  });
-
-  it("a chat turn's calls are served on the credential it was admitted on", async () => {
-    const h = await buildPersonalHarness();
-    const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
-    const chatTurn = { userId: h.ctx.user.id, turnId: "turn_admitted" };
-    recordChatTurnAdmission(
-      { orgId: h.ctx.orgId, userId: h.ctx.user.id, turnId: "turn_admitted" },
-      h.presetId,
-      { credentialId: h.personalCredentialId, source: "org" },
-    );
-    // The payer adds another personal key after the turn was admitted. The chain
-    // ranks personal keys oldest first, so this one is backdated to rank ahead of
-    // the admitted key: a turn that re-resolved would be served by it.
-    await addPersonalKey(h.ctx, "sk-added-later", new Date("2020-01-01T00:00:00Z"));
-
-    // Control: outside any turn the payer's chain serves the key that ranks first.
-    expect(
-      (await proxyAs(principal, h.presetId, { payerUserId: h.ctx.user.id })).authorization,
-    ).toBe("Bearer sk-added-later");
-    // The admitted turn keeps the key it was admitted on.
-    const admittedCall = await proxyAs(principal, h.presetId, {
-      payerUserId: h.ctx.user.id,
-      chatTurn,
+    const bob = await memberContext(h.ctx, "member");
+    await db.insert(modelProviderCredentials).values({
+      orgId: h.ctx.orgId,
+      ownerUserId: bob.user.id,
+      label: "Bob's key",
+      providerId: "openai",
+      credentialsEncrypted: encryptCredentials({ kind: "api_key", apiKey: "sk-bob" }),
+      baseUrlOverride: UPSTREAM_BASE,
+      createdBy: bob.user.id,
     });
-    expect(admittedCall.status).toBe(200);
-    expect(admittedCall.authorization).toBe("Bearer sk-personal");
-  });
-
-  it("a chat turn whose admitted credential is deleted is refused, never served by another key", async () => {
-    const h = await buildPersonalHarness();
-    const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
-    recordChatTurnAdmission(
-      { orgId: h.ctx.orgId, userId: h.ctx.user.id, turnId: "turn_deleted" },
-      h.presetId,
-      { credentialId: h.personalCredentialId, source: "org" },
-    );
-    // The payer deletes the personal key the turn was admitted on; another of theirs
-    // still serves the model, so a turn that re-resolved would be served by it.
+    // The run launched on the payer's personal key; the deletion nulls `runs.model_credential_id`.
     await db
       .delete(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, h.personalCredentialId));
-    await addPersonalKey(h.ctx, "sk-other");
     clearResolvedModelCache();
 
     let upstreamCalls = 0;
     await expect(
-      proxyAs(
-        principal,
-        h.presetId,
-        {
-          payerUserId: h.ctx.user.id,
-          chatTurn: { userId: h.ctx.user.id, turnId: "turn_deleted" },
-        },
-        () => {
-          upstreamCalls++;
-        },
-      ),
-    ).rejects.toBeInstanceOf(LlmProxyUnsupportedModelError);
+      proxyAs(run, h.presetId, { payerUserId: null, runCredentialId: null }, () => {
+        upstreamCalls++;
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "model_credential_required" });
     expect(upstreamCalls).toBe(0);
     expect(await db.select().from(llmUsage)).toHaveLength(0);
+
+    await bindToOrgKey(h);
+    clearResolvedModelCache();
+    expect(
+      (await proxyAs(run, h.presetId, { payerUserId: null, runCredentialId: null })).authorization,
+    ).toBe("Bearer sk-org");
   });
 
-  it("a chat call no admission covers is refused", async () => {
+  it("a run on a personal credential is refused once the organization switches personal credentials off", async () => {
     const h = await buildPersonalHarness();
-    const principal = { kind: "jwt_user", userId: h.ctx.user.id, orgId: h.ctx.orgId } as const;
+    const run = { kind: "run", orgId: h.ctx.orgId } as const;
+    const launched = { payerUserId: null, runCredentialId: h.personalCredentialId };
+    expect((await proxyAs(run, h.presetId, launched)).authorization).toBe("Bearer sk-personal");
 
-    // A call whose bearer carries no turn id (`turnId: null`) is covered by no admission.
-    let upstreamCalls = 0;
-    await expect(
-      proxyAs(
-        principal,
-        h.presetId,
-        { payerUserId: h.ctx.user.id, chatTurn: { userId: h.ctx.user.id, turnId: null } },
-        () => {
-          upstreamCalls++;
-        },
-      ),
-    ).rejects.toMatchObject({ status: 409, code: "model_credential_changed" });
-    // So is a turn id nothing was admitted under.
-    await expect(
-      proxyAs(principal, h.presetId, {
-        payerUserId: h.ctx.user.id,
-        chatTurn: { userId: h.ctx.user.id, turnId: "turn_never_admitted" },
-      }),
-    ).rejects.toMatchObject({ status: 409, code: "model_credential_changed" });
-    expect(upstreamCalls).toBe(0);
-    expect(await db.select().from(llmUsage)).toHaveLength(0);
+    await updateOrgSettings(h.ctx.orgId, { personal_model_credentials: false });
+    await expect(proxyAs(run, h.presetId, launched)).rejects.toBeInstanceOf(
+      LlmProxyUnsupportedModelError,
+    );
   });
 
   it("refuses an unbound model when the payer's only personal credential is a subscription, which the proxy never serves", async () => {

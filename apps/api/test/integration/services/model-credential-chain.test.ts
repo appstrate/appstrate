@@ -4,21 +4,22 @@
  * Who pays for a model. A model bound to an organization credential is served by
  * it whoever calls, and a built-in model by the platform key. A member's own
  * credential serves only an unbound model (`credential_id` NULL); with none for
- * the caller it resolves unbound and cannot be spent. Pins the chain in `loadModel`, the LLM proxy's subscription-free chain, the run's pinned
- * credential in `loadPinnedModel`, the write-side invariants, and the `billed_to`
+ * the caller it resolves unbound and cannot be spent. Pins the chain in
+ * `loadModel`, the LLM proxy's subscription-free chain, a run's launch
+ * credential in `loadRunModel`, the write-side invariants, and the `billed_to`
  * listing.
  */
 
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { listPiModels } from "@appstrate/runner-pi/pi-model";
-import { modelProviderCredentials, organizations } from "@appstrate/db/schema";
+import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
 import type { OrgModelInfo } from "@appstrate/shared-types";
 import {
   createOrgModel,
   listOrgModels,
   loadModel,
-  loadPinnedModel,
+  loadRunModel,
   requireBoundModel,
   resolveModel,
   setDefaultModel,
@@ -321,7 +322,6 @@ describe("model resolution — a member's own credential serves an unbound model
       credentialId: null,
       providerId: "anthropic",
       needs_reconnection: false,
-      credential_label: null,
       billed_to: null,
     });
   });
@@ -374,7 +374,7 @@ describe("model resolution — a member's own credential serves an unbound model
     });
   });
 
-  it("a pinned personal credential keeps serving its run after the payer adds a subscription", async () => {
+  it("a run's personal credential keeps serving it after the payer adds a subscription", async () => {
     const model = { id: await unboundModel("openai", TEST_OAUTH_MODEL_ID) };
     const mine = await personalKey(ctx.user.id, "openai", "sk-alice");
     const subscription = await seedOrgModelProviderOAuth({
@@ -385,34 +385,47 @@ describe("model resolution — a member's own credential serves an unbound model
     });
     clearResolvedModelCache();
 
-    // The chain now prefers the subscription; the run launched before it keeps its pin.
+    // The chain now prefers the subscription; the run launched before it keeps its credential.
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialId: subscription.id,
     });
-    expect(
-      await loadPinnedModel(ctx.orgId, model.id, { credentialId: mine.id, source: "org" }),
-    ).toMatchObject({
+    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({
       credentialSource: "org",
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
   });
 
-  it("a pinned personal credential stops serving its run once the organization switches personal credentials off", async () => {
+  it("a run's personal credential keeps serving it after an admin binds the model to an org key", async () => {
     const model = { id: await unboundModel() };
     const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
-    const pin = { credentialId: mine.id, source: "org" as const };
+    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({ apiKey: "sk-alice" });
 
-    expect(await loadPinnedModel(ctx.orgId, model.id, pin)).toMatchObject({
+    const org = await orgAnthropicKey();
+    await db.update(orgModels).set({ credentialId: org.id }).where(eq(orgModels.id, model.id));
+    clearResolvedModelCache();
+
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({ apiKey: "sk-org" });
+    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({
+      credentialId: mine.id,
+      apiKey: "sk-alice",
+    });
+  });
+
+  it("a run's personal credential stops serving it once the organization switches personal credentials off", async () => {
+    const model = { id: await unboundModel() };
+    const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
+
+    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
     // The policy is switched through the service the routes use, which drops the resolved-model cache.
     await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
-    expect(await loadPinnedModel(ctx.orgId, model.id, pin)).toBeNull();
+    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toBeNull();
   });
 
-  it("a run whose pinned credential is gone is never served by another credential", async () => {
+  it("a run whose launch credential is gone resolves its model as it is now, never on another member's key", async () => {
     const org = await orgAnthropicKey();
     const model = { id: await unboundModel() };
     const alias = await seedOrgModel({
@@ -431,23 +444,31 @@ describe("model resolution — a member's own credential serves an unbound model
         models: [{ id: "sys-claude", modelId: ANTHROPIC_A }],
       },
     ]);
-    // The run launched on the member's personal key, which was then deleted: its pin is
-    // null. Another key of theirs still serves the unbound model.
+    // The run launched on a personal key that was then deleted (its id is now null).
+    // The launching member and another member still hold keys serving the unbound model.
     await personalAnthropicKey(ctx.user.id, "sk-alice");
-    clearResolvedModelCache();
+    await personalAnthropicKey(bob.user.id, "sk-bob");
 
-    expect(
-      await loadPinnedModel(ctx.orgId, model.id, { credentialId: null, source: "org" }),
-    ).toBeNull();
-    expect(
-      await loadPinnedModel(ctx.orgId, "sys-claude", { credentialId: null, source: "org" }),
-    ).toBeNull();
-    expect(
-      await loadPinnedModel(ctx.orgId, "sys-claude", { credentialId: null, source: "system" }),
-    ).toMatchObject({ credentialSource: "system" });
-    expect(
-      await loadPinnedModel(ctx.orgId, alias.id, { credentialId: null, source: "org" }),
-    ).toMatchObject({ aliased: true });
+    const unbound = await loadRunModel(ctx.orgId, model.id, null);
+    expect(unbound).toMatchObject({ credentialSource: null, apiKey: "" });
+    let thrown: unknown;
+    try {
+      requireBoundModel(unbound!, null);
+    } catch (err) {
+      thrown = err;
+    }
+    expect((thrown as ApiError).status).toBe(409);
+    expect((thrown as ApiError).code).toBe("model_credential_required");
+
+    expect(await loadRunModel(ctx.orgId, "sys-claude", null)).toMatchObject({
+      credentialSource: "system",
+    });
+    expect(await loadRunModel(ctx.orgId, alias.id, null)).toMatchObject({ aliased: true });
+    // An org credential id resolves the model as it is now, too.
+    expect(await loadRunModel(ctx.orgId, alias.id, org.id)).toMatchObject({
+      credentialId: org.id,
+      apiKey: "sk-org",
+    });
   });
 
   it("a personal credential whose key is not in the keyring is skipped for the member's next one", async () => {

@@ -79,16 +79,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: the chat platform services take the session user and the turn.**
-  `PlatformServices.resolveChatModel(orgId, presetId, userId, turnId)` and
-  `checkUsageAllowed({ …, turnId, userId })` (`@appstrate/core/module`): a
-  subscription turn spends the user's own personal credential, and a turn on a
-  model the user holds no credential for is refused with
-  `model_credential_required`. `turnId` identifies the turn: its proxy calls are
-  served on the credential admitted for that id, which the caller carries to
-  them; a subscription turn is admitted on the exact credential
-  `resolveChatModel` resolved for the same `turnId`. Out-of-tree modules that
-  call either seam must pass the session user and the turn id.
+- **BREAKING: the chat platform services take the session user.**
+  `PlatformServices.resolveChatModel(orgId, presetId, userId)` and
+  `checkUsageAllowed({ …, userId })` (`@appstrate/core/module`): a member's own
+  subscription serves a model the organization leaves unbound, and a turn on
+  such a model the user holds no credential for is refused with
+  `model_credential_required`. Out-of-tree modules that call either seam must
+  pass the session user.
 - **BREAKING: `SubscriptionChatModel.credentialId` and
   `ChatUsageRecord.credentialId`** (`@appstrate/core/chat-contract`), both
   required: the credential a subscription turn spends, recorded in

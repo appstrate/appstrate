@@ -136,7 +136,6 @@ describe("publish_file across every launch path", () => {
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       modelCascade: await resolveModelCascade(ctx.orgId, agent.id, null, null),
-      payerUserId: null,
       input: {},
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
     });

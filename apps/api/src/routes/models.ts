@@ -33,7 +33,7 @@ import {
 } from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
-  canSeeCredential,
+  mayProbeCredential,
   loadInferenceCredentials,
   requestModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
@@ -478,13 +478,13 @@ export function createModelsRouter() {
     if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw systemEntityForbidden("model provider credential", data.credentialId, "test");
     }
-    const creds = await loadInferenceCredentials(orgId, data.credentialId);
     // A member's own credential is probed by its owner only (never by an API key);
     // `models:write` stands in for the org-wide read here.
-    const visible = await canSeeCredential(
+    const visible = await mayProbeCredential(
       { ...requestModelCredentialCaller(c), readsOrg: true },
       data.credentialId,
     );
+    const creds = visible ? await loadInferenceCredentials(orgId, data.credentialId) : null;
     if (!creds || !visible) {
       throw notFound("Credential not found");
     }

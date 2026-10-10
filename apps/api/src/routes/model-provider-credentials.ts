@@ -19,8 +19,7 @@ import {
 } from "../middleware/require-permission.ts";
 import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
-  assertCredentialProbeAllowed,
-  canSeeCredential,
+  mayProbeCredential,
   createApiKeyCredential,
   dedupeCredentialLabel,
   deriveCredentialLabel,
@@ -166,10 +165,9 @@ async function resolveDiscoverTarget(
       throw systemEntityForbidden("model provider credential", body.credentialId);
     }
     // Another member's personal credential reads as absent, as on the test probes.
-    if (!(await canSeeCredential(caller, body.credentialId))) {
+    if (!(await mayProbeCredential(caller, body.credentialId))) {
       throw notFound("Model provider credential not found");
     }
-    await assertCredentialProbeAllowed(caller.orgId, body.credentialId);
     const creds = await loadInferenceCredentials(caller.orgId, body.credentialId);
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
@@ -235,8 +233,7 @@ async function resolveTestTarget(
       throw systemEntityForbidden("model provider credential", body.credentialId, "test");
     }
     // A credential the caller may not see reads as absent: the inline target then applies.
-    const visible = await canSeeCredential(caller, body.credentialId);
-    if (visible) await assertCredentialProbeAllowed(caller.orgId, body.credentialId);
+    const visible = await mayProbeCredential(caller, body.credentialId);
     const creds = visible ? await loadInferenceCredentials(caller.orgId, body.credentialId) : null;
     if (creds) {
       const overridable = getModelProvider(creds.providerId)?.baseUrlOverridable === true;
@@ -501,9 +498,8 @@ export function createModelProviderCredentialsRouter() {
       // A built-in key spends the platform's money: only an org reader may probe it.
       const visible = isSystemModelProviderCredential(id)
         ? caller.readsOrg
-        : await canSeeCredential(caller, id);
+        : await mayProbeCredential(caller, id);
       if (!visible) throw notFound("Model provider credential not found");
-      await assertCredentialProbeAllowed(caller.orgId, id);
       const creds = await loadInferenceCredentials(caller.orgId, id);
       if (!creds) {
         throw notFound("Model provider credential not found");

@@ -591,28 +591,21 @@ export async function loadCredentialBinding(
 }
 
 /**
- * The visibility rule, shared by the test probes. An organization credential is
- * visible to `readsOrg`; a personal one to its owner alone. Anything else reads as absent.
+ * The probe rule, shared by every door that spends a stored credential's key to
+ * test it. An organization credential is probed by `readsOrg`; a personal one by
+ * its owner alone, and by nobody while the organization has them off (403).
+ * `false`: the caller cannot see it, so it reads as absent.
  */
-export async function canSeeCredential(
+export async function mayProbeCredential(
   caller: ModelCredentialCaller,
   id: string,
 ): Promise<boolean> {
   const row = await loadCredentialBinding(caller.orgId, id);
   if (!row) return false;
-  return row.ownerUserId === null ? caller.readsOrg : row.ownerUserId === caller.userId;
-}
-
-/**
- * The probe rule, shared by every door that spends a stored credential's key: a
- * personal credential serves no call while the org has personal credentials off.
- */
-export async function assertCredentialProbeAllowed(
-  orgId: string,
-  credentialId: string,
-): Promise<void> {
-  const row = await loadCredentialBinding(orgId, credentialId);
-  if (row && row.ownerUserId !== null) await assertPersonalModelCredentialsAllowed(orgId);
+  if (row.ownerUserId === null) return caller.readsOrg;
+  if (row.ownerUserId !== caller.userId) return false;
+  await assertPersonalModelCredentialsAllowed(caller.orgId);
+  return true;
 }
 
 /**

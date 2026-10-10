@@ -60,6 +60,7 @@ export function ModelsList({
   onSetDefault,
   canWrite,
   canDelete,
+  credentialLabels,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -70,6 +71,8 @@ export function ModelsList({
   onSetDefault: (m: OrgModelInfo) => void;
   canWrite: boolean;
   canDelete: boolean;
+  /** The organization credentials' labels by id, for those the caller may read. */
+  credentialLabels: ReadonlyMap<string, string>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
@@ -148,7 +151,9 @@ export function ModelsList({
                           {t("models.credentialEachMember")}
                         </span>
                       ) : (
-                        <span className="truncate">{m.credential_label ?? "—"}</span>
+                        <span className="truncate">
+                          {credentialLabels.get(m.credentialId) ?? "—"}
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -309,6 +314,7 @@ export function OrgSettingsModelsPage() {
       {activeTab === "models-list" && (
         <ModelsList
           models={models}
+          credentialLabels={new Map((credentials ?? []).map((k) => [k.id, k.label]))}
           isLoading={modelsLoading}
           error={modelsError}
           onCreate={() => {

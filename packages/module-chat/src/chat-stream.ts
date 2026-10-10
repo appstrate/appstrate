@@ -321,15 +321,13 @@ export async function handleChatStream(
   // proxy binding gets a *minter* and re-mints a fresh bearer immediately before
   // every provider request. The static header below is for the one-shot calls
   // (listModels) that fire immediately on this same line.
-  // Identifies this turn to the platform: admitted once, its proxy calls then
-  // spend the credential admitted for it, whatever another turn admits meanwhile.
-  const turnId = crypto.randomUUID();
   const mintInferenceAuth = () =>
     mintLoopbackToken(
       { userId: user.id, email: user.email, name: user.name, orgId, orgRole },
-      // Both ride the SIGNED loopback claims (not a header), so the llm-proxy
-      // attributes and serves the turn without trusting anything spoofable.
-      { chatSessionId: meteringSessionId, turnId },
+      // The session id rides the SIGNED loopback claims (not a header) so the
+      // llm-proxy can attribute a proxy-routed turn's usage to the chat session
+      // without trusting anything spoofable.
+      { chatSessionId: meteringSessionId },
     );
   const inferenceHeaders: Record<string, string> = {
     Authorization: `Bearer ${mintInferenceAuth()}`,
@@ -476,7 +474,7 @@ export async function handleChatStream(
   // binding + a fresh access token, or a reconnect signal when its credential is
   // dead. Both ride the SAME engine — this fact drives admission and the Pi
   // binding, never a choice of loop.
-  const subscription = await deps.resolveChatModel(orgId, chosen.id, user.id, turnId);
+  const subscription = await deps.resolveChatModel(orgId, chosen.id, user.id);
   const isSubscription = subscription.subscription;
 
   // Admission gate — EVERY turn. The platform
@@ -501,7 +499,6 @@ export async function handleChatStream(
     presetId: chosen.id,
     sessionId: meteringSessionId,
     subscription: isSubscription,
-    turnId,
     userId: user.id,
   });
   if (rejection) {
@@ -708,7 +705,7 @@ export async function handleChatStream(
         onError: (error) => logAndMarkStreamError(error, requestId),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
-          // Only a subscription turn meters inline; its credential is the one admitted.
+          // Only a subscription turn meters inline, on the subscription its engine spends.
           const credentialId =
             subscription.subscription && "model" in subscription
               ? subscription.model.credentialId

@@ -3,7 +3,7 @@
 import type { Context } from "hono";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, type CredentialSource, type InferenceRoute } from "@appstrate/db/schema";
+import { runs, type InferenceRoute } from "@appstrate/db/schema";
 import { parseBearer } from "@appstrate/core/bearer";
 import { parseSignedToken } from "./run-token.ts";
 import { forbidden, notFound, unauthorized } from "./errors.ts";
@@ -25,8 +25,6 @@ export async function verifyRunToken(c: Context): Promise<{
     spaceId: string;
     status: string;
     modelCredentialId: string | null;
-    /** Who paid the run's model at launch — see `runs.model_source`. */
-    modelSource: CredentialSource | null;
     /** The triggering API key (`runs.api_key_id`); null for session, schedule and end-user runs. */
     apiKeyId: string | null;
     /** The model the run launched with — see `runs.model_id`. */
@@ -85,7 +83,6 @@ export async function verifyRunToken(c: Context): Promise<{
       spaceId: runs.spaceId,
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
-      modelSource: runs.modelSource,
       apiKeyId: runs.apiKeyId,
       modelId: runs.modelId,
       inferenceRoute: runs.inferenceRoute,
@@ -121,7 +118,6 @@ export async function verifyRunToken(c: Context): Promise<{
       spaceId: run.spaceId,
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
-      modelSource: run.modelSource ?? null,
       apiKeyId: run.apiKeyId ?? null,
       modelId: run.modelId,
       inferenceRoute: run.inferenceRoute,

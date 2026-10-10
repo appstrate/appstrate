@@ -181,9 +181,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   key, a third-party OAuth token, an end user and a schedule never spend a
   personal credential. The rules: `docs/architecture/MODEL_ALIASES.md`,
   "Who pays".
-  - Model DTO: `credentialId` is nullable; `credential_label` (the organization
-    credential's label) and `billed_to` (`user` | `org` | `null`, for the caller)
-    are added. `POST /api/models` takes `providerId`, which a `null`
+  - Model DTO: `credentialId` is nullable, and `billed_to` (`user` | `org` |
+    `null`, for the caller) is added. `POST /api/models` takes `providerId`, which a `null`
     `credentialId` requires; binding a personal credential is refused with
     `400 personal_credential_not_bindable`. One unbound model per provider and
     model id.
@@ -199,9 +198,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Org setting `personal_model_credentials` (default on). Off, personal
     credentials can be neither created, reconnected, probed nor spent, and a run
     pinned to one is refused at its next call.
-  - A run's proxy calls serve the credential frozen at launch; a chat turn spends
-    the credential it was admitted on (a subscription turn: the one handed to its
-    engine, re-validated at admission). Otherwise `409 model_credential_changed`.
+  - A run's proxy calls on a member-paid model serve the personal credential
+    frozen at launch; one deleted mid-run is never replaced by another payer's.
     The public LLM proxy never serves a subscription. The sidecar's token door
     serves a subscription only to a run its owner launched without an API key.
   - Schedules spend organization credentials only: a member-paid model cannot be
@@ -215,10 +213,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `needs_reconnection` is read for the caller on an unbound model: true when
     nothing of theirs serves it and one of their own credentials for it is dead.
 - **BREAKING (modules): the chat platform services take the session user**
-  (#1875). `resolveChatModel(orgId, presetId, userId, turnId)` and
-  `checkUsageAllowed({ ..., turnId, userId })`, where `turnId` identifies the
-  turn whose proxy calls then spend the credential admitted for it. See
-  `packages/core/CHANGELOG.md`.
+  (#1875). `resolveChatModel(orgId, presetId, userId)` and
+  `checkUsageAllowed({ ..., userId })`. See `packages/core/CHANGELOG.md`.
 
 - **BREAKING (API): a connection may serve the whole organization, and is
   shared with a set of spaces** (#1870).

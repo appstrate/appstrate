@@ -26,7 +26,6 @@ import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { createOrgModel, listOrgModels } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
-import { takeSubscriptionTurn } from "../../../src/services/system-proxy-admission.ts";
 import { logger } from "../../../src/lib/logger.ts";
 
 // `resolveChatModel` reads the system model registry; the HTTP harness initializes it at boot.
@@ -99,7 +98,7 @@ describe("resolveChatModel", () => {
       })
       .returning();
 
-    const resolution = await resolveChatModel(ctx.orgId, row!.id, ctx.user.id, "turn_test");
+    const resolution = await resolveChatModel(ctx.orgId, row!.id, ctx.user.id);
     expect(resolution).toEqual({ subscription: false });
   });
 
@@ -107,15 +106,11 @@ describe("resolveChatModel", () => {
     const credentialId = await seedOauthCredential();
     const presetId = await createSubscriptionModel("Subscribed");
 
-    const resolution = await resolveChatModel(ctx.orgId, presetId, ctx.user.id, "turn_test");
+    const resolution = await resolveChatModel(ctx.orgId, presetId, ctx.user.id);
     expect(resolution.subscription).toBe(true);
     if (resolution.subscription && "model" in resolution) {
       expect(resolution.model.modelId).toBe(TEST_OAUTH_MODEL_ID);
       expect(resolution.model.credentialId).toBe(credentialId);
-      // Admission takes that exact credential, recorded for the turn.
-      expect(
-        takeSubscriptionTurn({ orgId: ctx.orgId, userId: ctx.user.id, turnId: "turn_test" }),
-      ).toEqual({ presetId, pin: { credentialId, source: "org" } });
       expect(resolution.model.accessToken).toBe("test-access");
       // The binding reads the row's Pi key from the listing, not its Appstrate id.
       const row = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === presetId);
@@ -155,7 +150,7 @@ describe("resolveChatModel", () => {
         Response.json({ error: "invalid_grant" }, { status: 400 }),
       );
 
-      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id, "turn_test")).toEqual({
+      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
         subscription: true,
         needsReconnection: true,
       });
@@ -165,7 +160,7 @@ describe("resolveChatModel", () => {
       globalThis.fetch = (async () => {
         throw new Error("the token endpoint must not be called again");
       }) as unknown as typeof fetch;
-      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id, "turn_test")).toEqual({
+      expect(await resolveChatModel(ctx.orgId, presetId, ctx.user.id)).toEqual({
         subscription: true,
         needsReconnection: true,
       });
@@ -176,9 +171,7 @@ describe("resolveChatModel", () => {
         () => new Response("down", { status: 503 }),
       );
 
-      await expect(
-        resolveChatModel(ctx.orgId, presetId, ctx.user.id, "turn_test"),
-      ).rejects.toThrow();
+      await expect(resolveChatModel(ctx.orgId, presetId, ctx.user.id)).rejects.toThrow();
       expect(await storedNeedsReconnection(credentialId)).toBe(false);
     });
   });
@@ -214,25 +207,18 @@ describe("resolveChatModel", () => {
       })
       .returning();
 
-    await expect(
-      resolveChatModel(ctx.orgId, model!.id, ctx.user.id, "turn_test"),
-    ).rejects.toMatchObject({
+    await expect(resolveChatModel(ctx.orgId, model!.id, ctx.user.id)).rejects.toMatchObject({
       status: 409,
       code: "model_credential_required",
     });
-    expect(await resolveChatModel(ctx.orgId, model!.id, other.id, "turn_test")).toMatchObject({
+    expect(await resolveChatModel(ctx.orgId, model!.id, other.id)).toMatchObject({
       subscription: true,
       model: { accessToken: "other-token" },
     });
   });
 
   it("returns { subscription: false } for an unknown preset", async () => {
-    const resolution = await resolveChatModel(
-      ctx.orgId,
-      "no-such-preset",
-      ctx.user.id,
-      "turn_test",
-    );
+    const resolution = await resolveChatModel(ctx.orgId, "no-such-preset", ctx.user.id);
     expect(resolution).toEqual({ subscription: false });
   });
 });

@@ -9614,7 +9614,6 @@
                       "needs_reconnection": false,
                       "aliased": false,
                       "credentialId": "pk_abc123",
-                      "credential_label": "OpenAI Production",
                       "billed_to": "org",
                       "contextWindow": 128000,
                       "maxTokens": 16384,
@@ -13184,7 +13183,7 @@
                   },
                   "personal_model_credentials": {
                     "type": "boolean",
-                    "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist are ignored: the models they would serve fall back to the organization's bindings."
+                    "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call."
                   }
                 },
                 "additionalProperties": false
@@ -26535,7 +26534,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -26834,7 +26833,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27157,7 +27156,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27449,7 +27448,7 @@
             }
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27695,7 +27694,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27922,7 +27921,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28149,7 +28148,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28376,7 +28375,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the payer (the run's user, or the caller) has no usable personal credential for it. `model_credential_changed` — a first-party chat call no turn admission covers (the turn is served only on the credential admitted for it). RFC 9457 problem+json.",
+            "description": "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. `model_credential_required` — the preset is an unbound model and the caller has no usable personal credential for it (a run: the credential it launched with is gone). RFC 9457 problem+json.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -29754,7 +29753,7 @@
           },
           "personal_model_credentials": {
             "type": "boolean",
-            "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist are ignored: the models they would serve fall back to the organization's bindings."
+            "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call."
           }
         }
       },
@@ -31542,7 +31541,6 @@
           "iconUrl",
           "source",
           "credentialId",
-          "credential_label",
           "billed_to",
           "created_by",
           "createdAt",
@@ -31636,10 +31634,6 @@
           "credentialId": {
             "type": ["string", "null"],
             "description": "ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed."
-          },
-          "credential_label": {
-            "type": ["string", "null"],
-            "description": "Label of the bound credential. `null` whenever `credentialId` is `null` (unbound model, or managed model)."
           },
           "billed_to": {
             "type": ["string", "null"],

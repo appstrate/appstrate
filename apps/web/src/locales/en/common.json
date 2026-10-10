@@ -241,7 +241,6 @@
   "apiError.model_not_offered": "This model is not offered by this provider: {{message}}",
   "apiError.credential_in_use": "This credential is used by models: delete them first.",
   "apiError.model_scheduled": "Schedules run this model on the organization credential. Change their model before letting each member serve it with their own credential.",
-  "apiError.model_credential_changed": "The model's access changed while this message was being sent. Send it again.",
   "apiError.model_credential_required": "This model needs your own provider credential, or an organization credential: {{message}}",
   "apiError.personal_model_credentials_disabled": "The organization does not allow personal model credentials: ask an administrator to enable them.",
   "apiError.personal_credential_custom_endpoint": "A personal credential cannot serve a custom endpoint: use an organization credential.",

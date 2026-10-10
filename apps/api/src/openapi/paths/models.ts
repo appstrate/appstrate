@@ -56,7 +56,6 @@ export const modelsPaths = {
                     needs_reconnection: false,
                     aliased: false,
                     credentialId: "pk_abc123",
-                    credential_label: "OpenAI Production",
                     billed_to: "org",
                     contextWindow: 128000,
                     maxTokens: 16384,

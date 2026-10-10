@@ -230,30 +230,26 @@ Each door computes it once per request and passes it down.
 
 An alias is always bound (a model alias needs an organization credential), so it
 never takes a personal credential. `GET /api/models` reads step 3 for the caller:
-`billed_to` is `org` for a built-in or usable bound model, `user` for an unbound
+`billed_to` is `org` for a built-in or bound model, `user` for an unbound
 model one of the caller's credentials serves, `null` otherwise; `needs_reconnection`
 on an unbound model is true when nothing of the caller's serves it and one of
 their credentials for it is dead.
 
 The public LLM proxy (`/api/llm-proxy`) never serves a subscription (`viaProxy`
 skips oauth2 credentials), so `billed_to` describes runs and chat. A run's proxy
-calls serve the credential frozen at launch (`runs.model_credential_id`), never
-re-resolved: one removed mid-run, or personal credentials switched off, refuses
-the run's next call rather than switching payer. The sidecar's token door
+calls on a member-paid model keep the personal credential it launched with
+(`runs.model_credential_id`, `loadRunModel`), even if the model is bound
+meanwhile; one removed mid-run, or personal credentials switched off, refuses
+the run's next call rather than switching payer. Any other run is served as the
+model is now. The sidecar's token door
 (`/internal/oauth-token/{credentialId}`) gives a subscription's token only to a
 platform run pinned to it and launched by its owner with no API key; a token the
 sidecar already holds lasts up to its 30-second cache, as for a revocation.
 
-What is admitted is what is spent. A run resolves its model once, before the
-`beforeUsage` gate, and its context reuses that resolution. A chat turn on the
-proxy is served on the credential admitted for its turn id
-(`recordChatTurnAdmission`, the id signed into its inference bearer); a call no
-admission covers is refused with `409 model_credential_changed`. A subscription
-turn never reaches the proxy: `resolveChatModel` records the subscription it
-hands the engine under the turn id (`recordSubscriptionTurn`), and admission
-re-validates that record through the pinned-model loader, refusing the turn the
-same way when it no longer serves. A reconnect answer carries no token and
-records nothing.
+A run resolves its model once, before the `beforeUsage` gate, and its context
+reuses that resolution. What a call costs the organization (`credential_source`)
+cannot change between admission and spend: a model's payer follows from the model
+itself, and a chat turn's proxy calls are resolved for the same session user.
 
 `llm_usage.credential_id` (uuid, no foreign key) records the credential that
 served a call as a run pins it (NULL for a platform key or an alias); a written

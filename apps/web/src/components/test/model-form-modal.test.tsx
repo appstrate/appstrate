@@ -115,7 +115,6 @@ function model(overrides: Partial<OrgModelInfo>): OrgModelInfo {
     iconUrl: null,
     source: "custom",
     credentialId: "cred_1",
-    credential_label: null,
     billed_to: "org",
     created_by: null,
     createdAt: "2026-07-01T10:00:00.000Z",
@@ -373,7 +372,6 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
       providerId: "claude-code",
       provider_name: "Claude Code",
       credentialId: null,
-      credential_label: null,
     }),
     [CONNECTION],
   );
@@ -403,7 +401,7 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
 });
 
 describe("ModelFormBody — catalogued row left to each member", () => {
-  const html = form(catalogued({ credentialId: null, credential_label: null }), [ANTHROPIC_KEY]);
+  const html = form(catalogued({ credentialId: null }), [ANTHROPIC_KEY]);
 
   it("shows the each-member choice as the identifier, and the model as an editable id", () => {
     expect(html).toContain(settingsFr["models.form.eachMember"]);
@@ -414,7 +412,7 @@ describe("ModelFormBody — catalogued row left to each member", () => {
 
 describe("ModelFormBody — custom endpoint is never left to each member", () => {
   // A custom endpoint is the operator's to describe, so the choice is not offered.
-  const html = form(model({ credentialId: null, credential_label: null }), [LOCAL_KEY]);
+  const html = form(model({ credentialId: null }), [LOCAL_KEY]);
 
   it("asks for the endpoint's key, and offers no each-member choice", () => {
     expect(html).toContain('placeholder="sk-..."');

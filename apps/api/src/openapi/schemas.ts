@@ -123,7 +123,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   personal_model_credentials: {
     type: "boolean",
     description:
-      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist are ignored: the models they would serve fall back to the organization's bindings.",
+      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call.",
   },
 };
 
@@ -1931,7 +1931,6 @@ export const schemas = {
       "iconUrl",
       "source",
       "credentialId",
-      "credential_label",
       "billed_to",
       "created_by",
       "createdAt",
@@ -2008,11 +2007,6 @@ export const schemas = {
         type: ["string", "null"],
         description:
           "ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed.",
-      },
-      credential_label: {
-        type: ["string", "null"],
-        description:
-          "Label of the bound credential. `null` whenever `credentialId` is `null` (unbound model, or managed model).",
       },
       billed_to: {
         type: ["string", "null"],
