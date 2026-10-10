@@ -11,6 +11,7 @@ import {
   setResourceEntries,
   schemaToFields,
   fieldsToSchema,
+  lockedKeyword,
   manifestToSchemaFields,
   manifestToMetadata,
   metadataToManifestPatch,
@@ -850,5 +851,176 @@ describe("writers emit canonical AFPS keys", () => {
     expect(input).not.toHaveProperty("propertyOrder");
     expect(input).toHaveProperty("ui_hints");
     expect(input).toHaveProperty("property_order");
+  });
+});
+
+// ─── Lossless schema round-trip (#1896) ─────────────────────
+
+describe("schemaToFields / fieldsToSchema — lossless round-trip", () => {
+  const roundtrip = (props: JSONSchemaObject["properties"], required?: string[]) => {
+    const schema: JSONSchemaObject = { type: "object", properties: props, required };
+    if (!required) delete schema.required;
+    const result = fieldsToSchema(schemaToFields(schema, "input"), "input");
+    return { schema, result: result!.schema };
+  };
+
+  it("keeps nested properties, required and additionalProperties of an object field", () => {
+    const { schema, result } = roundtrip({
+      address: {
+        type: "object",
+        description: "Where",
+        properties: { city: { type: "string" }, zip: { type: "integer", minimum: 0 } },
+        required: ["city"],
+        additionalProperties: false,
+      },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps items of an array of objects", () => {
+    const { schema, result } = roundtrip({
+      rows: {
+        type: "array",
+        items: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        minItems: 1,
+      },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps items of an array of integers", () => {
+    const { schema, result } = roundtrip({
+      ids: { type: "array", items: { type: "integer", minimum: 0 } },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps numeric enums numeric", () => {
+    const { schema, result } = roundtrip({
+      level: { type: "integer", enum: [1, 2, 3], default: 2 },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps boolean enums boolean", () => {
+    const { schema, result } = roundtrip({ flag: { type: "boolean", enum: [true, false] } });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps object and array defaults instead of '[object Object]'", () => {
+    const { schema, result } = roundtrip({
+      cfg: { type: "object", default: { a: 1 } },
+      tags: { type: "array", default: ["x", "y"] },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps an enum whose values contain a comma and locks it in the editor", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { city: { type: "string", enum: ["Paris, FR", "Lyon"] } },
+    };
+    const fields = schemaToFields(schema, "input");
+    expect(fields[0]!.enumValues).toBe("");
+    expect(lockedKeyword(fields[0]!, "input", "enum")).toBe('["Paris, FR","Lyon"]');
+    expect(fieldsToSchema(fields, "input")!.schema).toEqual(schema);
+  });
+
+  it("keeps a non-primitive items.enum", () => {
+    const { schema, result } = roundtrip({
+      pick: { type: "array", items: { enum: [{ a: 1 }, { a: 2 }] } },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("keeps unknown keywords", () => {
+    const { schema, result } = roundtrip({
+      a: { type: "string", title: "A", examples: ["x"] },
+      b: { oneOf: [{ type: "string" }, { type: "number" }], title: "B" },
+      c: { type: ["string", "null"], const: null },
+      d: { type: "number", format: "double" },
+    });
+    expect(result).toEqual(schema);
+  });
+
+  it("editing one field leaves another object field untouched", () => {
+    const nested = {
+      type: "object" as const,
+      properties: { city: { type: "string" as const } },
+      required: ["city"],
+    };
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { name: { type: "string", description: "old" }, address: nested },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, description: "new" };
+    const out = fieldsToSchema(fields, "input")!.schema;
+    expect(out.properties.name!.description).toBe("new");
+    expect(out.properties.address).toEqual(nested);
+  });
+
+  it("drops the old type's keywords when the type changes", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: {
+        cfg: { type: "object", properties: { a: { type: "string" } }, default: { a: "x" } },
+      },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, type: "string" };
+    expect(fieldsToSchema(fields, "input")!.schema.properties.cfg).toEqual({ type: "string" });
+  });
+
+  it("still converts an edited primitive default and enum per type", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { n: { type: "integer", default: 1, enum: [1, 2] } },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, default: "3", enumValues: "3, 4" };
+    const prop = fieldsToSchema(fields, "input")!.schema.properties.n!;
+    expect(prop.default).toBe(3);
+    expect(prop.enum).toEqual([3, 4]);
+  });
+
+  it("clearing an edited keyword removes it", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { s: { type: "string", default: "a", enum: ["a", "b"], minLength: 1 } },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, default: "", enumValues: "", minLength: "" };
+    expect(fieldsToSchema(fields, "input")!.schema.properties.s).toEqual({ type: "string" });
+  });
+
+  it("keeps root keys ($defs with nested $ref, additionalProperties, title) across an edit", () => {
+    const schema: JSONSchemaObject & Record<string, unknown> = {
+      type: "object",
+      title: "Root",
+      additionalProperties: false,
+      $defs: { x: { type: "string" } },
+      properties: { a: { $ref: "#/$defs/x" }, b: { type: "string" } },
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[1] = { ...fields[1]!, description: "edited" };
+    const out = fieldsToSchema(fields, "input", schema)!.schema;
+    expect(out).toEqual({
+      ...schema,
+      properties: { a: { $ref: "#/$defs/x" }, b: { type: "string", description: "edited" } },
+    });
+  });
+
+  it("recomputes root required from the fields", () => {
+    const schema: JSONSchemaObject = {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "string" } },
+      required: ["a", "b"],
+    };
+    const fields = schemaToFields(schema, "input");
+    fields[0] = { ...fields[0]!, required: false };
+    expect(fieldsToSchema(fields, "input", schema)!.schema.required).toEqual(["b"]);
+    fields[1] = { ...fields[1]!, required: false };
+    expect("required" in fieldsToSchema(fields, "input", schema)!.schema).toBe(false);
   });
 });

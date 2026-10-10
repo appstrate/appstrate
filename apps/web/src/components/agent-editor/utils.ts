@@ -11,7 +11,6 @@ import {
   type JSONSchemaObject,
   type JSONSchema7,
   type JSONSchema7TypeName,
-  type JSONSchema7Type,
   type FileConstraint,
   type UIHint,
   type SchemaWrapper,
@@ -307,35 +306,45 @@ export function toResourceEntry(r: {
 
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────
 
+type ManifestSchemaWrapper = {
+  schema?: JSONSchemaObject;
+  file_constraints?: Record<string, FileConstraint>;
+  ui_hints?: Record<string, UIHint>;
+  property_order?: string[];
+};
+
+/** Narrow `manifest[key]` (`input` | `output`) to its schema wrapper. */
+export function manifestSchemaWrapper(
+  manifest: Record<string, unknown>,
+  key: "input" | "output",
+): ManifestSchemaWrapper | undefined {
+  const raw = manifest[key] as ManifestSchemaWrapper | undefined;
+  if (!raw) return undefined;
+  return {
+    schema: raw.schema,
+    file_constraints: raw.file_constraints,
+    ui_hints: raw.ui_hints,
+    property_order: raw.property_order,
+  };
+}
+
 /** Convert the manifest input/output wrappers into SchemaField arrays for the form. */
 export function manifestToSchemaFields(
   manifest: Record<string, unknown>,
 ): Record<string, SchemaField[]> {
-  type ManifestWrapper = {
-    schema?: JSONSchemaObject;
-    file_constraints?: Record<string, FileConstraint>;
-    ui_hints?: Record<string, { placeholder?: string }>;
-    property_order?: string[];
-  };
-  const wrapperFor = (key: string) => {
-    const raw = manifest[key] as ManifestWrapper | undefined;
-    if (!raw) return undefined;
-    return {
-      schema: raw.schema,
-      file_constraints: raw.file_constraints,
-      ui_hints: raw.ui_hints,
-      property_order: raw.property_order,
-    };
-  };
+  const input = manifestSchemaWrapper(manifest, "input");
+  const output = manifestSchemaWrapper(manifest, "output");
   return {
-    input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
-    output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
+    input: schemaToFields(input?.schema, "input", input),
+    output: schemaToFields(output?.schema, "output", output),
   };
 }
 
 // ─── Schema field conversion (used by SchemaSection) ────────
 
-function convertDefaultValue(value: string, type: string): unknown {
+type Scalar = string | number | boolean;
+
+function convertDefaultValue(value: string, type: string): Scalar | undefined {
   if (!value) return undefined;
   if (type === "number" || type === "integer") {
     const n = Number(value);
@@ -344,6 +353,89 @@ function convertDefaultValue(value: string, type: string): unknown {
   }
   if (type === "boolean") return value === "true";
   return value;
+}
+
+/** Comma-separated text → typed values, converted per `type` like a default. */
+function parseList(text: string | undefined, type: string): Scalar[] {
+  const out: Scalar[] = [];
+  for (const raw of (text ?? "").split(",")) {
+    const v = convertDefaultValue(raw.trim(), type);
+    if (v !== undefined) out.push(v);
+  }
+  return out;
+}
+
+/**
+ * A value can live in a text input only if reading the text back yields the
+ * exact same value (no object, no "1.5" under integer, no comma inside a list
+ * item). Anything else is kept untouched from the source schema.
+ */
+function isTextEditable(v: unknown, type: string, inList: boolean): boolean {
+  if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") return false;
+  const s = String(v);
+  if (s === "" || (inList && (s !== s.trim() || s.includes(",")))) return false;
+  return convertDefaultValue(s, type) === v;
+}
+
+function itemsOf(prop: JSONSchema7): JSONSchema7 | undefined {
+  return prop.items && typeof prop.items === "object" && !Array.isArray(prop.items)
+    ? prop.items
+    : undefined;
+}
+
+function itemType(prop: JSONSchema7): string {
+  const t = itemsOf(prop)?.type;
+  return typeof t === "string" ? t : "string";
+}
+
+type EditableKeyword = "default" | "enum" | "items.enum";
+
+/** JSON of a keyword value the text inputs cannot represent losslessly (else undefined). */
+function lockedValue(prop: JSONSchema7, type: string, kw: EditableKeyword): string | undefined {
+  const value = kw === "default" ? prop.default : kw === "enum" ? prop.enum : itemsOf(prop)?.enum;
+  if (value === undefined) return undefined;
+  if (kw === "default")
+    return isTextEditable(value, type, false) ? undefined : JSON.stringify(value);
+  const itemsType = kw === "enum" ? type : itemType(prop);
+  const editable = Array.isArray(value) && value.every((v) => isTextEditable(v, itemsType, true));
+  return editable ? undefined : JSON.stringify(value);
+}
+
+/**
+ * The original property to start from: only while the field still has the
+ * shape it was loaded with. A type change or file toggle starts fresh, since
+ * keywords of the old type would be invalid.
+ */
+function reusableSource(f: SchemaField, mode: "input" | "output"): JSONSchema7 | undefined {
+  const s = f.source;
+  if (!s || f.isFile) return undefined;
+  if (mode === "input" && isFileField(s)) return undefined;
+  return (typeof s.type === "string" ? s.type : "string") === f.type ? s : undefined;
+}
+
+/** JSON shown read-only in place of a text input when the value cannot be edited as text. */
+export function lockedKeyword(
+  f: SchemaField,
+  mode: "input" | "output",
+  kw: EditableKeyword,
+): string | undefined {
+  const s = reusableSource(f, mode);
+  return s && lockedValue(s, f.type, kw);
+}
+
+function assign<K extends keyof JSONSchema7>(
+  prop: JSONSchema7,
+  key: K,
+  value: JSONSchema7[K] | undefined,
+): void {
+  if (value === undefined) delete prop[key];
+  else prop[key] = value;
+}
+
+function numberOrUndefined(text: string | undefined): number | undefined {
+  if (!text) return undefined;
+  const n = Number(text);
+  return isNaN(n) ? undefined : n;
 }
 
 export function schemaToFields(
@@ -375,7 +467,7 @@ export function schemaToFields(
       !Array.isArray(prop.items)
     ) {
       const items = prop.items;
-      if (Array.isArray(items.enum)) {
+      if (Array.isArray(items.enum) && !lockedValue(prop, type, "items.enum")) {
         arrayEnumItems = items.enum.join(", ");
       }
     }
@@ -386,6 +478,7 @@ export function schemaToFields(
       type,
       description: prop.description || "",
       required: requiredSet.has(key),
+      source: prop,
       ...(isInputFile
         ? {
             isFile: true,
@@ -398,8 +491,14 @@ export function schemaToFields(
       ...(mode === "input" && !fileField
         ? {
             placeholder: hint?.placeholder || "",
-            default: prop.default != null ? String(prop.default) : "",
-            enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
+            default:
+              prop.default !== undefined && !lockedValue(prop, type, "default")
+                ? String(prop.default)
+                : "",
+            enumValues:
+              Array.isArray(prop.enum) && !lockedValue(prop, type, "enum")
+                ? prop.enum.join(", ")
+                : "",
           }
         : {}),
       // String format
@@ -439,6 +538,8 @@ export function schemaToFields(
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output",
+  /** Current root schema: its keys other than `properties`/`required` (`$defs`, `title`, …) are kept. */
+  base?: JSONSchemaObject,
 ): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
@@ -477,56 +578,40 @@ export function fieldsToSchema(
       }
       if (Object.keys(constraint).length > 0) file_constraints[key] = constraint;
     } else {
-      const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
-      if (f.description) prop.description = f.description;
+      const src = reusableSource(f, mode);
+      // Start from the original so keywords the editor does not manage survive.
+      const prop: JSONSchema7 = src ? { ...src } : { type: f.type as JSONSchema7TypeName };
+      assign(prop, "description", f.description || undefined);
       if (mode === "input") {
-        const def = convertDefaultValue(f.default || "", f.type);
-        if (def != null) prop.default = def as JSONSchema7Type;
-        const enumVals = f.enumValues
-          ?.split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (enumVals && enumVals.length > 0) prop.enum = enumVals;
+        if (!lockedKeyword(f, mode, "default")) {
+          assign(prop, "default", convertDefaultValue(f.default || "", f.type));
+        }
+        if (!lockedKeyword(f, mode, "enum")) {
+          const enumVals = parseList(f.enumValues, f.type);
+          assign(prop, "enum", enumVals.length > 0 ? enumVals : undefined);
+        }
       }
-      // String format
-      if (f.type === "string" && f.format && f.format !== "__none") {
-        prop.format = f.format;
-      }
-      // String constraints
       if (f.type === "string") {
-        if (f.minLength) {
-          const n = Number(f.minLength);
-          if (!isNaN(n)) prop.minLength = n;
-        }
-        if (f.maxLength) {
-          const n = Number(f.maxLength);
-          if (!isNaN(n)) prop.maxLength = n;
-        }
-        if (f.pattern) prop.pattern = f.pattern;
+        assign(prop, "format", f.format && f.format !== "__none" ? f.format : undefined);
+        assign(prop, "minLength", numberOrUndefined(f.minLength));
+        assign(prop, "maxLength", numberOrUndefined(f.maxLength));
+        assign(prop, "pattern", f.pattern || undefined);
       }
-      // Number/integer constraints
       if (f.type === "number" || f.type === "integer") {
-        if (f.minimum) {
-          const n = Number(f.minimum);
-          if (!isNaN(n)) prop.minimum = n;
-        }
-        if (f.maximum) {
-          const n = Number(f.maximum);
-          if (!isNaN(n)) prop.maximum = n;
-        }
-        if (f.step) {
-          const n = Number(f.step);
-          if (!isNaN(n)) prop.multipleOf = n;
-        }
+        assign(prop, "minimum", numberOrUndefined(f.minimum));
+        assign(prop, "maximum", numberOrUndefined(f.maximum));
+        assign(prop, "multipleOf", numberOrUndefined(f.step));
       }
-      // Array with enum items → multiselect schema
-      if (f.type === "array" && f.arrayEnumItems) {
-        const items = f.arrayEnumItems
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (items.length > 0) {
-          prop.items = { type: "string", enum: items };
+      // Array with enum items → multiselect schema; other `items` stay as loaded.
+      if (f.type === "array" && !lockedKeyword(f, mode, "items.enum")) {
+        const srcItems = src && itemsOf(src);
+        const type = srcItems ? itemType(src) : "string";
+        const vals = parseList(f.arrayEnumItems, type);
+        if (vals.length > 0) {
+          prop.items = { ...srcItems, type: type as JSONSchema7TypeName, enum: vals };
+        } else if (srcItems?.enum) {
+          const { enum: _removed, ...rest } = srcItems;
+          assign(prop, "items", Object.keys(rest).length > 0 ? rest : undefined);
         }
       }
       properties[key] = prop;
@@ -537,12 +622,11 @@ export function fieldsToSchema(
     }
     if (f.required) required.push(key);
   }
+  const rootSchema: JSONSchemaObject = { ...base, type: "object", properties };
+  if (required.length > 0) rootSchema.required = required;
+  else delete rootSchema.required;
   return {
-    schema: {
-      type: "object",
-      properties,
-      ...(required.length > 0 ? { required } : {}),
-    },
+    schema: rootSchema,
     ...(Object.keys(file_constraints).length > 0 ? { file_constraints } : {}),
     ...(Object.keys(ui_hints).length > 0 ? { ui_hints } : {}),
     property_order: filtered.map((f) => f.key.trim()),

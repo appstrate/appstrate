@@ -345,6 +345,7 @@
   "editor.fieldDefault": "défaut",
   "editor.fieldPlaceholder": "placeholder",
   "editor.fieldEnum": "enum (virgule)",
+  "editor.fieldLockedJson": "Valeur JSON non modifiable ici : conservée telle quelle",
   "editor.fieldReq": "req",
   "editor.fieldIsFile": "fichier",
   "editor.fieldAccept": "extensions (.pdf, .csv...)",

@@ -30,6 +30,8 @@ import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { SectionCard } from "../section-card";
+import type { JSONSchema7 } from "@appstrate/core/form";
+import { lockedKeyword } from "./utils";
 
 export interface SchemaField {
   _id: string;
@@ -60,6 +62,8 @@ export interface SchemaField {
   pattern?: string;
   /** Comma-separated enum values for array items (multiselect). */
   arrayEnumItems?: string;
+  /** Property as loaded from the manifest; `fieldsToSchema` starts from it so unedited keywords survive. Absent on fields added in the UI. */
+  source?: JSONSchema7;
 }
 
 type SchemaMode = "input" | "output";
@@ -119,6 +123,9 @@ function SortableFieldCard({
   const isNumeric = field.type === "number" || field.type === "integer";
   const isString = field.type === "string" && !isFile;
   const isArray = field.type === "array";
+  const lockedDefault = lockedKeyword(field, mode, "default");
+  const lockedEnum = lockedKeyword(field, mode, "enum");
+  const lockedItemsEnum = lockedKeyword(field, mode, "items.enum");
 
   // Agent/tool input and output keys are slug-based (hyphen-based, URL-safe):
   // `live` while the user types, `final` on blur.
@@ -255,7 +262,9 @@ function SortableFieldCard({
               <Input
                 type="text"
                 placeholder={t("editor.fieldDefault")}
-                value={field.default ?? ""}
+                value={lockedDefault ?? field.default ?? ""}
+                disabled={lockedDefault !== undefined}
+                title={lockedDefault !== undefined ? t("editor.fieldLockedJson") : undefined}
                 onChange={(e) => onUpdate(index, { default: e.target.value })}
                 className="h-7 min-w-[100px] flex-1 text-xs"
               />
@@ -269,7 +278,9 @@ function SortableFieldCard({
               <Input
                 type="text"
                 placeholder={t("editor.fieldEnum")}
-                value={field.enumValues ?? ""}
+                value={lockedEnum ?? field.enumValues ?? ""}
+                disabled={lockedEnum !== undefined}
+                title={lockedEnum !== undefined ? t("editor.fieldLockedJson") : undefined}
                 onChange={(e) => onUpdate(index, { enumValues: e.target.value })}
                 className="h-7 min-w-[100px] flex-1 text-xs"
               />
@@ -348,7 +359,9 @@ function SortableFieldCard({
                 <Input
                   type="text"
                   placeholder="Enum items (a, b, c)"
-                  value={field.arrayEnumItems ?? ""}
+                  value={lockedItemsEnum ?? field.arrayEnumItems ?? ""}
+                  disabled={lockedItemsEnum !== undefined}
+                  title={lockedItemsEnum !== undefined ? t("editor.fieldLockedJson") : undefined}
                   onChange={(e) => onUpdate(index, { arrayEnumItems: e.target.value })}
                   className="h-7 min-w-[150px] flex-1 text-xs"
                 />
