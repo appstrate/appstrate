@@ -9,15 +9,8 @@ import { PageHeader, type BreadcrumbEntry } from "./page-header";
 import { SettingsHeading } from "./settings/settings-heading";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
 
-/** Every type is edited in its Package AFPS; only the page (create) shows the emoji and breadcrumb. */
+/** Every type is edited in its Package AFPS; only the page (create) shows the breadcrumb. */
 type EditablePackageType = "agent" | "skill" | "integration" | "mcp-server";
-
-const emojiMap: Record<EditablePackageType, string> = {
-  agent: "⚡",
-  skill: "🧠",
-  integration: "🧩",
-  "mcp-server": "🔌",
-};
 
 const breadcrumbNewKeys: Record<EditablePackageType, string> = {
   agent: "editor.breadcrumbNew",
@@ -173,7 +166,7 @@ export function EditorShell({
 
   return (
     <div className="space-y-4">
-      <PageHeader title={title} emoji={emojiMap[type]} breadcrumbs={breadcrumbs} />
+      <PageHeader title={title} breadcrumbs={breadcrumbs} />
 
       {error && (
         <div className="bg-destructive/15 text-destructive mb-4 rounded-md px-3 py-2 text-sm">

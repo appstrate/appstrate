@@ -25,7 +25,6 @@ export function WebhookDetailPage() {
     <div>
       <PageHeader
         title={webhook.url}
-        emoji="🪝"
         actions={
           <div className="flex items-center gap-2">
             {webhook.level === "org" && (
