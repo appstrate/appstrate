@@ -7,6 +7,7 @@
  * module graph (no mock.module needed — preload sets up DB/Redis/env).
  */
 
+import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { runLogs } from "@appstrate/db/schema";
@@ -232,7 +233,7 @@ describe("buildRunContext generation settings", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      modelCascade: await resolveModelCascade(ctx.orgId, agentId, modelId, null),
+      modelCascade: await resolveModelCascade(ctx.orgId, agentId, modelId, NO_PAYER),
       input: {},
       modelId,
       generationConfig: stored,

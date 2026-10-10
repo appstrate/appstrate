@@ -116,6 +116,55 @@ describe("Models API", () => {
       expect(body.data).toBeArray();
     });
 
+    it("names each row's binding, and the payer of a built-in model", async () => {
+      const credentialId = await createProviderKey();
+      const bound = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId,
+        providerId: "openai",
+        modelId: "gpt-4o",
+        label: "Bound",
+      });
+      const [unbound] = await db
+        .insert(orgModels)
+        .values({
+          orgId: ctx.orgId,
+          label: "Unbound",
+          modelId: "gpt-4o-mini",
+          providerId: "openai",
+          credentialId: null,
+          aliased: false,
+          source: "custom",
+          createdBy: ctx.user.id,
+        })
+        .returning({ id: orgModels.id });
+      initSystemModelProviderKeys([
+        {
+          id: "sys-key-list-test",
+          providerId: "openai",
+          apiKey: "sk-system-list",
+          models: [{ id: "sys-model-list-test", modelId: "gpt-4o" }],
+        },
+      ]);
+
+      try {
+        const res = await app.request("/api/models", { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: Array<{ id: string; billed_to: string | null; binding: string }>;
+        };
+        const byId = new Map(body.data.map((m) => [m.id, m]));
+        expect(byId.get("sys-model-list-test")).toMatchObject({
+          billed_to: "system",
+          binding: "org",
+        });
+        expect(byId.get(unbound!.id)).toMatchObject({ binding: "member" });
+        expect(byId.get(bound.id)).toMatchObject({ binding: "org" });
+      } finally {
+        initSystemModelProviderKeys();
+      }
+    });
+
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/models");
       expect(res.status).toBe(401);
@@ -315,6 +364,24 @@ describe("Models API", () => {
   });
 
   describe("POST /api/models", () => {
+    it("refuses an unbound model on a custom endpoint, which only an organization credential can serve — 400", async () => {
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "x",
+          modelId: "m",
+          credentialId: null,
+          providerId: "openai-compatible",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("personal_credential_custom_endpoint");
+      expect(body.param).toBe("providerId");
+    });
+
     it("creates a model with a valid provider key", async () => {
       const credentialId = await createProviderKey();
 
@@ -707,6 +774,31 @@ describe("Models API", () => {
   });
 
   describe("PATCH /api/models/:id", () => {
+    it("refuses to unbind a model from its custom-endpoint credential — 400, the row keeps its credential", async () => {
+      const credentialId = await createGatewayKey();
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId,
+        providerId: "openai-compatible",
+        modelId: "gateway-model",
+        label: "Gateway",
+      });
+
+      const res = await app.request(`/api/models/${model.id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: null }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).code).toBe("personal_credential_custom_endpoint");
+      const [row] = await db
+        .select({ credentialId: orgModels.credentialId })
+        .from(orgModels)
+        .where(eq(orgModels.id, model.id));
+      expect(row!.credentialId).toBe(credentialId);
+    });
+
     it("updates a model and returns the full updated resource", async () => {
       const credentialId = await createProviderKey();
 

@@ -8,14 +8,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { orgModels, runs } from "@appstrate/db/schema";
+import { orgModels, runs, spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { authHeaders } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedOrgModelProviderKey, seedSchedule } from "../../helpers/seed.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import {
   createFakeOrchestrator,
   waitForRunPipelineSettled,
@@ -34,11 +35,13 @@ describe("schedule payer — organization credentials only", () => {
   let ctx: TestContext;
 
   beforeAll(() => {
+    seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] });
     _setOrchestratorForTesting(createFakeOrchestrator());
   });
 
   afterAll(() => {
     _setOrchestratorForTesting(null);
+    seedTestModelProviders();
   });
 
   beforeEach(async () => {
@@ -167,6 +170,100 @@ describe("schedule payer — organization credentials only", () => {
     expect(body.detail).toContain("bound to an organization credential");
   });
 
+  it("refuses a schedule whose organization default is an unbound model", async () => {
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        label: "Default GPT",
+        modelId: "gpt-5.5",
+        providerId: "openai",
+        credentialId: null,
+        aliased: false,
+        source: "custom",
+        createdBy: ctx.user.id,
+      })
+      .returning({ id: orgModels.id });
+    await setDefaultModel(ctx.orgId, row!.id);
+
+    const res = await app.request(`/api/agents/${AGENT_ID}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * *", version_override: "draft" }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("model_credential_required");
+  });
+
+  it("refuses a schedule whose space package model is an unbound model", async () => {
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        label: "Space GPT",
+        modelId: "gpt-5.5",
+        providerId: "openai",
+        credentialId: null,
+        aliased: false,
+        source: "custom",
+        createdBy: ctx.user.id,
+      })
+      .returning({ id: orgModels.id });
+    await db
+      .update(spacePackages)
+      .set({ modelId: row!.id })
+      .where(
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT_ID)),
+      );
+
+    const res = await app.request(`/api/agents/${AGENT_ID}/schedules`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ cron_expression: "0 9 * * *", version_override: "draft" }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("model_credential_required");
+  });
+
+  it("refuses to enable a schedule whose effective model is unbound, and still lets it be disabled", async () => {
+    const [row] = await db
+      .insert(orgModels)
+      .values({
+        orgId: ctx.orgId,
+        label: "Override GPT",
+        modelId: "gpt-5.5",
+        providerId: "openai",
+        credentialId: null,
+        aliased: false,
+        source: "custom",
+        createdBy: ctx.user.id,
+      })
+      .returning({ id: orgModels.id });
+    const schedule = await seedSchedule({
+      packageId: AGENT_ID,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      modelIdOverride: row!.id,
+      enabled: false,
+    });
+    const patch = (body: Record<string, unknown>) =>
+      app.request(`/api/schedules/${schedule.id}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const enable = await patch({ enabled: true });
+    expect(enable.status).toBe(409);
+    expect(((await enable.json()) as { code: string }).code).toBe("model_credential_required");
+
+    const disable = await patch({ enabled: false });
+    expect(disable.status).toBe(200);
+  });
+
   it("refuses to unbind a model a schedule overrides with", async () => {
     const credentialId = await createApiKeyCredential({
       orgId: ctx.orgId,
@@ -194,10 +291,199 @@ describe("schedule payer — organization credentials only", () => {
     });
 
     expect(res.status).toBe(409);
-    const body = (await res.json()) as { code: string; detail: string };
+    const body = (await res.json()) as { code: string; detail: string; schedule_ids: string[] };
     expect(body.code).toBe("model_scheduled");
-    expect(body.detail).toContain(schedule.id);
+    expect(body.schedule_ids).toEqual([schedule.id]);
+    expect(body.detail).not.toContain(schedule.id);
     const [row] = await db.select().from(orgModels).where(eq(orgModels.id, modelDbId));
     expect(row!.credentialId).toBe(credentialId);
+  });
+  describe("writes that move a schedule's effective model", () => {
+    /** A model each member serves with their own credential. */
+    async function seedMemberPaidModel(label: string): Promise<string> {
+      const [row] = await db
+        .insert(orgModels)
+        .values({
+          orgId: ctx.orgId,
+          label,
+          modelId: "gpt-5.5",
+          providerId: "openai",
+          credentialId: null,
+          aliased: false,
+          source: "custom",
+          createdBy: ctx.user.id,
+        })
+        .returning({ id: orgModels.id });
+      return row!.id;
+    }
+
+    /** A model bound to an organization key. */
+    async function seedBoundModel(label: string): Promise<{ id: string; credentialId: string }> {
+      const credentialId = await createApiKeyCredential({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        ownerUserId: null,
+        label: `${label} key`,
+        providerId: "openai",
+        apiKey: "sk-org-test-key",
+      });
+      const id = await createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, { credentialId });
+      return { id, credentialId };
+    }
+
+    const seedAgentSchedule = (opts: { modelIdOverride?: string; enabled?: boolean } = {}) =>
+      seedSchedule({
+        packageId: AGENT_ID,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        ...opts,
+      });
+
+    const send = (method: string, path: string, body: Record<string, unknown>) =>
+      app.request(path, {
+        method,
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    async function expectScheduled(res: Response, scheduleIds: string[]): Promise<void> {
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { code: string; schedule_ids: string[] };
+      expect(body.code).toBe("model_scheduled");
+      expect(body.schedule_ids).toEqual(scheduleIds);
+    }
+
+    async function placementModelId(): Promise<string | null> {
+      const [row] = await db
+        .select({ modelId: spacePackages.modelId })
+        .from(spacePackages)
+        .where(
+          and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT_ID)),
+        );
+      return row!.modelId;
+    }
+
+    it("refuses a member-paid organization default that enabled schedules inherit", async () => {
+      const memberPaid = await seedMemberPaidModel("Default GPT");
+      const schedule = await seedAgentSchedule();
+
+      const res = await send("PUT", "/api/models/default", { modelId: memberPaid });
+
+      await expectScheduled(res, [schedule.id]);
+    });
+
+    it("sets a member-paid organization default no enabled schedule inherits", async () => {
+      const memberPaid = await seedMemberPaidModel("Default GPT");
+      const bound = await seedBoundModel("Team GPT");
+      await seedAgentSchedule({ modelIdOverride: bound.id });
+      await seedAgentSchedule({ enabled: false });
+
+      const res = await send("PUT", "/api/models/default", { modelId: memberPaid });
+
+      expect(res.status).toBe(200);
+    });
+
+    it("refuses a member-paid agent model that the agent's enabled schedules would run", async () => {
+      const memberPaid = await seedMemberPaidModel("Agent GPT");
+      const schedule = await seedAgentSchedule();
+
+      const res = await send("PATCH", `/api/agents/${AGENT_ID}/model`, { modelId: memberPaid });
+
+      await expectScheduled(res, [schedule.id]);
+      expect(await placementModelId()).toBeNull();
+    });
+
+    it("refuses clearing the agent model when the organization default is member-paid", async () => {
+      const memberPaid = await seedMemberPaidModel("Default GPT");
+      const bound = await seedBoundModel("Team GPT");
+      await setDefaultModel(ctx.orgId, memberPaid);
+      await db
+        .update(spacePackages)
+        .set({ modelId: bound.id })
+        .where(
+          and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT_ID)),
+        );
+      const schedule = await seedAgentSchedule();
+
+      const res = await send("PATCH", `/api/agents/${AGENT_ID}/model`, { modelId: null });
+
+      await expectScheduled(res, [schedule.id]);
+      expect(await placementModelId()).toBe(bound.id);
+    });
+
+    it("sets a member-paid agent model when every enabled schedule overrides it", async () => {
+      const memberPaid = await seedMemberPaidModel("Agent GPT");
+      const bound = await seedBoundModel("Team GPT");
+      await seedAgentSchedule({ modelIdOverride: bound.id });
+
+      const res = await send("PATCH", `/api/agents/${AGENT_ID}/model`, { modelId: memberPaid });
+
+      expect(res.status).toBe(200);
+      expect(await placementModelId()).toBe(memberPaid);
+    });
+
+    it("refuses a member-paid model on the space placement that enabled schedules would run", async () => {
+      const memberPaid = await seedMemberPaidModel("Space GPT");
+      const schedule = await seedAgentSchedule();
+
+      const res = await send("PATCH", `/api/spaces/${ctx.defaultSpaceId}/packages/${AGENT_ID}`, {
+        modelId: memberPaid,
+      });
+
+      await expectScheduled(res, [schedule.id]);
+      expect(await placementModelId()).toBeNull();
+    });
+
+    it("sets a member-paid model on the space placement when its schedules are disabled", async () => {
+      const memberPaid = await seedMemberPaidModel("Space GPT");
+      await seedAgentSchedule({ enabled: false });
+
+      const res = await send("PATCH", `/api/spaces/${ctx.defaultSpaceId}/packages/${AGENT_ID}`, {
+        modelId: memberPaid,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await placementModelId()).toBe(memberPaid);
+    });
+
+    it("refuses to unbind the organization default enabled schedules inherit", async () => {
+      const bound = await seedBoundModel("Team GPT");
+      await setDefaultModel(ctx.orgId, bound.id);
+      const schedule = await seedAgentSchedule();
+
+      const res = await send("PATCH", `/api/models/${bound.id}`, { credentialId: null });
+
+      await expectScheduled(res, [schedule.id]);
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, bound.id));
+      expect(row!.credentialId).toBe(bound.credentialId);
+    });
+
+    it("refuses to unbind the agent model enabled schedules run in their space", async () => {
+      const bound = await seedBoundModel("Team GPT");
+      await db
+        .update(spacePackages)
+        .set({ modelId: bound.id })
+        .where(
+          and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, AGENT_ID)),
+        );
+      const schedule = await seedAgentSchedule();
+
+      const res = await send("PATCH", `/api/models/${bound.id}`, { credentialId: null });
+
+      await expectScheduled(res, [schedule.id]);
+    });
+
+    it("unbinds a model only disabled schedules would run", async () => {
+      const bound = await seedBoundModel("Team GPT");
+      await setDefaultModel(ctx.orgId, bound.id);
+      await seedAgentSchedule({ enabled: false });
+
+      const res = await send("PATCH", `/api/models/${bound.id}`, { credentialId: null });
+
+      expect(res.status).toBe(200);
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, bound.id));
+      expect(row!.credentialId).toBeNull();
+    });
   });
 });

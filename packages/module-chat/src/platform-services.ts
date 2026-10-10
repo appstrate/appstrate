@@ -91,7 +91,7 @@ export interface ChatPlatformDeps {
    *
    * `subscription` is the one fact THIS module owns: the turn is served by the
    * in-process Pi engine on the org's own OAuth provider subscription, which
-   * makes it `credentialSource: "org"` whatever the preset resolves to. The
+   * makes it `credentialSource: "user"` whatever the preset resolves to. The
    * module reports it rather than deriving the credential source itself — it
    * has no model-registry access by design, so the platform keeps deriving the
    * rest. A subscription turn is NOT exempt: it runs inside the platform's own

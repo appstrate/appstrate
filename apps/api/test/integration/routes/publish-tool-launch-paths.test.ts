@@ -26,6 +26,7 @@
  * input, report the drop on read.
  */
 
+import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
@@ -135,7 +136,7 @@ describe("publish_file across every launch path", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
-      modelCascade: await resolveModelCascade(ctx.orgId, agent.id, null, null),
+      modelCascade: await resolveModelCascade(ctx.orgId, agent.id, null, NO_PAYER),
       input: {},
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
     });

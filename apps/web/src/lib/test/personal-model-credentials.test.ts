@@ -10,27 +10,8 @@ import { describe, it, expect } from "bun:test";
 import {
   credentialUpdateBody,
   personalApiKeyBody,
-  personalCredentialProviders,
   ownPersonalCredentials,
 } from "../personal-model-credentials.ts";
-
-describe("personalCredentialProviders", () => {
-  it("offers subscriptions and fixed-endpoint key providers, never a custom endpoint", () => {
-    const registry: {
-      providerId: string;
-      authMode: "api_key" | "oauth2";
-      baseUrlOverridable: boolean;
-    }[] = [
-      { providerId: "openai", authMode: "api_key", baseUrlOverridable: false },
-      { providerId: "openai-compatible", authMode: "api_key", baseUrlOverridable: true },
-      { providerId: "claude-code", authMode: "oauth2", baseUrlOverridable: false },
-    ];
-    expect(personalCredentialProviders(registry).map((p) => p.providerId)).toEqual([
-      "openai",
-      "claude-code",
-    ]);
-  });
-});
 
 describe("personalApiKeyBody", () => {
   it("owns the credential by the caller, with no endpoint override", () => {

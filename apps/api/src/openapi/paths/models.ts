@@ -56,6 +56,7 @@ export const modelsPaths = {
                     needs_reconnection: false,
                     aliased: false,
                     credentialId: "pk_abc123",
+                    binding: "org",
                     billed_to: "org",
                     contextWindow: 128000,
                     maxTokens: 16384,
@@ -163,7 +164,7 @@ export const modelsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential.",
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -223,10 +224,10 @@ export const modelsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time.",
+            "The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. `model_scheduled` — the model is served only by each member's own credential (`credentialId: null`) and enabled schedules with no model of their own and no agent model in their space would inherit it; the problem body carries `schedule_ids`.",
           content: {
             "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              schema: { $ref: "#/components/schemas/ScheduleIdsProblem" },
             },
           },
         },
@@ -555,17 +556,17 @@ export const modelsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential.",
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model a schedule names in `model_id_override`: a schedule spends organization credentials only, so change those schedules' model first.",
+            "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model enabled schedules run (through their override, their agent's model in their space, or the organization default): a schedule spends organization credentials only, so change those schedules' model first; the problem body carries `schedule_ids`.",
           content: {
             "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              schema: { $ref: "#/components/schemas/ScheduleIdsProblem" },
             },
           },
         },

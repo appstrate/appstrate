@@ -17,6 +17,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
 import type { ModulePrincipalPermissions } from "./principal-permissions.ts";
+import type { ModelPayer } from "./model-payer.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
@@ -1067,12 +1068,15 @@ export type BeforeUsageParams =
        *   platform's system model proxy, that seam dispatches its own
        *   `beforeUsage` with a `credentialSource` that IS known there.
        *
+       * - `"user"` — a member's own credential (key or subscription), for a
+       *   model the organization leaves to each member.
+       *
        * Naming note: this matches the `llm_usage.credential_source` ledger
        * column, which is what a metering module reconciles a run against after
        * the fact. The `runs.model_source` database column is the same concept
-       * under an older, persisted name — deliberately not renamed.
+       * under the persisted name `model_source`, deliberately not renamed.
        */
-      credentialSource: "system" | "org" | null;
+      credentialSource: ModelPayer | null;
       /**
        * Whose compute runs the work.
        *
@@ -1122,12 +1126,15 @@ export type BeforeUsageParams =
        * - `"system"` — the turn resolves to a platform-supplied model preset.
        * - `"org"` — the turn resolves to a model the organization configured
        *   with its own credential.
+       * - `"user"` — the turn resolves to the session user's own credential
+       *   (key or subscription), for a model the organization leaves to each
+       *   member.
        *
        * Never `null` here: a chat turn resolves its model on the platform,
        * before admission, so the fact is always determinable — unlike a
        * remote-origin run, which resolves its model elsewhere.
        */
-      credentialSource: "system" | "org";
+      credentialSource: ModelPayer;
       /**
        * Always `"platform"` for chat: a turn runs inside the platform's own
        * process, never on a caller-supplied host. Present rather than omitted
@@ -1170,8 +1177,8 @@ export interface RunStatusChangeParams {
   cost?: number;
   /** Duration in ms (only on terminal status). */
   duration?: number;
-  /** Model source: "system" or "org" (only on terminal status). */
-  modelSource?: string | null;
+  /** Model source: `system`, `org` or `user` (only on terminal status). */
+  modelSource?: ModelPayer | null;
   /**
    * Whether the underlying `packages` row is a shadow package (inline run).
    * Omitted for classic runs (treat as false). Consumers — e.g. the
@@ -1306,8 +1313,8 @@ export interface LlmUsageLedgerRow {
   contextType: "run" | "chat" | null;
   /** The run id / chat session id matching {@link contextType} (null when unattributed). */
   contextId: string | null;
-  /** Which credential set reached the provider: platform-provided or the org's own. */
-  credentialSource: "system" | "org" | null;
+  /** Whose credential reached the provider: the platform's, the organization's or a member's own. */
+  credentialSource: ModelPayer | null;
   /**
    * How much of {@link costUsd} is backed by real per-token rates.
    *
@@ -1385,7 +1392,7 @@ export interface PlatformServices {
     /**
      * Next VISIBLE ledger rows after `afterId` (exclusive, default 0), ordered
      * by `id` ASC, capped by `limit` (service default 500, max 1000). Optional
-     * `credentialSource` filters to rows stamped `system` / `org`.
+     * `credentialSource` filters to rows stamped with that payer.
      *
      * NOT every ledger row is visible. A remote run whose inference flows
      * through the platform's inference proxy is metered TWICE in the ledger:
@@ -1414,7 +1421,7 @@ export interface PlatformServices {
     list(args: {
       afterId?: number;
       limit?: number;
-      credentialSource?: "system" | "org";
+      credentialSource?: ModelPayer;
     }): Promise<LlmUsageLedgerRow[]>;
     /**
      * Highest ledger id `N` such that EVERY row with id ≤ `N` is settled — the
@@ -1538,10 +1545,10 @@ export interface PlatformServices {
    * the policy.
    *
    * `subscription` is the one fact the caller owns and the platform cannot
-   * derive: the turn runs on a provider subscription the organization
-   * authorized over OAuth (claude-code, codex), driven in-process rather than
-   * through the inference gateway. Such a turn is `credentialSource: "org"`
-   * whatever its preset resolves to, and it is dispatched like any other — it
+   * derive: the turn runs on a provider subscription authorized over OAuth
+   * (claude-code, codex), the organization's or the member's own, driven in-process rather than
+   * through the inference gateway. Its `credentialSource` is the owner of the
+   * credential it spends, like any turn, and it is dispatched like any other — it
    * still occupies the platform's own process. Splitting the responsibility
    * this way keeps the seam DRY: the caller reports what it knows, the platform
    * derives the rest from the model registry.

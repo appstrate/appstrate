@@ -17,6 +17,7 @@
  * that observable without touching the production call graph.
  */
 
+import { userPayer } from "../../../src/services/model-providers/payer.ts";
 import { describe, it, expect, beforeEach } from "bun:test";
 // Imported for its module-level boot: this suite calls the services directly,
 // and they read singletons (`initRunLimits`, the model/proxy registries) that
@@ -89,7 +90,7 @@ describe("inline run — one manifest memo across preflight and kickoff", () => 
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
-        payerUserId: ctx.user.id,
+        payer: userPayer(ctx.user.id),
         runId: `run_${crypto.randomUUID()}`,
         preflight: result,
         parsed: {},

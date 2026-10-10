@@ -239,10 +239,10 @@ describe("chat admission gate (handleChatStream)", () => {
   });
 
   it("gates the subscription branch too, reporting subscription: true", async () => {
-    // The escape this closes: a subscription turn used to skip admission
-    // entirely. It reports the one fact this module owns — it chose the
-    // in-process engine — and the platform derives `credentialSource: "org"`
-    // from it (see apps/api check-usage-allowed.test.ts).
+    // The escape this closes: a subscription turn skipping admission entirely.
+    // It reports the one fact this module owns — it chose the in-process
+    // engine — and the platform derives `credentialSource: "user"` from it
+    // (see apps/api check-usage-allowed.test.ts).
     const gateArgs: Parameters<ChatPlatformDeps["checkUsageAllowed"]>[0][] = [];
     const c = fakeContext({
       orgId: ctx.orgId,

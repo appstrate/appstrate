@@ -26,6 +26,7 @@ import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { createOrgModel, listOrgModels } from "../../../src/services/org-models.ts";
 import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
+import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 import { logger } from "../../../src/lib/logger.ts";
 
 // `resolveChatModel` reads the system model registry; the HTTP harness initializes it at boot.
@@ -113,7 +114,7 @@ describe("resolveChatModel", () => {
       expect(resolution.model.credentialId).toBe(credentialId);
       expect(resolution.model.accessToken).toBe("test-access");
       // The binding reads the row's Pi key from the listing, not its Appstrate id.
-      const row = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === presetId);
+      const row = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === presetId);
       expect(row?.pi_provider).toBe("openai");
     } else {
       throw new Error(`expected a model resolution, got ${JSON.stringify(resolution)}`);
@@ -283,6 +284,41 @@ describe("recordChatUsage — pricing provenance", () => {
     await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
 
     expect((await storedRow(sessionId))!.credentialId).toBe(credentialId);
+  });
+
+  /** A subscription credential owned by `ownerUserId` (`null`: the organization's). */
+  async function seedSubscription(ownerUserId: string | null): Promise<string> {
+    const row = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Test OAuth",
+      accessToken: "token",
+      refreshToken: "test-refresh",
+      expiresAt: Date.now() + 3_600_000,
+      createdBy: ctx.user.id,
+      ownerUserId,
+    });
+    return row.id;
+  }
+
+  it("records a turn on a member's own subscription as that member's spend", async () => {
+    const sessionId = await seedSession("chs_user_payer");
+    const credentialId = await seedSubscription(ctx.user.id);
+    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+
+    const row = await storedRow(sessionId);
+    expect(row!.credentialSource).toBe("user");
+    expect(row!.payerUserId).toBe(ctx.user.id);
+  });
+
+  it("records a turn on an organization subscription as the organization's spend, with no payer", async () => {
+    const sessionId = await seedSession("chs_org_payer");
+    const credentialId = await seedSubscription(null);
+    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+
+    const row = await storedRow(sessionId);
+    expect(row!.credentialSource).toBe("org");
+    expect(row!.payerUserId).toBeNull();
   });
 
   it("marks a turn on a model with no rates `unpriced` instead of a silent $0", async () => {

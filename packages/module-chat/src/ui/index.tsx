@@ -158,8 +158,8 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
-  /** Whether the organization allows personal model credentials (see `ChatHost`). */
-  personalModelCredentials: boolean;
+  /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
+  personalModelCredentials: boolean | undefined;
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
 }

@@ -482,10 +482,9 @@ export async function handleChatStream(
   // `beforeUsage` (chat context) with that fact; a metering module quotes it and
   // decides.
   //
-  // A subscription turn used to skip this entirely, on the reasoning that it
-  // spends the user's OWN credential (`credentialSource` `org`) and therefore
-  // costs nothing. That is the module's call to make, not the platform's: the
-  // turn is driven by the IN-PROCESS Pi engine, so the platform funds its
+  // A subscription turn is gated like any other. It spends the user's OWN
+  // credential (`credentialSource` `user`), so the org pays no inference for it,
+  // but the turn is driven by the IN-PROCESS Pi engine: the platform funds its
   // compute even when it funds no inference, and a module gating on
   // subscription status must be able to refuse it. `subscription` reports the
   // credential mode, and the platform derives the credential source from it.

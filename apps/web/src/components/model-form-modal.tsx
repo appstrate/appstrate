@@ -166,18 +166,21 @@ function ModelForm({
         provider: selectedProvider,
         apiShape,
         baseUrl,
-      }).filter((k) => k.owner_type === "org" && k.authMode !== "oauth2"),
+      }).filter((k) => k.bindable),
     [credentialsQuery.data, selectedProvider, apiShape, baseUrl],
   );
   const selectedCredential = availableCredentials.find((k) => k.id === credentialId);
 
-  // Offered where a member's own credential can serve the model: a custom
-  // endpoint is the operator's to describe, an alias hides its binding, and a
-  // listing that still needs a key to ask with has none to lend.
+  // Offered where a member's own credential can serve the model: the provider
+  // allows personal credentials, an alias hides its binding, and a listing that
+  // still needs a key to ask with has none to lend.
   const eachMemberOffered =
-    !!selectedProvider && !overridable && !model?.aliased && source !== "discover";
-  // An unbound row (`credentialId: null`) is the saved form of the same choice.
-  const [eachMember, setEachMember] = useState(() => !!model && model.credentialId === null);
+    !!selectedProvider &&
+    selectedProvider.personal_allowed &&
+    !model?.aliased &&
+    source !== "discover";
+  // A member-served row (`binding: "member"`) is the saved form of the same choice.
+  const [eachMember, setEachMember] = useState(() => !!model && model.binding === "member");
   const unbound = eachMemberOffered && eachMember;
 
   /** Step 1 answered: an endpoint that parses, and something that serves it. */

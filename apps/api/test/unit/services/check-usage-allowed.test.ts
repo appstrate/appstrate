@@ -8,7 +8,7 @@
  * dumb, but that resolution is REPORTED, not used to pre-filter:
  *
  *   - every turn dispatches the hook, carrying `credentialSource`
- *     (`"system"` | `"org"`) and `executionPlane: "platform"` (a chat turn
+ *     (`"system"` | `"org"` | `"user"`) and `executionPlane: "platform"` (a chat turn
  *     always runs in the platform's own process);
  *   - an org-credential turn is dispatched too — the platform no longer
  *     declares it free, the module quotes it (typically at zero) and decides;
@@ -16,8 +16,9 @@
  *   - a metering module's rejection flows straight back (a 402 the route turns
  *     into problem+json);
  *   - a subscription turn (`subscription: true`, the one fact the chat module
- *     owns) is `"org"` whatever its preset resolves to, and is dispatched like
- *     any other — it runs inline in the platform's own process;
+ *     owns) reports the owner of the credential its preset resolves to, and is
+ *     dispatched like any other — it runs inline in the platform's own process;
+ *   - a preset that resolves to nothing reports nothing: no hook, no spend;
  *   - an organization whose deletion is reserved is refused before any of that,
  *     hook or no hook: its usage rows would be cascade-deleted unaccounted for.
  *   - a model no credential of the session user serves is refused, hook or no
@@ -178,9 +179,9 @@ describe("checkUsageAllowed", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("dispatches the hook for a preset that does not resolve, reporting credentialSource 'org'", async () => {
-    // An unknown preset fails at model resolution, but the admission hook is not
-    // skipped: the module decides on every turn, and the turn reports "org".
+  it("admits a preset that does not resolve without dispatching the hook: nothing can be spent", async () => {
+    // An unknown preset fails at model resolution downstream; there is no payer
+    // to report, so no source is invented for the module to quote.
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances(
       [gateModule({ code: "over_cap", message: "blocked", status: 402 }, calls)],
@@ -195,16 +196,8 @@ describe("checkUsageAllowed", () => {
       userId: USER_ID,
     });
 
-    expect(result).toEqual({ code: "over_cap", message: "blocked", status: 402 });
-    expect(calls).toEqual([
-      {
-        orgId: ORG_ID,
-        context: "chat",
-        sessionId: "chs_missing",
-        credentialSource: "org",
-        executionPlane: "platform",
-      },
-    ]);
+    expect(result).toBeNull();
+    expect(calls).toEqual([]);
   });
 
   it("refuses a turn in an organization whose deletion is reserved", async () => {
@@ -364,11 +357,9 @@ describe("checkUsageAllowed", () => {
     expect((calls[0] as { sessionId: string | null }).sessionId).toBeNull();
   });
 
-  it("reports a subscription turn as credentialSource 'org' even on a system-registered preset", async () => {
-    // A subscription turn spends the org's OWN OAuth provider subscription, so
-    // the credential source is `org` whatever the preset resolves to — the
-    // registry lookup must not win over the fact the caller reported. Pinned on
-    // the SYSTEM preset precisely because that is where the two disagree.
+  it("reports a subscription turn by the credential its preset resolves to", async () => {
+    // The payer is the owner of the credential the turn spends, not the
+    // credential mode the caller reported: a system preset is the platform's.
     const calls: BeforeUsageParams[] = [];
     await loadModulesFromInstances([gateModule(null, calls)], fakeInitCtx());
 
@@ -386,7 +377,7 @@ describe("checkUsageAllowed", () => {
         orgId: ORG_ID,
         context: "chat",
         sessionId: "chs_sub",
-        credentialSource: "org",
+        credentialSource: "system",
         // The in-process Pi engine still runs inside the platform's process.
         executionPlane: "platform",
       },
@@ -413,6 +404,8 @@ describe("checkUsageAllowed", () => {
 
     expect(result).toEqual({ code: "subscription_suspended", message: "Suspended", status: 402 });
     expect(calls).toHaveLength(1);
+    // An organization-bound preset is the organization's spend, subscription or not.
+    expect(calls[0]!.credentialSource).toBe("org");
   });
 
   it("rejects a caller that omits `subscription` (module built against core < 6.0.0)", async () => {
@@ -449,7 +442,7 @@ describe("checkUsageAllowed", () => {
     ).resolves.toBeNull();
   });
 
-  it("admits a turn on an unbound model the session user holds a personal key for, reporting credentialSource 'org'", async () => {
+  it("admits a turn on an unbound model the session user holds a personal key for, reporting credentialSource 'user'", async () => {
     const presetId = await seedUnboundOpenAiPreset();
     await seedOrgModelProviderKey({
       orgId: ORG_ID,
@@ -476,7 +469,7 @@ describe("checkUsageAllowed", () => {
         orgId: ORG_ID,
         context: "chat",
         sessionId: "chs_personal",
-        credentialSource: "org",
+        credentialSource: "user",
         executionPlane: "platform",
       },
     ]);

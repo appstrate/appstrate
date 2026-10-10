@@ -41,10 +41,12 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import {
+  assertAgentModelSchedulable,
   assertExplicitModelExists,
   resolveModel,
   validateGenerationOverride,
 } from "../services/org-models.ts";
+import { NO_PAYER } from "../services/model-providers/payer.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -444,7 +446,7 @@ export function createAgentsRouter() {
       const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
-        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, null));
+        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, NO_PAYER));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
         generation = validateGenerationOverride(generation, selectedModel, "generation");
@@ -458,6 +460,7 @@ export function createAgentsRouter() {
         );
       }
 
+      await assertAgentModelSchedulable(scope.orgId, scope.spaceId, agent.id, data.modelId);
       await updateSpacePackage(scope, agent.id, {
         modelId: data.modelId,
         ...(generation !== undefined ? { generationConfig: generation } : {}),

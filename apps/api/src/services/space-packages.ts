@@ -19,7 +19,7 @@
  * too, but only UPDATES a column in place on a row already placed.
  */
 
-import { eq, and, exists, sql } from "drizzle-orm";
+import { eq, and, exists, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
 import {
@@ -1277,4 +1277,30 @@ async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: T
       { budget: CHAT_SKILLS_CONTENT_BUDGET_CHARS, total },
     );
   }
+}
+
+/**
+ * The model each (space, package) placement sets, keyed `spaceId:packageId`; a
+ * key with no placement row is absent.
+ */
+export async function placementModelIds(
+  keys: readonly { spaceId: string; packageId: string }[],
+  executor: DbOrTx = db,
+): Promise<Map<string, string | null>> {
+  if (keys.length === 0) return new Map();
+  const rows = await executor
+    .select({
+      spaceId: spacePackages.spaceId,
+      packageId: spacePackages.packageId,
+      modelId: spacePackages.modelId,
+    })
+    .from(spacePackages)
+    .where(
+      or(
+        ...keys.map((k) =>
+          and(eq(spacePackages.spaceId, k.spaceId), eq(spacePackages.packageId, k.packageId)),
+        ),
+      ),
+    );
+  return new Map(rows.map((r) => [`${r.spaceId}:${r.packageId}`, r.modelId]));
 }

@@ -2,12 +2,14 @@
 
 import type { Context } from "hono";
 import { and, eq } from "drizzle-orm";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { isUserPrincipal } from "../../lib/principal.ts";
 import { lookupCatalogModel } from "../model-catalog.ts";
 import { personalModelCredentialsAllowed } from "./credentials.ts";
+import { NO_PAYER, userPayer, type Payer } from "./payer.ts";
 import { getModelProvider } from "./registry.ts";
 
 /** The catalog family a provider's models belong to (a wrapper serves its catalog provider's ids). */
@@ -16,7 +18,7 @@ function familyOf(providerId: string): string {
 }
 
 /** A subscription (oauth2) credential: always personal, never served by the LLM proxy. */
-export function isSubscription(providerId: string): boolean {
+function isSubscription(providerId: string): boolean {
   return getModelProvider(providerId)?.authMode === "oauth2";
 }
 
@@ -40,14 +42,15 @@ interface PersonalCredential {
 }
 
 /**
- * The personal credentials `payerUserId` owns in `orgId`, read once per call.
+ * The personal credentials `payer` owns in `orgId`, read once per call.
  * The owner query runs first (indexed, and almost always empty); the org policy
  * is read only when there is a credential to switch off.
  */
 export async function listPersonalCredentials(
   orgId: string,
-  payerUserId: string,
+  payer: Payer,
 ): Promise<PersonalCredential[]> {
+  if (payer.kind !== "user") return [];
   const rows = await db
     .select({
       id: modelProviderCredentials.id,
@@ -58,7 +61,7 @@ export async function listPersonalCredentials(
     .where(
       and(
         eq(modelProviderCredentials.orgId, orgId),
-        eq(modelProviderCredentials.ownerUserId, payerUserId),
+        eq(modelProviderCredentials.ownerUserId, payer.userId),
       ),
     );
   if (rows.length === 0) return [];
@@ -90,10 +93,31 @@ export function applicableCredentialIds(
 }
 
 /**
- * The user whose personal credentials may serve a call of this request: the caller
- * when it is the platform user itself (see `isUserPrincipal`), never a delegate
- * (API key, third-party OAuth token) or an end user.
+ * The payer of a call of this request: the caller when it is the platform user
+ * itself (see `isUserPrincipal`), never a delegate (API key, third-party OAuth
+ * token) or an end user.
  */
-export function requestPayerUserId(c: Context<AppEnv>): string | null {
-  return isUserPrincipal(c) ? c.get("user").id : null;
+export function requestPayer(c: Context<AppEnv>): Payer {
+  return isUserPrincipal(c) ? userPayer(c.get("user").id) : NO_PAYER;
+}
+
+/**
+ * A member may own a credential of this provider, and a model on it may be left to
+ * each member: its endpoint is fixed.
+ */
+export function providerAllowsPersonalCredentials(
+  def: Pick<ModelProviderDefinition, "baseUrlOverridable">,
+): boolean {
+  return !def.baseUrlOverridable;
+}
+
+/**
+ * An organization model may be bound to this credential: an organization API key,
+ * never a member's own or a subscription.
+ */
+export function isBindableCredential(c: {
+  ownerUserId: string | null;
+  providerId: string;
+}): boolean {
+  return c.ownerUserId === null && !isSubscription(c.providerId);
 }

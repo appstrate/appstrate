@@ -21,6 +21,7 @@
  *    strength of a row that total does not include.
  */
 
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
@@ -29,7 +30,7 @@ import { recordLlmUsage } from "../../../src/services/llm-usage-ledger.ts";
 import { computeRunSpend } from "../../../src/services/state/runs.ts";
 import { writeRunnerLedgerRow } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import { db } from "@appstrate/db/client";
-import { llmUsage, type CredentialSource, type InferenceRoute } from "@appstrate/db/schema";
+import { llmUsage, type InferenceRoute } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 
@@ -341,13 +342,14 @@ describe("runner ledger row — the run's inference route decides", () => {
 
   async function writeRunnerRow(
     run: { id: string; inferenceRoute: InferenceRoute | null },
-    modelSource: CredentialSource,
+    modelSource: ModelPayer,
   ) {
     const row = {
       cost: 1,
       usage: USAGE,
       modelSource,
       modelCredentialId: null,
+      payerUserId: null,
       inferenceRoute: run.inferenceRoute,
       modelCost: RATES,
     };

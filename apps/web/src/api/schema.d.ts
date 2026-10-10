@@ -6008,6 +6008,10 @@ export interface components {
             owner_id: string | null;
             /** @description Display name of `owner_id`; `null` for `org`. */
             owner_name: string | null;
+            /** @description The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`, and `reconnect` to its owner holding `model-provider-credentials:connect` when it is an OAuth credential that needs reconnection. */
+            allowed_actions: ("edit" | "delete" | "test" | "reconnect")[];
+            /** @description Whether an organization model may be bound to this credential: `true` for an organization API key (not a subscription), `false` for a personal credential, an organization subscription or a built-in credential. */
+            bindable: boolean;
             created_by: string | null;
             /** Format: date-time */
             createdAt: string;
@@ -6145,13 +6149,18 @@ export interface components {
             iconUrl: string | null;
             /** @enum {string} */
             source: "built-in" | "custom";
-            /** @description ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed. */
+            /** @description The bound organization credential; `null` when `binding` is `member` or `managed`. `null` for managed models — binding not exposed. */
             credentialId: string | null;
             /**
-             * @description Who pays for a call to this model, for the caller. `org` — a built-in model or a model bound to an organization credential: the organization (or the platform) pays whoever calls (a dead credential is `needs_reconnection`). `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — an unbound model nothing of the caller's serves: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.
+             * @description How the model is served. `org` — bound to one credential (an organization credential, or the platform key for a built-in model). `member` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.
+             * @enum {string}
+             */
+            binding: "org" | "member" | "managed";
+            /**
+             * @description Who pays for a call to this model, for the caller. `system` — a built-in model, paid by the platform. `org` — bound to an organization credential: the organization pays whoever calls (a dead credential is `needs_reconnection`). `user` — unbound, and served by one of the caller's own credentials. `null` — unbound and nothing of the caller's serves it: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there.
              * @enum {string|null}
              */
-            billed_to: "user" | "org" | null;
+            billed_to: "system" | "org" | "user" | null;
             /** @description Cost in USD per million tokens */
             cost?: {
                 input?: number;
@@ -6268,8 +6277,8 @@ export interface components {
             api_version?: string;
             /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
             dashboard_sso_enabled?: boolean;
-            /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. */
-            personal_model_credentials?: boolean;
+            /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
+            personal_model_credentials: boolean;
         };
         Organization: {
             id: string;
@@ -6586,10 +6595,10 @@ export interface components {
             /** @description Model label used at run time */
             model_label: string | null;
             /**
-             * @description Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.
+             * @description Who paid for the run's model: 'system' (platform-provided), 'org' (an organization credential) or 'user' (the launching member's own personal credential). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch.
              * @enum {string|null}
              */
-            model_source: "system" | "org" | null;
+            model_source: "system" | "org" | "user" | null;
             /** @description Run cost in USD */
             cost: number | null;
             /**
@@ -6820,6 +6829,11 @@ export interface components {
             unread_count: number;
             /** @description Highest run number this schedule ever produced; 0 when it never fired. */
             last_run_number: number;
+        };
+        /** @description A problem that may name schedules. On `model_scheduled` — the write would leave enabled schedules running a model served only by each member's own credential, which a schedule has none of — `schedule_ids` lists them. A schedule's effective model is its `model_id_override`, else its agent's model in its space, else the organization default. Change those schedules' model, or bind the model to an organization credential. */
+        ScheduleIdsProblem: components["schemas"]["ProblemDetail"] & {
+            /** @description On `model_scheduled`: the enabled schedules the write would leave on that model. */
+            schedule_ids?: string[];
         };
         /** @description Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id. */
         ShareTarget: {
@@ -8189,6 +8203,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description `model_scheduled` — enabled schedules of this agent in this space with no `model_id_override` would run a model served only by each member's own credential (the model named, or the organization default for `null`), and a schedule has none to spend. The problem body carries `schedule_ids`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ScheduleIdsProblem"];
+                };
+            };
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
@@ -8846,7 +8869,7 @@ export interface operations {
                     };
                     /** @description Temperature/reasoning overrides applied to every run fired by this schedule. */
                     generation_config_override?: components["schemas"]["ModelGenerationSettings"];
-                    /** @description Override the persisted model on every run triggered by this schedule. It must be bound to an organization credential (a schedule never spends a member's own credential): a model each member serves with their own is a 409 `model_credential_required`. */
+                    /** @description Override the persisted model on every run triggered by this schedule. It must be bound to an organization credential (a schedule never spends a member's own credential): a model each member serves with their own is a 409 `model_credential_required`. When unset, the effective model is the agent's model in the space, else the organization default, and the same rule applies to it. */
                     model_id_override?: string;
                     /** @description Override the persisted proxy on every run triggered by this schedule. */
                     proxy_id_override?: string;
@@ -8932,7 +8955,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description `no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`). */
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: `model_id_override` names a model served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -15997,6 +16020,12 @@ export interface operations {
                      *           "owner_type": "org",
                      *           "owner_id": null,
                      *           "owner_name": null,
+                     *           "allowed_actions": [
+                     *             "edit",
+                     *             "delete",
+                     *             "test"
+                     *           ],
+                     *           "bindable": false,
                      *           "created_by": "usr_cm3abc123",
                      *           "createdAt": "2026-01-10T08:00:00Z",
                      *           "updatedAt": "2026-01-10T08:00:00Z"
@@ -16197,7 +16226,7 @@ export interface operations {
                 limit?: number;
                 /** @description Number of items to skip before the first returned item. */
                 offset?: components["parameters"]["Offset"];
-                /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400. */
+                /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400. */
                 fields?: string;
             };
             header?: {
@@ -16232,6 +16261,8 @@ export interface operations {
                             baseUrlOverridable?: boolean;
                             /** @enum {string} */
                             authMode?: "api_key" | "oauth2";
+                            /** @description Whether members may bring their own credential for this provider. `false` when the endpoint is the organization's to choose: a personal credential is refused with `personal_credential_custom_endpoint`. */
+                            personal_allowed?: boolean;
                             /** @description Surface this provider in the picker's 'Featured' group (above an 'Other' divider). Module-supplied metadata; never gates writes — any registry entry stays selectable. */
                             featured?: boolean;
                             /** @description The provider serves more models than `models` lists: they are searched live on the provider (`GET /api/models/openrouter`) and any model id is accepted, not only the listed ones. */
@@ -16304,6 +16335,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestResult"];
                 };
             };
+            /** @description Validation error, including `personal_credential_custom_endpoint` (param `providerId`) when a personal credential is tested on a provider whose endpoint is the organization's to choose. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -16388,6 +16420,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelProviderCredential"];
                 };
             };
+            /** @description Validation error. `invalid_request` (param `api_key`) when `api_key` is sent for an OAuth credential: reconnect it instead. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             /** @description Forbidden — caller lacks `model-provider-credentials:write` (generic RBAC) to change an organization credential, or `operation_not_allowed` when `id` refers to a built-in/system credential that cannot be modified. */
@@ -16674,6 +16707,7 @@ export interface operations {
                      *           "needs_reconnection": false,
                      *           "aliased": false,
                      *           "credentialId": "pk_abc123",
+                     *           "binding": "org",
                      *           "billed_to": "org",
                      *           "contextWindow": 128000,
                      *           "maxTokens": 16384,
@@ -16751,7 +16785,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
-            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential. */
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -16801,13 +16835,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. */
+            /** @description The model cannot become the organization default. `model_disabled` — the row is switched off (`enabled: false`), so model resolution skips it. `model_needs_reconnection` — its stored credential can no longer be used for inference (see the `needs_reconnection` field on `OrgModel`): such a model is listed so it can be inspected or detached, but every run and chat would fail at inference time. `model_scheduled` — the model is served only by each member's own credential (`credentialId: null`) and enabled schedules with no model of their own and no agent model in their space would inherit it; the problem body carries `schedule_ids`. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ScheduleIdsProblem"];
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
@@ -17093,18 +17127,18 @@ export interface operations {
                     "application/json": components["schemas"]["OrgModel"];
                 };
             };
-            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential. */
+            /** @description Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model a schedule names in `model_id_override`: a schedule spends organization credentials only, so change those schedules' model first. */
+            /** @description `model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model enabled schedules run (through their override, their agent's model in their space, or the organization default): a schedule spends organization credentials only, so change those schedules' model first; the problem body carries `schedule_ids`. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ScheduleIdsProblem"];
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
@@ -18708,7 +18742,8 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "api_version": "2026-03-21"
+                     *       "api_version": "2026-03-21",
+                     *       "personal_model_credentials": true
                      *     }
                      */
                     "application/json": components["schemas"]["OrgSettings"];
@@ -18736,7 +18771,7 @@ export interface operations {
                     api_version?: string;
                     /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
                     dashboard_sso_enabled?: boolean;
-                    /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. */
+                    /** @description Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH. */
                     personal_model_credentials?: boolean;
                 };
             };
@@ -23849,7 +23884,7 @@ export interface operations {
             /** @description Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NoPublishedVersion"];
-            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: `model_id_override` names a model served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
+            /** @description `missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -25130,13 +25165,13 @@ export interface operations {
             /** @description The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
+            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Or `modelId` would leave enabled schedules of this agent in this space with no `model_id_override` running a model served only by each member's own credential — the model named, or the organization default for `null` (`model_scheduled`, with the `schedule_ids` extension). Nothing in the patch is written. */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["ScheduleIdsProblem"];
                 };
             };
             /** @description Enforcing a skill while a latest published archive cannot be read (`version_artifact_unavailable`, `detail` naming the package): this skill's own, or that of a skill this space already enforces — the budget check reads every one, and the space's chats already refuse their turns until that skill is republished or released. Nothing in the patch is written. */

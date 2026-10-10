@@ -47,7 +47,8 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage, runs, type CredentialSource } from "@appstrate/db/schema";
+import { llmUsage, runs } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
@@ -94,13 +95,15 @@ export interface LlmUsageEntry {
   /** Proxy dedup key — required on proxy rows, null on runner rows. */
   requestId?: string | null;
   /** Which credential set reached the provider. */
-  credentialSource?: CredentialSource | null;
+  credentialSource?: ModelPayer | null;
   /**
    * The `model_provider_credentials` row that served the call — the attribution
    * of a personal credential to its owner. Null for a platform-supplied key and
    * for rows written before the column existed.
    */
   credentialId?: string | null;
+  /** The member whose own credential served the call: set iff `credentialSource` is `user`. */
+  payerUserId?: string | null;
 }
 
 export interface RecordLlmUsageOptions {
@@ -251,6 +254,7 @@ export async function recordLlmUsage(
     api: entry.api ?? null,
     credentialSource: entry.credentialSource ?? null,
     credentialId: entry.credentialId ?? null,
+    payerUserId: entry.payerUserId ?? null,
     inputTokens: entry.inputTokens,
     outputTokens: entry.outputTokens,
     cacheReadTokens: entry.cacheReadTokens ?? null,

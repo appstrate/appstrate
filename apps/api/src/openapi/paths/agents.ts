@@ -586,6 +586,15 @@ export const agentsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`model_scheduled` — enabled schedules of this agent in this space with no `model_id_override` would run a model served only by each member's own credential (the model named, or the organization default for `null`), and a schedule has none to spend. The problem body carries `schedule_ids`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ScheduleIdsProblem" },
+            },
+          },
+        },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },

@@ -39,6 +39,7 @@ import { ApiError } from "../../../src/lib/errors.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import {
   assertCredentialEditable,
+  credentialActions,
   mayProbeCredential,
   createApiKeyCredential,
   createOAuthCredential,
@@ -68,6 +69,7 @@ const orgAdmin = (orgId: string) => ({
   readsOrg: true,
   writesOrg: true,
   deletesOrg: true,
+  connects: true,
 });
 
 getTestApp(); // boots the model and provider registries
@@ -81,6 +83,7 @@ const adminCaller = (orgId: string): ModelCredentialCaller => ({
   readsOrg: true,
   writesOrg: true,
   deletesOrg: true,
+  connects: true,
 });
 
 describe("model-provider-credentials service — api_key path", () => {
@@ -372,12 +375,16 @@ describe("model-provider-credentials service — oauth path", () => {
       refreshToken: "r",
       expiresAt: null,
     });
-    await expect(
-      // A subscription is its holder's: only they edit it.
-      updateModelProviderCredential({ ...orgAdmin(ctx.orgId), userId: ctx.user.id }, id, {
-        apiKey: "intruder",
-      }),
-    ).rejects.toThrow(/Cannot rotate apiKey/);
+    // A subscription is its holder's: only they edit it.
+    const error = await updateModelProviderCredential(
+      { ...orgAdmin(ctx.orgId), userId: ctx.user.id },
+      id,
+      { apiKey: "intruder" },
+    ).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).code).toBe("invalid_request");
+    expect((error as ApiError).param).toBe("api_key");
   });
 
   it("updateOAuthCredentialTokens writes fresh tokens and preserves email/account", async () => {
@@ -868,6 +875,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       readsOrg: false,
       writesOrg: false,
       deletesOrg: false,
+      connects: true,
     };
     const readerCaller: ModelCredentialCaller = {
       ...memberCaller,
@@ -910,6 +918,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       readsOrg: true,
       writesOrg: true,
       deletesOrg: true,
+      connects: true,
     };
     await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
 
@@ -945,6 +954,7 @@ describe("model-provider-credentials service — visibility and the personal-cre
       readsOrg: true,
       writesOrg: false,
       deletesOrg: false,
+      connects: false,
     };
     const writer = { ...base, writesOrg: true };
     const deleter = { ...base, deletesOrg: true };
@@ -1060,5 +1070,65 @@ describe("model-provider-credentials service — membership lock on creation", (
 
     // Control: the same call for a member of the org succeeds.
     expect(await createFor(member.user.id)).toEqual(expect.any(String));
+  });
+});
+
+describe("model-provider-credentials service — credentialActions", () => {
+  const reader = {
+    orgId: "org",
+    userId: "reader",
+    readsOrg: true,
+    writesOrg: false,
+    deletesOrg: false,
+    connects: false,
+  } satisfies ModelCredentialCaller;
+  const admin = { ...reader, userId: "admin", writesOrg: true, deletesOrg: true };
+  const owner = { ...reader, userId: "owner", connects: true };
+  const orgKey = {
+    source: "custom",
+    ownerUserId: null,
+    authMode: "api_key",
+    needsReconnection: false,
+  } as const;
+  const personalKey = { ...orgKey, ownerUserId: "owner" } as const;
+  const personalSubscription = {
+    ...personalKey,
+    authMode: "oauth2",
+    needsReconnection: true,
+  } as const;
+
+  it("a reader without write gets only test on an organization credential", () => {
+    expect(credentialActions(reader, orgKey, true)).toEqual(["test"]);
+  });
+
+  it("an admin gets delete alone on a member's personal credential", () => {
+    expect(credentialActions(admin, personalKey, true)).toEqual(["delete"]);
+  });
+
+  it("an owner with connect gets edit, delete and test on its own credential while the policy is on", () => {
+    expect(credentialActions(owner, personalKey, true)).toEqual(["edit", "delete", "test"]);
+  });
+
+  it("the policy off removes test from an owner's personal credential", () => {
+    expect(credentialActions(owner, personalKey, false)).toEqual(["edit", "delete"]);
+  });
+
+  it("an owner of a flagged subscription also gets reconnect", () => {
+    expect(credentialActions(owner, personalSubscription, true)).toEqual([
+      "edit",
+      "delete",
+      "test",
+      "reconnect",
+    ]);
+  });
+
+  it("a reader gets only test on a built-in credential", () => {
+    expect(
+      credentialActions(
+        reader,
+        { source: "built-in", ownerUserId: null, authMode: "api_key", needsReconnection: false },
+        true,
+      ),
+    ).toEqual(["test"]);
   });
 });

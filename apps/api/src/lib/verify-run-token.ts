@@ -27,6 +27,8 @@ export async function verifyRunToken(c: Context): Promise<{
     modelCredentialId: string | null;
     /** The triggering API key (`runs.api_key_id`); null for session, schedule and end-user runs. */
     apiKeyId: string | null;
+    /** The member whose own credential pays the run (`runs.payer_user_id`); null when none does. */
+    payerUserId: string | null;
     /** The model the run launched with — see `runs.model_id`. */
     modelId: string | null;
     /** Who serves the run's inference — see `runs.inference_route`. */
@@ -84,6 +86,7 @@ export async function verifyRunToken(c: Context): Promise<{
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
       apiKeyId: runs.apiKeyId,
+      payerUserId: runs.payerUserId,
       modelId: runs.modelId,
       inferenceRoute: runs.inferenceRoute,
       runOrigin: runs.runOrigin,
@@ -119,6 +122,7 @@ export async function verifyRunToken(c: Context): Promise<{
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
       apiKeyId: run.apiKeyId ?? null,
+      payerUserId: run.payerUserId ?? null,
       modelId: run.modelId,
       inferenceRoute: run.inferenceRoute,
       runOrigin: run.runOrigin,

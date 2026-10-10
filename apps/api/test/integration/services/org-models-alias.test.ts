@@ -12,7 +12,7 @@
  * sidecar swap build on the flag landing correctly here.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { listOrgModels, loadModel, updateOrgModel } from "../../../src/services/org-models.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { orgModels } from "@appstrate/db/schema";
@@ -21,8 +21,14 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { NO_PAYER } from "../../../src/services/model-providers/payer.ts";
 
 getTestApp(); // boots the model registry
+
+// The unbind and alias races below need openai and anthropic at their production endpoint.
+beforeAll(() => seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] }));
+afterAll(() => seedTestModelProviders());
 
 describe("org-models — aliased flag (DB path)", () => {
   let ctx: TestContext;
@@ -53,11 +59,11 @@ describe("org-models — aliased flag (DB path)", () => {
       enabled: true,
     });
 
-    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.aliased).toBe(false);
 
-    const resolved = await loadModel(ctx.orgId, model.id, null);
+    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
     expect(resolved).not.toBeNull();
     expect(resolved!.aliased).toBe(false);
     // Non-aliased: alias id and real model id describe the same model.
@@ -77,11 +83,11 @@ describe("org-models — aliased flag (DB path)", () => {
       aliased: true,
     });
 
-    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id);
     expect(listed).toBeDefined();
     expect(listed!.aliased).toBe(true);
 
-    const resolved = await loadModel(ctx.orgId, model.id, null);
+    const resolved = await loadModel(ctx.orgId, model.id, NO_PAYER);
     expect(resolved).not.toBeNull();
     expect(resolved!.aliased).toBe(true);
     // The user-selected alias is the row id; the real backing is hidden behind it.
@@ -111,9 +117,9 @@ describe("org-models — aliased flag (DB path)", () => {
       medium: "supported",
       high: "supported",
     } as const;
-    const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
+    const listed = (await listOrgModels(ctx.orgId, NO_PAYER)).find((m) => m.id === model.id);
     expect(listed!.generation?.reasoning.levels).toEqual(levels);
-    expect((await loadModel(ctx.orgId, model.id, null))!.generation?.reasoning.levels).toEqual(
+    expect((await loadModel(ctx.orgId, model.id, NO_PAYER))!.generation?.reasoning.levels).toEqual(
       levels,
     );
   });

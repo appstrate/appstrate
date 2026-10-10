@@ -87,10 +87,12 @@ import { removeScheduleJobs } from "../services/scheduler.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
+  assertAgentModelSchedulable,
   assertExplicitModelExists,
   resolveModel,
   validateGenerationOverride,
 } from "../services/org-models.ts";
+import { NO_PAYER } from "../services/model-providers/payer.ts";
 
 /**
  * The wire shape every space response carries: the row plus the CALLER's
@@ -930,7 +932,7 @@ export function createSpacesRouter() {
       const explicitModel =
         data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
-        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId, null));
+        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId, NO_PAYER));
 
       if (generationConfig && Object.keys(generationConfig).length > 0) {
         generationConfig = validateGenerationOverride(
@@ -954,6 +956,10 @@ export function createSpacesRouter() {
           selectedModel?.generation,
         );
       }
+    }
+
+    if (placement && data.modelId !== undefined) {
+      await assertAgentModelSchedulable(orgId, spaceId, packageId, data.modelId);
     }
 
     const { generation_config: _generationConfig, chat_enforced: chatEnforced, ...rest } = data;

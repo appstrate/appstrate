@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CredentialSource } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import type { AppstrateRunPlan, FileReference } from "./run-launcher/types.ts";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { LoadedPackage } from "../types/index.ts";
@@ -12,6 +12,7 @@ import {
   scopeFromActor,
 } from "./state/package-persistence.ts";
 import { getSpacePackageSettings } from "./space-packages.ts";
+import { NO_PAYER } from "./model-providers/payer.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
@@ -131,7 +132,7 @@ export async function buildRunContext(params: {
   versionRef: string;
   proxyLabel: string | null;
   modelLabel: string;
-  modelSource: CredentialSource;
+  modelSource: ModelPayer;
   modelCost: ModelCost | null;
   generationConfig: ModelGenerationSettings;
   /**
@@ -220,7 +221,7 @@ export async function buildRunContext(params: {
     throw new ModelNotConfiguredError();
   }
   // The pipeline refused an unbound model before admission; this narrows the type.
-  const modelResult = requireBoundModel(modelCascade.model, null);
+  const modelResult = requireBoundModel(modelCascade.model, NO_PAYER);
 
   // Fail-fast on a resolved-but-keyless model. A system stub
   // (`SYSTEM_PROVIDER_KEYS` with an empty `apiKey`) or a credential whose
