@@ -37,5 +37,5 @@ export function isModelPinUnavailable(
 
 /** A model each member serves with their own credential: never one a schedule may run on. */
 export function isMemberPaid(model: OrgModelInfo): boolean {
-  return model.source === "custom" && !model.aliased && model.credentialId === null;
+  return model.binding === "member";
 }

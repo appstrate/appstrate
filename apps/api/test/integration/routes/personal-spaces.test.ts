@@ -1464,6 +1464,8 @@ describe("personal spaces — offboarding", () => {
       orphanedSpaceIds: [personalId],
       revokedApiKeyIds: [],
       unsharedConnectionIds: [],
+      // The member created no model credential in this fixture.
+      deletedModelCredentialIds: [],
     });
   });
 });

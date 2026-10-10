@@ -12,7 +12,7 @@
  * sidecar swap build on the flag landing correctly here.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { listOrgModels, loadModel, updateOrgModel } from "../../../src/services/org-models.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { orgModels } from "@appstrate/db/schema";
@@ -21,8 +21,13 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModel, seedOrgModelProviderKey } from "../../helpers/seed.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 getTestApp(); // boots the model registry
+
+// The unbind and alias races below need openai and anthropic at their production endpoint.
+beforeAll(() => seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] }));
+afterAll(() => seedTestModelProviders());
 
 describe("org-models — aliased flag (DB path)", () => {
   let ctx: TestContext;

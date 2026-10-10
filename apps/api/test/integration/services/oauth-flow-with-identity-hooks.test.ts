@@ -135,6 +135,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
       readsOrg: true,
       writesOrg: true,
       deletesOrg: true,
+      connects: true,
     });
     const oauth = list.find((k) => k.id === imported.credentialId);
     expect(oauth).toBeDefined();

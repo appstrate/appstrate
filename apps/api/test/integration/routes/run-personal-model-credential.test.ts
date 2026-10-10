@@ -145,12 +145,24 @@ describe("run payer — personal model credentials", () => {
     return ((await detail.json()) as { modelCredentialId: string | null }).modelCredentialId;
   }
 
+  /** Launch an inline run and read its row: the payer and source are stored, not on the wire. */
+  async function launchedRun(launchHeaders: Record<string, string>) {
+    const res = await postInline(launchHeaders);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const [row] = await db.select().from(runs).where(eq(runs.id, id));
+    return row!;
+  }
+
   it("a member's manual run on a bound org model spends the org credential, even with a personal key", async () => {
     const orgCredentialId = await seedBoundDefault();
     const member = await memberContext(ctx, "member", "builder");
     await seedPersonalKey(member.user.id, "member-key");
 
-    expect(await launchedCredentialId(authHeaders(member))).toBe(orgCredentialId);
+    const run = await launchedRun(authHeaders(member));
+    expect(run.modelCredentialId).toBe(orgCredentialId);
+    expect(run.modelSource).toBe("org");
+    expect(run.payerUserId).toBeNull();
   });
 
   it("the org owner without a personal key still runs on the org credential", async () => {
@@ -189,7 +201,28 @@ describe("run payer — personal model credentials", () => {
     const member = await memberContext(ctx, "member", "builder");
     const personalId = await seedPersonalKey(member.user.id, "member-key");
 
-    expect(await launchedCredentialId(authHeaders(member))).toBe(personalId);
+    const run = await launchedRun(authHeaders(member));
+    expect(run.modelCredentialId).toBe(personalId);
+    expect(run.modelSource).toBe("user");
+    expect(run.payerUserId).toBe(member.user.id);
+  });
+
+  it("keeps the payer of a run whose personal credential is deleted afterwards", async () => {
+    await seedUnboundDefault();
+    const member = await memberContext(ctx, "member", "builder");
+    const personalId = await seedPersonalKey(member.user.id, "member-key");
+    const launched = await launchedRun(authHeaders(member));
+    expect(launched.modelCredentialId).toBe(personalId);
+
+    const deleted = await app.request(`/api/model-provider-credentials/${personalId}`, {
+      method: "DELETE",
+      headers: authHeaders(member),
+    });
+    expect(deleted.status).toBe(204);
+
+    const [after] = await db.select().from(runs).where(eq(runs.id, launched.id));
+    expect(after!.modelCredentialId).toBeNull();
+    expect(after!.payerUserId).toBe(member.user.id);
   });
 
   it("serves a personal OAuth credential only to runs of its holder", async () => {
@@ -208,6 +241,7 @@ describe("run payer — personal model credentials", () => {
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
+        payerUserId: userId,
         status: "running",
         modelCredentialId: oauth.id,
       });
@@ -227,6 +261,35 @@ describe("run payer — personal model credentials", () => {
     }
   });
 
+  it("refuses the door to a run that recorded no payer, even when its user holds the credential", async () => {
+    const agentId = `@${ctx.org.slug}/nopayer-agent`;
+    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
+    const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
+    await db
+      .update(modelProviderCredentials)
+      .set({ ownerUserId: ctx.user.id })
+      .where(eq(modelProviderCredentials.id, oauth.id));
+    const run = await seedRun({
+      packageId: agentId,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      payerUserId: null,
+      status: "running",
+      modelCredentialId: oauth.id,
+    });
+    const token = await signRunToken(run.id);
+
+    try {
+      const res = await app.request(`/internal/oauth-token/${oauth.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
+    }
+  });
+
   it("stops the sidecar's subscription door for a holder's pinned run once personal credentials are switched off", async () => {
     const agentId = `@${ctx.org.slug}/door-agent`;
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
@@ -240,6 +303,7 @@ describe("run payer — personal model credentials", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
+      payerUserId: ctx.user.id,
       status: "running",
       modelCredentialId: oauth.id,
     });
@@ -437,7 +501,7 @@ describe("run admission — the credential a run spends is the one admitted", ()
 
     expect(res.status).toBe(201);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ credentialSource: "org" });
+    expect(calls[0]).toMatchObject({ credentialSource: "user" });
     // The run spends the personal key admitted at the gate.
     expect(await stampedCredentials()).toEqual([{ modelCredentialId: personalId }]);
     // Discrimination: a fresh resolution after the gate finds no credential at all.
@@ -455,7 +519,7 @@ describe("run admission — the credential a run spends is the one admitted", ()
 
     expect(res.status).toBe(201);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ credentialSource: "org" });
+    expect(calls[0]).toMatchObject({ credentialSource: "user" });
     expect(await stampedCredentials()).toEqual([{ modelCredentialId: personalId }]);
   });
 

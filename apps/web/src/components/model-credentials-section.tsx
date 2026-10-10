@@ -40,9 +40,7 @@ export function CredentialsSection({
   onEdit,
   onDelete,
   onConnectOAuth,
-  canWrite,
-  canDelete,
-  userId,
+  canAdd,
   showOwner,
   empty,
 }: {
@@ -53,10 +51,8 @@ export function CredentialsSection({
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  canWrite: boolean;
-  canDelete: boolean;
-  /** The caller: a personal credential is editable only by its owner. */
-  userId: string | undefined;
+  /** Whether the add button shows; each row's actions come from the server's `allowed_actions`. */
+  canAdd: boolean;
   /** Whether the owner column shows; a personal-only list has one owner, the caller. */
   showOwner: boolean;
   /** Empty-state copy; the organization's by default. */
@@ -70,17 +66,10 @@ export function CredentialsSection({
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
 
-  const isOwnCredential = (pk: ModelProviderCredentialInfo) =>
-    pk.owner_type === "user" && pk.owner_id === userId;
-  // A personal credential is changed by its holder alone (404 to anyone else),
-  // so an admin's write right covers the organization's rows only.
-  const canEditCredential = (pk: ModelProviderCredentialInfo) =>
-    pk.owner_type === "org" ? canWrite : isOwnCredential(pk);
-
   // Single entry point — the unified modal handles both API-key and OAuth
   // flows. Removing a module from `MODULES` hides its OAuth tile from the
   // in-modal provider picker with zero UI footprint here.
-  const addButton = canWrite ? <Button onClick={onCreate}>{t("credentials.add")}</Button> : null;
+  const addButton = canAdd ? <Button onClick={onCreate}>{t("credentials.add")}</Button> : null;
   const emptyCopy = empty ?? { message: t("credentials.empty"), hint: t("credentials.emptyHint") };
 
   return (
@@ -108,6 +97,8 @@ export function CredentialsSection({
               {credentials.map((pk) => {
                 const ProviderIcon = getProviderIcon(resolveProviderEntry(pk, registry ?? []));
                 const isOauth = pk.authMode === "oauth2";
+                const can = (action: ModelProviderCredentialInfo["allowed_actions"][number]) =>
+                  pk.allowed_actions.includes(action);
                 const editButton = (
                   <Button
                     variant="ghost"
@@ -177,7 +168,7 @@ export function CredentialsSection({
                             failedKey="credentials.testFailed"
                           />
                         )}
-                        {!isOauth && pk.source === "custom" && canEditCredential(pk) && (
+                        {can("test") && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -190,8 +181,8 @@ export function CredentialsSection({
                         )}
                         {pk.source === "custom" && !isOauth && (
                           <>
-                            {canEditCredential(pk) && editButton}
-                            {canDelete && (
+                            {can("edit") && editButton}
+                            {can("delete") && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -206,21 +197,19 @@ export function CredentialsSection({
                         )}
                         {isOauth && (
                           <>
-                            {canEditCredential(pk) && editButton}
-                            {pk.needs_reconnection &&
-                              pk.providerId &&
-                              isOwnCredential(pk) &&
-                              canWrite && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  onClick={() => onConnectOAuth(pk)}
-                                >
-                                  {t("credentials.oauth.reconnect")}
-                                </Button>
-                              )}
-                            {canDelete && (
+                            {can("edit") && editButton}
+                            {/* The server allows re-pairing any own subscription; the row offers it once it fails. */}
+                            {can("reconnect") && pk.needs_reconnection && pk.providerId && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => onConnectOAuth(pk)}
+                              >
+                                {t("credentials.oauth.reconnect")}
+                              </Button>
+                            )}
+                            {can("delete") && (
                               <Button
                                 variant="ghost"
                                 size="sm"

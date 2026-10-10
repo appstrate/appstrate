@@ -125,8 +125,9 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
     expect(row.chatSessionId).toBe("chs_attr_1");
     expect(row.runId).toBeNull();
     // Org-owned preset (org provider key) → the org's own credential reached the
-    // provider, so the row is stamped "org".
+    // provider, so the row is stamped "org", with no member payer.
     expect(row.credentialSource).toBe("org");
+    expect(row.payerUserId).toBeNull();
     expect(row.inputTokens).toBe(20);
     expect(row.model).toBe(presetId);
   });
@@ -171,5 +172,6 @@ describe("chat proxy-routed path — session attribution via the loopback bearer
     expect(row.chatSessionId).toBeNull();
     expect(row.runId).toBeNull();
     expect(row.credentialSource).toBe("org");
+    expect(row.payerUserId).toBeNull();
   });
 });

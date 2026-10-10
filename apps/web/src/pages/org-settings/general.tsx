@@ -35,9 +35,7 @@ export function OrgSettingsGeneralPage() {
   const canCreateOrg = useCanCreateOrg();
   const { data: orgSettings } = useOrgSettings();
   // Unknown until the settings load: the toggle then reads neither as on nor off.
-  const personalModelCredentialsAllowed = orgSettings
-    ? orgSettings.personal_model_credentials !== false
-    : undefined;
+  const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials;
   const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
@@ -258,8 +256,7 @@ export function OrgSettingsGeneralPage() {
                 {t("orgSettings.personalModelCredentialsDesc")}
               </span>
             </div>
-            {/* Absent means allowed: the setting is opt-out, not opt-in. Disabled
-                until loaded, so a click can never send a value read off a default. */}
+            {/* Disabled until loaded, so a click can never send a value read off a default. */}
             <Button
               variant={personalModelCredentialsAllowed ? "default" : "outline"}
               disabled={!orgSettings || updateSettingsMutation.isPending}
@@ -278,9 +275,9 @@ export function OrgSettingsGeneralPage() {
                         queryKey: ["get", "/api/model-provider-credentials"],
                       });
                       toast.success(
-                        data.personal_model_credentials === false
-                          ? t("orgSettings.personalModelCredentialsDisabled")
-                          : t("orgSettings.personalModelCredentialsEnabled"),
+                        data.personal_model_credentials
+                          ? t("orgSettings.personalModelCredentialsEnabled")
+                          : t("orgSettings.personalModelCredentialsDisabled"),
                       );
                     },
                   },

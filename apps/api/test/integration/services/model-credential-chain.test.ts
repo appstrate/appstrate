@@ -10,7 +10,7 @@
  * listing.
  */
 
-import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
 import { listPiModels } from "@appstrate/runner-pi/pi-model";
 import { modelProviderCredentials, orgModels, organizations } from "@appstrate/db/schema";
@@ -38,8 +38,13 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
+import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 
 getTestApp(); // boots the model and provider registries
+
+// The unbound refusals need a production-fixed endpoint on the built-in providers.
+beforeAll(() => seedTestModelProviders({ fixedEndpoint: ["openai", "anthropic"] }));
+afterAll(() => seedTestModelProviders());
 
 const anthropicIds = listPiModels("anthropic", "anthropic-messages").map((m) => m.id);
 const ANTHROPIC_A = anthropicIds[0]!;
@@ -174,7 +179,7 @@ describe("model resolution — a member's own credential serves an unbound model
 
     await personalAnthropicKey(bob.user.id, "sk-bob");
     expect(await loadModel(ctx.orgId, unbound, bob.user.id)).toMatchObject({
-      credentialSource: "org",
+      credentialSource: "user",
       apiKey: "sk-bob",
     });
   });
@@ -198,7 +203,7 @@ describe("model resolution — a member's own credential serves an unbound model
 
     await personalAnthropicKey(bob.user.id, "sk-bob");
     const withKey = await loadModel(ctx.orgId, unbound, bob.user.id);
-    expect(requireBoundModel(withKey!, bob.user.id).credentialSource).toBe("org");
+    expect(requireBoundModel(withKey!, bob.user.id).credentialSource).toBe("user");
   });
 
   it("ignores personal credentials on an unbound model while the organization has switched them off", async () => {
@@ -244,7 +249,7 @@ describe("model resolution — a member's own credential serves an unbound model
     await personalAnthropicKey(ctx.user.id, "sk-alice");
 
     expect(await resolveModel(ctx.orgId, "@acme/agent", null, ctx.user.id)).toMatchObject({
-      credentialSource: "org",
+      credentialSource: "user",
       apiKey: "sk-alice",
     });
     expect(await resolveModel(ctx.orgId, "@acme/agent", null, bob.user.id)).toMatchObject({
@@ -368,7 +373,7 @@ describe("model resolution — a member's own credential serves an unbound model
       credentialId: subscription.id,
     });
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id, { viaProxy: true })).toMatchObject({
-      credentialSource: "org",
+      credentialSource: "user",
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
@@ -389,8 +394,10 @@ describe("model resolution — a member's own credential serves an unbound model
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
       credentialId: subscription.id,
     });
-    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({
-      credentialSource: "org",
+    expect(
+      await loadRunModel(ctx.orgId, model.id, { credentialId: mine.id, payerUserId: ctx.user.id }),
+    ).toMatchObject({
+      credentialSource: "user",
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
@@ -399,14 +406,20 @@ describe("model resolution — a member's own credential serves an unbound model
   it("a run's personal credential keeps serving it after an admin binds the model to an org key", async () => {
     const model = { id: await unboundModel() };
     const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
-    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({ apiKey: "sk-alice" });
+    expect(
+      await loadRunModel(ctx.orgId, model.id, { credentialId: mine.id, payerUserId: ctx.user.id }),
+    ).toMatchObject({ apiKey: "sk-alice" });
 
     const org = await orgAnthropicKey();
     await db.update(orgModels).set({ credentialId: org.id }).where(eq(orgModels.id, model.id));
     clearResolvedModelCache();
 
-    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({ apiKey: "sk-org" });
-    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({
+    expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
+      apiKey: "sk-org",
+    });
+    expect(
+      await loadRunModel(ctx.orgId, model.id, { credentialId: mine.id, payerUserId: ctx.user.id }),
+    ).toMatchObject({
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
@@ -416,13 +429,17 @@ describe("model resolution — a member's own credential serves an unbound model
     const model = { id: await unboundModel() };
     const mine = await personalAnthropicKey(ctx.user.id, "sk-alice");
 
-    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toMatchObject({
+    expect(
+      await loadRunModel(ctx.orgId, model.id, { credentialId: mine.id, payerUserId: ctx.user.id }),
+    ).toMatchObject({
       credentialId: mine.id,
       apiKey: "sk-alice",
     });
     // The policy is switched through the service the routes use, which drops the resolved-model cache.
     await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
-    expect(await loadRunModel(ctx.orgId, model.id, mine.id)).toBeNull();
+    expect(
+      await loadRunModel(ctx.orgId, model.id, { credentialId: mine.id, payerUserId: ctx.user.id }),
+    ).toBeNull();
   });
 
   it("a run whose launch credential is gone resolves its model as it is now, never on another member's key", async () => {
@@ -449,7 +466,10 @@ describe("model resolution — a member's own credential serves an unbound model
     await personalAnthropicKey(ctx.user.id, "sk-alice");
     await personalAnthropicKey(bob.user.id, "sk-bob");
 
-    const unbound = await loadRunModel(ctx.orgId, model.id, null);
+    const unbound = await loadRunModel(ctx.orgId, model.id, {
+      credentialId: null,
+      payerUserId: ctx.user.id,
+    });
     expect(unbound).toMatchObject({ credentialSource: null, apiKey: "" });
     let thrown: unknown;
     try {
@@ -460,12 +480,18 @@ describe("model resolution — a member's own credential serves an unbound model
     expect((thrown as ApiError).status).toBe(409);
     expect((thrown as ApiError).code).toBe("model_credential_required");
 
-    expect(await loadRunModel(ctx.orgId, "sys-claude", null)).toMatchObject({
+    expect(
+      await loadRunModel(ctx.orgId, "sys-claude", { credentialId: null, payerUserId: ctx.user.id }),
+    ).toMatchObject({
       credentialSource: "system",
     });
-    expect(await loadRunModel(ctx.orgId, alias.id, null)).toMatchObject({ aliased: true });
+    expect(
+      await loadRunModel(ctx.orgId, alias.id, { credentialId: null, payerUserId: ctx.user.id }),
+    ).toMatchObject({ aliased: true });
     // An org credential id resolves the model as it is now, too.
-    expect(await loadRunModel(ctx.orgId, alias.id, org.id)).toMatchObject({
+    expect(
+      await loadRunModel(ctx.orgId, alias.id, { credentialId: org.id, payerUserId: ctx.user.id }),
+    ).toMatchObject({
       credentialId: org.id,
       apiKey: "sk-org",
     });
@@ -483,7 +509,7 @@ describe("model resolution — a member's own credential serves an unbound model
     const next = await personalAnthropicKey(ctx.user.id, "sk-alice-next");
 
     expect(await loadModel(ctx.orgId, model.id, ctx.user.id)).toMatchObject({
-      credentialSource: "org",
+      credentialSource: "user",
       credentialId: next.id,
       apiKey: "sk-alice-next",
     });

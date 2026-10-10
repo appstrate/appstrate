@@ -235,6 +235,7 @@ describe("recordChatUsage — pricing provenance", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    seedTestModelProviders();
     ctx = await createTestContext({ orgSlug: "chatpricing" });
   });
 
@@ -283,6 +284,43 @@ describe("recordChatUsage — pricing provenance", () => {
     await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
 
     expect((await storedRow(sessionId))!.credentialId).toBe(credentialId);
+  });
+
+  /** A subscription credential owned by `ownerUserId` (`null`: the organization's). */
+  async function seedSubscription(ownerUserId: string | null): Promise<string> {
+    const row = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Test OAuth",
+      accessToken: "token",
+      refreshToken: "test-refresh",
+      expiresAt: Date.now() + 3_600_000,
+      createdBy: ctx.user.id,
+      ownerUserId,
+    });
+    return row.id;
+  }
+
+  it("records a turn on a member's own subscription as that member's spend", async () => {
+    const sessionId = await seedSession("chs_user_payer");
+    const credentialId = await seedSubscription(ctx.user.id);
+    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+
+    const row = await storedRow(sessionId);
+    expect(row!.credentialId).toBe(credentialId);
+    expect(row!.credentialSource).toBe("user");
+    expect(row!.payerUserId).toBe(ctx.user.id);
+  });
+
+  it("records a turn on an organization subscription as the organization's spend, with no payer", async () => {
+    const sessionId = await seedSession("chs_org_payer");
+    const credentialId = await seedSubscription(null);
+    await recordChatUsage(record({ chatSessionId: sessionId, credentialId }));
+
+    const row = await storedRow(sessionId);
+    expect(row!.credentialId).toBe(credentialId);
+    expect(row!.credentialSource).toBe("org");
+    expect(row!.payerUserId).toBeNull();
   });
 
   it("marks a turn on a model with no rates `unpriced` instead of a silent $0", async () => {

@@ -2,6 +2,7 @@
 
 import type { Context } from "hono";
 import { and, eq } from "drizzle-orm";
+import type { ModelProviderDefinition } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
@@ -16,7 +17,7 @@ function familyOf(providerId: string): string {
 }
 
 /** A subscription (oauth2) credential: always personal, never served by the LLM proxy. */
-export function isSubscription(providerId: string): boolean {
+function isSubscription(providerId: string): boolean {
   return getModelProvider(providerId)?.authMode === "oauth2";
 }
 
@@ -40,14 +41,15 @@ interface PersonalCredential {
 }
 
 /**
- * The personal credentials `payerUserId` owns in `orgId`, read once per call.
+ * The personal credentials `payerUserId` owns in `orgId` (none for `null`), read once per call.
  * The owner query runs first (indexed, and almost always empty); the org policy
  * is read only when there is a credential to switch off.
  */
 export async function listPersonalCredentials(
   orgId: string,
-  payerUserId: string,
+  payerUserId: string | null,
 ): Promise<PersonalCredential[]> {
+  if (!payerUserId) return [];
   const rows = await db
     .select({
       id: modelProviderCredentials.id,
@@ -96,4 +98,25 @@ export function applicableCredentialIds(
  */
 export function requestPayerUserId(c: Context<AppEnv>): string | null {
   return isUserPrincipal(c) ? c.get("user").id : null;
+}
+
+/**
+ * A member may own a credential of this provider, and a model on it may be left to
+ * each member: its endpoint is fixed.
+ */
+export function providerAllowsPersonalCredentials(
+  def: Pick<ModelProviderDefinition, "baseUrlOverridable">,
+): boolean {
+  return !def.baseUrlOverridable;
+}
+
+/**
+ * An organization model may be bound to this credential: an organization API key,
+ * never a member's own or a subscription.
+ */
+export function isBindableCredential(c: {
+  ownerUserId: string | null;
+  providerId: string;
+}): boolean {
+  return c.ownerUserId === null && !isSubscription(c.providerId);
 }

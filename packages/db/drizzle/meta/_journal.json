@@ -617,6 +617,13 @@
       "when": 1791581301597,
       "tag": "0087_personal_model_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1791667701597,
+      "tag": "0088_model_payer",
+      "breakpoints": true
     }
   ]
 }

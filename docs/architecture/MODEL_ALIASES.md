@@ -206,47 +206,71 @@ billing/audit; the module-facing service accessor (`listLlmUsage`, exposed as
 The model is resolved first, by the cascade, which is actor-free. Who pays then
 follows from the model alone (`loadModel`, `services/org-models.ts`):
 
-1. a built-in model: the platform key;
-2. a model bound to an organization credential: that credential, whoever calls;
-3. a model with no organization credential (`credential_id` NULL, "each member
-   uses their own credential"): the payer's own credential. The applicable ones
-   are of the model's catalog family with the model in their provider's offer,
-   subscriptions first, then the oldest (`services/model-providers/credential-chain.ts`);
-   none applies while the organization has personal model credentials off. With
-   none, the call is refused with `409 model_credential_required`.
+1. a built-in model: the platform key (`billed_to: system`);
+2. a model bound to an organization credential (`binding: org`): that credential,
+   whoever calls (`billed_to: org`);
+3. a model with no organization credential (`credential_id` NULL, `binding:
+member`, "each member uses their own credential"): the payer's own credential.
+   The applicable ones are of the model's catalog family with the model in their
+   provider's offer, subscriptions first, then the oldest
+   (`services/model-providers/credential-chain.ts`); none applies while the
+   organization has personal model credentials off. With none, the call is refused
+   with `409 model_credential_required`.
+
+An unbound model is only possible on a provider whose endpoint is fixed
+(`providerAllowsPersonalCredentials`: not `baseUrlOverridable`). A provider whose
+base URL is overridable refuses an unbound model at binding time
+(`400 personal_credential_custom_endpoint`), because a member's credential could
+then send that member's key to an endpoint of their choosing.
+
+A credential may be bound to a model only when it is an organization API key:
+`isBindableCredential` refuses a member's own credential and a subscription
+(`400 personal_credential_not_bindable`). The credential list reports the result
+as `bindable`.
 
 The payer is the user whose personal credentials may serve step 3, or nobody.
-Only a user principal pays: `requestPayerUserId(c)` returns the caller's id when
-`isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `null` otherwise.
-Each door computes it once per request and passes it down.
+Only a user principal pays: `requestPayerUserId(c)` returns the caller's user id
+when `isUserPrincipal(c)` holds (`apps/api/src/lib/principal.ts`), `null`
+otherwise. Each door computes it once per request and passes it down.
 
 - a session, CLI, MCP instance token or chat loopback: that user;
 - an API key, a third-party OAuth token, an end user or an OIDC end-user token: nobody;
-- a schedule: nobody, whoever wrote it or is its actor. A member-paid model
-  cannot be a schedule's `model_id_override` (`409 model_credential_required`),
-  and a model a schedule overrides with cannot be unbound
-  (`PATCH /api/models/{id}`, `409 model_scheduled`);
-- a run: the payer its launch door computed.
+- a schedule: nobody, whoever wrote it or is its actor. A schedule is judged on
+  its effective model (its override, else the agent's model in its space, else
+  the organization default), which must be bound (`409 model_credential_required`
+  otherwise) when a write creates it, moves its model or enables it. A model
+  enabled schedules run that way cannot be unbound (`PATCH /api/models/{id}`,
+  `409 model_scheduled`, with their ids in `schedule_ids`). Other writes that
+  move the effective model (the organization default, an agent's model in a
+  space) are not refused: a schedule that then fires a member-paid model records
+  a failed run;
+- a run: the payer its launch door computed, recorded as `runs.payer_user_id` at
+  launch. It is the one fact every later door compares against: the sidecar's
+  OAuth door and a run's personal credential both require the payer to match it.
 
 An alias is always bound (a model alias needs an organization credential), so it
 never takes a personal credential. `GET /api/models` reads step 3 for the caller:
-`billed_to` is `org` for a built-in or bound model, `user` for an unbound
-model one of the caller's credentials serves, `null` otherwise; `needs_reconnection`
-on an unbound model is true when nothing of the caller's serves it and one of
-their credentials for it is dead.
+`billed_to` is `system` for a built-in model, `org` for a bound model, `user` for
+an unbound model one of the caller's credentials serves, `null` otherwise;
+`binding` tells `org`, `member` (unbound) and `managed` (an alias) apart.
+`needs_reconnection` on an unbound model is true when nothing of the caller's
+serves it and one of their credentials for it is dead.
 
 The public LLM proxy (`/api/llm-proxy`) never serves a subscription (`viaProxy`
 skips oauth2 credentials), so `billed_to` describes runs and chat. A run's proxy
 calls on a member-paid model keep the personal credential it launched with
 (`runs.model_credential_id`, `loadRunModel`), even if the model is bound
-meanwhile; one removed mid-run, or personal credentials switched off, refuses
-the run's next call while the model stays unbound. Any other run is served as
-the model is now. A payer changes mid-call only through an administrator's act:
-binding or unbinding a model makes the next call of a chat turn, or of a run
-whose launch credential is gone, served as the model now is. The sidecar's token door
-(`/internal/oauth-token/{credentialId}`) gives a subscription's token only to a
-platform run pinned to it and launched by its owner with no API key; a token the
-sidecar already holds lasts up to its 30-second cache, as for a revocation.
+meanwhile; a launch credential that no longer belongs to the recorded payer
+(`runs.payer_user_id`) returns no model, and one removed mid-run, or personal
+credentials switched off, refuses the run's next call while the model stays
+unbound. Any other run is served as the model is now. A payer changes mid-call only
+through an administrator's act: binding or unbinding a model makes the next call
+of a chat turn, or of a run whose launch credential is gone, served as the model
+now is. The sidecar's token door (`/internal/oauth-token/{credentialId}`) gives a
+subscription's token only to a platform run pinned to it whose recorded payer
+(`runs.payer_user_id`) is the credential's owner, and never to a run launched with
+an API key; a token the sidecar already holds lasts up to its 30-second cache, as
+for a revocation.
 
 A run resolves its model once, before the `beforeUsage` gate, and its context
 reuses that resolution. What a call costs the organization (`credential_source`)
@@ -255,9 +279,13 @@ itself, and a chat turn's proxy calls are resolved for the same session user.
 
 `llm_usage.credential_id` (uuid, no foreign key) records the credential that
 served a call as a run pins it (NULL for a platform key or an alias); a written
-row keeps it after the credential is deleted. `credential_source` keeps two
-values: `system` (the platform's) and `org` (the customer's: the organization's
-or a member's own).
+row keeps it after the credential is deleted. `credential_source` keeps three
+values, `MODEL_PAYERS` in `@appstrate/core/model-payer`: `system` (the platform's),
+`org` (the organization's credential) and `user` (a member's own credential).
+`llm_usage.payer_user_id` and `runs.payer_user_id` (text, no foreign key, NULL =
+not recorded) name the member whose credential paid: set exactly when
+`credential_source` is `user`. Rows written before a payer was recorded keep NULL,
+and nothing backfills them.
 
 ## Error surfaces: synthesize, never scrub
 
