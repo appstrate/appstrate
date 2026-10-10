@@ -157,8 +157,8 @@ function ModelForm({
   });
 
   const credentialsQuery = useModelProviderCredentials();
-  // A model binds an organization credential only: a personal one serves its
-  // holder's calls, and is reached through "each member" below.
+  // A model binds an organization API key only: a personal credential or a
+  // subscription serves its holder's calls, reached through "each member" below.
   const availableCredentials = useMemo(
     () =>
       selectableCredentials({
@@ -166,7 +166,7 @@ function ModelForm({
         provider: selectedProvider,
         apiShape,
         baseUrl,
-      }).filter((k) => k.owner_type === "org"),
+      }).filter((k) => k.owner_type === "org" && k.authMode !== "oauth2"),
     [credentialsQuery.data, selectedProvider, apiShape, baseUrl],
   );
   const selectedCredential = availableCredentials.find((k) => k.id === credentialId);

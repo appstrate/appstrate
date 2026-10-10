@@ -913,7 +913,11 @@ export async function setDefaultModel(orgId: string, modelDbId: string | null): 
   // `org-proxies` and must stay generic. System ids, unknown rows and non-UUIDs
   // carry no binding, so the pointer helper below still owns the 404.
   const row = modelDbId === null ? undefined : await loadModelBinding(orgId, modelDbId);
-  if (row?.enabled && (await credentialIsDeadButListed(orgId, row.credentialId))) {
+  if (
+    row?.enabled &&
+    row.credentialId &&
+    (await credentialIsDeadButListed(orgId, row.credentialId))
+  ) {
     throw conflict(
       "model_needs_reconnection",
       "This model's provider credential must be reconnected before it can be the default model. Reconnect the credential, or pick another model.",
@@ -1479,21 +1483,50 @@ async function resolveDbModel(
  * credential is flagged by the list (which flags regardless of `enabled`) but
  * answers `false` here. It is inert either way — `resolveModel` cascades past
  * it — and the actionable advice for it is "enable it", not "reconnect".
+ *
+ * An unbound row is served by the payer's own credentials, so with a payer the
+ * question is asked of each of theirs that applies to it.
  */
-export async function modelNeedsReconnection(orgId: string, modelDbId: string): Promise<boolean> {
+export async function modelNeedsReconnection(
+  orgId: string,
+  modelDbId: string,
+  payerUserId: string | null = null,
+): Promise<boolean> {
   const row = await loadModelBinding(orgId, modelDbId);
-  return !!row && row.enabled && (await credentialIsDeadButListed(orgId, row.credentialId));
+  if (!row || !row.enabled) return false;
+  if (row.credentialId !== null) return credentialIsDeadButListed(orgId, row.credentialId);
+  if (payerUserId === null || row.aliased) return false;
+  const personal = await listPersonalCredentials(orgId, payerUserId);
+  for (const credentialId of applicableCredentialIds(personal, row)) {
+    if (await credentialIsDeadButListed(orgId, credentialId)) return true;
+  }
+  return false;
 }
 
 /** A custom row's credential and switch — undefined for a system id, an unknown row or a non-UUID. */
 async function loadModelBinding(
   orgId: string,
   modelDbId: string,
-): Promise<{ credentialId: string | null; enabled: boolean } | undefined> {
+): Promise<
+  | {
+      credentialId: string | null;
+      enabled: boolean;
+      aliased: boolean;
+      providerId: string;
+      modelId: string;
+    }
+  | undefined
+> {
   if (isSystemModel(modelDbId)) return undefined;
   try {
     const [row] = await db
-      .select({ credentialId: orgModels.credentialId, enabled: orgModels.enabled })
+      .select({
+        credentialId: orgModels.credentialId,
+        enabled: orgModels.enabled,
+        aliased: orgModels.aliased,
+        providerId: orgModels.providerId,
+        modelId: orgModels.modelId,
+      })
       .from(orgModels)
       .where(scopedWhere(orgModels, { orgId, extra: [eq(orgModels.id, modelDbId)] }))
       .limit(1);
@@ -1506,11 +1539,7 @@ async function loadModelBinding(
 }
 
 /** Dead for inference but still renderable — see {@link modelNeedsReconnection}. */
-async function credentialIsDeadButListed(
-  orgId: string,
-  credentialId: string | null,
-): Promise<boolean> {
-  if (!credentialId) return false;
+async function credentialIsDeadButListed(orgId: string, credentialId: string): Promise<boolean> {
   if ((await loadInferenceCredentials(orgId, credentialId)) !== null) return false;
   return (await loadCredentialMetadata(credentialId, orgId)) !== null;
 }

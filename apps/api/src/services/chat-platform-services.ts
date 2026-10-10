@@ -58,7 +58,7 @@ export async function resolveChatModel(
     // already returned null, so nothing is resolvable and no spend can happen
     // on either branch: this only decides which error the user is shown, and
     // "reconnect that credential" is the actionable one.
-    if (await modelNeedsReconnection(orgId, presetId)) {
+    if (await modelNeedsReconnection(orgId, presetId, userId)) {
       return { subscription: true, needsReconnection: true };
     }
     return { subscription: false };
@@ -85,8 +85,14 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
-  // An unbound subscription model names no credential the user holds: nothing
-  // can be spent, and the error says which credential to add.
+  // An unbound subscription model names no credential the user can spend: a dead
+  // one of theirs asks for a reconnect, none at all for a credential to add.
+  if (
+    resolved.credentialSource === null &&
+    (await modelNeedsReconnection(orgId, presetId, userId))
+  ) {
+    return { subscription: true, needsReconnection: true };
+  }
   const { credentialId } = requireBoundModel(resolved);
   if (!credentialId) {
     return { subscription: true, needsReconnection: true };
