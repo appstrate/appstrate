@@ -1,0 +1,330 @@
+---
+title: "Tutorial: Legacy Web App Agent"
+description: Let an agent read an internal web app that has no API, only a login form and HTML pages, and run it every month.
+---
+
+<Callout type="warn" title="Limits of the declarative login">
+
+This tutorial uses a declarative login, which has three known gaps, tracked in [issue #1818](https://github.com/appstrate/appstrate/issues/1818):
+
+- **The session is never renewed.** The password is not stored, so when the session expires, the user reconnects.
+- **Form values are not URL-encoded.** A password containing `&` or `=` breaks the login, unless the user types it encoded (`&` as `%26`).
+- **A refused login is a generic `500`.** A wrong password and a broken integration answer the same way.
+
+</Callout>
+
+## Goal
+
+You have an internal web app with no API: a login form, a few HTML pages, and the data your business runs on. You write three packages, `@acme/intranet` (an integration that logs in with the user's own account and keeps only the session cookie), `@acme/intranet-reports` (a skill that teaches the page layout) and `@acme/sales-report` (an agent that returns the sales of a period as JSON), then run the agent every month. No code runs next to the credential: the model reads the HTML itself.
+
+## The example app
+
+The app lives at `https://intranet.acme.test`. Substitute your own host, fields and paths as you read.
+
+```text
+POST /login                                     form fields: zone, username, password
+  -> 302 Found, Set-Cookie: SESSIONID=...; Path=/; HttpOnly
+  -> 200 with the login form again when the credentials are wrong
+
+GET /reports/sales?from=2026-09-01&to=2026-09-30   with Cookie: SESSIONID=...
+  -> 200, an HTML page with <table id="sales">
+  -> 302 to /login when the session is missing or expired
+```
+
+## How it works
+
+The integration declares a **declarative login** (`connect.login`). When someone connects, the platform sends one `POST /login` with the fields they typed, reads the `SESSIONID` cookie from the answer and stores only that cookie, encrypted, as the connection's credential. The password is used once and not stored. The login is a single request, with no cookie jar and no redirect following, so a login that first reads a CSRF token, takes several steps or needs JavaScript cannot be written this way.
+
+At run time the agent calls the integration's `api_call` tool. The run's sidecar checks the URL against the integration's `authorized_uris`, adds `Cookie: SESSIONID=...` and returns the page. The agent sees neither the password nor the cookie. See [How integrations work](/integrations/how-integrations-work) for the model behind this.
+
+## Prerequisites
+
+- An Appstrate instance that can reach the intranet (a self-hosted one when the intranet is on a private network), with a default model for the organization ([Model providers](/integrations/llm-models)).
+- An API key of a space admin in `$APPSTRATE_KEY` (see [API keys](/features/api-keys)).
+- `zip` and `curl`. The examples use `http://localhost:3000`, the address of a development instance.
+
+## Steps
+
+<Steps>
+
+<Step>
+
+### Let the instance reach the intranet
+
+An internal host usually resolves to a private address, and Appstrate refuses private addresses by default. Two parties must agree before a call reaches one: the integration names the host literally in `authorized_uris` (step 2 does), and the operator lists it in `EGRESS_ALLOW_INTERNAL_HOSTS`. Set it in the instance environment and restart:
+
+```bash
+EGRESS_ALLOW_INTERNAL_HOSTS=intranet.acme.test
+```
+
+The list covers both the login sent at connect time and the calls of a run. A listed host is trusted for every organization of the instance. Skip this step when the intranet has a public address. The rules are in [Isolation and Security](/self-hosting/isolation-and-security#egress-rules).
+
+</Step>
+
+<Step>
+
+### Write the integration
+
+Create a folder `intranet/` with this `manifest.json`:
+
+```json
+{
+  "name": "@acme/intranet",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Acme intranet",
+  "description": "Internal intranet behind a login form, read through its HTML pages.",
+  "source": { "kind": "none" },
+  "default_tools": ["api_call"],
+  "auths": {
+    "primary": {
+      "type": "custom",
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["zone", "username", "password"],
+          "properties": {
+            "zone": { "type": "string", "description": "Tenant zone" },
+            "username": { "type": "string", "description": "Intranet user name" },
+            "password": { "type": "string", "description": "Intranet password" }
+          }
+        }
+      },
+      "connect": {
+        "login": {
+          "request": {
+            "method": "POST",
+            "url": "https://intranet.acme.test/login",
+            "content_type": "application/x-www-form-urlencoded",
+            "body": "zone={{zone}}&username={{username}}&password={{password}}"
+          },
+          "success_criteria": [{ "condition": "$statusCode == 302" }],
+          "outputs": {
+            "session_id": { "from": "cookie", "name": "SESSIONID" }
+          }
+        }
+      },
+      "authorized_uris": ["https://intranet.acme.test/**"],
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Cookie",
+          "prefix": "SESSIONID=",
+          "value": "{$credential.session_id}"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/api": { "auths": { "primary": {} } }
+  }
+}
+```
+
+What each part does:
+
+- `credentials.schema` is the form the user fills in when connecting.
+- `connect.login.request` is the one request the platform sends. Each `{{name}}` is replaced by the field of the same name that the user typed.
+- `success_criteria` says what success looks like. Without criteria only a `2xx` counts, so declare the `302` the app sends. A wrong password returns `200` with the form again, and the connection is refused. A criterion is one `<expression> == <value>` comparison, with a string value in single quotes (`$response.body#/status == 'ok'`).
+- `outputs` names what to keep from the answer: here the value of the `SESSIONID` cookie in `Set-Cookie`. Only the outputs are stored, and each becomes a credential field, `{$credential.session_id}`.
+- `delivery.http` says how the sidecar sends it: a `Cookie` header. `in: "header"` is the only placement implemented today, and the import refuses `in: "cookie"`.
+- `authorized_uris` lists the only URLs that may receive the cookie and the login request. It must be literal when the auth declares `connect`, so write one integration per intranet host.
+- `_meta["dev.appstrate/api"]` gives the integration its `api_call` tool.
+
+</Step>
+
+<Step>
+
+### Import it and connect an account
+
+The archive is a zip with `manifest.json` at its root:
+
+```bash
+cd intranet && zip ../intranet.afps manifest.json && cd ..
+
+curl -X POST "http://localhost:3000/api/packages/import" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -F file=@intranet.afps
+# {"packageId":"@acme/intranet","type":"integration","version":"1.0.0"}
+```
+
+The import validates the manifest, and the integration is active in the key's space. Each person then connects with their own intranet account, on the hosted form. This call returns a single-use link, valid ten minutes, to open in a browser; the password is typed on the platform's page only.
+
+```bash
+curl -X POST "http://localhost:3000/api/integrations/@acme/intranet/auths/primary/connect/session" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# {"connect_url":"http://localhost:3000/api/integrations/connect/start?token=...","expiresAt":"..."}
+```
+
+The platform sends the login request at once and stores the session cookie. The login answer carries no identity, so the connection gets a generic label. A backend that already holds the credentials can create the connection with `POST .../connect/fields` instead (see [Connecting an account](/integrations/how-integrations-work#connecting-an-account)).
+
+</Step>
+
+<Step>
+
+### Teach the page layout with a skill
+
+The integration says how to reach the app. A [skill](/features/skills) says how to read it, and any agent of the space can reuse it. Create a folder `intranet-reports/` with a `SKILL.md`:
+
+```markdown
+---
+name: intranet-reports
+description: How to read the Acme intranet sales report through the intranet integration's api_call tool. Use when a task needs sales figures from the intranet.
+---
+
+# Reading the Acme intranet
+
+The intranet has no API. Its pages are HTML, fetched with the `api_call` tool of the
+Acme intranet integration. The session cookie is added for you: never send a `Cookie`
+header and never post to `/login`.
+
+## Sales report
+
+    GET https://intranet.acme.test/reports/sales?from=YYYY-MM-DD&to=YYYY-MM-DD
+
+The data is the table with `id="sales"`: one `<tr>` per sale, cells in this order:
+date, region, customer, amount (decimal point, no currency sign). Decode HTML entities.
+
+## Expired session
+
+If the page contains the login form instead of the table, the session has expired.
+Do not retry and do not guess figures. Return `needs_reconnect: true` with no rows.
+```
+
+And a `manifest.json` next to it:
+
+```json
+{
+  "name": "@acme/intranet-reports",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.3",
+  "display_name": "Intranet reports",
+  "description": "How to read reports from the Acme intranet HTML pages."
+}
+```
+
+Zip both files and import the archive as in step 3.
+
+</Step>
+
+<Step>
+
+### Create the agent
+
+Create a folder `sales-report/` with the manifest:
+
+```json
+{
+  "name": "@acme/sales-report",
+  "version": "1.0.0",
+  "type": "agent",
+  "schema_version": "0.3",
+  "display_name": "Sales report",
+  "description": "Reads the sales table of the Acme intranet for a period and returns it as JSON.",
+  "timeout": 300,
+  "input": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "from": { "type": "string", "format": "date", "description": "First day, YYYY-MM-DD" },
+        "to": { "type": "string", "format": "date", "description": "Last day, YYYY-MM-DD" }
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "rows": { "type": "array", "items": { "type": "object" } },
+        "total": { "type": "number" },
+        "needs_reconnect": { "type": "boolean" }
+      },
+      "required": ["rows", "total", "needs_reconnect"]
+    }
+  },
+  "dependencies": {
+    "skills": { "@acme/intranet-reports": "^1.0.0" },
+    "integrations": { "@acme/intranet": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@acme/intranet": { "tools": ["api_call"] }
+  },
+  "runtime_tools": ["output"]
+}
+```
+
+And the prompt, `prompt.md`:
+
+```markdown
+Fetch the sales report of the Acme intranet for the period given in the input
+(`from` to `to`, both included), following the intranet-reports skill. When the
+input gives no period, use the previous calendar month: run `date +%F` to learn
+today's date.
+
+Return every sale (date, region, customer, amount) and the total of the amounts
+with the output tool. If the intranet session has expired, return
+`needs_reconnect: true` and stop.
+```
+
+The agent gets the integration's tool as `acme_intranet__api_call`, the skill, and the `output` tool for its result. Zip `manifest.json` and `prompt.md` and import the archive as in step 3. `GET /api/agents/@acme/sales-report/connection-readiness` then confirms that your connection will be used.
+
+</Step>
+
+<Step>
+
+### Run it, then schedule it
+
+```bash
+# Launch. Answers 201 with the run resource; keep its id.
+curl -X POST "http://localhost:3000/api/agents/@acme/sales-report/run" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "from": "2026-09-01", "to": "2026-09-30" } }'
+
+# Wait for it to finish (up to 55 seconds per call).
+curl "http://localhost:3000/api/runs/$RUN_ID?wait=true" \
+  -H "Authorization: Bearer $APPSTRATE_KEY"
+```
+
+The agent calls `acme_intranet__api_call` on the sales page, reads the table and returns it through `output`. The finished run carries it in `result.output`, for example `{ "rows": [{ "date": "2026-09-02", "region": "North", "customer": "Bolt & Co", "amount": 1200.5 }, ...], "total": 4355.5, "needs_reconnect": false }`.
+
+To run it at 7am on the first day of every month, with no input so that the agent takes the previous month:
+
+```bash
+curl -X POST "http://localhost:3000/api/agents/@acme/sales-report/schedules" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Monthly sales", "cron_expression": "0 7 1 * *", "timezone": "America/Toronto" }'
+```
+
+A scheduled run executes as the person who created the schedule, with their connection. See [Scheduling](/features/scheduling).
+
+</Step>
+
+</Steps>
+
+## When the session expires
+
+When the intranet drops the session, it redirects to `/login`. `api_call` follows that redirect and returns the login form with a `200` status, so nothing flags the connection as broken: this is why the skill tells the agent to return `needs_reconnect: true` instead of empty figures. To get a fresh session, the user connects again on the same connection, passing its id as `connection_id` (to `connect/session` or `connect/fields`). The connection keeps its id, so the schedule and any pin that names it keep working.
+
+For a login this page cannot express, the code route is a local MCP server that logs in on every call and exposes a tool such as `get_sales_report(from, to)`: see [Custom integrations](/integrations/custom-integrations#a-local-mcp-server). It needs the `docker` or `firecracker` run adapter, and it reaches a private intranet only on stricter terms than `api_call`: the host is listed in `EGRESS_ALLOW_INTERNAL_HOSTS`, the integration's `authorized_uris` names it with no template (`{…}`) and no `*` in its host or port, on the port the server dials (its scheme's default port when the entry names none), and `allow_all_uris` is off. On `firecracker`, the intranet's range must also be left out of the runner's `FIRECRACKER_EGRESS_DENY_CIDRS`.
+
+## Troubleshooting
+
+| Symptom                                                                      | Cause                                                                                                                  | Fix                                                                          |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Connecting answers `500 internal_error`, log `LoginError: unexpected status` | Wrong credentials, an unencoded special character, or a success status other than the one in `success_criteria`        | Check the credentials, encode special characters, match `success_criteria`   |
+| Log `LoginError: url targets a blocked/internal address`                     | The intranet host is on a private address and not in `EGRESS_ALLOW_INTERNAL_HOSTS`                                     | Step 1                                                                       |
+| Import or save refused on `connect.login`                                    | A criterion the platform does not evaluate (a compound condition, an unquoted string), or `delivery.http.in: "cookie"` | One `<expression> == <value>` per criterion, strings quoted; header delivery |
+| `403 unauthorized_target` on a call                                          | The URL is outside `authorized_uris`                                                                                   | Fix the URL, or the pattern                                                  |
+
+## Resources
+
+- [Custom integrations](/integrations/custom-integrations)
+- [How integrations work](/integrations/how-integrations-work)
+- [Skills](/features/skills)
+- [Isolation and Security](/self-hosting/isolation-and-security)

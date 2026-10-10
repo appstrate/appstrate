@@ -1,0 +1,91 @@
+---
+title: Contributing
+description: "Where to ask for help and report bugs, and how to propose a change to Appstrate: setup, branches, commits, and the pull request process."
+---
+
+Thanks for your interest in contributing. This page is the short version. The canonical reference is [`CONTRIBUTING.md`](https://github.com/appstrate/appstrate/blob/main/CONTRIBUTING.md) at the root of the repository, and when the two differ, the repository wins. Larger changes follow the process in [`GOVERNANCE.md`](https://github.com/appstrate/appstrate/blob/main/GOVERNANCE.md).
+
+All participants are expected to follow the [Code of Conduct](https://github.com/appstrate/appstrate/blob/main/CODE_OF_CONDUCT.md) (the Contributor Covenant). Be kind and technical, and assume good faith.
+
+## Getting help and reporting
+
+- **Setup help or a general question**: [Discord](https://discord.gg/5Js2CKWNnh), for questions and real-time chat with maintainers.
+- **Bug, crash, regression**: open an issue with the [bug report template](https://github.com/appstrate/appstrate/issues/new?template=bug_report.yml). Include steps to reproduce, what you expected, what happened, and your environment (OS, Bun and Docker versions).
+- **Feature request**: open an issue with the [feature request template](https://github.com/appstrate/appstrate/issues/new?template=feature_request.yml). Describe the problem before the solution.
+- **Large or breaking change**: propose it first, following the RFC process in [GOVERNANCE.md](https://github.com/appstrate/appstrate/blob/main/GOVERNANCE.md).
+- **Security vulnerability**: do not open a public issue. Use [GitHub private vulnerability reporting](https://github.com/appstrate/appstrate/security/advisories/new) or email `security@appstrate.dev`. See [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md).
+- **A change to the AFPS format**: open an issue on the [AFPS spec repository](https://github.com/appstrate/afps-spec/issues). The spec is governed separately from the runtime.
+- **Anything else**: `hello@appstrate.dev`.
+
+Code, issues and [releases](https://github.com/appstrate/appstrate/releases) are in [github.com/appstrate/appstrate](https://github.com/appstrate/appstrate), and the other Appstrate projects under [github.com/appstrate](https://github.com/appstrate).
+
+## Ways to contribute
+
+Code is one path among several. Documentation fixes, translations (the UI is French and English, in `apps/web/src/locales/`), triage, design feedback, and answering questions on Discord all count.
+
+## Development setup
+
+You need [Bun](https://bun.sh/) 1.3.14 or newer. Docker (with Compose v2) is only needed to work on container execution or to run the full stack.
+
+```bash
+git clone https://github.com/<your-username>/appstrate.git
+cd appstrate
+bun install
+cp .env.example .env
+bun run dev          # http://localhost:3000, embedded database, no Docker
+```
+
+That is Tier 0: PGlite, filesystem storage, in-memory queues, agents as host subprocesses. It is enough for most frontend, API, and backend work. `bun run setup` brings up the full stack (PostgreSQL, Redis, S3-compatible storage, Docker execution) when you need it. Changes under `runtime-pi/` need `bun run build-runtime`, which rebuilds the agent and sidecar images together. The infrastructure tiers are described in [Progressive infrastructure](/self-hosting/progressive-infrastructure), and the layout of the code in [Architecture](/resources/architecture).
+
+Useful commands:
+
+| Command                        | What it does                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `bun run check`                | The quality gate: typecheck, lint, format, OpenAPI, and the repository's other verification steps |
+| `bun test apps/api/test/unit/` | Fast unit tests with no database. Run only the tests your change touches                          |
+| `bun run test:tier0`           | The whole suite on PGlite, split across processes, no Docker                                      |
+| `bun run verify:openapi`       | Validates the OpenAPI document against the code                                                   |
+
+## Branches and commits
+
+Branch from `main`:
+
+- `feat/short-description`: new features
+- `fix/short-description`: bug fixes
+- `docs/short-description`: documentation
+- `refactor/short-description`: refactoring
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), enforced by commitlint:
+
+```
+feat: add webhook retry configuration
+fix: prevent duplicate cron runs
+docs: update API overview table
+refactor: extract credential validation into service
+```
+
+Commit signing (GPG or SSH) is recommended, not required.
+
+## Pull requests
+
+1. Create a branch from `main`.
+2. Keep commits focused, and do not bundle unrelated changes.
+3. Run `bun run check` and the tests that cover your change.
+4. Open a pull request against `main` with a clear description.
+5. Sign the [CLA](https://cla-assistant.io/appstrate/appstrate) on your first pull request. The bot walks you through it.
+6. Wait for CI and review. Pull requests are squash-merged after approval.
+
+A reviewer will look for:
+
+- The quality gate passes, and the change matches its description.
+- New behavior has tests.
+- API changes update the OpenAPI spec in the same pull request. The OpenAPI document is the source of truth for the API.
+- A change that alters behavior updates the matching page in `docs/site/`. This documentation lives in the repository, next to the code.
+
+## Response times
+
+Goals, not guarantees: issue acknowledgment within 5 business days, bug triage within 10 business days, first pull request review within 10 business days, and security reports within 48 hours.
+
+## License
+
+By contributing, you agree that your contributions are licensed under the [Apache License 2.0](https://github.com/appstrate/appstrate/blob/main/LICENSE).

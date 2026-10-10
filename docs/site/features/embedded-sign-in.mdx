@@ -1,0 +1,274 @@
+---
+title: Embedded Sign-In
+description: "Let the people who use your product sign in through Appstrate: register OAuth clients at instance, organization or space level, run the authorization code flow with PKCE, and set up per-space email and Google or GitHub sign-in."
+---
+
+The `oidc` module turns Appstrate into an OAuth 2.1 and OpenID Connect authorization server. Your product sends a person to Appstrate to sign in, and gets back a token. This page covers the two things you configure for that: **OAuth clients** (who may start a sign-in, and what the resulting token may do) and the **authentication settings of a space** (the email server and the Google and GitHub apps used by that space's sign-in pages).
+
+The module is loaded by default: the default value of `MODULES` includes `oidc`. The token types and how the API accepts them are in [Authentication](/api/authentication#oidc-access-tokens). This page is about setting the clients up and embedding the flow.
+
+## The three client levels
+
+Every OAuth client has a level, fixed when it is created. The level decides who signs in and what the token represents.
+
+| Level      | Who signs in                                                                  | The token carries                                                    | Where you create it                                                                                          |
+| ---------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `instance` | Platform users, through an app that lets them pick an organization afterwards | `actor_type` `user`, with no organization and no space               | Declared by the operator with `OIDC_INSTANCE_CLIENTS` at boot. Not in the web app, not through the admin API |
+| `org`      | Members of one organization, in your internal tools                           | `actor_type` `dashboard_user`, with `org_id` and `org_role`          | **Organization settings**, **Team SSO** tab                                                                  |
+| `space`    | The end-users of your product, in one team space                              | `actor_type` `end_user`, with `org_id`, `space_id` and `end_user_id` | **Space settings**, **End-user SSO** tab                                                                     |
+
+The level, and the organization or space a client is pinned to, cannot be changed afterwards. The client name cannot be changed either. To embed sign-in in a product for your customers, you want a **space** client. The other two levels exist for people who already have a platform account.
+
+### Space level: sign in for your end-users
+
+You need a team space (a personal space takes no OAuth client and answers `409 personal_space_takes_no_oauth_clients`) and the `oauth-clients:write` permission, which owners and admins hold by default.
+
+1. Open the space in **Space settings** and choose the **End-user SSO** tab.
+2. Choose **New client**.
+3. Fill the form (the fields are described below) and choose **New client** again to save.
+4. Copy the **Client ID** and **Client Secret** from the dialog. The secret is shown once.
+
+The same thing through the API, with a session or an API key that carries `oauth-clients:write`:
+
+```bash
+curl -X POST https://your-instance/api/oauth/clients \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "level": "space",
+    "name": "Customer portal",
+    "referencedSpaceId": "spc_...",
+    "redirectUris": ["https://portal.example.com/callback"],
+    "postLogoutRedirectUris": ["https://portal.example.com/"],
+    "scopes": ["openid", "profile", "email", "offline_access", "agents:read", "agents:run", "runs:read"],
+    "allowSignup": false
+  }'
+```
+
+With a browser session, add `X-Org-Id` (a key already carries its organization). The response is the client with its `clientId` (it starts with `oauth_`) and, this once, its `clientSecret`.
+
+| Field                    | What it does                                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `name`                   | A label of 1 to 200 characters, shown in the list and on the consent screen. Fixed after creation.                       |
+| `redirectUris`           | Where Appstrate sends the person after authorization. At least one.                                                      |
+| `postLogoutRedirectUris` | The URLs that logout may send the person back to (the form calls them **Allowed logout URLs**). Optional.                |
+| `scopes`                 | What the client may request. Defaults to `openid`, `profile` and `email`, which the web form always keeps selected.      |
+| `isFirstParty`           | A trusted client: the consent screen is skipped. Only an organization owner or admin may set it, anyone else gets `403`. |
+| `allowSignup`            | Whether a first sign-in may create the person. Off by default.                                                           |
+
+#### Redirect URIs and logout URLs
+
+A redirect URI must be `https`, and its host must not be a private, loopback or link-local address. That includes `localhost` and every `.localhost` name: `https://localhost/...` and `https://tenant.localhost/...` are refused. The one exception is a loopback address, which may use `http`: `localhost`, any `.localhost` name, `127.0.0.0/8` and `::1`. Anything else is refused with `400`. At authorization time Appstrate matches the requested redirect against the registered list, path included. For `localhost` and `127.0.0.1` the port may differ from the registered one, so `http://127.0.0.1/callback` also matches `http://127.0.0.1:63785/callback`. For a public host the port must match exactly.
+
+Logout (see [below](#log-the-person-out)) only redirects to a URL registered in **Allowed logout URLs**. A registered redirect URI is accepted there too. Anything else sends the person to `/` on the Appstrate instance.
+
+#### Scopes
+
+A scope is a permission name taken verbatim, so `agents:run` grants `agents:run`. `GET /api/oauth/scopes` returns the live list for your instance. The built-in vocabulary:
+
+| Kind                    | Scopes                                                                                                                                                                                        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identity                | `openid`, `profile`, `email`, `offline_access` (`offline_access` is what makes the server issue a refresh token)                                                                              |
+| Usable by end-users     | `agents:read`, `agents:run`, `runs:read`, `runs:cancel`, `files:read`, `integrations:read`, `integrations:connect`, `integrations:disconnect`, `skills:read`, `models:read`, `llm-proxy:call` |
+| Dashboard users only    | `runs:read-all`                                                                                                                                                                               |
+| Added by loaded modules | For example `mcp:read` and `mcp:invoke`, when the `mcp` module is loaded                                                                                                                      |
+
+A space client may only register the identity scopes and the scopes usable by end-users, plus module scopes. `runs:read-all` is refused for it with `400`, because no end-user token can carry it. Changing a client's scopes affects new authorizations only, and tokens already issued keep theirs.
+
+#### First-party clients
+
+A first-party client skips the consent screen. Use it for your own product, where asking people to "authorize" your own app adds nothing. It has a second effect: the session cookie that the hosted password sign-in and registration pages set keeps its normal lifetime for a first-party client, and is cut to 5 minutes for any other client. Toggle it from the shield icon in the client list or from the edit form.
+
+#### Allow new users to register
+
+`allowSignup` is off by default on every level.
+
+- **On**: a person who has no account yet can create one on the hosted pages (a sign-up link appears on the sign-in page), and a first sign-in with Google, GitHub or a magic link creates the account too. For a space client, the end-user is created on the fly in that space.
+- **Off**: the register page answers `403`, and creating a new account by any route (password, social, magic link) is refused with `signup_disabled`. A person who signs in with an existing account that has no end-user in this space is turned away with `access_denied`. Accounts that already exist keep signing in.
+
+The platform's own closed mode applies on top. When the operator sets `AUTH_DISABLE_SIGNUP=true` or `AUTH_ALLOWED_SIGNUP_DOMAINS`, the platform gate is evaluated first for every new account, including the ones created on a space's hosted pages (see [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md)). An open `allowSignup` does not override it.
+
+One email address belongs to one audience: an account created through a space is an end-user of that space only and cannot sign in to the dashboard, and the other way round. See [Multi-tenancy](/features/multi-tenancy).
+
+#### Rotate, disable and delete
+
+In the client list, each client has buttons for these actions:
+
+- **Rotate secret** issues a new secret, shown once. The previous secret stops working immediately, so update your backend first or expect failures. Only a SHA-256 hash is stored, so a lost secret cannot be read back: rotate it.
+- **Disable** and **Enable** switch the client off without deleting it. A disabled client's hosted pages answer `404`.
+- **Delete** removes the client. Applications that use it stop working.
+
+Over the API these are `rotateOAuthClientSecret` (`POST /api/oauth/clients/{clientId}/rotate`), `updateOAuthClient` (`PATCH /api/oauth/clients/{clientId}`, with `disabled`) and `deleteOAuthClient`. Creating and updating need `oauth-clients:write`, deleting needs `oauth-clients:delete`, listing needs `oauth-clients:read`. These routes and the Organization and Space settings screens are the only way to manage a client: the client endpoints of Better Auth (`/api/auth/oauth2/create-client`, `update-client`, `delete-client`, `client/rotate-secret`, `get-client`, `get-clients`) answer `401` to every session, and a signed-in user cannot create or read a client through them.
+
+### Organization level: Team SSO
+
+Use an organization client when your own team signs in to an internal tool with their Appstrate account.
+
+1. Open **Organization settings**, **General**, and in the **Advanced** section choose **Enable** on **Team SSO**. This needs the `org:settings` permission.
+2. The **Team SSO** tab now appears. Create the client there, the same way as above. The form adds two fields.
+3. **Role assigned on auto-join** (`signupRole`) is the role a person gets when `allowSignup` is on and they join through this client: `guest`, `member` or `admin`. `owner` is refused. Admins already reach every space, so for them the space list must be empty (`400` otherwise).
+4. **Space assignments** (`signupSpaceAssignments`) lists spaces to put them in, each as `{ "spaceId": "spc_...", "preset_role": "..." }` or `{ "spaceId": "spc_...", "custom_role_id": "srl_..." }`. A personal space cannot be assigned.
+
+While Team SSO is off, creating or editing an organization client and rotating its secret answer `403`, the hosted pages answer `404`, and no token is issued. Deleting stays possible. The token's permissions are its scopes intersected with the person's organization role.
+
+### Instance level
+
+An instance client is for a trusted app that lets a platform user choose an organization after signing in, like the dashboard itself and the `appstrate` CLI (both are created by the platform). No form and no admin endpoint creates one, on purpose. The operator declares extra ones in the `OIDC_INSTANCE_CLIENTS` environment variable (see [Environment Variables](/self-hosting/environment-variables)), and the platform creates them at boot. Tools such as MCP clients that register themselves through dynamic client registration also receive an instance-level client, and their tokens are bound to a single resource. If a declared client later differs from the stored one in `name`, `redirectUris`, `postLogoutRedirectUris`, `scopes`, `skipConsent` or the secret, the boot fails instead of changing it silently. The format and the procedure for changing one are in the [module README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
+
+## Embed the flow in your product
+
+A client created in the web app or the API is a **confidential** client: it has a secret and uses it with HTTP Basic authentication at the token endpoint. Do the code exchange on your backend. A single-page app or a mobile app cannot keep the secret and must go through your server.
+
+| Purpose                              | Endpoint                                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Discovery                            | `GET /.well-known/openid-configuration` and `GET /.well-known/oauth-authorization-server` |
+| Authorize (code flow, PKCE)          | `GET /api/auth/oauth2/authorize`                                                          |
+| Token                                | `POST /api/auth/oauth2/token`                                                             |
+| User info, introspection, revocation | `/api/auth/oauth2/userinfo`, `/api/auth/oauth2/introspect`, `/api/auth/oauth2/revoke`     |
+| Signing keys (ES256)                 | `GET /api/auth/jwks`                                                                      |
+| Logout                               | `GET /api/oauth/logout`                                                                   |
+
+The discovery document lists the authorize, token and JWKS endpoints, the supported scopes and `S256` as a code challenge method, so a standard OpenID Connect library can configure itself from it. The issuer is your `APP_URL` followed by `/api/auth`, so a client that inserts the issuer path after `.well-known` finds the document at `/.well-known/openid-configuration/api/auth` as well.
+
+### 1. Send the person to authorize
+
+PKCE with `S256` is required. Create a random `code_verifier`, derive the challenge from it, keep the verifier and a random `state` in a short-lived session of your own, then redirect:
+
+```ts
+const verifier = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+const challenge = Buffer.from(
+  await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+).toString("base64url");
+const state = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64url");
+
+const url = new URL("https://your-instance/api/auth/oauth2/authorize");
+url.search = new URLSearchParams({
+  response_type: "code",
+  client_id: CLIENT_ID,
+  redirect_uri: "https://portal.example.com/callback",
+  scope: "openid profile email offline_access agents:read agents:run",
+  state,
+  code_challenge: challenge,
+  code_challenge_method: "S256",
+}).toString();
+// redirect the browser to url
+```
+
+Appstrate shows its own hosted pages from there: sign-in, then registration, magic link and password reset where they apply, then the consent screen unless the client is first-party. The pages are rendered in French. Afterwards the browser returns to your `redirect_uri` with `code` and `state`. Check that `state` is the one you stored.
+
+### 2. Exchange the code
+
+The client secret goes in an HTTP Basic header. A secret sent in the body is refused with `invalid_client`. The `resource` parameter is required (RFC 8707) and is your instance's `APP_URL`, without a path:
+
+```bash
+curl -X POST https://your-instance/api/auth/oauth2/token \
+  -u "$CLIENT_ID:$CLIENT_SECRET" \
+  -d grant_type=authorization_code \
+  -d client_id="$CLIENT_ID" \
+  -d code="$CODE" \
+  -d redirect_uri=https://portal.example.com/callback \
+  -d code_verifier="$VERIFIER" \
+  -d resource=https://your-instance
+```
+
+The response holds `access_token`, `token_type`, `expires_in` and `expires_at`, plus `id_token` when `openid` was granted, and `refresh_token` when `offline_access` was granted. The access token is an ES256 JWT. For a space client its claims include `actor_type` (`end_user`), `org_id`, `space_id` and `end_user_id`, and `/api/auth/oauth2/userinfo` returns the same identifiers. To renew it, post `grant_type=refresh_token` and the `refresh_token` to the same endpoint, with the same Basic header, `client_id` and `resource`. The token endpoint is rate limited per IP address, to 20 requests per minute, and a call over the limit is a `429` with a `Retry-After` header and the body `{ "error": "temporarily_unavailable", ... }`.
+
+### 3. Call the API as that person
+
+```bash
+curl https://your-instance/api/agents \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+The token is pinned to the space, so no `X-Space-Id` is needed. The granted scopes are the ceiling, and the person only sees their own runs. See [End-users](/features/end-users) and [Authentication](/api/authentication#oidc-access-tokens). To check a token yourself, verify its ES256 signature against the key set at `/api/auth/jwks`, and fetch the set again when a token names a `kid` you do not know.
+
+### Log the person out
+
+Send the browser to the logout endpoint, which clears the Appstrate session cookie:
+
+```
+GET /api/oauth/logout?client_id=<client id>&post_logout_redirect_uri=<one of the allowed logout URLs>
+```
+
+If the URI is registered on the client, the person is redirected there. Otherwise they land on `/`.
+
+## Authentication settings of a space
+
+A space client signs people in on pages that Appstrate hosts, and those pages need two things your instance may not give them: a mail server and Google or GitHub apps. A space brings its own, so each tenant sends mail from its own domain and shows its own Google or GitHub consent screen.
+
+Open the space's settings (**Organization settings**, **Spaces**, then the space) and choose **Authentication**. You need `space-settings:write` in that space, which the space `admin` role holds. The tab has three sections: **SMTP server**, **Google Sign-In** and **GitHub Sign-In**, each with a **Configured** or **Not configured** badge.
+
+These settings apply to **space-level clients only**, and only to the pages Appstrate hosts for them.
+
+- **Google and GitHub**: a space with no configuration does not fall back to the instance's `GOOGLE_CLIENT_ID` and `GITHUB_CLIENT_ID` apps. The button is hidden on its sign-in page.
+- **Mail**: a space with no configuration does not fall back to the instance's SMTP server for the magic link and password reset pages, which answer an error. Registration is the exception: if the instance has an SMTP server, the verification email of a new account still goes through it.
+- Organization and instance clients, and the dashboard sign-in, keep using the instance settings from [Environment Variables](/self-hosting/environment-variables).
+
+The calls below need a signed-in session (an API key cannot carry `space-settings:write`), so send the session cookie and `X-Org-Id`. See [Authentication](/api/authentication#session-cookies).
+
+### Email
+
+The space's SMTP server sends the verification, magic link and password reset emails of the space's sign-in pages. The sender is the configured **From address** and **From name**.
+
+| Form field        | API field      | Notes                                                                                                                                                                                   |
+| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Host**          | `host`         | Up to 253 characters. A private, internal or loopback host is refused with `400` on `host`.                                                                                             |
+| **Port**          | `port`         | 1 to 65535. The form starts at 587.                                                                                                                                                     |
+| **Username**      | `username`     | Required.                                                                                                                                                                               |
+| **Password**      | `pass`         | Required on every save, because a save replaces the whole configuration. It is never returned or displayed, so enter it again each time you save, even when only another field changed. |
+| **From address**  | `from_address` | A valid email address.                                                                                                                                                                  |
+| **From name**     | `from_name`    | Optional. Quotes and line breaks are refused.                                                                                                                                           |
+| **Security mode** | `secure_mode`  | `auto` (the form describes it as TLS on port 465, otherwise STARTTLS), `tls`, `starttls` or `none` (development only). Default `auto`.                                                  |
+
+```bash
+curl -X PUT https://your-instance/api/spaces/spc_.../smtp-config \
+  -b cookies.txt \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "host": "smtp.example.com",
+    "port": 587,
+    "username": "mailer",
+    "pass": "...",
+    "from_address": "noreply@example.com",
+    "from_name": "Example",
+    "secure_mode": "auto"
+  }'
+```
+
+`GET`, `PUT` and `DELETE` on `/api/spaces/{id}/smtp-config` read, save and remove the configuration (`getSpaceSmtpConfig`, `upsertSpaceSmtpConfig`, `deleteSpaceSmtpConfig`). A read answers `404` until one exists, and never contains the password.
+
+**Send test email** appears once a configuration exists. It asks for a recipient and sends a message through the saved settings. If the mail server refuses it, its answer is shown as it came, so authentication, DKIM and SPF problems stay visible. Over the API this is `POST /api/spaces/{id}/smtp-config/test` with `{ "to": "you@example.com" }`, which answers `{ "ok": true, "message_id": "..." }`. It is limited to 5 calls per minute.
+
+Two behaviors worth knowing:
+
+- Mail from a space's server only goes to accounts of that space, or to an address that has no account (except the addresses the operator names in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS`). For any other address nothing is sent.
+- These mails go out through the instance's authentication system, which only sends mail when the instance has its own SMTP server configured (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM`). The space's server then replaces the transport and the sender. On an instance with no SMTP of its own, magic link, password reset and verification emails are not enabled, even for a space that configured its own server.
+
+### Google and GitHub
+
+For each provider, register an OAuth app with Google or GitHub, then enter its credentials in the matching section.
+
+| Form field        | API field       | Notes                                                                                                                                       |
+| ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Client ID**     | `client_id`     | Required.                                                                                                                                   |
+| **Client Secret** | `client_secret` | Required on every save, because a save replaces the stored secret. It is never returned or displayed, so enter it again each time you save. |
+| **Scopes**        | `scopes`        | Optional, space-separated in the form, up to 32 entries. Empty means the provider's defaults.                                               |
+
+Register this redirect URI at the provider, with your own `APP_URL`: `https://your-instance/api/auth/callback/google` or `https://your-instance/api/auth/callback/github`. It is the same URI for every space of the instance, so each tenant's app registers it.
+
+```bash
+curl -X PUT https://your-instance/api/spaces/spc_.../social-providers/google \
+  -b cookies.txt \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "Content-Type: application/json" \
+  -d '{ "client_id": "...", "client_secret": "...", "scopes": ["openid", "email", "profile"] }'
+```
+
+The provider is `google` or `github`, and `GET`, `PUT` and `DELETE` work as for SMTP (`getSpaceSocialProvider`, `upsertSpaceSocialProvider`, `deleteSpaceSocialProvider`). Once saved, the button appears on the sign-in page of the space's clients. Deleting the configuration hides it again.
+
+### How the secrets are stored
+
+The SMTP password and the Google and GitHub client secrets are encrypted at rest with AES-256-GCM, using the platform's `CONNECTION_ENCRYPTION_KEY` and its rotation keyring. They are write-only: no endpoint and no screen returns them. If a stored secret is encrypted under a key the instance no longer holds (a key removed from the keyring, for example), the space's hosted pages answer `503` with an error page, a Google or GitHub sign-in through them is refused, and **Send test email** answers `503 encryption_key_unavailable`. The instance's own SMTP server and Google or GitHub apps are never used in its place. Restoring the key fixes it. A stored secret that is corrupted is treated as not configured, and the space's pages behave as if it were absent until you save it again. For the key rotation procedure, see [Environment Variables](/self-hosting/environment-variables), and [Production checklist](/self-hosting/production-checklist) for the secrets you must keep.
+
+Saving or deleting a configuration refreshes the cache of the API instance that handled the call at once. Other instances are told through the platform's pub/sub, which uses Redis when `REDIS_URL` is set. Without Redis, an instance other than the one that handled the call keeps its cached answer for up to a minute.

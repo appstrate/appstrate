@@ -1,0 +1,230 @@
+---
+title: Docker Compose
+description: Run Appstrate with the shipped Docker Compose files, without the installer.
+---
+
+`appstrate install` is the recommended path (see [Self-Hosting](/self-hosting)). It renders one of the Compose templates below, generates the secrets and manages the stack for you. Use Compose directly when you need to adapt the stack to CI, an existing server or your own orchestration.
+
+| File                                                                                                                                                                  | What it is                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docker-compose.yml`](https://github.com/appstrate/appstrate/blob/main/docker-compose.yml) (repository root)                                                         | The Tier 3 stack: PostgreSQL, Redis, bundled MinIO, Docker-isolated runs. Service names are `appstrate-postgres`, `appstrate-redis`, `appstrate-minio` and `appstrate`                                     |
+| [`examples/self-hosting/docker-compose.tier1.yml`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/docker-compose.tier1.yml), `tier2`, `tier3` | The templates the installer writes. Tier 2 (PostgreSQL and Redis, files on a persisted volume) is the recommended single-node stack. Service names are `postgres`, `redis`, `minio` and `appstrate`        |
+| [`examples/self-hosting/docker-compose.yml`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/docker-compose.yml)                               | The same Tier 3 stack as the root file (PostgreSQL, Redis, bundled MinIO), with the tier templates' service names `postgres`, `redis`, `minio` and `appstrate`. It reads `.env` copied from `.env.example` |
+| [`examples/self-hosting/.env.example`](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/.env.example)                                           | The operator contract for the variables these files read                                                                                                                                                   |
+
+`deploy/docker-compose.yml` runs `app.appstrate.com` under Coolify. It is not a template.
+
+The commands below use the root file. With a tier template, save it as `docker-compose.yml` and replace the service names where a command names one.
+
+## Set up
+
+<Steps>
+
+<Step>
+
+### Download the files
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/appstrate/appstrate/main/docker-compose.yml -o docker-compose.yml
+```
+
+Start from an empty `.env`. The repository's root `.env.example` targets local development.
+
+</Step>
+
+<Step>
+
+### Generate the secrets
+
+Nine variables must be set or Compose refuses to start. Postgres and MinIO values are used inside connection strings, so prefer hex to avoid characters that need URL encoding.
+
+```bash
+cat >> .env <<EOF
+POSTGRES_USER=appstrate
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+MINIO_ROOT_USER=appstrate
+MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)
+BETTER_AUTH_SECRET=$(openssl rand -hex 32)
+UPLOAD_SIGNING_SECRET=$(openssl rand -hex 32)
+RUN_TOKEN_SECRET=$(openssl rand -hex 32)
+CONNECT_SESSION_SECRET=$(openssl rand -hex 32)
+CONNECTION_ENCRYPTION_KEY=$(openssl rand -base64 32)
+EOF
+```
+
+`CONNECTION_ENCRYPTION_KEY` must be 32 bytes, base64-encoded. `UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET` and `CONNECT_SESSION_SECRET` must be at least 16 characters. Keep a copy of `CONNECTION_ENCRYPTION_KEY`: losing it makes every stored credential unreadable. The tier templates need only `POSTGRES_PASSWORD` and the five application secrets, plus `MINIO_ROOT_PASSWORD` on Tier 3 (`POSTGRES_USER` defaults to `appstrate`, and Tier 1 and 2 have no MinIO).
+
+All other variables are listed in [Environment Variables](/self-hosting/environment-variables).
+
+</Step>
+
+<Step>
+
+### Set the public URL
+
+Behind a reverse proxy, set the origin users reach and the proxy depth:
+
+```bash
+cat >> .env <<EOF
+APP_URL=https://appstrate.example.com
+TRUSTED_ORIGINS=https://appstrate.example.com
+TRUST_PROXY=1
+EOF
+```
+
+With an HTTPS `APP_URL` in production the platform refuses to boot on `TRUST_PROXY=false`, because every caller would resolve to the proxy's address. See [Reverse proxy](#reverse-proxy).
+
+You also need at least one LLM provider. Set `SYSTEM_PROVIDER_KEYS` (a JSON array, see the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#llm-provider-setup)) or add a model in the dashboard after signing in.
+
+</Step>
+
+<Step>
+
+### Start
+
+```bash
+docker compose up -d
+```
+
+The first start pulls the platform, the agent runtime, the sidecar and the five MCP runner images. Compose gates the platform on the agent runtime and sidecar pulls (the tier templates gate it on all seven pulls), so a slow first start is normal. The tier templates also run a one-shot `migrate` service before the platform. The root file migrates at boot only.
+
+</Step>
+
+</Steps>
+
+## Compose forwards only what it lists
+
+The `appstrate` service gets its configuration from the `environment:` list of the Compose file, not from the whole `.env`. A variable that is not named there never reaches the container, whatever `.env` says.
+
+Since 1.0.0-beta.65 the root file and the three tier templates forward the variables most installs set: the `AUTH_*` closed-mode settings including `AUTH_BOOTSTRAP_TOKEN`, `EGRESS_ALLOW_INTERNAL_HOSTS`, SMTP, Google and GitHub sign-in, `PLATFORM_RUN_LIMITS` and `INLINE_RUN_LIMITS`, `PROXY_URL` and `SYSTEM_PROXIES`, and `MODEL_CATALOG_URL`. The two sets differ a little: only the root file forwards the `STRIPE_*` and `EE_*` variables of the commercial module, and only the tier templates forward `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN`.
+
+Some variables are still not forwarded by the root file or by any file in `examples/self-hosting/`, for example `LLM_PROXY_LIMITS`, `CREDENTIAL_PROXY_LIMITS`, `FILE_MAX_BYTES`, `STORAGE_DELETION_WORKER_INTERVAL_MS` and `FIRECRACKER_RUNNER_TLS_REQUIRED`. Before relying on a variable, check that it appears under `appstrate.environment`. If it does not, add a bare `- NAME` line to pass it through from `.env`:
+
+```yaml
+services:
+  appstrate:
+    environment:
+      - LLM_PROXY_LIMITS
+      - FILE_MAX_BYTES
+```
+
+A Compose file that predates 1.0.0-beta.65 forwards less. It does not pass `AUTH_BOOTSTRAP_TOKEN`, `EGRESS_ALLOW_INTERNAL_HOSTS` or `MODEL_CATALOG_URL`, and its tier templates also omit the SMTP and Google and GitHub sign-in variables, the run limits and the proxy settings (fixed in #1726). If you keep such a file, either replace it with the current one (diff it against yours first) or add the missing lines yourself. `appstrate install` on an existing directory rewrites the file for you, see [Upgrading](/self-hosting/upgrading).
+
+## Pin a version
+
+Image tags are the release version without a leading `v`, for example `1.0.0-beta.66`. The Compose files default to the release they shipped with, and one variable moves every image together:
+
+```bash
+echo "APPSTRATE_VERSION=1.0.0-beta.66" >> .env
+```
+
+`APPSTRATE_VERSION` is read by Compose, not by the application. It applies to `appstrate`, `appstrate-pi`, `appstrate-sidecar` and the five `appstrate-mcp-runner-*` images. Do not rely on `latest`: GHCR only publishes it for non-prerelease versions, and every release so far is a prerelease.
+
+The platform, `PI_IMAGE` and `SIDECAR_IMAGE` form a version contract. When all three are release versions they must be equal, and boot fails if they are not. See the `PI_IMAGE` row in [Environment Variables](/self-hosting/environment-variables).
+
+## Verify
+
+```bash
+curl http://localhost:3000/health
+```
+
+`/health` returns `status` (`healthy`, `degraded`, `unhealthy` or `starting`), `version`, `uptime_ms` and per-subsystem `checks` (`database`, `agents`, `realtime`). The HTTP status is `503` when the database is unhealthy and while the server is still starting, `200` otherwise. `GET /` serves the dashboard.
+
+## First owner
+
+Open the dashboard and follow [Auth modes](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). In the default open mode you sign up and create the first organization. For a private instance, set the `AUTH_*` closed-mode variables and an `AUTH_BOOTSTRAP_TOKEN` in `.env`, and claim the instance at `<APP_URL>/claim` (the current Compose files forward the token, see [above](#compose-forwards-only-what-it-lists)).
+
+## Persistent data
+
+The root file and `examples/self-hosting/docker-compose.yml` declare three named volumes: `pgdata` (PostgreSQL), `redisdata` (Redis) and `miniodata` (MinIO). The tier templates declare `pgdata` and `storagedata` (uploaded files) on Tier 1, `pgdata`, `redisdata` and `storagedata` on Tier 2, and `pgdata`, `redisdata` and `miniodata` on Tier 3. Compose prefixes the names with the project name (`appstrate_pgdata` for the root file).
+
+Back up PostgreSQL with a logical dump rather than a copy of the data directory:
+
+```bash
+docker compose exec -T appstrate-postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc appstrate' \
+  > appstrate-$(date +%F).dump
+```
+
+Use `postgres` as the service name with a tier template. A stack written by `appstrate install` runs under a derived Compose project name, so add `--project-name "$(jq -r .projectName .appstrate/project.json)"` to every `docker compose` command, even from the install directory. Back up file storage by snapshotting the volume (`storagedata`, or `miniodata` on Tier 3) or the bucket, and see [Upgrading](/self-hosting/upgrading) for the full list. If MinIO crash-loops after a volume restore, the repair is in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#data-persistence).
+
+```bash
+# DESTRUCTIVE: removes containers and all volumes
+docker compose down -v
+```
+
+## Reverse proxy
+
+Appstrate does not terminate TLS. Put a reverse proxy in front, forward to the host port (`PORT`, default `3000`), and set `APP_URL`, `TRUSTED_ORIGINS` and `TRUST_PROXY` as above. Three things matter:
+
+- **Upload size.** Every upload goes through the platform on `APP_URL`, and the per-file ceiling is 100 MiB by default (`FILE_MAX_BYTES`). Most proxies cap request bodies far lower, and a proxy-side `413` never reaches Appstrate.
+- **Streaming.** Chat tokens and run logs are Server-Sent Events. Do not buffer or compress `text/event-stream`. Appstrate sets `X-Accel-Buffering: no` on those responses.
+- **Client IP.** `TRUST_PROXY` must be the number of proxies that append to `X-Forwarded-For`. A value that is too high lets callers spoof their IP and evade per-IP rate limits. A TLS-terminating L4 load balancer appends nothing and does not count.
+
+### Nginx
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name appstrate.example.com;
+
+    ssl_certificate     /etc/ssl/certs/appstrate.pem;
+    ssl_certificate_key /etc/ssl/private/appstrate.key;
+
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
+```
+
+`proxy_http_version 1.1` with an empty `Connection` header keeps long-lived event streams stable.
+
+### Caddy
+
+```
+appstrate.example.com {
+    reverse_proxy localhost:3000
+}
+```
+
+Caddy obtains certificates automatically, has no body limit by default and supports SSE natively. Traefik buffers nothing unless you add its `buffering` middleware, in which case exempt `/api/chat`, `/api/realtime` and the run-log endpoints and set `maxRequestBodyBytes` to at least 104857600.
+
+### Separate origin for agent HTML
+
+Agents can publish HTML that the dashboard renders in a sandboxed preview. For the strongest isolation, set `USERCONTENT_URL` to a second registrable domain that points at the same server. Boot fails if its host equals the host of `APP_URL`. Details: [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md#agent-html-previews-usercontent_url).
+
+## Docker network pool
+
+Each run creates an isolated bridge network. On a host with many Docker projects, `all predefined address pools have been fully subnetted` means Docker's default address pool is exhausted. See [Troubleshooting](/self-hosting/troubleshooting#docker-network-pool-exhausted).
+
+## Logs
+
+The platform writes structured JSON logs to stdout:
+
+```bash
+docker compose logs appstrate -f
+```
+
+`LOG_LEVEL` accepts `debug`, `info` (default), `warn` and `error`. At `debug` it also writes one access line per request.
+
+## Multiple instances
+
+With Redis configured (Tier 2 or 3), several platform instances can run behind a load balancer. The scheduler delivers each job once through BullMQ, rate limits are shared, and run cancellation is broadcast over Redis pub/sub. Point every instance at the same PostgreSQL, Redis and, if used, the same S3 bucket, and give them identical secrets. Filesystem storage is per host, so use S3 for more than one instance.
+
+## Updating
+
+Pin the new version, pull and restart, after reading the operator notes of every release you skip. See [Upgrading](/self-hosting/upgrading).
+
+## Verifying the installer
+
+`install.sh` carries SLSA build provenance and a minisign signature, and the CLI binaries are published with minisign-signed checksums and SLSA provenance. The self-hosting README documents `gh attestation verify` and the offline minisign check.

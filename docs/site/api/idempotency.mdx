@@ -1,0 +1,73 @@
+---
+title: Idempotency
+description: Retry the operations that create runs, end-users, webhooks and OAuth clients without creating duplicates, using the Idempotency-Key header.
+---
+
+Some `POST` operations accept an `Idempotency-Key` header. Repeating the same request with the same key returns the original response instead of doing the work twice, so you can retry safely after a timeout, a dropped connection, or an ambiguous `5xx`.
+
+## Which operations honor it
+
+Only the operations that declare an `Idempotency-Key` parameter in the OpenAPI document. Today these are:
+
+| Operation                             | Why it matters                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `POST /api/agents/{scope}/{name}/run` | A retry must not launch a second run                                               |
+| `POST /api/runs/inline`               | Same, for an inline agent                                                          |
+| `POST /api/runs/remote`               | Same, for a remote-backed run                                                      |
+| `POST /api/end-users`                 | A retry must not create a second end-user                                          |
+| `POST /api/webhooks`                  | A retry must not create a second webhook (the response carries the signing secret) |
+| `POST /api/oauth/clients`             | A retry must not register a second OAuth client                                    |
+
+The header is refused elsewhere. A `POST`, `PUT`, `PATCH`, or `DELETE` that carries `Idempotency-Key` to an operation that does not honor it fails with `400` and `code: "idempotency_not_supported"`, rather than being silently executed without the guarantee you asked for. Do not add the header to every outbound request. `GET`, `HEAD`, and `OPTIONS` ignore it. The authentication endpoints under `/api/auth/*` neither honor nor refuse it.
+
+## How it works
+
+1. You send a unique key, such as a UUID v4, with the request.
+2. Appstrate fingerprints the request: a SHA-256 over the method, the path, the query string, and the raw body. It stores the key with that fingerprint and marks it in progress.
+3. When the request finishes, the response (status, headers, body) is stored under the key.
+4. A later request with the same key and the same fingerprint gets the stored response, with the header `Idempotent-Replayed: true`. The handler does not run again.
+5. After **24 hours** the key expires. Reusing it then is a new request.
+
+```bash
+curl -X POST http://localhost:3000/api/end-users \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Idempotency-Key: 7b2d4c8e-1e8a-4f5b-9a3c-2d4e8f1a7b6c" \
+  -H "Content-Type: application/json" \
+  -d '{ "externalId": "user_alice", "name": "Alice" }'
+```
+
+Run the same command again and you get the same `201` and the same end-user, with `Idempotent-Replayed: true`.
+
+## Rules
+
+- **Format**: any string up to 255 characters. Longer is `400` with `code: "invalid_idempotency_key"`.
+- **Scope**: a key is scoped to the organization and the space of the request. Two spaces can use the same key without colliding.
+- **Same key, different request**: `422` with `code: "idempotency_conflict"`. The method, the URL, the query, or the body differs from the first use. Do not retry; use a new key, or send the original request.
+- **Same key, still running**: `409` with `code: "idempotency_in_progress"`. Wait and retry the same request.
+- **Some failures are not stored**. If the first attempt throws an error or ends in a `5xx`, the key is released, and a retry with the same key runs the operation again. A `2xx` or a `4xx` response returned by the operation is stored and replayed.
+- **Large responses** (a body over about 1 MiB, 1,048,576 characters) are not stored, and the key is released.
+- **Permissions are checked first**, on every request, replays included. A replay is never served to a caller who would be refused on a fresh request, and a replayed run response is shaped for what the current caller may see.
+
+```json
+{
+  "type": "https://docs.appstrate.dev/errors/idempotency-conflict",
+  "title": "Idempotency Conflict",
+  "status": 422,
+  "detail": "This idempotency key was already used with a different method, URL or body.",
+  "instance": "urn:appstrate:request:req_…",
+  "code": "idempotency_conflict",
+  "request_id": "req_…",
+  "param": "Idempotency-Key"
+}
+```
+
+## Storage
+
+Keys live in the platform's shared cache. With `REDIS_URL` set, that is Redis, shared by every replica and surviving restarts. Without it, the cache is in the memory of the single API process: keys are lost on restart and are not shared between replicas. That is fine for local development and a single-node install; use Redis for anything replicated. See [Progressive infrastructure](/self-hosting/progressive-infrastructure).
+
+## Practices
+
+- Generate the key on the client, before the first attempt, and persist it with the intent (a job row, a queue message) so every retry reuses it.
+- One key per logical operation. A new operation gets a new key.
+- Keep the request byte-for-byte identical on retry. A re-serialized body with a different key order is a different fingerprint.
+- Treat `Idempotent-Replayed: true` as success.

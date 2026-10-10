@@ -1,0 +1,69 @@
+---
+title: "GitHub"
+description: "Connect GitHub to your Appstrate agents: the REST API, GitHub's hosted MCP server, or a sandboxed git workflow."
+---
+
+## Overview
+
+GitHub hosts code and collaboration. Appstrate ships three GitHub integrations, each a separate package with separate connections.
+
+| Integration             | Source       | Use it for                                                                                                                                             |
+| ----------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@appstrate/github`     | `api_call`   | Calling the GitHub REST API directly                                                                                                                   |
+| `@appstrate/github-mcp` | Remote MCP   | GitHub's hosted MCP server: tools covering repositories, issues, pull requests, Actions, code security, notifications, projects, gists and discussions |
+| `@appstrate/github-git` | Local runner | A clone, edit, commit, push and pull request loop on a real working tree                                                                               |
+
+**GitHub (MCP)** accepts an OAuth App registered by an administrator (GitHub's MCP server does not support dynamic client registration) or a personal access token, classic or fine-grained, pasted into the connect form. With OAuth, consent asks only for the scopes the selected tools use; a token carries whatever permissions you gave it. This integration allows `tools: "*"`, so an agent can select every tool the server advertises, but prefer an explicit list.
+
+**GitHub Git** runs the `@appstrate/github-git-mcp` server in a sandboxed runner container, with a per-run workspace at `/workspace`, and shells out to `git`. The agent edits the files with its own file tools. Its tools are `clone`, `checkout_branch`, `status`, `diff`, `commit`, `push` and `open_pr`. It needs the `docker` or `firecracker` run adapter.
+
+## Connect GitHub
+
+An administrator registers an OAuth App once (not needed for a personal access token).
+
+<Steps>
+<Step>
+
+Create an OAuth App under Settings, Developer settings, OAuth Apps ([open](https://github.com/settings/developers)).
+
+</Step>
+<Step>
+
+Set the "Authorization callback URL" to `APP_URL` followed by `/api/integrations/callback`, as shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/github-mcp": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/github-mcp": {
+      "tools": ["list_issues", "issue_read", "issue_write"]
+    }
+  }
+}
+```
+
+Example prompt:
+
+```
+Every Monday, list the issues opened last week in acme/api without a label,
+propose a label for each one, and add it after my approval.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

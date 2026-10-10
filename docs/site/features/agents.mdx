@@ -1,0 +1,219 @@
+---
+title: Agents
+description: What an agent is, how it is defined, versioned, configured per space and given capabilities.
+---
+
+## What is an agent?
+
+An agent is an **LLM in a loop with tools**, running inside an isolated sandbox. You give it a goal, and it decides which tools to call, in what order, to reach it. Unlike a workflow (a predefined graph of steps), an agent plans and reacts as it goes.
+
+An agent is an [AFPS package](/features/packages) of type `agent`. It is made of:
+
+- `manifest.json`: identity, input and output schemas, timeout, dependencies, runtime tools.
+- `prompt.md`: the instructions the model receives.
+
+At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/how-integrations-work) and the [runtime tools](/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
+
+Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/features/files)).
+
+## Drafts, versions and where an agent lives
+
+Every agent package has:
+
+- a **draft**: the working copy, edited in place;
+- immutable **published versions** (semver, forward-only), cut from the draft.
+
+An agent also has a **home space**, the space whose `agents:write` permission governs editing, publishing, renaming and deleting it. Other spaces reach it by **sharing** and run it by **activating** it. Both concepts are covered in [Library and sharing](/features/library) and [Spaces](/features/spaces).
+
+A launch with no selector runs the **latest published version**. The draft runs only when the caller asks for it (`?version=draft`) and can write the agent.
+
+## Creating an agent
+
+### In the web app
+
+Open **Agents** in the sidebar and create a new agent. The editor lets you write the prompt, define the input and output schemas, attach skills and integrations, and pick the runtime tools. Saving edits the draft. **Create version**, in the agent's actions menu, cuts a version.
+
+### Through the API
+
+Creating an agent writes its draft and cuts its first version, and activates it in your space. Later you edit the draft and publish more versions. Writes to a draft are guarded by optimistic concurrency: `PATCH` requires the `ETag` of the draft in `If-Match`.
+
+```bash
+# 1. Create the agent (draft + initial version)
+curl -X POST https://your-instance/api/packages/agents \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "manifest": {
+      "name": "@acme/email-summarizer",
+      "version": "1.0.0",
+      "type": "agent",
+      "schema_version": "0.3",
+      "display_name": "Email summarizer",
+      "description": "Summarizes recent emails",
+      "author": "Acme"
+    },
+    "content": "Summarize the most recent emails and return the result."
+  }'
+
+# 2. Later edits: update the draft under If-Match, then cut a version with a new number
+curl -X PATCH https://your-instance/api/packages/agents/@acme/email-summarizer \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "If-Match: <ETag from the GET>" \
+  -H "Content-Type: application/json" \
+  -d '{ "content": "Summarize the most recent emails in three bullets." }'
+
+curl -X POST https://your-instance/api/packages/agents/@acme/email-summarizer/versions \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "version": "1.0.1" }'
+```
+
+`content` is the prompt and must not be blank. A version is cut at the draft's manifest `version` unless the body names another one; reusing a published number for changed content is `409 version_exists`, and a draft identical to the latest version is `409 no_changes`. Request bodies are closed: an unknown field is a `400`, never silently dropped. An API key is bound to one space, which is where the agent is created and activated. With a browser session, send `X-Org-Id` and `X-Space-Id` instead (see [Multi-Tenancy](/features/multi-tenancy)).
+
+You can also import an existing package (ZIP, GitHub URL or `.afps-bundle`). See [Packages](/features/packages).
+
+## The manifest
+
+A manifest follows the [AFPS specification](/resources/afps-specification), plus Appstrate's `runtime_tools` field.
+
+```json
+{
+  "name": "@acme/support-triage",
+  "version": "1.2.0",
+  "type": "agent",
+  "schema_version": "0.3",
+  "display_name": "Support triage",
+  "description": "Labels and answers new support tickets",
+  "author": "Acme",
+  "timeout": 600,
+  "input": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "max_tickets": { "type": "integer", "default": 20 }
+      }
+    }
+  },
+  "output": {
+    "schema": {
+      "type": "object",
+      "properties": { "handled": { "type": "integer" } },
+      "required": ["handled"]
+    }
+  },
+  "dependencies": {
+    "skills": { "@acme/tone-of-voice": "^1.0.0" },
+    "integrations": { "@appstrate/zendesk": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/zendesk": { "tools": ["api_call"] }
+  },
+  "runtime_tools": ["output", "log", "note"]
+}
+```
+
+The fields the platform reads:
+
+| Field                                                  | Meaning                                                                                                                                                                   |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timeout`                                              | Run timeout in seconds. Default `300`. Clamped to the platform ceiling (`timeout_ceiling_seconds`, default `1800`). The agent detail returns `effective_timeout_seconds`. |
+| `input.schema`                                         | JSON Schema 2020-12 for the run input. Drives the launch form.                                                                                                            |
+| `output.schema`                                        | JSON Schema 2020-12 for the result. If set, `runtime_tools` must include `output`.                                                                                        |
+| `dependencies.skills` / `mcp_servers` / `integrations` | Flat maps of package id to semver range.                                                                                                                                  |
+| `integrations_configuration.<id>`                      | Per-integration selection: `tools`, `scopes`, `auth_key`. Every key must match a declared integration dependency.                                                         |
+| `runtime_tools`                                        | Opt-in first-party tools: `output`, `log`, `note`, `pin`, `publish_file`. None is injected by default.                                                                    |
+| `_meta["dev.appstrate/resources"]`                     | Optional memory and CPU hints. See [Configuring agent resources](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md).            |
+
+The platform validates manifests on every write path. An unknown `runtime_tools` id is rejected on author input and dropped (with a report) when read back from a stored manifest.
+
+## The prompt
+
+`prompt.md` is your text. The platform prepends a preamble built from the run context, so the model sees, when they apply:
+
+- the environment (ephemeral container, network access, timeout, workspace layout);
+- the available skills (files under `.pi/skills/`);
+- one section per connected integration, including its API documentation when the integration ships an `INTEGRATION.md`;
+- the **User Input** and **Files** of this run;
+- the **Checkpoint** and **Pinned Slots** left by earlier runs (see [Memory](/features/memory));
+- a **Deliverables** section telling it to write user-facing files under `./outputs/`;
+- the **Output Format**, with the full schema, when `output.schema` is declared.
+
+Tools are not listed in the prompt. The model discovers them through MCP, each tool carrying its own description. Write the prompt as the task and constraints, not as a tool manual.
+
+## Input and output
+
+### Input
+
+`input.schema` describes what a run takes. A field can be a file (`format: "uri"` with a `contentMediaType`), in which case the caller passes an `upload://` or `appfile://` reference or an inline data URI (see [Files](/features/files)).
+
+Values resolve in this order, last one wins:
+
+1. the author `default` in the schema;
+2. the **stored value** saved for the agent in this space;
+3. the caller's input at launch, or, for a scheduled run, the value frozen on the [schedule](/features/scheduling). A run has one or the other, never both.
+
+A member who holds `agents:configure` in the space (the `admin` and `builder` roles) can save stored values and **lock** fields. A locked field is not asked at launch, and a caller that sets it gets `400 locked_input_field`.
+
+```bash
+curl -X PUT https://your-instance/api/agents/@acme/support-triage/input-settings \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "values": { "max_tickets": 50 }, "locked_fields": ["max_tickets"] }'
+```
+
+`PUT` replaces the whole input settings of the agent in that space: both members are required. Stored values are validated against the schema with `required` ignored, so a required field can stay empty and be asked at launch. Locking a required field that has no value is refused (`locked_required_field_empty`).
+
+Without `agents:read`, run responses return `input: null` for registered agents, so editor-imposed values stay private.
+
+### Output
+
+The `output` tool takes one argument, `data`, the object to return. When `output.schema` is declared, it is the schema of `data`, and the model sees it in the tool definition. The call is validated in the sandbox and again on the server. A mismatch marks the run `failed`. The payload is still stored, never dropped.
+
+A run with no output schema can finish without calling `output`.
+
+## Capabilities
+
+| Capability                                                          | Where it is declared                                         | Page                                                |
+| ------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
+| Skills                                                              | `dependencies.skills`                                        | [Skills](/features/skills)                          |
+| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/integrations/how-integrations-work) |
+| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/features/packages)                      |
+| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/features/tools)                            |
+| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/features/memory)                          |
+
+Attachment is **manifest-only**: edit the draft, then publish a version. There is no separate endpoint to attach a skill or a tool.
+
+### Integrations need connections
+
+An integration only works for an actor that holds a usable **connection** to it. Before launching, `GET /api/agents/{scope}/{name}/connection-readiness` returns one verdict covering every declared integration and whether the agent is active in the space. A launch with a missing connection answers `409 missing_integration_connection`, with one error item per integration to fix. The connection model (pins, org defaults, launch overrides) belongs to the integrations pages.
+
+## Model, proxy and generation settings
+
+Each space can pin a model, a proxy and generation settings (temperature, reasoning level) for an agent. The effective model is resolved at launch with this precedence:
+
+1. `modelId` in the run request;
+2. the model override of a schedule, when a schedule fires the run;
+3. the model pinned for the agent in this space;
+4. the organization default model;
+5. the system default.
+
+```bash
+curl -X PATCH https://your-instance/api/agents/@acme/support-triage/model \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "modelId": "<model id>", "generation": { "temperature": 0.2, "reasoning_level": "medium" } }'
+```
+
+Pass `"modelId": null` to go back to the organization default. Models and provider credentials are covered in [LLM Models](/integrations/llm-models). The proxy cascade is in [Proxies](/features/proxies).
+
+The same per-space settings are also available through `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` (`modelId`, `proxyId`, `generation_config`) and read back, resolved, by `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+
+## Running an agent
+
+An agent can be launched from the web app, the API, the CLI, a [schedule](/features/scheduling), the [chat](/using-appstrate/chat) assistant or an [MCP client](/using-appstrate/mcp-clients). See [Runs](/features/runs).
+
+An agent must be **active** in the space to be launched there. A space that has it switched off answers `404 agent_not_active_in_space`, while reads keep working.
+
+## Exporting
+
+`GET /api/agents/{scope}/{name}/bundle` streams the agent and all its transitive dependencies as a deterministic `.afps-bundle`, which another instance imports with `POST /api/packages/import-bundle`. If the organization sets `restrict_package_copy`, the export requires `agents:share` in the agent's home space.

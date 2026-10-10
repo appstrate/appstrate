@@ -1,0 +1,430 @@
+---
+title: CLI
+description: Reference for the appstrate command-line tool. Install and operate an instance, sign in, call the API, run agents, edit packages locally.
+---
+
+The `appstrate` CLI installs and operates an instance, signs you in to any instance, and drives its API from a terminal or a script. It is a single self-contained binary: no Node.js or other runtime is required on the host (except Bun for a Tier 0 install). This page covers the common cases. The full flag tables are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md).
+
+Global flags work on every command: `-p, --profile <name>` selects a profile, `--insecure` allows an instance without HTTPS (tokens then travel in plaintext, so use it on a trusted network only), and `--version` prints the version.
+
+## Get the CLI
+
+<Tabs items={['curl (recommended)', 'Bun']}>
+
+<Tab value="curl (recommended)">
+
+```bash
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+Downloads the signed binary for macOS or Linux (x64 and arm64) into `~/.local/bin`, and verifies it. In an interactive terminal it then stops and tells you to run `appstrate install`. Unattended (`bash -s -- --yes`, `CI=true`, or stdout not a terminal), it runs `appstrate install --yes` itself. To install only the CLI in every case, pipe into `APPSTRATE_NO_LAUNCH=1 bash`. On Windows, run it inside WSL2. Update with `appstrate self-update`.
+
+</Tab>
+
+<Tab value="Bun">
+
+```bash
+bun install -g appstrate     # needs Bun 1.3.9 or later
+bunx appstrate <command>     # or run it once without installing
+```
+
+The npm package is `appstrate`. Update with `bun update -g appstrate`. This is the route on native Windows.
+
+</Tab>
+
+</Tabs>
+
+The two channels are independent. If both are installed, `appstrate doctor` lists every `appstrate` on your `PATH` and which one wins. See [Upgrading the CLI](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
+
+## Driving the CLI from a coding agent
+
+The repository ships an operating manual written for a coding agent: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). It covers the zero-to-first-run recipe, the rules of engagement and a `curl` to `appstrate api` cheat sheet. With a logged-in profile the CLI injects the bearer token itself, so the agent never sees it. An API key passed through the environment or `--api-key` is readable by the process that sets it, so give an agent a key scoped to what it may do. See also [Skills and coding agents](/using-appstrate/skill).
+
+## Commands
+
+| Command                                                              | Purpose                                               |
+| -------------------------------------------------------------------- | ----------------------------------------------------- |
+| `install`, `start`, `stop`, `restart`, `logs`, `status`, `uninstall` | Install an instance and manage its Docker stack       |
+| `login`, `logout`, `whoami`, `token`                                 | Sessions                                              |
+| `org`, `space`                                                       | Pin the organization and space that commands act in   |
+| `api`, `openapi`                                                     | Call the REST API, explore its schema                 |
+| `run`                                                                | Run an agent, on the instance or locally              |
+| `models`                                                             | List the model presets an instance exposes            |
+| `packages`                                                           | Edit a package in a local folder, push it, publish it |
+| `code`                                                               | Sync skills and agents into Claude Code and Codex     |
+| `self-update`, `doctor`                                              | Maintain the CLI itself                               |
+| `runner`                                                             | Install the Firecracker runner daemon on a KVM host   |
+
+<Accordions type="multiple">
+
+<Accordion title="appstrate install">
+
+Installs a local or server instance: asks for a tier, generates a `.env` with cryptographic secrets, starts the stack, and opens the instance once the healthcheck passes (up to 120 seconds on Docker tiers).
+
+```bash
+appstrate install                              # interactive
+appstrate install --tier 2 --yes               # unattended
+appstrate install --tier 0 --dir ~/demo-appstrate
+appstrate install --yes --app-url https://appstrate.example.com
+```
+
+| Flag                                          | Description                                                                                                                              |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `-t`, `--tier <0\|1\|2\|3>`                   | Skip the tier prompt                                                                                                                     |
+| `-d`, `--dir <path>`                          | Install directory (default `~/appstrate`)                                                                                                |
+| `--port <port>`                               | Host port (default 3000, also `APPSTRATE_PORT`)                                                                                          |
+| `--app-url <url>`                             | Public origin for a deployment behind a reverse proxy (also `APPSTRATE_APP_URL`). Enables `TRUST_PROXY` automatically for non-local URLs |
+| `-y`, `--yes`                                 | Accept the defaults without prompting (also `APPSTRATE_YES=1`)                                                                           |
+| `--force`                                     | Skip the check for another Compose project running under the same name                                                                   |
+| `--run-adapter <docker\|firecracker>`         | Agent execution backend. `firecracker` needs a KVM host with the runner daemon, on Docker tiers                                          |
+| `--runner-url`, `--runner-token`, `--host-ip` | Firecracker topology options                                                                                                             |
+| `--upgrade-compose`                           | Maintenance: clean stale defaults out of an existing `docker-compose.yml`                                                                |
+
+What each tier runs, and who can sign up on the new instance, are in [Install](/get-started/install).
+
+</Accordion>
+
+<Accordion title="start, stop, restart, logs, status, uninstall">
+
+Wrappers around Docker Compose for a Docker-tier install. They read the Compose project name the installer recorded, so you do not type it.
+
+```bash
+appstrate start
+appstrate stop                      # containers off, volumes kept
+appstrate restart
+appstrate logs -f postgres          # follow one service, or omit the name for all
+appstrate status
+appstrate uninstall                 # remove containers, keep data
+appstrate uninstall --purge --yes   # destructive: also deletes volumes and the install directory
+```
+
+All accept `-d, --dir <path>` for a non-default install directory.
+
+</Accordion>
+
+<Accordion title="appstrate login">
+
+Signs in to an instance with the OAuth 2.0 device authorization grant (RFC 8628).
+
+```bash
+appstrate login                                                # prompts for the instance URL
+appstrate login --instance http://localhost:3000
+appstrate login --profile prod --instance https://app.example.com
+```
+
+| Flag                     | Description                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `--instance <url>`       | Instance base URL                                                                           |
+| `-p`, `--profile <name>` | Profile to store the session under (default: the active profile, see [Profiles](#profiles)) |
+| `--org <id-or-slug>`     | Pin this organization after login                                                           |
+| `--create-org <name>`    | Create an organization and pin it. A default space and a `hello-world` agent come with it   |
+| `--no-org`               | Do not pin an organization                                                                  |
+| `--space <id>`           | Pin this space after the organization                                                       |
+| `--create-space <name>`  | Create a space and pin it                                                                   |
+| `--no-space`             | Do not pin a space                                                                          |
+| `--device-name <name>`   | Label shown in the dashboard's list of devices (default: the hostname)                      |
+
+The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
+
+After the token exchange, login pins what you work in. One organization is pinned automatically, several give a picker, none offers to create one. Then the organization's default space is pinned. Every later call sends them as `X-Org-Id` and `X-Space-Id`. You can see and revoke your CLI sessions under **Preferences → Devices**, and admins can see everyone's under **Organization settings → CLI sessions**.
+
+</Accordion>
+
+<Accordion title="appstrate logout, whoami, token">
+
+```bash
+appstrate whoami          # asks the instance who you are; exits non-zero if the session is invalid
+appstrate token           # metadata of the stored tokens (expiry, status), never the token itself
+appstrate logout          # revokes the session on the instance, wipes local credentials
+```
+
+`whoami` is the right check for scripts that must fail fast when authentication drifts. `logout` still cleans up locally if the instance is unreachable. It also removes the skills it synced for that profile (see [`code sync`](/using-appstrate/skill)).
+
+</Accordion>
+
+<Accordion title="appstrate org, appstrate space">
+
+Change the organization and the space the active profile acts in.
+
+```bash
+appstrate org list              # the pinned one is marked *
+appstrate org switch acme       # by slug or id; no argument opens a picker
+appstrate org current           # prints the pinned id
+appstrate org create "Acme" --slug acme-prod
+
+appstrate space list            # the default space is tagged [default]
+appstrate space switch spc_xxx
+appstrate space current
+appstrate space create "Staging"
+```
+
+Switching organization re-pins that organization's default space, so space-scoped calls keep working. Spaces are identified by id only.
+
+</Accordion>
+
+<Accordion title="appstrate api">
+
+An authenticated, curl-compatible call to the instance's REST API. The CLI adds the bearer token, `X-Org-Id` and `X-Space-Id` of your profile, and prints the response. With an API key it calls as the key instead, see [Call the API with an API key](#call-the-api-with-an-api-key).
+
+```bash
+appstrate api GET /api/agents
+appstrate api /api/agents                                        # method inferred
+appstrate api GET /api/runs -q limit=5 -q user=me                # query parameters
+echo '{"input":{"query":"hi"}}' | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
+appstrate api POST /api/x -d @body.json
+appstrate api POST /api/x -F 'file=@pkg.zip'
+```
+
+Most curl flags behave as in curl: `-H`, `-d`, `-F`, `-G`, `-i`, `-I`, `-o`, `-s`, `-f` and `--fail-with-body`, `-v` (the token stays redacted), `-w`, `--retry`, `--max-time`, `-L`. `-q, --query 'k=v'` (repeatable) adds a query parameter, unlike curl's `-q`. Three differences are deliberate. There is no `-u`, because you never handle the token. A URL on another origin than the instance (your profile's, or `APPSTRATE_INSTANCE` with an API key) is refused. Cookie-jar files are refused. The curl-aligned exit codes (22 and 25 for HTTP errors, 28 for timeouts, and so on) are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-api).
+
+An agent is addressed by its package id, in the URL `/api/agents/@scope/name/run`. The launch call returns `201` with the run resource and does not stream. Follow the run with `GET /api/runs/{id}`, or use `appstrate run`.
+
+</Accordion>
+
+<Accordion title="appstrate openapi">
+
+Explores the instance's OpenAPI 3.1 schema without printing all of it. The schema is cached per profile and revalidated with an ETag.
+
+```bash
+appstrate openapi list --tag runs
+appstrate openapi list --search "create run" --json
+appstrate openapi show runAgent                   # by operationId
+appstrate openapi show GET /api/runs --json       # fully dereferenced
+appstrate openapi export -o schema.json
+```
+
+`list` filters with `--tag`, `--method`, `--path` and `--search`. `--refresh` and `--no-cache` control the cache.
+
+</Accordion>
+
+<Accordion title="appstrate run">
+
+Runs an agent. The target decides where it executes.
+
+```bash
+appstrate run @acme/triage                       # latest published version, on the instance
+appstrate run @acme/triage@1.2.0                 # exact version, range or tag
+appstrate run @acme/triage@draft                 # your working copy, if you can edit it
+appstrate run @acme/triage --input '{"query":"hi"}'
+appstrate run ./triage-1.2.0.afps-bundle --integrations local --creds-file ./creds.json
+```
+
+- A **package id** runs on the instance by default (a **platform run**), exactly like the dashboard's Run button, and the CLI follows the run's logs and final status. `--remote` asks for this explicitly. Add `--local` to download the bundle and run it in-process instead (a **remote run**).
+- A **`.afps` or `.afps-bundle` path** runs locally, with your shell, filesystem and environment. A path cannot be combined with `--remote`.
+
+Pass parameters with `--input <json>` or `--input-file <path>`. A platform run sends them as is and the instance validates them. Other useful flags: `--no-inherit` (a remote run ignores the space's stored run configuration; a platform run ignores the flag), `--proxy <id>`, `--json` (events as JSON lines), `--output <path>` (write the final result), `-v` and `-q` (more or less tool output).
+
+A platform run outlives the CLI. In an interactive terminal, Ctrl-C cancels the run on the instance. In a script (`--json`, or no TTY on stdin), a signal detaches instead and the run keeps going, which you can force either way with `--cancel-on-exit` or `--no-cancel-on-exit`. A run that needs an integration without a healthy connection is refused with `409 missing_integration_connection`: connect it from the dashboard first.
+
+Most flags that only make sense in one mode are refused in the other, with a message that names them. The environment variables, the flags of a remote run and a CI example are in [Headless and CI runs](#headless-and-ci-runs).
+
+</Accordion>
+
+<Accordion title="appstrate models list">
+
+Lists the model presets the instance exposes: id, API shape and label, flagged `default`, `disabled` or `needs-reconnection`. A preset whose API shape the [LLM proxy](#llm-proxy-and-credential-proxy) cannot route is flagged `proxy-unsupported`, and `--proxy-only` hides those. `--json` prints the list for scripts. The command reads the instance with the session of a logged-in profile.
+
+</Accordion>
+
+<Accordion title="appstrate packages">
+
+Edit a skill, agent, integration or MCP server in a local folder with any tool, then write it back to its draft and publish it as a separate step.
+
+```bash
+appstrate packages pull my-skill            # the draft into ~/Appstrate Packages/<org>/packages/...
+appstrate packages status my-skill --diff   # what the folder changes in the draft
+appstrate packages push my-skill            # the folder into the draft, nobody else sees it yet
+appstrate packages publish my-skill         # the draft becomes a version every space resolves
+```
+
+`pull` accepts a version (`my-skill@1.2.0`) to fetch a published version read-only. `push` refuses to overwrite a draft that changed elsewhere since you pulled it (`--force` replaces it). `publish` cuts the draft's own version when it is ahead of the latest published one (or nothing is published yet). When the draft still carries the published version, it bumps the patch (`--bump minor` or `major`). `push --create` creates a package that does not exist yet and publishes its first version. Only someone who can write in the package's home space can push or publish.
+
+</Accordion>
+
+<Accordion title="appstrate code sync">
+
+Copies the skills of the spaces you belong to, and the agents of your pinned space as commands, into Claude Code and Codex. It runs unattended once the Claude Code plugin is installed.
+
+```bash
+appstrate code sync --target claude-plugin --target codex
+```
+
+See [Skills and coding agents](/using-appstrate/skill) for the plugin setup, targets and behaviour.
+
+</Accordion>
+
+<Accordion title="appstrate self-update, appstrate doctor">
+
+```bash
+appstrate self-update                 # upgrade a curl-installed binary in place
+appstrate self-update --release v1.2.3
+appstrate doctor [--json]             # every appstrate on PATH, its channel and version
+```
+
+`self-update` verifies the minisign signature and the checksum, and refuses to downgrade without `--force`. A CLI installed with Bun is updated with `bun update -g appstrate` instead.
+
+</Accordion>
+
+<Accordion title="appstrate runner">
+
+Installs and manages the Firecracker runner daemon (`install`, `doctor`, `update`, `status`, `logs`, `uninstall`) on a Linux host with KVM, as root. Only needed for the opt-in Firecracker backend. See [Firecracker](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
+
+</Accordion>
+
+</Accordions>
+
+## Headless and CI runs
+
+`appstrate run` can authenticate without `appstrate login`: give it an API key and the instance, and it works on a CI runner or any machine with no profile. `appstrate api` reads the same key and instance (see [Call the API with an API key](#call-the-api-with-an-api-key)). The other commands (`openapi`, `whoami`) still need a profile.
+
+| Variable             | Meaning                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `APPSTRATE_API_KEY`  | An `apst_` [API key](/features/api-keys). Same as `--api-key`, and the flag wins when both are set. It replaces the profile's session entirely, so the run is made as the key. |
+| `APPSTRATE_INSTANCE` | Base URL of the instance. When unset, the active profile's instance is used.                                                                                                   |
+| `APPSTRATE_SPACE_ID` | Id of the space (`spc_...`). Not needed for a platform run. A remote run with remote integrations (the default, see below) requires it, and the command stops without it.      |
+| `APPSTRATE_ORG_ID`   | Organization id. Not needed for a platform run. Required by `--model-source preset`, which refuses to start without it.                                                        |
+
+With an API key, the organization and the space come only from `APPSTRATE_ORG_ID` and `APPSTRATE_SPACE_ID`, never from the active profile, and only the instance falls back to the profile. A key is pinned to one organization and one space: leave both unset for a platform run, and when you set them, use the ones the key is pinned to (a space that disagrees with the key is a `403`). An empty value counts as unset.
+
+The key needs a few scopes, depending on what you run:
+
+| You run                                      | Scopes the key needs                                                                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A platform run                               | `agents:run` to launch, `runs:read` to follow the run                                                                                                                                  |
+| A remote run of a package id (`--local`)     | `agents:read` to download the bundle and read the space's run configuration, `skills:read` when the agent depends on a skill (the bundle carries it), `agents:run` to register the run |
+| A remote run of a bundle path                | `agents:run`, and `agents:write` too, because the run is registered with its manifest and prompt                                                                                       |
+| A remote run with integrations (the default) | `credential-proxy:call`                                                                                                                                                                |
+| A remote run with `--model-source preset`    | `llm-proxy:call`                                                                                                                                                                       |
+
+The last two are explained in [LLM proxy and credential proxy](#llm-proxy-and-credential-proxy). Mint the key with the narrowest list that covers your case.
+
+### Call the API with an API key
+
+For a CI job or a script on a machine with no login, pass an `apst_` [API key](/features/api-keys) instead of a session:
+
+```bash
+export APPSTRATE_API_KEY=apst_...
+export APPSTRATE_INSTANCE=https://appstrate.example.com   # optional when a profile exists
+appstrate api GET /api/agents
+```
+
+- The key replaces the profile credential entirely. The keyring is not read and no profile is needed. `--api-key <key>` does the same as the variable and wins over it, but a command-line argument is visible to other local users, so prefer the variable.
+- The instance is `APPSTRATE_INSTANCE`, else the profile's. With neither, the command stops.
+- No `X-Org-Id` or `X-Space-Id` is sent: a key is pinned to one organization and one space, and those apply. Your own `-H` headers still pass through.
+- **An exported `APPSTRATE_API_KEY` switches every `appstrate api` call to the key.** If that variable is already set for `appstrate run`, `api` in the same shell stops using your login: another principal, no org or space headers, and the instance `APPSTRATE_INSTANCE` names. Unset it to go back to your profile.
+- Only `api` and `run` read the key. `openapi`, `whoami` and the other commands still use the profile.
+
+### Platform run or remote run
+
+A **platform run** executes on the instance, in its sandbox, as if you had clicked Run in the dashboard. It is the default for a package id, and `--remote` selects it explicitly. A **remote run** (`runOrigin: "remote"`) executes on your own host, in the `appstrate` process, with your shell, filesystem and environment: you get one with `--local` or with a bundle path. When the CLI has credentials for an instance, it registers the run and streams signed events back, so the run shows up in the dashboard with a **Remote** badge.
+
+|                      | Platform run                                                               | Remote run                                                                                        |
+| -------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Command              | `appstrate run @scope/agent`                                               | `appstrate run @scope/agent --local`, or `appstrate run ./bundle.afps-bundle`                     |
+| Where the agent runs | The instance's sandbox                                                     | Your host                                                                                         |
+| Model                | The instance's. Only `--model <preset id>` and `--proxy <id>` are accepted | Your own provider key (`env`), or the instance's models through the LLM proxy (`preset`)          |
+| Integrations         | The platform's connections                                                 | `--integrations remote` (default, through the credential proxy), `local` (a creds file) or `none` |
+| Reporting            | Native. `--report`, `--report-fallback` and `--sink-ttl` are refused       | `--report auto` by default: on when the run has credentials for an instance                       |
+| Exit code            | `0` on success, `1` for `failed`, `timeout` or `cancelled`                 | The CLI does not turn the final status into an exit code. Read `status` in the `--output` file    |
+
+Use a **platform run** when the agent should behave exactly as it does in the dashboard: same sandbox, model, connections and stored run configuration. A CI step that triggers a production agent and waits for its result is the typical case. Use a **remote run** when the agent has to act on the machine that runs the CLI (the files of a checkout, local tools), when it must use your own LLM key, or while you iterate on a bundle with `--snapshot`.
+
+One limit of a remote run: only serverless `apiCall` integrations are available in-process, since MCP-server integrations are skipped.
+
+### Flags of a remote run
+
+The flags that matter most:
+
+- `--model-source env|preset`: your own provider key, or the instance's model presets through the LLM proxy. The automatic choice is `preset` for a package id with `--integrations remote`, and `env` otherwise. With `env`, `--model` and `--model-api` name the model and its protocol, and the key comes from `--llm-api-key` or from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `MISTRAL_API_KEY`.
+- `--integrations remote|local|none`: through the credential proxy (the default), from a `--creds-file`, or none.
+- `--report auto|true|false`: whether the run is registered on the instance. `auto` registers it when the CLI has credentials for an instance.
+- `--sink-ttl <seconds>`: how long the run may keep reporting, for a run that outlives the default (see [Run liveness](/features/run-liveness)).
+- `--run-id <id>`: a platform run sends it as its [`Idempotency-Key`](/api/idempotency), so repeating the command replays the first launch instead of starting a second run.
+
+`appstrate run --help` lists every flag, and the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#appstrate-run) covers the rest of the command.
+
+`--model-source preset` reads the list of presets with the session of a CLI profile, not with the API key, so it needs `appstrate login` on that machine. A job that has only an API key must pass `--model-source env`.
+
+When you run a package id with `--local`, the CLI also reads the space's run configuration for that agent (model, generation settings, stored input values) and applies it under your flags. Pass `--no-inherit` in CI so that a change made in the dashboard cannot alter a pipeline.
+
+### LLM proxy and credential proxy
+
+A remote run has no sidecar on the platform, so the CLI reaches the organization's models and the space's connections through two routes of the instance, the same ones the GitHub Action uses. They are the plumbing of remote runs, not an API to build on.
+
+- With `--integrations remote`, every `api_call` of an integration goes through the **credential proxy**, which injects the connection's credential on the platform and checks the target against the integration's `authorized_uris`. A remote runner addresses one connection per integration: when the space binds several connections to one integration, the run is refused with `remote_binds_one_connection`. Narrow it to one connection with a member pin, or run the agent on the platform.
+- With `--model-source preset`, model calls go through the **LLM proxy**, which resolves the organization's model preset, adds the provider key and meters the usage. With `--model-source env`, the CLI calls your provider directly.
+
+The CLI never holds a provider key or an integration credential. A key with `llm-proxy:call` spends the organization's model budget, and one with `credential-proxy:call` uses the space's connected accounts, so give these scopes only to keys that run agents remotely. A key created without an explicit `scopes` list carries both when its creator holds them. Both proxies are rate-limited (see [Rate limits](/self-hosting/rate-limits)).
+
+### CI examples
+
+A GitHub Actions job that triggers an agent on the instance and fails when the run does:
+
+```yaml
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install the CLI
+        run: |
+          curl -fsSL https://get.appstrate.dev | APPSTRATE_NO_LAUNCH=1 bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run the agent on the instance
+        env:
+          APPSTRATE_API_KEY: ${{ secrets.APPSTRATE_API_KEY }}
+          APPSTRATE_INSTANCE: https://appstrate.example.com
+        run: |
+          appstrate run @acme/triage \
+            --input-file ./input.json \
+            --run-id "ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --json --output result.json
+```
+
+The key needs `agents:run` and `runs:read`. It names its own organization and space, so no `APPSTRATE_SPACE_ID` is set. With `--json` the CLI prints events as JSON lines, starting with an `appstrate.remote.triggered` line that carries the run id, and the step ends with exit code `1` when the run did not succeed. If the CLI receives SIGINT, SIGTERM or SIGHUP while the run is in flight, it detaches and the run carries on on the instance.
+
+The same job as a remote run on the runner itself, with your own model key:
+
+```yaml
+- name: Run the agent on this runner
+  env:
+    APPSTRATE_API_KEY: ${{ secrets.APPSTRATE_API_KEY }}
+    APPSTRATE_INSTANCE: https://appstrate.example.com
+    APPSTRATE_SPACE_ID: spc_xxx
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  run: |
+    appstrate run @acme/triage --local \
+      --model-source env --no-inherit \
+      --input-file ./input.json \
+      --output result.json
+```
+
+This one needs `APPSTRATE_SPACE_ID`, set to the space the key is pinned to, because a run on your host names the space when it registers itself and calls the credential proxy. The key needs `agents:read` and `agents:run`, plus `skills:read` if the agent depends on a skill and `credential-proxy:call` if it uses integrations. The run is reported to the instance and appears there as a remote run. Do not rely on the exit code to detect a failed agent: read `status` in `result.json`.
+
+## Profiles
+
+A profile ties a name to an instance URL, your identity and the pinned organization and space. The active profile is the first of: the `--profile` flag, the `APPSTRATE_PROFILE` environment variable, `defaultProfile` in the config file, then `default`.
+
+```bash
+appstrate login --profile prod --instance https://appstrate.acme.com
+appstrate --profile prod whoami
+APPSTRATE_PROFILE=prod appstrate api GET /api/agents
+```
+
+Profiles live in `~/.config/appstrate/config.toml` (or under `$XDG_CONFIG_HOME`). Tokens are stored in the OS keyring (macOS Keychain, libsecret, Windows Credential Manager) under the profile's name. If no keyring backend exists at all, for example in a headless Linux container, the CLI falls back to a `0600` file `~/.config/appstrate/credentials.json`. If a keyring exists but refuses access (locked), the CLI stops unless you set `APPSTRATE_ALLOW_PLAINTEXT_TOKENS=1`. On Windows there is no file fallback.
+
+## Troubleshooting
+
+| Message                                       | Fix                                                                                                             |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `your session may have been revoked`          | Run `appstrate login` again                                                                                     |
+| `Space context required`                      | No space is pinned. Run `appstrate space switch`                                                                |
+| `Space '<id>' not found in this organization` | The pinned space belongs to another organization. Run `appstrate space switch`                                  |
+| `Docker is required for this tier`            | Tiers 1 to 3 need Docker. Install it, or use Tier 0                                                             |
+| `No space id for a local run`                 | An API key run on your host needs `APPSTRATE_SPACE_ID`, the space the key is pinned to. A platform run does not |
+
+More entries are in the [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md#troubleshooting).
+
+## Reference
+
+- [CLI README](https://github.com/appstrate/appstrate/blob/main/apps/cli/README.md): every flag, exit code and edge case.
+- [REST API](/api).

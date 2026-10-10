@@ -1,0 +1,370 @@
+---
+title: Custom Integrations
+description: Write your own integration as an AFPS package when the service you need is not one of the built-in integrations.
+---
+
+When the service you need is not in the [built-in catalogue](/integrations/catalog), write your own. A custom integration uses the same manifest format, the same runtime and the same connection flow as the built-in ones. The built-in manifests are the best reference: every `.afps` in [`system-packages/`](https://github.com/appstrate/appstrate/tree/main/system-packages) is a zip with a `manifest.json` at its root, and their sources are in [`scripts/system-packages/`](https://github.com/appstrate/appstrate/tree/main/scripts/system-packages).
+
+This page is a summary. The complete guide, with every strategy and field, is [Writing an integration with connect](https://github.com/appstrate/appstrate/blob/main/docs/guides/writing-an-integration-with-connect.md), and the wire format is the [AFPS specification](https://github.com/appstrate/afps-spec/blob/main/spec.md). Read [How integrations work](/integrations/how-integrations-work) first if sources, auths and connections are new to you.
+
+## Pick a source
+
+| You have                                                    | Use                                   | What you write                                                       |
+| ----------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------- |
+| A REST API                                                  | `source.kind: "none"` plus `api_call` | One `manifest.json`                                                  |
+| A vendor-hosted MCP server                                  | `source.kind: "remote"`               | One `manifest.json` with the endpoint URL                            |
+| Code that must run next to the credential (git, SSH, a CLI) | `source.kind: "local"`                | The integration manifest, plus an `mcp-server` package it references |
+
+Most integrations are the first kind. They are also the simplest: no server to host or maintain.
+
+## A REST API with an API key
+
+This is the shape of the shipped Stripe integration, with your own scope:
+
+```json
+{
+  "name": "@acme/internal-api",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Acme Internal API",
+  "description": "Internal data API",
+  "source": { "kind": "none" },
+  "default_tools": ["api_call"],
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://api.acme.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["api_key"],
+          "properties": {
+            "api_key": { "type": "string", "description": "Acme API key" }
+          }
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.api_key}"
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/api": { "auths": { "primary": {} } }
+  }
+}
+```
+
+- `credentials.schema` is a JSON Schema that drives the hosted form the user fills in.
+- `delivery.http` says where the sidecar puts the credential. `{$credential.<field>}` reads a field of the connection's credential. The only other template expression the platform evaluates is `{$variable.<name>}`, which reads a declared [connection variable](#connection-variables).
+- `_meta["dev.appstrate/api"]` opts the auth into the `api_call` tool. Without it the integration exposes no `api_call`, and the import refuses a manifest whose `default_tools` names `api_call` anyway.
+- `default_tools` is what an agent gets when it does not select tools itself.
+
+## OAuth 2.0
+
+Add the endpoints and the scope catalogue. Excerpt of the Slack integration manifest:
+
+```json
+"auths": {
+  "primary": {
+    "type": "oauth2",
+    "authorization_endpoint": "https://slack.com/oauth/v2/authorize",
+    "token_endpoint": "https://slack.com/api/oauth.v2.access",
+    "token_endpoint_auth_method": "client_secret_post",
+    "default_scopes": ["channels:read", "users:read"],
+    "scope_catalog": [
+      { "value": "channels:read", "label": "View channels" },
+      { "value": "users:read", "label": "View users" },
+      { "value": "chat:write", "label": "Send messages" }
+    ],
+    "authorized_uris": ["https://slack.com/api/**"],
+    "delivery": {
+      "http": {
+        "in": "header",
+        "name": "Authorization",
+        "prefix": "Bearer ",
+        "value": "{$credential.access_token}"
+      }
+    },
+    "_meta": { "dev.appstrate/oauth": { "scope_separator": "," } }
+  }
+}
+```
+
+Points that matter:
+
+- Discovery is optional. Set `issuer` to let the platform discover endpoints, or give them explicitly as above.
+- `scope_catalog` lists the scopes the provider offers. Entries can declare `implies` (a broad scope that satisfies narrower ones). Default scopes and tool scopes must belong to it.
+- `scope_separator` defaults to a space. Some providers use a comma, for example Slack, Pinterest and Linear.
+- `identity_claims` maps the provider's user payload to an `account_id` (for example `"account_id": "$.email"`), which labels the connection and tells two accounts of the same service apart. Keys must be snake_case, and the platform refuses a manifest that uses another spelling. Without `account_id`, connections fall back to `Connexion 1`, `Connexion 2`.
+- `callback_url_hint` and `setup_guide` give the admin the steps shown when they register the OAuth app. Use the `{{callback_url}}` placeholder for the redirect URI.
+- An admin still has to register an OAuth client for it, as described in [How integrations work](/integrations/how-integrations-work#setting-up-an-integration). The `@acme` scope has no system client.
+
+## Several fields (custom auth)
+
+When a service needs more than one value, use `type: "custom"` with a schema of your own. The shipped WordPress integration asks for a site URL, a user and an application password, and builds a Basic header from two of them. Excerpt of the integration manifest:
+
+```json
+"auths": {
+  "primary": {
+    "type": "custom",
+    "credentials": {
+      "schema": {
+        "type": "object",
+        "required": ["site_url", "username", "application_password"],
+        "properties": {
+          "site_url": { "type": "string" },
+          "username": { "type": "string" },
+          "application_password": { "type": "string" }
+        }
+      }
+    },
+    "authorized_uris": ["{$credential.site_url}/**"],
+    "delivery": {
+      "http": {
+        "in": "header",
+        "name": "Authorization",
+        "prefix": "Basic ",
+        "value": "{$credential.username}:{$credential.application_password}",
+        "encoding": "base64"
+      }
+    }
+  }
+}
+```
+
+The host depends on the connection, so `authorized_uris` references `{$credential.site_url}`. It is rendered per connection. The platform refuses an auth that injects a credential over HTTP while leaving the host to the caller (no `authorized_uris`, `allow_all_uris: true`, or a pattern such as `https://**`).
+
+A wildcard in the host counts as bounded only when it sits under a registrable domain written literally in the entry, judged with the [Public Suffix List](https://publicsuffix.org/) (its ICANN and private sections). `https://*.zendesk.com/**` and `https://*.example.co.uk/**` are bounded. `https://*.co.uk/**`, `https://*.github.io/**`, `https://*.googleapis.com/**`, `https://*.vercel.app/**`, `https://*.supabase.co/**` and `https://*.workers.dev/**` are not, and an auth whose credential the proxy injects is refused with them when the manifest is written. List such hosts literally (`https://sheets.googleapis.com/**`), or render the host from the connection (`https://{$credential.shop_domain}/**`, with the field constrained by a `pattern` in `credentials.schema`).
+
+Because a host `*` also matches dots, each target is judged at run time too: a credential goes to a host that a wildcard matched only when that host's own registrable domain lies inside the literal part of the entry. Under `https://*.amazonaws.com/**`, `sts.amazonaws.com` receives it, but `dynamodb.us-east-1.amazonaws.com` and the S3 hosts (`s3.amazonaws.com`) do not. Such a call is refused as `credential_exfiltration_refused`, with a message naming the host to list, and such a redirect hop is followed without the credential.
+
+Custom auths can also acquire the credential themselves: a declarative `connect.login` (one HTTP request that exchanges a password for a session) or a `connect.tool` (a tool that logs in, run once at connect time or at the start of every run). Those are covered in the [repository guide](https://github.com/appstrate/appstrate/blob/main/docs/guides/writing-an-integration-with-connect.md). The platform evaluates only the login forms of the AFPS §7.7 evaluation profile: a `connect.login` it cannot evaluate (a `simple` success criterion other than one `<expr> == <operand>` comparison, an unquoted string literal, `xpath`, a regex that does not compile) is refused when the manifest is written and, for a stored manifest, when a connection starts, before the login request is sent. A login request that a secret is substituted into is held to the same host binding as an injected credential: when the auth's `authorized_uris` leaves the host to the caller, the run refuses that request with a `403`.
+
+## A hosted MCP server
+
+Excerpt of the integration manifest:
+
+```json
+"source": {
+  "kind": "remote",
+  "remote": { "url": "https://mcp.example.com/mcp", "transport": "streamable-http" }
+}
+```
+
+Declare the tools you want agents to be able to pick in `tools_policy`, with the scopes each needs. Excerpt of the integration manifest:
+
+```json
+"tools_policy": {
+  "list_issues": { "required_scopes": { "oauth": ["repo"] } },
+  "create_issue": { "required_scopes": { "oauth": ["repo"] } }
+}
+```
+
+`hidden_tools` removes tools from what agents can see. A remote OAuth auth declared as a public client (`token_endpoint_auth_method: "none"`) gets its client registered automatically at connect time through discovery and dynamic client registration, so the admin has no client to create. This is how the Notion, ClickUp and Canva MCP integrations and MCP Emails work.
+
+## Connection variables
+
+When where the integration connects depends on the connection (a product offered hosted and self-hosted, or only self-hosted), declare **connection variables**. The user enters their values when connecting, before any authorization step, and every auth of the integration shares them, so one package serves every instance and each connection reaches only its own. The shipped GitLab, Twenty and Coolify MCP integrations work this way. Abridged from the GitLab integration manifest:
+
+```json
+"source": {
+  "kind": "remote",
+  "remote": { "url": "{$variable.base_url}/api/v4/mcp", "transport": "streamable-http" }
+},
+"variables": {
+  "schema": {
+    "type": "object",
+    "properties": {
+      "base_url": { "type": "string", "format": "uri", "pattern": "^https?://", "default": "https://gitlab.com" }
+    },
+    "required": ["base_url"]
+  }
+}
+```
+
+- Each property of `variables.schema` is a variable: a string, named in lower-case snake_case, and listed in `required`. `default` only prefills the form.
+- `{$variable.<name>}` is accepted in `source.remote.url`, an `oauth2` `issuer`, `authorized_uris` and the `delivery` values, and nowhere else. A reference to an undeclared variable is refused when the manifest is saved, published or imported.
+- Variables are not secrets. They are stored in plaintext with the connection and shown on it, so a token belongs in `credentials.schema`. A value changes only through a reconnect.
+- A URL rendered from a variable is checked against the egress rules for each connection: a plain `http` URL, or a private or loopback address, is refused unless the operator lists its host in `EGRESS_ALLOW_INTERNAL_HOSTS`.
+- When the remote URL or the `issuer` is a template, the authorization server is the one of the instance the user named. The platform discovers it (RFC 9728, then RFC 8414) and registers one public client per server, integration and space by dynamic client registration, so declare `token_endpoint_auth_method: "none"`. A server without dynamic client registration cannot be connected.
+
+The complete rules (URL and host forms, which `authorized_uris` entries may carry a variable) are in the repository guide, section "Connection variables".
+
+## A local MCP server
+
+Use a local source when code has to run next to the credential: a CLI, git, SSH, a client library. Two packages work together:
+
+- an **`mcp-server` package** holds the code and declares how to start it (an MCP Bundle, MCPB, manifest);
+- an **integration** with `source.kind: "local"` references it and declares how the credential reaches it.
+
+The platform starts the server in its own runner container, one per bound connection. The server speaks MCP over its standard input and output (line-delimited JSON-RPC), and its tools appear to agents under the integration's namespace like any other integration tool. Local integrations need the `docker` or `firecracker` run adapter, because the default `process` adapter refuses to start them. The shipped `@appstrate/ssh` and `@appstrate/github-git` integrations, and their `@appstrate/ssh-mcp` and `@appstrate/github-git-mcp` server packages, are working examples: their sources are in [`scripts/system-packages/`](https://github.com/appstrate/appstrate/tree/main/scripts/system-packages), and the SSH server is a small dependency-free implementation of the protocol loop.
+
+### The `mcp-server` manifest
+
+The manifest uses the MCPB field names for the server and keeps the AFPS identity fields at the root:
+
+| Field                               | Meaning                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`                              | Always `"mcp-server"`.                                                                                                                                                                      |
+| `name`, `version`                   | The scoped identity (`@acme/tickets-mcp`) and the semver version the integration pins.                                                                                                      |
+| `manifest_version`                  | MCPB `MAJOR.MINOR` format. The shipped servers use `"0.3"`. A `uv` server needs `"0.4"` or later and is refused with `"0.3"`.                                                               |
+| `server.type`                       | The runtime: `node`, `python`, `binary` or `uv`. It selects the runner image.                                                                                                               |
+| `server.entry_point`                | The file to start, as a path inside the archive. It must exist in the archive.                                                                                                              |
+| `server.mcp_config`                 | Required by the schema, with a `command` and optional `args`. The templates the platform hands out use `node` and the entry point for `node`, and `uv`, `run` and the entry point for `uv`. |
+| `tools`                             | The tools the server offers, each with a `name` and a `description`. This list is the catalog an agent author picks from, so declare every tool the server exposes.                         |
+| `_meta["dev.appstrate/mcp-server"]` | Optional runtime hint. `{ "runtime": "bun" }` runs a TypeScript or JavaScript server under Bun. Keep `server.type: "node"`: the schema refuses a `bun` runtime with any other type.         |
+| `_meta["dev.appstrate/workspace"]`  | Optional. `{ "mount": "/workspace", "access": "rw" }` mounts the run's shared workspace into the runner. Without it the server cannot see the agent's files. `access` defaults to `ro`.     |
+
+The archive is a zip with `manifest.json` at its root and the entry point beside it, at most 10 MiB compressed. Put whatever the server needs inside the archive. The runner images are minimal: the bun image has no `node_modules`, which is why the shipped SSH server is dependency-free.
+
+If you author through an agent connected to the instance's MCP server, its `get_runtime_capabilities` tool returns the runtimes this build accepts and a minimal manifest template for each.
+
+### Delivering the credential
+
+The integration's auth says where the credential lands inside the runner. A local server never gets it over HTTP: use `delivery.env`, `delivery.files`, or both.
+
+- `delivery.env` maps an environment variable name to an object: `{ "value": "{$credential.api_key}", "sensitive": true }`. A bare string is refused.
+- `delivery.files` maps an absolute path to `{ "value": "{$credential.client_cert}", "mode": "0400" }`. `mode` is an octal string and defaults to `"0400"`. Paths under system directories are refused when the runner starts (the import does not check them), so keep to places such as `/run/secrets/`.
+- `delivery.http` cannot be combined with `env` or `files` on the same auth.
+
+The credential reaches only the runner, never the agent's container. The runner's network access is limited to the auth's `authorized_uris`, rendered for the connection, so declare every host the server must call. Its HTTP traffic is routed through the sidecar, and a server that starts child processes must pass its own `process.env` on to them, or their requests cannot get out.
+
+One rule for the server code: a tool must not have a parameter named `connection`. When an agent binds several connections of the integration in one run, the platform adds that parameter itself, and the run fails to boot if a tool already declares it.
+
+### A worked example
+
+An internal ticket tracker whose server is a Node program. Layout of the two packages, each zipped with its `manifest.json` at the root:
+
+```text
+tickets-mcp/
+  manifest.json
+  server/index.js
+tickets/
+  manifest.json
+```
+
+The server package, `tickets-mcp/manifest.json`:
+
+```json
+{
+  "name": "@acme/tickets-mcp",
+  "version": "1.0.0",
+  "type": "mcp-server",
+  "schema_version": "0.3",
+  "manifest_version": "0.3",
+  "display_name": "Acme tickets (MCP server)",
+  "description": "Lists and closes tickets in the Acme tracker.",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": { "command": "node", "args": ["server/index.js"] }
+  },
+  "tools": [
+    { "name": "list_tickets", "description": "List open tickets." },
+    { "name": "close_ticket", "description": "Close a ticket by id." }
+  ]
+}
+```
+
+The integration, `tickets/manifest.json`. The server reads `ACME_API_KEY` from its environment:
+
+```json
+{
+  "name": "@acme/tickets",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Acme tickets",
+  "description": "Acme ticket tracker, through a local MCP server.",
+  "source": {
+    "kind": "local",
+    "server": { "name": "@acme/tickets-mcp", "version": "^1.0.0" }
+  },
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://tickets.acme.com/**"],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "required": ["api_key"],
+          "properties": {
+            "api_key": { "type": "string", "description": "Acme API key" }
+          }
+        }
+      },
+      "delivery": {
+        "env": {
+          "ACME_API_KEY": { "value": "{$credential.api_key}", "sensitive": true }
+        }
+      }
+    }
+  }
+}
+```
+
+`source.server.version` is a semver range matched against the published versions of the server package. The agent then selects tools by the names in the server's `tools` list. Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": { "integrations": { "@acme/tickets": "^1.0.0" } },
+  "integrations_configuration": {
+    "@acme/tickets": { "tools": ["list_tickets"] }
+  }
+}
+```
+
+To also hand a certificate to the server as a file, add a `client_cert` field to the credential schema (and to `required`), and add this beside `env` in `delivery`. Excerpt of the integration manifest:
+
+```json
+"files": {
+  "/run/secrets/acme_cert.pem": { "value": "{$credential.client_cert}", "mode": "0400" }
+}
+```
+
+Import both archives as described under "Pack, import, publish" below, then activate the integration and connect an account.
+
+## Tools and scopes in agents
+
+Agents pick tools from `tools_policy` (remote and local sources) or use `api_call`. The scope an OAuth connection asks for is computed from the tools selected, so keep `required_scopes` accurate: it is what makes consent screens ask for the minimum. See [How integrations work](/integrations/how-integrations-work#scopes).
+
+## Pack, import, publish
+
+Put `manifest.json` at the root of a zip (not inside a folder), then import it:
+
+```bash
+cd my-integration && zip -r ../my-integration.afps manifest.json
+appstrate api POST /api/packages/import -F file=@../my-integration.afps
+```
+
+The import validates the manifest and rejects what the platform cannot run: unknown template expressions (only `{$credential.<field>}` and a declared `{$variable.<name>}` are evaluated), a non-snake_case `identity_claims` key, an unbounded injected credential, a scope outside `scope_catalog`.
+
+In the dashboard, **New integration** on the **Integrations** page (with `integrations:write`) opens the package editor on a new integration instead.
+
+You can also edit a package as a local folder with `appstrate packages pull`, `status`, `push` and `publish`, which writes to the package's draft and publishes a version as a separate step. Use a scope of your own: `@appstrate` ids belong to the system packages and cannot be created. Forking a system integration (`POST /api/packages/@appstrate/{name}/fork`) gives you an editable copy under your scope.
+
+Activate the integration in a space, register an OAuth client if it needs one, then reference it from an agent as any other integration. Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": { "integrations": { "@acme/internal-api": "^1.0.0" } },
+  "integrations_configuration": { "@acme/internal-api": { "tools": ["api_call"] } }
+}
+```
+
+## Common problems
+
+| Symptom                                                                                                 | Cause                                                                                                                                                                                                                                                                                     | Fix                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Import refused with a field error naming `identity_claims`, a `{$...}` expression, or `authorized_uris` | The manifest uses something the platform cannot evaluate or cannot bound                                                                                                                                                                                                                  | Fix the field the error names. Only `{$credential.<field>}` and a declared `{$variable.<name>}` are valid templates.                                              |
+| Saving or publishing an agent fails with `no_tools_selected` on `integrations_configuration.{id}.tools` | The integration exposes no callable tool for that selection                                                                                                                                                                                                                               | Select a tool, give the integration `default_tools`, or remove the dependency                                                                                     |
+| Connecting answers 403 "Administrator must register OAuth client credentials"                           | An OAuth integration with no client at any tier                                                                                                                                                                                                                                           | Register a client, or have the operator add a system client in `SYSTEM_INTEGRATIONS`                                                                              |
+| Connection form is empty                                                                                | `credentials.schema` is missing or has no properties                                                                                                                                                                                                                                      | Add a JSON Schema with the fields the user must enter                                                                                                             |
+| `api_call` returns `[api_call status=0 code=...]`                                                       | The sidecar answered itself: the call was refused before reaching the service (`unauthorized_target`, `credential_exfiltration_refused`, `blocked_target`) or failed after sending (`upstream_timeout`, `upstream_unreachable`). Without a code: credential unavailable or body too large | Check the target against the patterns, including those rendered from connection fields. The codes are listed in [Tools](/features/tools#status-and-failure-codes) |
+| The run fails with `409 missing_integration_connection`                                                 | No usable connection is bound                                                                                                                                                                                                                                                             | Connect an account, or pin or pass a connection explicitly                                                                                                        |

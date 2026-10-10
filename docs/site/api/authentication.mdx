@@ -1,0 +1,111 @@
+---
+title: Authentication
+description: API keys, session cookies, and OIDC access tokens, plus the headers that select the organization, space, and end-user.
+---
+
+Appstrate accepts three kinds of credentials. They are tried in this order and the first match wins:
+
+| Order | Credential                        | Format                              | Typical use                                          |
+| ----- | --------------------------------- | ----------------------------------- | ---------------------------------------------------- |
+| 1     | OIDC access token (`oidc` module) | `Authorization: Bearer ey...` (JWT) | The CLI, second-party dashboards, your own end-users |
+| 2     | API key                           | `Authorization: Bearer apst_...`    | Backends, scripts, CI/CD                             |
+| 3     | Session cookie (Better Auth)      | `better-auth.session_token` cookie  | The dashboard                                        |
+
+A request with none of them is `401 unauthorized`, with a `WWW-Authenticate: Bearer` challenge.
+
+## Context headers
+
+An organization contains spaces, and most resources (agents, runs, schedules, end-users, API keys, files, packages, integrations) live in a space. Each credential carries some of that context itself and needs the headers for the rest.
+
+| Header              | Used with                                                      | Description                                                                                                                                                                                                 |
+| ------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Authorization`     | API keys, OIDC tokens                                          | `Bearer apst_...` or `Bearer ey...`                                                                                                                                                                         |
+| `X-Org-Id`          | Session cookies, instance-level OIDC tokens                    | Selects the organization. Ignored with an API key: the key is bound to its organization, and only `X-Space-Id` is checked                                                                                   |
+| `X-Space-Id`        | Session cookies, instance-level OIDC tokens                    | Selects the space on space-scoped routes. An API key is already pinned to one space. If they differ, the answer is `403`. If a space-scoped route gets none, the answer is `400` with `param: "X-Space-Id"` |
+| `Appstrate-User`    | API keys only                                                  | `eu_...` end-user id. Run the request on behalf of that end-user. See [End-user impersonation](#end-user-impersonation)                                                                                     |
+| `Appstrate-Version` | Optional                                                       | Date version of the API, `YYYY-MM-DD`. See [API Reference](/api#versioning)                                                                                                                                 |
+| `Idempotency-Key`   | Operations that declare it                                     | See [Idempotency](/api/idempotency)                                                                                                                                                                         |
+| `X-View-As`         | Sessions (and instance-level OIDC tokens) of owners and admins | Preview the API as a lesser role. Refused with `400 view_as_unsupported` on API keys                                                                                                                        |
+
+The routes that need a space are the ones under `/api/agents`, `/api/runs`, `/api/schedules`, `/api/end-users`, `/api/api-keys`, `/api/notifications`, `/api/packages`, `/api/integrations`, `/api/uploads`, and `/api/files`. Organization-level routes such as `/api/models` need `X-Org-Id` only, and the `/api/orgs/{orgId}` family carries the organization in the path. The `parameters` of each operation in the OpenAPI document say which headers it takes.
+
+## API keys
+
+API keys (`apst_...`) are the credential for servers and automation. A key is pinned to the space it was created in, and its effective permissions are its scopes intersected with what its creator currently holds there. The full key is shown once, at creation, and a key cannot mint another key. Creating, using and revoking keys is covered in [API keys](/features/api-keys). Scopes are `resource:action` permissions from the [permission catalog](/features/roles-and-permissions#the-permission-catalog), and `GET /api/api-keys/available-scopes` lists the ones you can grant.
+
+Two scopes exist only for remote runs, the mechanism the CLI and the GitHub Action use to run an agent outside the platform (see [Headless and CI runs](/using-appstrate/cli#headless-and-ci-runs)). A key with `llm-proxy:call` spends the organization's model budget, and one with `credential-proxy:call` uses the space's connected accounts, so give these scopes only to keys that run agents remotely. A key created without `scopes` receives every grantable scope its creator holds, these two included.
+
+Realtime streams take the key as a query parameter (`?token=apst_...`), because `EventSource` cannot send headers. Other routes only read the `Authorization` header. See [Realtime](/features/realtime).
+
+## Session cookies
+
+The dashboard signs users in with [Better Auth](https://www.better-auth.com/): email and password, with optional Google and GitHub sign-in, magic links, and email verification depending on how the instance is configured.
+
+```bash
+curl -X POST http://localhost:3000/api/auth/sign-in/email \
+  -H "Content-Type: application/json" \
+  -d '{ "email": "alice@example.com", "password": "…" }' \
+  -c cookies.txt
+
+curl http://localhost:3000/api/agents \
+  -b cookies.txt \
+  -H "X-Org-Id: $ORG_ID" \
+  -H "X-Space-Id: $SPACE_ID"
+```
+
+When `NODE_ENV` is `production`, sign-in, sign-up and the other Better Auth routes are rate limited per client IP address; a refused call is a `429` with a JSON body. A session does not pin an organization or a space, so send both headers. Sessions have a `realm`: `platform` for dashboard users, `end_user:<spaceId>` for people who signed in through your OIDC flow. Platform routes refuse end-user sessions.
+
+A session expires after 7 days. While it is used it is extended, at most once a day, and the response carries a refreshed cookie, so an active user stays signed in.
+
+Changing a password ends the account's other sessions and keeps the one that made the change. A reset (`/api/auth/reset-password`, or the hosted reset page of the OIDC module) ends every session. Both also invalidate pending reset links, magic links and social-account links, and, with the OIDC module, the account's OAuth refresh and access tokens, CLI sessions and device codes, so MCP clients and the CLI have to sign in again. API keys are not revoked, and an OAuth access token already issued as a JWT stays valid until it expires (one hour by default). The full list of what is deliberately kept is in [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md). If the revocation fails, the request answers `500` with the code `credential_change_revocation_failed` instead of reporting success.
+
+## OIDC access tokens
+
+The `oidc` module (in the default `MODULES` set) turns Appstrate into an OAuth 2.1 and OpenID Connect authorization server. It issues ES256-signed JWTs, accepted as `Authorization: Bearer ey...`. The kind of token depends on the level of the OAuth client that issued it:
+
+| Client level | Token represents                                                                                   | Context                                                                                                |
+| ------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `instance`   | A platform user acting as themselves (the `appstrate` CLI via device flow, first-party dashboards) | Send `X-Org-Id` (and `X-Space-Id` where needed) like a session                                         |
+| `org`        | A platform user, delegated to a third-party app                                                    | Bound to one organization. Permissions are the token's scopes intersected with the user's current role |
+| `space`      | One of **your end-users**, in one space                                                            | Bound to the space. Only a fixed allowlist of scopes can be granted                                    |
+
+Endpoints:
+
+| Purpose                               | Endpoint                                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Discovery                             | `GET /.well-known/openid-configuration` and `GET /.well-known/oauth-authorization-server`   |
+| Authorize (Authorization Code + PKCE) | `GET /api/auth/oauth2/authorize`                                                            |
+| Token                                 | `POST /api/auth/oauth2/token`                                                               |
+| UserInfo, introspection, revocation   | `/api/auth/oauth2/userinfo`, `/introspect`, `/revoke`                                       |
+| Signing keys                          | `GET /api/auth/jwks`                                                                        |
+| Device flow (RFC 8628)                | `POST /api/auth/device/code`                                                                |
+| Register and manage clients           | `POST /api/oauth/clients`, `GET /api/oauth/clients`, and siblings (needs `oauth-clients:*`) |
+
+OAuth clients are registered and managed only through the `/api/oauth/clients` routes, under the `oauth-clients:*` permissions and the confinement of their level. The client endpoints of the underlying library (`/api/auth/oauth2/create-client`, `get-client`, `get-clients`, `update-client`, `delete-client` and `client/rotate-secret`) answer `401` to every session, so a signed-in user cannot mint or read a client through them. Dynamic client registration, which needs no session, is unchanged. The authorize, token, introspect, revoke and registration endpoints are rate limited per IP address, and a call refused by that limit is a `429` with a `Retry-After` header and an RFC 6749 body (`{ "error": "temporarily_unavailable", "error_description": "..." }`), not a problem document.
+
+A space-level client is how you embed Appstrate sign-in in your product: your user logs in, your app receives a token, and every call it makes is scoped to that end-user. Whether a first sign-in creates the end-user is controlled per client (`allowSignup`, closed by default). To register clients, embed the flow and set up per-space SMTP and social sign-in, see [Embedded sign-in](/features/embedded-sign-in). The module's internals are in its [README](https://github.com/appstrate/appstrate/blob/main/apps/api/src/modules/oidc/README.md).
+
+OIDC tokens are not accepted by the `?token=` query parameter of the SSE routes, which takes API keys only. Use a cookie session or an API key for realtime streams.
+
+## End-user impersonation
+
+When you embed Appstrate in a product, your backend holds one API key and acts for many end-users. Impersonation is a header on an API-key request, not a separate credential:
+
+```
+Authorization: Bearer apst_...
+Appstrate-User: eu_...
+```
+
+Only API keys can impersonate: with a session cookie or an OIDC token the answer is `400 header_not_allowed`. The rules, and what an impersonated request can reach, are in [End-users](/features/end-users#acting-on-behalf-of-an-end-user).
+
+## Errors
+
+| Status | `code`               | Meaning                                                                                          |
+| ------ | -------------------- | ------------------------------------------------------------------------------------------------ |
+| 401    | `unauthorized`       | No credential, an invalid or expired key, or no valid session                                    |
+| 403    | `forbidden`          | The credential is valid but lacks the permission, or a context header contradicts the credential |
+| 403    | `not_a_space_member` | The caller holds no role in the requested space                                                  |
+| 400    | `header_not_allowed` | A header such as `Appstrate-User` was sent with a credential that cannot honor it                |
+| 429    | `rate_limited`       | Too many requests. See [Rate limits](/self-hosting/rate-limits)                                  |
+
+All errors are RFC 9457 problem documents. See [Errors](/api/errors).

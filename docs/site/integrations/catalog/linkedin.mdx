@@ -1,0 +1,63 @@
+---
+title: LinkedIn
+description: Connect LinkedIn to your Appstrate agents.
+---
+
+## Overview
+
+LinkedIn is a professional network. The integration lets agents read the connected member's profile and, with the matching scopes, post on their behalf or work with organization pages and ads.
+
+Integration: `@appstrate/linkedin`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
+
+## Connect LinkedIn
+
+An administrator registers an OAuth client once, then members connect their own accounts.
+
+<Steps>
+<Step>
+
+Create an app in the LinkedIn developer portal and request the "Sign In with LinkedIn using OpenID Connect" product ([open](https://www.linkedin.com/developers/apps)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the app's authorized redirect URLs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/linkedin": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/linkedin": {
+      "tools": ["api_call"],
+      "scopes": ["w_member_social"]
+    }
+  }
+}
+```
+
+`api_call` has no per-tool scopes, so scopes beyond the defaults are listed explicitly (here `w_member_social`).
+
+Example prompt:
+
+```
+Draft a post from this week's release notes and publish it to my profile after I approve it.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

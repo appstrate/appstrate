@@ -1,0 +1,115 @@
+---
+title: Isolation and Security
+description: How Appstrate isolates runs, keeps credentials away from agents and restricts outbound traffic.
+---
+
+Every run executes untrusted, model-driven code next to credentials that must never reach it. Appstrate's answer has four parts: an isolated network per run, a per-run sidecar that holds the credentials, URL authorization on every outbound call, and hardened containers. This page covers what an operator controls. The full threat model is in [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md), and the protocol details are in [SIDECAR.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SIDECAR.md).
+
+The isolation depends on the execution backend. `docker`, described on this page, and `firecracker` (see [Firecracker](/self-hosting/firecracker)) isolate each run; `process` gives up network and filesystem isolation (see [When Docker is not available](#when-docker-is-not-available)). The backends are compared in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#execution-backends).
+
+## Per-run network (Docker)
+
+For each run the platform creates an internal bridge network named `appstrate-exec-<runId>`. Two containers join it: the **agent** and a fresh **sidecar**. The sidecar also joins `appstrate-egress`, a shared network with internet access. Nothing on the run network can reach the host, other runs, or the internet except through the sidecar. When the run ends, the containers and the network are removed, and leftovers from a crash are reclaimed at the next boot.
+
+There is no sidecar pool: every run starts its own sidecar, in parallel with the agent. `appstrate-egress` is created once and never deleted, because several API processes can share a Docker daemon.
+
+Integrations of `source.kind: "local"` run as extra containers on the same run network. Their egress is bounded by the connection's `authorized_uris`, enforced by the sidecar.
+
+## Credentials stay in the sidecar
+
+Credentials are stored encrypted (AES-256-GCM, envelope format `v1:<kid>:...`) with `CONNECTION_ENCRYPTION_KEY`. The agent never receives them. Its only cross-boundary channel is the sidecar's MCP endpoint, where each opted-in integration appears as an `api_call` tool. The sidecar fetches the credential, injects it into the outbound request, checks the target URL, and returns the response.
+
+The agent container is also denied the means to reach the sidecar's other surfaces:
+
+- Run-scoped secrets (the sidecar URL, the sidecar auth token, the sink credentials) are handed to the runtime over stdin, never through the environment, and the processes holding them are non-dumpable.
+- Every sidecar route except `/health` requires a per-run token, compared in constant time.
+- The agent has no `RUN_TOKEN` and no route to the platform API.
+
+LLM calls take the same path. The agent's model SDK talks to the sidecar's `/llm` endpoint, so provider keys (`SYSTEM_PROVIDER_KEYS` or an organization's own) are never exposed to it. Outbound proxying (`PROXY_URL`, system proxies, per-organization proxies) applies on top. See [Proxies](/features/proxies) and [Sandbox and Sidecar](/features/sandbox-and-sidecar).
+
+## Egress rules
+
+Every outbound call from an integration passes the same checks, on the target and on every redirect hop:
+
+1. **`authorized_uris` is mandatory.** A call is allowed only if its URL matches an entry the integration declares. An empty or missing list authorizes nothing, and `allow_all_uris` is dropped for any call that carries a credential. An entry whose host the caller could choose (`https://**`) is refused for credentialed calls, and so is a host wildcard that does not sit under a registrable domain written in the entry, judged with the Public Suffix List (`https://*.co.uk/**`, `https://*.vercel.app/**`). Through a wildcard that passes, the credential reaches a host only when that host's own registrable domain lies inside the entry's literal part: `https://*.amazonaws.com/**` carries it to `sts.amazonaws.com`, not to `dynamodb.us-east-1.amazonaws.com`. These calls are refused as `credential_exfiltration_refused`.
+2. **Blocked network ranges.** Loopback, link-local, private (RFC 1918), IPv6 unique-local and mapped addresses, and the cloud metadata addresses are refused. So are the host names `localhost` and every `*.localhost` name (loopback by RFC 6761), and the container names `sidecar` and `agent` and `host.docker.internal`. The platform resolves DNS itself, refuses the call if any record lands in a blocked range, and connects to the validated address (resolve and pin), which defeats DNS rebinding. A host that does not resolve returns `502`, a blocked one `403`.
+3. **Redirects.** A redirect to a host outside `authorized_uris` is refused. A redirect to another origin strips credentials and the request body.
+4. **Internal hosts are opt-in on both sides.** To let an integration reach a private or internal API, the integration's `authorized_uris` must name that host literally, and the operator must list it in `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated hostnames). Neither alone is enough. A local integration runner (an MCP server the sidecar starts) gets the exemption under stricter conditions: the entry names the host with no template (`{…}`) and no `*` in its host or port, the exemption covers only the port that entry names (its scheme's default port when it names none), `allow_all_uris` is off, and the target is never loopback nor one of the sidecar's own addresses, whether written literally or reached through DNS. A host taken from a connection value or matched by a wildcard is never exempt. For a runner the exemption is at the TCP level: it can speak any protocol to that host on that port. An `api_call` keeps the per-host rule. A listed host is trusted by every organization of the instance and by every egress site that reads the variable (OAuth token exchange, LLM upstreams, organization proxies, remote MCP servers, the local runners of every organization). Add only hosts that every organization may reach. On `RUN_ADAPTER=firecracker` the runner host also drops private ranges, see [Firecracker](/self-hosting/firecracker#network-and-egress-policy). See the full semantics in [Environment Variables](/self-hosting/environment-variables).
+5. **The sidecar needs working DNS.** It resolves the target host of an `api_call` itself, even when it sends traffic through `PROXY_URL`. Without DNS the call fails with `502 Target host could not be resolved`. The one exception is a host that rule 4 trusts (named literally in `authorized_uris` and listed in `EGRESS_ALLOW_INTERNAL_HOSTS`): it is not looked up.
+
+The same blocklist guards webhook URLs at creation and at delivery. See [Webhooks](/features/webhooks).
+
+A run that is refused logs `Target refused (SSRF)` with the host in the sidecar log. A model on a private endpoint (Ollama, a LAN vLLM) is called by the platform's LLM proxy, so its host must be in `EGRESS_ALLOW_INTERNAL_HOSTS` and reachable from the API process.
+
+## Live model catalog
+
+The API process reads a signed model catalog from `get.appstrate.dev` so that a model a vendor ships becomes selectable without a release. It does this in the background when it starts and then every hour (up to two anonymous GET requests, redirects refused, 10 seconds each), and boot never waits on it. Nothing about your instance is sent and nothing is stored: the accepted file lives in memory. It only adds models an organization can bind with its own credentials, and a file is refused unless its signature verifies against a key built into the platform. A read that fails is logged as a warning (`model catalog not refreshed`) and the instance keeps serving the bundled registry.
+
+To stop the reads, set `MODEL_CATALOG_URL=off`; the instance then runs on the bundled registry alone. An empty value is not a switch, it means the default. To read the catalog from a mirror, set the variable to that URL (`http` or `https`). The variable is described in [Environment Variables](/self-hosting/environment-variables), and the design in [MODEL_CATALOG.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
+
+## Container hardening and resource limits
+
+Run containers drop all Linux capabilities (`CapDrop: ALL`), set `no-new-privileges`, and cap the process count (256 for the agent). Memory and CPU come from the run limits and are applied at the Docker API level:
+
+- Without a hint from the agent manifest, a run gets **1536 MiB and 2 vCPU**.
+- `PLATFORM_RUN_LIMITS` sets operator ceilings `agent_memory_ceiling_mb` and `agent_cpu_ceiling` (both default to the values above). A manifest hint above the ceiling is capped.
+- `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds` (default 1800) caps the runtime of any run. A manifest timeout above it is clamped, and a run that hits it ends with the `timeout` status.
+
+See [Rate Limits](/self-hosting/rate-limits) for the other keys and the [resource guide](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md) for the manifest hints.
+
+A run that stops reporting is failed by the liveness watchdog. Its settings are in [Run Liveness and Timeouts](/features/run-liveness).
+
+### Runtime image version contract
+
+The platform, `PI_IMAGE` and `SIDECAR_IMAGE` change in lockstep. Deploy all three at the same version. Boot fails when the two runtime image tags differ, or when all three are release versions that disagree. Never rebuild only one runtime image. See the `PI_IMAGE` row in [Environment Variables](/self-hosting/environment-variables).
+
+## The Docker socket
+
+The `docker` backend needs the Docker socket, and access to it is effectively root on the host. Harden around it:
+
+- Keep the socket owned by `root:docker` with mode `0660`, and run the platform container with the host's docker group (`group_add: ["${DOCKER_GID:-0}"]`, as the tier templates do).
+- The root `docker-compose.yml` ships a commented `appstrate-docker-proxy` service that filters Docker API verbs. Read its comment before enabling it: it narrows the reachable API surface but is not a security boundary, because container creation is itself a host-root primitive, and the platform needs a build whose Docker client can target a TCP `DOCKER_HOST`.
+- For a stronger boundary, use a rootless or VM-isolated Docker daemon, or `RUN_ADAPTER=firecracker` (early preview).
+
+Run containers are siblings of the platform container, not children: there is no Docker-in-Docker.
+
+## Authentication and secrets
+
+- **Auth mode.** Run closed on any instance that is not a public SaaS. See [Self-Hosting](/self-hosting#first-run-and-auth-modes) and [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md).
+- **Five required secrets**, each independent: `BETTER_AUTH_SECRET`, `CONNECTION_ENCRYPTION_KEY`, `UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET` and `CONNECT_SESSION_SECRET`.
+- **Rotation is supported for the signing secrets and the encryption key.** `UPLOAD_SIGNING_SECRET`, `RUN_TOKEN_SECRET` and `CONNECT_SESSION_SECRET` accept a comma-separated keyring: the first key signs, all keys verify. The auth secret rotates through Better Auth's own keyring, `BETTER_AUTH_SECRETS` (`<version>:<secret>` pairs, current first): prepend a new version and restart, and leave `BETTER_AUTH_SECRET` unchanged, because it still decrypts what was written before the keyring. A rotation ends sessions, in-flight social sign-ins and emailed links signed with the old secret. `CONNECTION_ENCRYPTION_KEY` rotates through a key id, `CONNECTION_ENCRYPTION_KEYS` and a re-encryption script. The procedure is in [Environment Variables](/self-hosting/environment-variables).
+- **Bundle signing.** `AFPS_SIGNATURE_POLICY` (`off`, `warn` by default, or `required`) with `AFPS_TRUST_ROOT` controls verification of package signatures before execution.
+
+## Agent HTML previews
+
+Agents can publish HTML. It is untrusted, so the dashboard renders it only inside a sandboxed iframe, and a top-level navigation to the preview URL shows source text, never a rendered page. Set `USERCONTENT_URL` to a separate registrable domain to give previews their own cookie jar and storage partition.
+
+## When Docker is not available
+
+With `RUN_ADAPTER=process` (the code default), the sidecar and the agent are host subprocesses. Credentials still stay in the sidecar process, but you lose network isolation, filesystem isolation and host protection: the agent can reach anything the host can. A `source.kind: "local"` integration is refused outright, with no override, because a same-user child process could read the sidecar's environment: run local integrations with `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`. Use this mode for solo development or a trusted evaluation only.
+
+## Air-gapped deployments
+
+Appstrate has no required external service at boot. For a network without internet access:
+
+- Mirror the images (`PI_IMAGE`, `SIDECAR_IMAGE`, the five `RUNNER_IMAGE_*` and the platform image) to a private registry and set the variables to those references. Keep the version contract.
+- Use filesystem storage or an internal S3 endpoint.
+- Send outbound traffic through your gateway with `PROXY_URL` or `SYSTEM_PROXIES`.
+- Point `SYSTEM_PROVIDER_KEYS` at a model endpoint you can reach, and list its host in `EGRESS_ALLOW_INTERNAL_HOSTS` if it is on a private address.
+- Set `MODEL_CATALOG_URL=off`, or the API logs a warning every hour for a catalog it cannot reach (see [Live model catalog](#live-model-catalog)).
+- Leave OpenTelemetry off. It exports nothing unless `@appstrate/module-observability` is in `MODULES` and an endpoint is configured.
+
+## What Appstrate does not do
+
+- It does not terminate TLS. Use a reverse proxy.
+- It does not run Docker-in-Docker.
+- It does not back up your data. See [Production Checklist](/self-hosting/production-checklist#plan-backups).
+
+## Reporting a vulnerability
+
+Use GitHub private vulnerability reporting or write to security@appstrate.dev. Do not open a public issue. The policy, response times and supported versions are in [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md).
+
+## Next
+
+- [Production Checklist](/self-hosting/production-checklist) lists what to do before going live.
+- [Environment Variables](/self-hosting/environment-variables) is the full reference.

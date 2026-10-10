@@ -1,0 +1,93 @@
+---
+title: Scheduling
+description: Run agents on a cron schedule, as a chosen identity, with frozen input and overrides.
+---
+
+A **schedule** fires an agent on a cron expression. Each tick goes through the same pipeline as a manual launch, so a scheduled run gets the same sandbox, proxy cascade and credential injection, and shows up in the run list with its `scheduleId` (see [Runs](/features/runs)).
+
+Schedules live in a [space](/features/spaces). They are stored in the database and re-armed when the API boots.
+
+## Queue backend
+
+With `REDIS_URL` set, schedules are driven by BullMQ and fire once across all API instances. Without Redis the platform falls back to an in-process evaluator that checks every 30 seconds. That fallback is meant for a single instance: it coordinates nothing across processes. Use Redis for any multi-instance or production deployment. See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+
+## In the web app
+
+The **Schedules** page lists every schedule of the space with its next run, last run, running runs and unread count. From there you can create a schedule (pick an agent, a cron expression, a timezone, the input), open one to see its run history, edit it, or pause and resume it.
+
+## Creating a schedule
+
+```bash
+curl -X POST https://your-instance/api/agents/@acme/support-triage/schedules \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Weekday triage",
+    "cron_expression": "0 9 * * 1-5",
+    "timezone": "Europe/Paris",
+    "input": { "max_tickets": 20 }
+  }'
+```
+
+Only `cron_expression` is required. The body is closed: an unknown field is a `400`.
+
+| Field                                                                  | Meaning                                                                                                                                                                           |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                                                                 | Label.                                                                                                                                                                            |
+| `cron_expression`                                                      | Five-field cron (minute, hour, day of month, month, day of week); an optional leading seconds field is also accepted. Validated at write time (`400 invalid_cron_expression`).    |
+| `timezone`                                                             | IANA zone, default `UTC`. An unknown zone is refused (`400 invalid_timezone`).                                                                                                    |
+| `input`                                                                | Frozen on the schedule and replayed at every tick. Validated against the agent's input schema, merged on top of the stored values of the space. Naming a locked field is refused. |
+| `version_override`                                                     | Which agent definition to run: `published` (default, the latest published version), a version spec, or `draft` (needs write access to the agent when you write the schedule).     |
+| `model_id_override`, `generation_config_override`, `proxy_id_override` | Frozen overrides applied to every run of the schedule.                                                                                                                            |
+| `connection_overrides`                                                 | Per-integration connection picks, as arrays of connection ids. See [Integrations](/integrations/how-integrations-work).                                                           |
+| `dependency_overrides`                                                 | Per-dependency version overrides for skills and integrations.                                                                                                                     |
+| `actor`                                                                | The identity the schedule runs as: exactly one of `userId` or `endUserId`. Defaults to the caller.                                                                                |
+
+An agent whose input schema declares **file fields cannot be scheduled**. The input is validated against the definition the schedule will actually fire (the published version unless you chose `draft`), not against the editor's working copy.
+
+## Who a schedule runs as
+
+A schedule runs as an **actor**: a member or an [end-user](/features/end-users). The actor decides whose connections the runs use and whose memory scope they read ([Memory](/features/memory)).
+
+- By default the actor is the member who created the schedule.
+- Naming **another member** as actor, or editing or deleting a schedule that runs as another member, requires the organization role `owner` or `admin` on the user's own session. An API key or third-party OAuth client is refused with `403`, because such a schedule lends that member's connections to every run.
+- The actor is **re-checked at every tick**. The member must still belong to the organization and hold `agents:run` in the space, and an end-user must still exist in it. Otherwise the schedule is disabled and a failed run records why. `disabled_reason` says which system act disabled it: `actor_invalid`, `actor_left_org`, `connection_deleted` (a connection named in `connection_overrides` was deleted) or `connection_unshared` (a connection another actor owns, named in `connection_overrides`, stopped being shared). `disabled_reason` is `null` when a person paused the schedule. Re-enabling clears it.
+
+A schedule that names a colleague's shared connection is disabled, in the same transaction, when that connection is deleted (`connection_deleted`) or stops being shared (`connection_unshared`), whether its owner unshared it, a holder of `integrations:configure` did, or the owner lost access to the space. Its overrides keep the connection's id, so while the connection stays unreachable, re-enabling the schedule requires a new choice. The owner's own schedules follow the rule described in [How Integrations Work](/integrations/how-integrations-work#connecting-an-account).
+
+A run fired by a schedule is attributed to that actor and to the schedule (`scheduleId`, `schedule_name`).
+
+## Managing schedules
+
+```bash
+# List the schedules of the space, or of one agent
+curl https://your-instance/api/schedules -H "Authorization: Bearer apst_your_key"
+curl https://your-instance/api/agents/@acme/support-triage/schedules -H "Authorization: Bearer apst_your_key"
+
+# Pause (merge semantics: only the fields you send change, null clears a nullable field)
+curl -X PATCH https://your-instance/api/schedules/sched_xxx \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "enabled": false }'
+
+# Recent runs of one schedule
+curl https://your-instance/api/schedules/sched_xxx/runs -H "Authorization: Bearer apst_your_key"
+
+# Delete
+curl -X DELETE https://your-instance/api/schedules/sched_xxx -H "Authorization: Bearer apst_your_key"
+```
+
+Pausing keeps the schedule and removes its job, so no tick fires. A `PATCH` is judged against the schedule as it was when the request started: if another write lands in between, it answers `409 schedule_modified_concurrently`, writes nothing, and you reload and retry. Deleting the agent deletes its schedules.
+
+Permissions: `schedules:read`, `schedules:write`, `schedules:delete`. The `builder` and `admin` space roles hold all three, `operator` can only read. Listing the runs of a schedule additionally needs a run read permission.
+
+## What happens at each tick
+
+1. The schedule row is read and the actor re-validated.
+2. The platform checks that the agent is still **placed and active** in the space. If it is not, the tick produces a visible failed run that says whether the agent is not placed or switched off, and the schedule stays armed so that switching the agent back on resumes it.
+3. A tick that cannot start for another reason (agent deleted, no published version, invalid stored input, missing connection) also produces a failed run with the reason, so a broken schedule never fails silently.
+4. Otherwise the run starts normally with the frozen input and overrides.
+
+A schedule never pins a version unless you set `version_override`. By default each tick runs the latest published version, so publishing a new version changes what the next tick executes.
+
+The scheduling worker processes up to 10 ticks concurrently per instance. With Redis, ticks are also capped at 30 per minute across all instances, a backstop against runaway schedules. The in-process queue used without Redis has no per-minute cap.

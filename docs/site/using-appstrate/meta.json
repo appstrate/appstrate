@@ -1,0 +1,6 @@
+{
+  "title": "Using Appstrate",
+  "collapsible": false,
+  "defaultOpen": true,
+  "pages": ["webapp", "chat", "cli", "skill", "mcp-clients"]
+}

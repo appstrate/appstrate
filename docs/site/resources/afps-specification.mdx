@@ -1,0 +1,56 @@
+---
+title: AFPS Specification
+description: The open package format Appstrate uses for agents, skills, MCP servers, and integrations, and what Appstrate adds on top of it.
+---
+
+**AFPS** (Agent Format Packaging Standard) is the portable format Appstrate uses to package, version, and distribute agents and the things they depend on. The specification is open, maintained in its own repository, and meant to be implemented by other runtimes. Appstrate's runtime is one implementation.
+
+## Why a separate format
+
+AFPS builds on MCP (how tools are called) and on Anthropic's Agent Skills (portable instructions). It adds the layer for **packaging, versioning, and installing** an agent together with its skills, tool servers, and service connections, and for declaring what an agent may reach once installed. A package is a ZIP with a `manifest.json` that declares its type, its version, and its dependencies, so a runtime can resolve, verify, and run it.
+
+## Where the spec lives
+
+The normative text, JSON Schemas, examples, and the proposal process are in a public repository:
+
+**[github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec)**
+
+It is published under CC-BY-4.0, and the schemas and TypeScript types are on npm as `@afps-spec/schema` and `@afps-spec/types`. Appstrate validates every manifest it reads or writes with `@afps-spec/schema`. At the time of writing the specification is a **2.0 draft**; the manifests Appstrate writes declare `schema_version: "0.3"`, the revision of the manifest schema they conform to.
+
+## Package types
+
+AFPS defines four types. Appstrate stores, versions, and runs all four.
+
+| Type          | What it is                                                                                                                                               | Main file                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `agent`       | A goal for an agent to pursue, with the resources it depends on, and optional input, output, and configuration schemas                                   | `prompt.md`                                                     |
+| `skill`       | Reusable instructions, compatible with Anthropic's Agent Skills                                                                                          | `SKILL.md` (with optional `scripts/`, `references/`, `assets/`) |
+| `mcp-server`  | A runnable MCP tool server, described with the MCPB vocabulary (`node`, `python`, `binary`, `uv`)                                                        | the entry point named in the manifest                           |
+| `integration` | A connection to a service: its authentication methods, the URLs it may call, and the MCP tools it exposes, backed by an `mcp-server` or a remote MCP URL | `manifest.json`                                                 |
+
+Packages are identified by a scoped name, `@scope/name`, and versioned with semver.
+
+A package is a ZIP archive, conventionally `.afps`, with `manifest.json` at its root. Every manifest requires `name`, `version`, and `type`. A pure `SKILL.md` folder with a manifest is a valid skill, so skills written for other tools carry over.
+
+## What Appstrate adds around the format
+
+The spec describes packages. These are Appstrate behaviors built on it:
+
+- **Versioning and catalog.** Published versions are immutable and forward-only, resolved by exact version, dist-tag, or semver range, and recorded with a SHA-256 integrity hash. Packages are installed per space.
+- **Least-privilege tools and scopes.** An agent selects the tools it uses from each integration, and the OAuth scopes requested at consent are inferred from that selection.
+- **Bundles.** An agent and its dependencies export as one `.afps-bundle`, with integrity hashes computed per file, per package, and over the whole bundle. `GET /api/agents/{scope}/{name}/bundle` exports one and `POST /api/packages/import-bundle` imports it. Import also accepts single `.afps` files.
+- **Signatures.** Bundles can be signed with Ed25519. The `AFPS_SIGNATURE_POLICY` setting (`off`, `warn`, or `required`) and the `AFPS_TRUST_ROOT` allowlist decide what an instance accepts.
+- **Portable execution.** `@appstrate/afps-runtime` loads and runs a bundle outside Appstrate, and ships an `afps` command for bundle tooling: `keygen`, `sign`, `verify`, `inspect`, `render`, `bundle`, and `conformance`. It lives in the [Appstrate repository](https://github.com/appstrate/appstrate/tree/main/packages/afps-runtime) and is not published to npm. To execute an agent against a model, use `appstrate run`.
+
+Integrity, signing, and bundles are runtime features: the specification itself does not define them.
+
+## In the product
+
+- [Packages](/features/packages): importing, publishing, versions, and placing a package in a space.
+- [Skills](/features/skills): writing and publishing a skill.
+- [Agents](/features/agents): the agent manifest in practice.
+- [How integrations work](/integrations/how-integrations-work) and the [catalog](/integrations/catalog): what integrations are and which ship with the platform.
+
+## Contributing to the spec
+
+Open an issue or a pull request on [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec/issues). The specification is governed separately from the Appstrate runtime.

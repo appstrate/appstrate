@@ -1,0 +1,44 @@
+---
+title: Personal Agents
+description: Use Appstrate as the execution backend for a personal agent, over the REST API or MCP.
+---
+
+A personal agent is an assistant that runs on your own machine and acts for you. When it needs to act for many users, run many agents in parallel, or use accounts without ever holding their credentials, it can delegate the work to Appstrate: the personal agent **reasons** locally, and Appstrate **executes**. Brain local, arms remote.
+
+There is no SDK for this. It is a usage pattern over the [REST API](/api) and the organization's [MCP server](/using-appstrate/mcp-clients).
+
+## Division of responsibility
+
+| Concern                      | Personal agent (brain) | Appstrate (arms) |
+| ---------------------------- | ---------------------- | ---------------- |
+| Reasoning, planning          | Yes                    | No               |
+| User-facing chat             | Yes                    | No               |
+| Pick which agent to run      | Yes                    | No               |
+| Execute the run in isolation | No                     | Yes              |
+| Hold end-user credentials    | No                     | Yes              |
+| Parallel fan-out             | No                     | Yes              |
+| Audit log of who did what    | No                     | Yes              |
+
+What Appstrate brings to the split:
+
+- **Isolated, parallel runs.** With the `docker` or `firecracker` run adapter, each run gets its own sandbox, and runs execute concurrently within the instance's [run limits](/self-hosting/rate-limits).
+- **Credentials hidden from the LLM.** The sidecar injects credentials at request time, so neither the model nor the personal agent sees a token. See [Credential isolation](/integrations/how-integrations-work#credential-isolation).
+- **Multi-user execution.** One backend can launch runs on behalf of distinct [end-users](/features/end-users), each with their own connected accounts.
+
+## Wire-up
+
+Over REST, launch a run with an [API key](/features/api-keys), then wait for its result:
+
+```bash
+curl -X POST "$APPSTRATE_URL/api/agents/@acme/triage-support-tickets/run" \
+  -H "Authorization: Bearer $APPSTRATE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "ticket_id": 42 } }'
+
+curl "$APPSTRATE_URL/api/runs/$RUN_ID?wait=55" \
+  -H "Authorization: Bearer $APPSTRATE_KEY"
+```
+
+The launch answers `201` with the run resource. The wait returns when the run reaches a terminal status, or after 55 seconds at most, so loop until it does. The [API quickstart](/api/quickstart) walks through the whole flow. To launch for an end-user, see [Acting on behalf of an end-user](/features/end-users#acting-on-behalf-of-an-end-user).
+
+Over MCP, the `run_and_wait` tool launches a run and returns its result in one call. See [MCP clients](/using-appstrate/mcp-clients).

@@ -1,0 +1,58 @@
+---
+title: Chat
+description: The dashboard's conversational assistant. It uses the platform on your behalf, with your own permissions.
+---
+
+The **Chat** page of the dashboard is a conversational assistant built into Appstrate. You ask in plain words, and it uses the platform for you: it finds and launches your agents, reads their runs and files, connects accounts, and can even create agents. It acts with **your own permissions**, never more. It is the quickest way for someone who does not want to learn the interface to get work done.
+
+The chat is a module (`@appstrate/module-chat`) that is part of the default `MODULES`, so it is there on a standard install. If an administrator removed it from `MODULES`, the Chat entry does not exist.
+
+## What you need
+
+- **A model.** The chat runs on one of your organization's models. An administrator adds them under **Organization settings → Models**. If you have several, choose one in the composer. Until you choose, the chat follows the organization's default model, so a change of that default reaches everyone who never picked one.
+- **A role that can chat in the current space.** Conversations belong to a space. Every built-in space role can read conversations, and the `admin`, `builder`, `operator` and `runner` roles can also write. The `viewer` role is read-only.
+
+## Using it
+
+Open **Chat** in the sidebar (under Activity) and type. Your conversations are listed on the left. They are private to your account and to the space you are in, and they are stored on the server: if you leave the page while the assistant is answering, the answer is still saved. Deleting a conversation asks for confirmation, then deletes its messages and files, except a file that a run still uses. The address of a deleted conversation, or of one that belongs to another account or space, shows "Conversation not found". A role that can only read conversations does not get the **New conversation** button. The chat interface follows the dashboard's language (English or French).
+
+Things the assistant can do for you:
+
+- **Run your agents.** Ask for an agent by name, or describe the task. The conversation shows a progress card for the run with its status, a link to the run page, and the files it produced.
+- **Read and explain.** Look up runs, files and anything else the API shows your role.
+- **Connect accounts.** When an agent needs an integration you have not connected, the chat shows a connect card that starts the sign-in flow. If your browser blocks the window, use the link to open it in a new tab.
+- **Work with files.** Attach files to a message. A side panel next to the conversation has Preview, Runs, Files and Info tabs for what the conversation touched.
+- **Schedule runs and create agents**, where your role allows it (see below).
+
+The assistant shows its reasoning as a collapsible row while it thinks, and names the model that answered. If a turn fails, the message says why (a provider refused the key, a rate limit, the organization out of credits, a connection that needs to be renewed) and offers **Retry**. When the server returned one, the failure shows a request ID that an administrator can look up in the logs.
+
+## Control what it can do
+
+### Assistant access
+
+The access chip in the composer lists, for the current organization and space, what the assistant can do for you: use the Appstrate API on your behalf, run agents, create agents, see runs, browse files, connect accounts, activate an integration, schedule runs. Each line is marked allowed or denied by your role, or turned off in the composer. The assistant never exceeds your role.
+
+### Agent authoring
+
+A toggle in the composer controls whether the assistant may **create or edit agents** and compose a one-off agent on the fly for a single task. Each execution of such an agent costs a run. Turned off, the assistant sticks to your published agents and does not run drafts. The setting is remembered per account in your browser.
+
+### Skills
+
+[Skills](/features/skills) give the assistant instructions for a domain. Each conversation has a skill mode, chosen in the composer:
+
+| Mode                | Behaviour                                                                      |
+| ------------------- | ------------------------------------------------------------------------------ |
+| Automatic (default) | The assistant sees the space's skills and loads the ones that fit              |
+| Manual              | The skills you chose are loaded in full, and it can look for others if you ask |
+| Strict              | Only the skills you chose. It can neither list nor load any other              |
+
+Manual and strict take at most 5 skills, sharing a budget of 64,000 characters.
+
+A space can also **require** skills on its chat. A person with `skills:write` in the space switches this on from the space's package library. A required skill is loaded in every conversation held there, whatever the mode, and members cannot remove it. At most three per space, and together they stay within the same 64,000 characters. Remember that requiring a skill discloses its `SKILL.md` to everyone who chats in that space.
+
+## For administrators
+
+- Every chat turn runs inside the API process, on the Pi engine. `CHAT_PI_MAX_CONCURRENCY` (default 6) caps concurrent turns per API process, and a full instance answers new turns with `429`. Size it from measured capacity before opening chat to many users. The variables are in [Environment Variables](/self-hosting/environment-variables).
+- Inference goes through the platform's LLM proxy: the model's key is injected server-side and the usage is metered like any run. With the billing module, a chat can stop on an exhausted quota.
+- The assistant drives the platform through the same [MCP tools](/using-appstrate/mcp-clients#the-tools) an external client gets, which enforce your permissions on every call.
+- Developers can reach the same surface over the API: `POST /api/chat` and `/api/chat/sessions`. See the [API reference](/api).

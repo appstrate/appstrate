@@ -1,0 +1,16 @@
+{
+  "title": "Resources",
+  "icon": "Library",
+  "root": true,
+  "pages": [
+    "---Learn---",
+    "why-appstrate",
+    "architecture",
+    "tutorials",
+    "---Specifications---",
+    "afps-specification",
+    "---Community---",
+    "contributing",
+    "changelog"
+  ]
+}

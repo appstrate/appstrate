@@ -1,0 +1,113 @@
+---
+title: Quickstart
+description: Install an instance, connect a model and run your first agent.
+---
+
+This is the local happy path. For server deployments, Docker Compose, or driving an instance from another machine, see [Install](/get-started/install).
+
+<Steps>
+
+<Step>
+
+### Install an instance
+
+```bash
+curl -fsSL https://get.appstrate.dev | bash
+```
+
+The script installs the `appstrate` CLI. In an interactive terminal it then asks you to run the installer yourself:
+
+```bash
+appstrate install
+```
+
+Pick a tier when asked. Tier 2 (PostgreSQL + Redis, agents in Docker containers) is the default when Docker is running. Tier 0 needs nothing but Bun: an embedded database, and agents as plain subprocesses, which is fine for evaluation. When the healthcheck passes, the instance is at `http://localhost:3000`.
+
+To skip the prompts, add `--yes`: `curl -fsSL https://get.appstrate.dev | bash -s -- --yes`. That also makes the instance invitation-only on Docker tiers, so you claim ownership at `/claim` with the token the installer prints. See [Install](/get-started/install#who-can-sign-up).
+
+</Step>
+
+<Step>
+
+### Create your account, organization and model
+
+Open `http://localhost:3000` and sign up (or claim the instance). The onboarding flow guides you through:
+
+1. **Create your organization.** A default space and a `hello-world` demo agent are created with it.
+2. **Add an AI model.** Agents and the chat need at least one. Choose a provider (Anthropic, OpenAI, OpenRouter, Mistral, Groq and others, or any OpenAI-compatible or Anthropic-compatible endpoint), paste an API key, pick one or more of the models it lists and save.
+3. **Invite users** (optional).
+
+You can skip the model step and add one later under **Organization settings → Models**.
+
+</Step>
+
+<Step>
+
+### Run your first agent
+
+The `hello-world` agent starts as a draft, with no published version. The webapp's **Run** button and the CLI's `@draft` run that draft, because you can edit the agent. The chat and a coding agent run the latest published version by default, and the `/appstrate:run-hello-world` command only appears once one exists: for those, open the agent first and choose **Create version** in its actions menu.
+
+<Tabs items={['Webapp', 'Chat', 'CLI', 'Coding agent']}>
+
+<Tab value="Webapp">
+
+1. Open **Agents** and select **Hello World**.
+2. Click **Run**.
+
+The run streams live: logs, tool calls, and the result when it finishes. Open **Runs** to see the history with status, duration and cost.
+
+</Tab>
+
+<Tab value="Chat">
+
+Open **Chat** in the sidebar, pick a model, and ask for what you want, for example "Run my Hello World agent and show me the result". The assistant acts with your own permissions, launches the run and reports back. See [Chat](/using-appstrate/chat).
+
+</Tab>
+
+<Tab value="CLI">
+
+```bash
+appstrate login --instance http://localhost:3000   # approve the code in your browser
+appstrate api GET /api/agents                      # each agent has an id like @acme/hello-world
+appstrate run @acme/hello-world@draft              # launch the draft and follow the logs
+```
+
+`appstrate login` pins your organization and its default space on the profile, so later commands need no extra flags. Replace `@acme` with your organization's slug. See [CLI](/using-appstrate/cli).
+
+</Tab>
+
+<Tab value="Coding agent">
+
+With [Claude Code](https://docs.claude.com/en/docs/claude-code), install the Appstrate plugin once. Every agent active in your space then appears as a `/appstrate:run-<agent>` command, and your space's skills as `/appstrate:<skill>`:
+
+```bash
+appstrate login --instance http://localhost:3000
+claude plugin marketplace add appstrate/claude-plugins
+claude plugin install appstrate@appstrate
+```
+
+Then, in a new Claude Code session, run `/mcp` and authenticate the `plugin:appstrate:appstrate` server, and try `/appstrate:run-hello-world`. See [Skills and coding agents](/using-appstrate/skill).
+
+</Tab>
+
+</Tabs>
+
+On Docker tiers the agent ran in its own container, and the credentials of any integration it used stayed in the sidecar next to it, never inside the agent process.
+
+</Step>
+
+</Steps>
+
+## What you have now
+
+- A local Appstrate instance on port 3000, with your organization and default space
+- A model connected to the organization
+- One agent you have run, and a way to run more: the webapp, the chat, the CLI, or a coding agent
+
+## Where to go next
+
+- [Concepts](/get-started/concepts): the mental model behind agents, runs, integrations, spaces and packages
+- [Using Appstrate / Webapp](/using-appstrate/webapp): a tour of the dashboard
+- [Using Appstrate / CLI](/using-appstrate/cli): the command reference
+- [Features](/features/agents): one page per primitive
+- [Self-Hosting](/self-hosting): when to leave Tier 0 and how to operate in production

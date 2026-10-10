@@ -1,0 +1,83 @@
+---
+title: Proxies
+description: Route the outbound traffic of agent runs through your own HTTP proxy, for fixed egress IPs, corporate gateways or per-agent routing.
+---
+
+A **proxy** is an outbound HTTP proxy that the run's sidecar sends agent traffic through. Agents can still reach Gmail, Slack or any web resource, but the connection leaves through the proxy you chose.
+
+Typical reasons:
+
+- **Corporate egress**: a single outbound IP, or a gateway that logs everything.
+- **Air-gapped networks**: the only route to the public internet is a hardened proxy.
+- **IP-based limits**: some APIs rate-limit or allow-list by source address.
+- **Geography or compliance**: a given customer's agents must exit from a given region.
+
+## How it is applied
+
+Every run has a sidecar that mediates outbound requests (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). When a proxy resolves for the run, the platform hands its URL to that sidecar, which tunnels the agent's HTTP and HTTPS requests through it with `CONNECT`. Without a proxy the sidecar connects directly. In both cases the SSRF protections (private ranges, DNS rebinding, redirects) still apply, and credentials are still injected by the sidecar and never exposed to the agent.
+
+## Managing proxies
+
+Proxies belong to the **organization**. Open **Organization settings > Proxies** in the web app (`/org-settings/proxies`), or use the API:
+
+```bash
+# Create
+curl -X POST https://your-instance/api/proxies \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "label": "Corporate egress", "url": "http://user:secret@proxy.internal:8080" }'
+
+# Make it the organization default
+curl -X PUT https://your-instance/api/proxies/default \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "proxyId": "<id from the list>" }'
+
+# Probe it (5 per minute)
+curl -X POST https://your-instance/api/proxies/<id>/test -H "Authorization: Bearer apst_your_key"
+```
+
+| Method and route              | Permission       | Purpose                                           |
+| ----------------------------- | ---------------- | ------------------------------------------------- |
+| `GET /api/proxies`            | `proxies:read`   | List custom and built-in proxies.                 |
+| `POST /api/proxies`           | `proxies:write`  | Create a custom proxy (`label`, `url`).           |
+| `PATCH /api/proxies/{id}`     | `proxies:write`  | Change `label`, `url` or `enabled`.               |
+| `PUT /api/proxies/default`    | `proxies:write`  | Set the default. `{ "proxyId": null }` clears it. |
+| `DELETE /api/proxies/{id}`    | `proxies:delete` | Delete a custom proxy.                            |
+| `POST /api/proxies/{id}/test` | `proxies:read`   | Check connectivity.                               |
+
+Proxy URLs are stored encrypted. They are never returned in clear: lists show a masked `urlPrefix` (credentials replaced by `***`, long URLs truncated). A proxy URL that points at a blocked network is refused.
+
+### Built-in proxies
+
+An operator can preload proxies with `SYSTEM_PROXIES`, a JSON array of `{ id, label, url, isDefault?, enabled? }`:
+
+```bash
+SYSTEM_PROXIES='[{"id":"corp-egress","label":"Corporate egress","url":"http://user:secret@proxy.internal:8080","isDefault":true}]'
+```
+
+They appear as `source: "built-in"` and are read-only. Admins can select one as the default or pin it on an agent without seeing or changing its URL. `PROXY_URL` is a simpler, instance-wide fallback with no UI. See [Environment Variables](/self-hosting/environment-variables).
+
+## Which proxy a run uses
+
+The first match wins:
+
+1. `proxyId` in the launch body of the run, or `proxy_id_override` on the [schedule](/features/scheduling) that fired it. `"none"` forces a direct connection.
+2. The proxy pinned on the agent in this [space](/features/spaces).
+3. The organization default proxy.
+4. The built-in proxy flagged `isDefault`.
+5. `PROXY_URL`.
+6. No proxy.
+
+An override that points at a deleted or disabled proxy is skipped with a warning and the cascade continues. A proxy whose stored URL is encrypted under a key the instance does not hold is not skipped: the launch is refused with `503 encryption_key_unavailable`, so a run never leaves without the proxy it was given. The label of the proxy a run actually used is stored on the run as `proxy_label`.
+
+### Pinning a proxy on an agent
+
+```bash
+curl -X PUT https://your-instance/api/agents/@acme/support-triage/proxy \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "proxyId": "<id>" }'
+```
+
+`proxyId` is a proxy id, `"none"` to opt this agent out of proxying, or `null` to clear the override and fall back to the cascade. It needs `agents:configure`. `GET /api/agents/{scope}/{name}/proxy` returns `{ proxyId, resolved }`. The same value is available as `proxyId` on `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`.

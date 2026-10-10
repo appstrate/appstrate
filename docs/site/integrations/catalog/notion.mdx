@@ -1,0 +1,66 @@
+---
+title: Notion
+description: Connect Notion to your Appstrate agents, with the direct API integration or Notion's hosted MCP server.
+---
+
+## Overview
+
+Notion is a workspace for notes, docs and databases. Appstrate ships two Notion integrations, as separate packages.
+
+| Integration             | Source     | How the agent reaches Notion                                                                   |
+| ----------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
+| `@appstrate/notion`     | `api_call` | Calls the Notion REST API directly. Needs an OAuth client registered by an administrator.      |
+| `@appstrate/notion-mcp` | Remote MCP | Uses Notion's hosted MCP server. The OAuth client is registered automatically at connect time. |
+
+Notion does not use OAuth scopes: access is granted per page and database when the user authorizes.
+
+## Connect Notion
+
+For the MCP integration, activate it and members click Connect. For the API integration:
+
+<Steps>
+<Step>
+
+Create a public integration (type "Public") under "My integrations" ([open](https://www.notion.so/my-integrations)).
+
+</Step>
+<Step>
+
+Register the redirect URI `APP_URL` followed by `/api/integrations/callback`, as shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/notion-mcp": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/notion-mcp": {
+      "tools": ["notion-search", "notion-fetch", "notion-create-pages"]
+    }
+  }
+}
+```
+
+Example prompt:
+
+```
+After each client call, find the client's page in Notion and add the action items
+from the call notes under "Next steps".
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

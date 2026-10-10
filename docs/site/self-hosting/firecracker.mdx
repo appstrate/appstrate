@@ -1,0 +1,143 @@
+---
+title: Firecracker Execution Backend
+description: "Run each agent in its own microVM. What the opt-in Firecracker backend requires, how to install the runner daemon on a KVM host, how the platform pairs with it, and how to check it."
+---
+
+The `firecracker` execution backend runs every agent run in its own [Firecracker](https://firecracker-microvm.github.io/) microVM, behind a hardware virtualization boundary (KVM). It is an **early preview** and **opt-in**: it is not in the default `MODULES`, it needs a dedicated Linux host, and nothing in it is read unless you select it. The installer defaults to `docker`. Choose it when you want a hardware boundary rather than a container, within the limits listed below. What each backend protects is compared in [Isolation and Security](/self-hosting/isolation-and-security), and the backends are listed in [Progressive Infrastructure](/self-hosting/progressive-infrastructure#execution-backends).
+
+## How it is split
+
+The platform runs in a container and cannot touch `/dev/kvm`, network devices or firewall rules. So the backend is split in two:
+
+- The **platform** keeps running as usual. With `RUN_ADAPTER=firecracker` it forwards every sandbox operation over HTTP to the runner.
+- The **runner**, a daemon named `appstrate-runner`, runs on a KVM host under systemd. It creates the microVMs, their network devices and the host firewall rules.
+
+Both can live on the same machine (the platform talks to the runner through a unix socket) or on different machines (it talks over HTTPS). They share one secret, the runner token.
+
+## What it requires
+
+On the runner host:
+
+- **Linux** on `x86_64` or `aarch64`. macOS and other systems are refused by the installer. A virtual machine qualifies only if it exposes nested virtualization and a `/dev/kvm` device.
+- **`/dev/kvm`**, readable and writable by the user that runs the daemon (root, see below).
+- **`nft` (nftables) and `ip` (iproute2)** on the `PATH`. The installer checks them and, when one is missing, prints the package command for common distributions.
+- **`mkfs.ext4` and `debugfs`** from e2fsprogs, which the daemon calls to build each run's configuration drive.
+- **Root.** `appstrate runner install` must run as root, and the systemd unit it writes runs the daemon as `root`. The daemon needs it to confine each microVM (chroot, per-VM user, cgroups), create network devices and manage nftables.
+- **Firecracker 1.16 or later.** The installer downloads Firecracker `1.16.0` and its `jailer` from one release, and the daemon refuses an older Firecracker.
+- **Outbound access to GitHub Releases.** The installer downloads the daemon and Firecracker. On first start the daemon downloads the guest kernel and root filesystem.
+- **`minisign`.** `appstrate runner install` and `runner update` verify the daemon against the release's signed checksums and fail closed when `minisign` is not installed. The one-liner below already provides it.
+
+Per run, a microVM gets the agent's memory plus 512 MiB for the sidecar and the guest kernel. The guest's workspace and root overlay live in RAM (tmpfs, capped at half the guest memory), so what an agent writes counts against host memory. The runner admits at most 16 microVMs at once by default and fails further runs fast instead of overcommitting memory.
+
+Limits to know before you choose it:
+
+- Every run pays a microVM boot and a cold start of the agent runtime inside the guest. There are no snapshots yet.
+- A sidecar-only workload, which the platform uses for some integration connect flows, is not supported. The platform reports that this backend cannot run it and suggests `docker` or `process`.
+- The backend's own documentation says it suits single-tenant and trusted workloads for production, and that for hostile multi-tenant workloads you should weigh the residual risks and commission an independent security review first, because this backend has not had one. See [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
+
+## Install with `appstrate install`
+
+On a Docker tier (1 to 3, never tier 0), the installer can set up both sides:
+
+```bash
+appstrate install --run-adapter firecracker
+```
+
+It writes `RUN_ADAPTER`, `MODULES` (the default set plus `firecracker`), `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN` to the platform's `.env`, plus `APPSTRATE_RUNNER_SOCKET_DIR` (the runner socket's directory) on the same host, and `FIRECRACKER_RUNNER_TLS_REQUIRED=0` when you accept a plaintext `http://` runner URL on a remote host. Two topologies:
+
+- **Same host.** The installer detects the host's LAN IPv4 (override it with `--host-ip`), points the platform at the runner socket, brings the platform up, then runs `sudo appstrate runner install` for you. A non-interactive run prints that command instead, because it cannot ask for a password. A failed runner install is a warning, not a rollback: the platform stays installed.
+- **Remote KVM host.** Pass `--runner-url https://<kvm-host>:3100 --runner-token <token>`. The installer writes the platform side and prints the command to run on the KVM host.
+
+A non-interactive `--run-adapter firecracker` needs either `--runner-url` with `--runner-token`, or `--host-ip`. If you re-run the installer over an `.env` where you set `MODULES` by hand, it keeps your value: add `firecracker` to that list yourself.
+
+## Install the runner on a KVM host
+
+On the KVM host, either use the one-liner or the CLI if it is already installed:
+
+```bash
+curl -fsSL https://get.appstrate.dev/runner | sudo bash -s -- \
+  --platform-url http://<PLATFORM_IPV4>:3000
+
+# or
+sudo appstrate runner install --platform-url http://<PLATFORM_IPV4>:3000
+```
+
+`--platform-url` is the address the microVMs use to reach the platform. It must be `http(s)://<IPv4>[:port]` with an IPv4 literal, because guests have no DNS. Options of `runner install`:
+
+| Option                 | Meaning                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `--platform-url <url>` | Required with `--yes` or without a terminal. The IPv4 URL the microVMs reach the platform on                  |
+| `--token <token>`      | The shared secret, at least 16 characters. Default: keep the existing one, else generate one                  |
+| `--socket <path>`      | Serve the daemon on a unix socket at this absolute path instead of a TCP port. Excludes `--port` and `--host` |
+| `--port <port>`        | TCP listen port (default 3100)                                                                                |
+| `--host <addr>`        | TCP bind address (default `0.0.0.0`)                                                                          |
+| `--data-dir <path>`    | State directory for the kernel, root filesystem and run data (default `/var/lib/appstrate-runner`)            |
+| `-y`, `--yes`          | Skip prompts                                                                                                  |
+
+Interactively, and with no `--socket`, `--port` or `--host`, the command asks which transport to use. The installer does the following, in order:
+
+1. Checks the host (operating system, architecture, `/dev/kvm`, `nft`, `ip`) and stops with a one-line remedy per failed check.
+2. Downloads the daemon, verifying it against the release's signed `checksums.txt`, and Firecracker with its jailer.
+3. Reuses the token in `/etc/appstrate-runner/env`, or generates a 48 character one and prints it once. Set the same value as `FIRECRACKER_RUNNER_TOKEN` on the platform.
+4. Writes `/etc/appstrate-runner/env` (mode 0600) and a hardened systemd unit named `appstrate-runner`, then enables and restarts it.
+5. Waits up to three minutes for the daemon to answer its health check, then prints the settings the platform needs. For a TCP install it also prints the `ufw` or `firewalld` command that opens the port.
+
+The guest kernel and root filesystem are not part of the install. The daemon downloads them when it first starts, before it opens its port, and checks a signed manifest and the file hashes before it uses them. The first health check can therefore take a while: if the daemon is not ready after three minutes, the installer says it is still warming up and points to `runner doctor` and `runner logs -f`. If the files are missing and the download fails, the daemon exits, and a bad signature, a bad checksum or an incompatible guest version are always fatal.
+
+## Pair the platform with the runner
+
+The platform needs four settings. The first two select the backend, the last two say where the runner is and how to authenticate:
+
+```bash
+MODULES=oidc,webhooks,mcp,core-providers,@appstrate/module-chat,firecracker
+RUN_ADAPTER=firecracker
+FIRECRACKER_RUNNER_URL=unix:///run/appstrate-runner/runner.sock
+FIRECRACKER_RUNNER_TOKEN=<the runner token, at least 16 characters>
+```
+
+`RUN_ADAPTER=firecracker` without the module in `MODULES` is a fatal boot error that lists the registered backends. The `FIRECRACKER_RUNNER_*` variables are read lazily, only when the backend is selected, so loading the module alone requires nothing. The host-side `FIRECRACKER_*` variables (kernel and root filesystem paths, subnet, deny list, limits) belong to the daemon, are not read by the platform, and are set in the daemon's environment file, `/etc/appstrate-runner/env`. The variables of the platform are listed in [Environment Variables](/self-hosting/environment-variables), and the daemon's in [FIRECRACKER.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md#env-vars).
+
+The wire carries the runner token and each run's credentials, so the transport matters:
+
+| Topology                        | `FIRECRACKER_RUNNER_URL`                   | Notes                                                                                         |
+| ------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Platform and runner on one host | `unix:///run/appstrate-runner/runner.sock` | Recommended. Three slashes. The traffic never touches the network, so no TLS and no open port |
+| Runner on another host          | `https://<runner-host>:3100`               | Put a TLS reverse proxy in front of the daemon                                                |
+| Loopback                        | `http://127.0.0.1:3100`                    | Allowed, the traffic stays on the host                                                        |
+
+A plaintext `http://` URL to a host that is not loopback is **refused** when the platform first connects to the runner, and a private LAN address is not trusted automatically. The platform still starts, but `checks.agents` stays `degraded` on `/health` and every run fails until the URL is fixed. The last-resort escape is `FIRECRACKER_RUNNER_TLS_REQUIRED=0` on the platform, which turns the refusal into a warning. The shipped Compose files do not forward that variable, so list it under `appstrate.environment` yourself. Use it only when the link is already encrypted and authenticated at a lower layer, such as a VPN or WireGuard. Run one platform per runner: the runner's cleanup of orphaned microVMs covers the whole daemon.
+
+For the socket topology, the platform container must see the socket. The three tier templates in `examples/self-hosting` (`docker-compose.tier1.yml` to `tier3.yml`, the ones the installer writes) mount `${APPSTRATE_RUNNER_SOCKET_DIR}` at `/run/appstrate-runner` and forward `FIRECRACKER_RUNNER_URL` and `FIRECRACKER_RUNNER_TOKEN`, and the firecracker installer sets `APPSTRATE_RUNNER_SOCKET_DIR=/run/appstrate-runner` in `.env`. At the time of writing, the root `docker-compose.yml` does none of these, and `examples/self-hosting/docker-compose.yml` mounts the directory but forwards neither variable, so with either file add the two variables under `appstrate.environment` (and, for the root file, the volume) yourself (see [Docker Compose](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)). The socket is created with mode `0660` owned by root, which fits the stock platform image because its process runs as root. A rootless or user-namespace-remapped platform container needs `FIRECRACKER_RUNNER_SOCKET_MODE=0666` on the runner. The token is still checked on every request.
+
+## Network and egress policy
+
+The runner sets up an nftables table named `appstrate_fc` and applies a fixed policy to every microVM:
+
+- A guest can reach **the platform at the `--platform-url` address and port**, and nothing else on the host. The runner opens that one address ahead of its deny list, and drops every other packet a guest sends to the host.
+- Guests cannot reach each other.
+- Traffic from a guest to the internet is forwarded and masqueraded, except toward the **egress deny list**, `FIRECRACKER_EGRESS_DENY_CIDRS` in the runner's environment. Its default covers cloud metadata and link-local (`169.254.0.0/16`), the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), `100.64.0.0/10`, `198.18.0.0/15`, `192.0.0.0/24` and `224.0.0.0/3`.
+- Inside the guest, only the sidecar has general network access. The agent can reach the sidecar and the platform and nothing more.
+- At start, the runner probes whether a guest can reach the platform through this policy and reports the verdict on its health endpoint. `FIRECRACKER_NET_VERIFY` sets what a proven failure does: `warn` (default) logs it and starts, `strict` refuses to start.
+
+Two consequences for operators. First, the per-integration `authorized_uris` rules and the SSRF checks described in [Isolation and Security](/self-hosting/isolation-and-security) still apply in the sidecar, but the host rules above are enforced under them: a microVM cannot reach a private service just because an integration names it. To let a run reach a private host listed in `EGRESS_ALLOW_INTERNAL_HOSTS`, also leave its range out of `FIRECRACKER_EGRESS_DENY_CIDRS` on the runner. That list is the runner host's forward chain for every guest, so narrowing it removes the network-level backstop for that range from every run on the host, and only the sidecar's own checks remain. Second, if you change `--platform-url` (for example after the platform's IP changes), re-run `runner install` so the runner and its firewall rule use the new address.
+
+## Check it
+
+On the platform host, `appstrate doctor` adds a Firecracker line when the local install's `.env` selects `RUN_ADAPTER=firecracker` and sets `FIRECRACKER_RUNNER_URL`. It makes one authenticated health request and reports one of three results: reachable and authorized, `unauthorized` (the platform's `FIRECRACKER_RUNNER_TOKEN` does not match the daemon), or `unreachable`. It works over a `unix://` URL too. When the line is red, it points to the deeper check on the KVM host:
+
+```bash
+sudo appstrate runner doctor          # add --json for scripts
+```
+
+`runner doctor` reports the host checks (operating system, architecture, `/dev/kvm`, `nft`, `ip`), the systemd state, the daemon's `/v1/health` answer with its protocol version, the installed guest artifacts and whether the jailer binary is present. It exits non-zero when anything fails. It reads the token from `/etc/appstrate-runner/env`, which only root can read. The platform's own `GET /health` shows `checks.agents` as `degraded` until the run orchestrator has initialized (see [Monitoring](/self-hosting/monitoring)).
+
+Day-2 commands on the KVM host:
+
+| Command                           | What it does                                                                                             |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `sudo appstrate runner update`    | Downloads the daemon that matches this CLI's version, verifies it, swaps it and restarts the unit        |
+| `appstrate runner status`         | Shows `systemctl status` for the unit                                                                    |
+| `appstrate runner logs [-f]`      | Shows the daemon's journal, `-f` to follow                                                               |
+| `sudo appstrate runner uninstall` | Stops and removes the daemon, its unit and config, and its state directory unless you pass `--keep-data` |
+
+When a run's microVM exits abnormally, the last 2 KiB of its console are recorded in the run's logs as a `system` entry named `firecracker_console`, so the cause is visible without logging into the host. The daemon logs `Firecracker workload destroyed` with a `reason` for every microVM it tears down. At start it also warns, without stopping, when the host has SMT enabled, KSM on or swap in use, because those weaken isolation on a multi-tenant host.

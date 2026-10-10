@@ -1,0 +1,128 @@
+---
+title: Skills
+description: Reusable instructions, in the Agent Skills format, that agents and the chat assistant load on demand.
+---
+
+A skill is a portable unit of instruction. It follows the [Agent Skills](https://agentskills.io/specification) format: a folder with a `SKILL.md` file (YAML frontmatter, then Markdown), plus any supporting files. A skill written for Claude Code or another Agent Skills host works in Appstrate unchanged. Appstrate adds the package layer: versions, a registry, integrity hashes, sharing between spaces.
+
+Skills are one of the four [package types](/features/packages) (`skill`).
+
+## A minimal skill
+
+```markdown
+---
+name: ticket-tone
+description: House style for answering support tickets. Use when drafting or reviewing a customer reply.
+---
+
+# Ticket tone
+
+Answer in the customer's language. Keep it under 120 words. Never promise a delivery date.
+```
+
+Both frontmatter fields are required on every path that writes a skill (editor, publish, restore, ZIP, GitHub and bundle import). A violation is a `400` whose first error code is one of `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description`, `skill_invalid_frontmatter_description`.
+
+| Field         | Rule                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`        | The bare skill slug on one line: 1 to 64 characters of lowercase `a-z`, `0-9` and `-`, with no leading, trailing or doubled hyphen. It is not the package id. |
+| `description` | Non-empty, at most 1024 characters. The model reads it to decide when to load the skill, so say when to use it.                                               |
+
+Save the file without a byte-order mark. The frontmatter is parsed as YAML, so anything YAML rejects is rejected too (for example `description: a: b`).
+
+Other files in the folder (reference documents, scripts, templates) travel with the skill. At run time the whole folder is written to the agent's workspace under `.pi/skills/<package id>/`, and the agent reads what it needs with its file and shell tools.
+
+## Package form
+
+A skill package is an archive with a `manifest.json` next to the skill folder:
+
+```
+my-skill.afps
+├── manifest.json
+├── SKILL.md
+└── references/style-guide.md
+```
+
+```json
+{
+  "name": "@acme/ticket-tone",
+  "version": "1.0.0",
+  "type": "skill",
+  "schema_version": "0.3",
+  "display_name": "Ticket tone",
+  "description": "House style for answering support tickets."
+}
+```
+
+`name` is the scoped package id. A ZIP that contains only a `SKILL.md` is accepted too: the platform derives the package id (`@<your org slug>/<name from the frontmatter>`) and a manifest, and bumps the patch version when the package already exists.
+
+## Creating and editing
+
+In the web app, **Skills** (`/skills`) lists the skills of the space, lets you create one from a template, import a ZIP or a GitHub repository, edit the draft, see the version history, and publish.
+
+Through the API:
+
+```bash
+# Create (manifest + SKILL.md content)
+curl -X POST https://your-instance/api/packages/skills \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "manifest": { "name": "@acme/ticket-tone", "version": "1.0.0", "type": "skill", "schema_version": "0.3" },
+    "content": "---\nname: ticket-tone\ndescription: House style for answering support tickets.\n---\n\n# Ticket tone\n..."
+  }'
+
+# Edit the draft (needs the ETag in If-Match), including supporting files
+curl -X PATCH https://your-instance/api/packages/skills/@acme/ticket-tone \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "If-Match: <ETag>" \
+  -H "Content-Type: application/json" \
+  -d '{ "content": "..." }'
+
+# Publish a version from the draft (creating the skill already published 1.0.0)
+curl -X POST https://your-instance/api/packages/skills/@acme/ticket-tone/versions \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "version": "1.0.1" }'
+```
+
+An update body can also carry `operations`, an ordered list of file edits applied atomically with the manifest. Limits: 1 MiB per written file, 50 MiB and 10,000 entries for the whole package.
+
+Versions are semver, forward-only and immutable. Importing an archive (`POST /api/packages/import`) creates the draft and a version at once. See [Packages](/features/packages) for versions, dist-tags, import and export.
+
+## Using a skill in an agent
+
+Skills are attached in the agent manifest and nowhere else. Excerpt of the agent manifest:
+
+```json
+{
+  "type": "agent",
+  "name": "@acme/support-triage",
+  "dependencies": {
+    "skills": { "@acme/ticket-tone": "^1.0.0" }
+  }
+}
+```
+
+At launch, each range resolves to a published version and its files are placed in the sandbox. The prompt lists the available skills with their descriptions. To test an unpublished skill without republishing the agent, launch with `dependency_overrides: { "@acme/ticket-tone": "draft" }`, which needs write access to that skill. See [Runs](/features/runs).
+
+## Skills in the chat assistant
+
+The [chat](/using-appstrate/chat) assistant also uses the skills of the space. Each conversation has a skill mode:
+
+| Mode             | Behaviour                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| `auto` (default) | The space's skills are listed and the model loads the ones that fit.                         |
+| `manual`         | The skills you chose (up to 5) are injected, and the model may still find others on request. |
+| `strict`         | Only the skills you chose (up to 5) are injected.                                            |
+
+A space admin can also **enforce** a skill: with `chat_enforced: true` on the skill's placement (`PATCH /api/spaces/{spaceId}/packages/{scope}/{name}`), the latest published `SKILL.md` is injected in every chat conversation of that space, whatever the member's permissions. A skill must be published to be enforced. A space enforces at most 3 skills, and their `SKILL.md` files may total at most 64,000 characters, a budget the skills chosen in a conversation share.
+
+## Who can see and use a skill
+
+A skill has a **home space**, where its `skills:write` permission governs editing and publishing. Other spaces receive it through [sharing](/features/library) and use it once they activate it. The `operator` and `viewer` space roles can read skills (a `runner` cannot), `builder` and `admin` can write them. See [roles and permissions](/features/roles-and-permissions).
+
+## Portability
+
+- A pure `SKILL.md` folder moves freely between Claude Code, the Claude Agent SDK, Appstrate and any Agent Skills host.
+- Only the AFPS wrapper (`manifest.json`, versions, integrity) is Appstrate-specific. The format is published at [github.com/appstrate/afps-spec](https://github.com/appstrate/afps-spec).
+- A worked example lives in [`examples/custom-skill`](https://github.com/appstrate/appstrate/tree/main/examples/custom-skill).

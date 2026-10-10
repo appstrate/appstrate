@@ -1,0 +1,116 @@
+---
+title: AFPS Packages
+description: The four package types, drafts and versions, importing and exporting, and system packages.
+---
+
+Everything you build on Appstrate is an **AFPS package** (Agent Format Packaging Standard): a versioned, signed-able archive with a `manifest.json`. The format is specified in [AFPS](/resources/afps-specification).
+
+## Package types
+
+| Type          | What it is                                                                                                                           | Content file                               |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `agent`       | An agent: prompt, input and output schemas, dependencies. See [Agents](/features/agents).                                            | `prompt.md`                                |
+| `skill`       | Reusable instructions in the Agent Skills format. See [Skills](/features/skills).                                                    | `SKILL.md`                                 |
+| `integration` | Access to a third-party API or MCP server, with its authentication methods. See [Integrations](/integrations/how-integrations-work). | `manifest.json`, optional `INTEGRATION.md` |
+| `mcp-server`  | A runnable MCP server (an MCP Bundle) that a local integration references.                                                           | Server entry point                         |
+
+Package ids are scoped names, `@scope/name`. The scope defaults to your organization's slug. Packages shipped with the platform use `@appstrate/`.
+
+## Anatomy
+
+```
+my-agent.afps          (a ZIP)
+├── manifest.json      metadata, schemas, dependencies
+├── prompt.md          the agent prompt
+└── ...                any other files the package needs
+```
+
+A package can be edited and imported as a folder or a ZIP (`.afps` or `.zip`). Several packages travel together as an `.afps-bundle`.
+
+In the web app, a package's **Content** tab browses the files of the version you are viewing, previews text files and downloads any file. In the editor, the **Files** tab creates, uploads, renames, replaces and deletes files, up to 1 MiB each (import a ZIP for larger files); the changes are written with the manifest when you save. `manifest.json` itself is edited on the **JSON** tab.
+
+## Drafts and versions
+
+Every package has a mutable **draft** and immutable **versions**.
+
+- Editing writes the draft. Saving a draft requires the `ETag` of what you last read, sent as `If-Match`. A stale tag answers `412`, a missing one `428`, so two editors cannot overwrite each other silently.
+- **Publishing** freezes the draft into a version: `POST /api/packages/{type}/{scope}/{name}/versions`, where `type` is `agents`, `skills`, `integrations` or `mcp-servers`. The version comes from the manifest or from the `version` you send in the body.
+- Versions are **semver and forward-only**: a new version must be strictly higher than every existing one. A duplicate is `409 version_exists`.
+- An unchanged draft cannot be published again (`409 no_changes`). For an agent, publishing, restoring, deleting a version and deleting the agent are refused while one of its runs is in progress (`agent_in_use`).
+- Each version stores an **integrity hash** (SHA-256 SRI). Downloads return it in `X-Integrity`.
+- `POST .../versions/{version}/restore` copies a version back into the draft. `DELETE .../versions/{version}` removes a version permanently and moves the dist-tag to the best remaining stable version.
+
+```bash
+# List versions of an agent
+curl https://your-instance/api/packages/agents/@acme/support-triage/versions \
+  -H "Authorization: Bearer apst_your_key"
+
+# Latest published and draft
+curl https://your-instance/api/packages/agents/@acme/support-triage/versions/info \
+  -H "Authorization: Bearer apst_your_key"
+```
+
+### Dist-tags and resolution
+
+The platform maintains one dist-tag, `latest`, which points at the newest stable published version. You cannot create other tags. When something refers to a package by a range, it resolves in three steps:
+
+1. an **exact** version (`1.2.3`);
+2. a **dist-tag** (`latest`);
+3. a **semver range** (`^1.0.0`, `~2.1`).
+
+Two more selectors exist where a run or schedule picks a definition: `published` (the latest version) and `draft` (the working copy, for people who can write the package).
+
+Dependencies declared in an agent (`dependencies.skills`, `integrations`, `mcp_servers`) are ranges and are resolved when a run starts, so publishing a compatible dependency version changes what the next run uses.
+
+## Importing
+
+```bash
+# A ZIP or .afps archive
+curl -X POST https://your-instance/api/packages/import \
+  -H "Authorization: Bearer apst_your_key" \
+  -F "file=@my-agent.afps"
+
+# A bundle exported from another instance (also accepts .afps and .zip)
+curl -X POST https://your-instance/api/packages/import-bundle \
+  -H "Authorization: Bearer apst_your_key" \
+  -F "file=@my-agent.afps-bundle"
+
+# A public GitHub directory holding a manifest.json (branch and path are part of the URL)
+curl -X POST https://your-instance/api/packages/import-github \
+  -H "Authorization: Bearer apst_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{ "url": "https://github.com/acme/my-agent/tree/main" }'
+```
+
+- An import writes the draft **and** cuts a version from the archive. The package is owned by your organization and stays editable, whatever its scope name.
+- `POST /api/packages/import` answers `409` when the target has unpublished draft changes (`draft_overwrite`) or already holds that version with other content (`integrity_mismatch`). Resend with `?force=true` to overwrite. Both problems carry the `packageId`, and say what the import would overwrite: `active_version` on `draft_overwrite`, `version` on `integrity_mismatch`. A GitHub import has no force option: publish or discard the draft, or bump the version in the source manifest.
+- An import whose version is new but **lower than the highest published one** is refused before anything is written, with `409 version_not_higher`. Forcing does not help: raise the version in the manifest. A taken identifier (a system package, or one owned by another organization) is always `409 name_collision`.
+- A bundle registers every embedded package, reusing byte-identical ones. A conflict (same identity, different bytes) is `409 bundle_conflict`, and so is a package that another organization owns, even one created while the import was running. A bundle whose root version is lower than the highest published one is refused with `409 version_not_higher` before any package is written. A dependency in that situation is left as your organization has it, with a warning in the response. Integrations whose selection exposes no callable tool are refused.
+- A ZIP containing only a `SKILL.md` imports as a skill.
+- Imports are limited to 10 per minute. The signature policy of the instance (`AFPS_SIGNATURE_POLICY`) can require signed bundles.
+
+## Exporting and downloading
+
+- `GET /api/agents/{scope}/{name}/bundle` streams the agent and all its dependencies as a deterministic `.afps-bundle` (`?source=published` by default, `?source=draft` for authors).
+- `GET /api/packages/{scope}/{name}/{version}/download` returns one package as a ZIP. `version` can be a version, a dist-tag, a range or `draft` (authors only).
+- `GET /api/packages/{scope}/{name}/files` lists the files of a package and returns small text files inline.
+
+If the organization sets `restrict_package_copy`, copying a package out (fork, download, export) requires `share` in its home space. Skills and system packages are exempt. See [Organizations](/features/organizations#organization-settings).
+
+## Working from a folder
+
+The [CLI](/using-appstrate/cli) edits packages as local folders: `appstrate packages pull` writes a package's draft (or a published version) to a folder, `status` shows what would change, `push` writes the folder back to the draft atomically, and `publish` cuts a version.
+
+## Ownership, sharing and activation
+
+A package belongs to the organization and has a **home space**. Other spaces get it through **shares** and run it once they **activate** it. Moving a home, sharing, and the library views are in [Library and sharing](/features/library).
+
+Creating a package needs the type's `write` permission (`agents:write`, `skills:write`, `integrations:write`, `mcp-servers:write`) in the space you create it from, which becomes its home. `DELETE /api/packages/{type}/{scope}/{name}` removes a package, and is refused while it is in use.
+
+## Forking
+
+`POST /api/packages/{scope}/{name}/fork` copies a package your organization does not own, for example a system package, under your scope. The copy is based on the latest published version, so the source needs one. Packages your organization already owns are edited in place and do not need forking.
+
+## System packages
+
+The platform ships packages under `@appstrate/`, loaded at boot and available to every organization: more than sixty integrations (Gmail, Slack, GitHub, Notion, QuickBooks and more) and two MCP servers. They are read-only. Fork one to customize it. Each space can switch a system package on or off like any other. See [Integrations](/integrations/how-integrations-work).

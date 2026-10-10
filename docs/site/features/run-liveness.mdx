@@ -1,0 +1,50 @@
+---
+title: Run Liveness and Timeouts
+description: How the platform detects runs that never started, stalled or ran out of time, and how it finishes them.
+---
+
+A run that nobody watches can hang forever: a container that never boots, a model call that never returns, a remote runner that lost its network. Appstrate watches every run, platform-managed or remote, and always brings it to a terminal status.
+
+There is no way to pause a run and resume it later. A run is `pending`, `running`, or finished (see [Runs](/features/runs)).
+
+## Two phases, two questions
+
+Liveness is checked in two phases, the same split as a Kubernetes `startupProbe` and `livenessProbe`.
+
+| Phase     | Question                        | Setting                       | Default |
+| --------- | ------------------------------- | ----------------------------- | ------- |
+| **Boot**  | Did the runner ever show up?    | `RUN_BOOT_DEADLINE_SECONDS`   | 300 s   |
+| **Stall** | Did a running runner go silent? | `RUN_STALL_THRESHOLD_SECONDS` | 60 s    |
+
+**Boot.** Until the runner emits its first event, the platform is still provisioning (pulling an image, creating the sandbox, starting the process). It vouches for the runner during this time, so a slow start is not mistaken for a crash. Each run gets a boot deadline (`boot_deadline_at`). A run that has not produced a first event by then fails with an error saying it never started executing.
+
+**Stall.** After the first event, the runner owns its liveness. It sends a heartbeat every `RUN_HEARTBEAT_INTERVAL_SECONDS` (15 s), and every event it streams counts as a heartbeat too. If the last heartbeat is older than the stall threshold, the run fails with its own error message. Keep the threshold at least three times the heartbeat interval.
+
+A **watchdog** sweeps open runs every `RUN_WATCHDOG_INTERVAL_SECONDS` (15 s, with a little jitter). On several API replicas only one runs a given sweep at a time. Each finalisation is idempotent: if the runner reports its own result at the same moment, exactly one outcome is recorded.
+
+When the watchdog fails a run it also stops the sandbox, because a runner that stopped reporting is not always dead. A microVM that lost its network, for example, keeps executing and billing.
+
+## Timeouts
+
+Each agent has a `timeout` (seconds) in its manifest. Without one the run gets 300 seconds. The platform clamps it to `timeout_ceiling_seconds` (1800 by default, set through `PLATFORM_RUN_LIMITS`). The agent detail shows the value a run will really get as `effective_timeout_seconds`, and importing an agent warns when the ceiling lowers its declared value.
+
+A run that exceeds its timeout ends with status `timeout`.
+
+The model has no clock, so the agent runtime reminds it twice during the run, at 75% and 90% of the budget, of how much time is left. These reminders are visible in the run logs.
+
+## Missing output
+
+If an agent declares an `output.schema` and ends its turn without calling the `output` tool, the runtime gives it one corrective turn restricted to `output` and `read`. If the output is still missing or invalid, the run fails.
+
+## Remote runs
+
+A [remote run](/features/runs#remote-runs) streams signed events to a short-lived sink. Its liveness works the same way: events and explicit heartbeats keep it alive, and the stall threshold applies. A long idle period can be bridged with `PATCH /api/runs/{runId}/sink/extend`, which pushes the sink expiry out (up to `REMOTE_RUN_SINK_MAX_TTL_SECONDS`, 24 hours by default) and counts as a heartbeat. The default sink lifetime is 2 hours (`REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS`).
+
+## Restarts and shutdown
+
+- On shutdown the API stops accepting new launches and waits up to 30 seconds for in-flight runs.
+- At boot the platform marks runs that a previous process left `running` or `pending` as failed and cleans up their orphaned sandboxes.
+
+## Operating it
+
+All the variables above are listed in [Environment Variables](/self-hosting/environment-variables), and `docs/ENV.md` in the repository is authoritative. Raise `RUN_BOOT_DEADLINE_SECONDS` on hosts where cold image pulls are slow. Lower `RUN_STALL_THRESHOLD_SECONDS` only if you also keep the ratio to the heartbeat interval.

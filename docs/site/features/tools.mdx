@@ -1,0 +1,148 @@
+---
+title: Tools
+description: What an agent can call during a run, where each tool comes from, and how to add your own through MCP.
+---
+
+A **tool** is a function the model can call during a run. A skill tells the agent what to do and when. A tool lets it do something. An agent sees three families of tools, each coming from a different place.
+
+| Family            | Where it comes from                                       | Declared in                                                  |
+| ----------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
+| Sandbox tools     | The agent runtime                                         | Nothing to declare                                           |
+| Runtime tools     | The platform                                              | `runtime_tools` in the manifest                              |
+| Integration tools | Integrations, which wrap third-party APIs and MCP servers | `dependencies.integrations` and `integrations_configuration` |
+
+All platform-provided tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). Tool names and descriptions are advertised through MCP, not written into the prompt.
+
+## Sandbox tools
+
+The agent runs on the Pi coding agent, which gives the model file and shell tools inside its workspace: `read`, `write`, `edit`, `bash`, plus `grep`, `find` and `ls`. The model uses them to read input files, run scripts shipped by [skills](/features/skills), process data, and write deliverables under `./outputs/` (see [Files](/features/files)). `python3` is available with `openpyxl`, `pandas`, `requests` and `PyPDF2` preinstalled.
+
+These tools act inside the sandbox only. Anything that reaches the outside world on the agent's behalf goes through the sidecar. Raw credentials are never in the sandbox.
+
+## Runtime tools
+
+Runtime tools are first-party and **opt-in**. You choose them per agent with `runtime_tools`. None is injected by default, not even `output`.
+
+| Tool           | Purpose                                                                                                                                                                                                                |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output`       | Returns the run's structured result as its `data` argument, whose schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Required when the agent declares an output schema. |
+| `log`          | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                                                                            |
+| `note`         | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                                                         |
+| `pin`          | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                                                       |
+| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI.                                                                                                                         |
+
+Excerpt of the agent manifest:
+
+```json
+{ "runtime_tools": ["output", "log", "note"] }
+```
+
+Alongside them the sidecar exposes two read-only first-party tools, `run_history` (metadata of recent runs) and `recall_memory` (search the memory archive). `note`, `pin` and `recall_memory` are explained in [Memory](/features/memory). Files are covered in [Files](/features/files).
+
+The model's plain text is never delivered. To reach the user, an agent must call `output`, `log` or write a file.
+
+## Integration tools
+
+Each integration an agent depends on contributes tools under its own namespace, `{namespace}__{tool}`. Most integrations expose a generic `api_call` tool that sends an authenticated HTTP request (described in detail further down this page). The sidecar injects the credential at request time, and the model never sees it. Integrations backed by an MCP server also expose that server's tools.
+
+The agent author picks which tools an agent can use. Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": { "integrations": { "@appstrate/github-mcp": "^1.0.0" } },
+  "integrations_configuration": {
+    "@appstrate/github-mcp": { "tools": ["list_issues", "issue_write"] }
+  }
+}
+```
+
+- An absent `tools` uses the integration's declared default tools (`api_call` for most system integrations).
+- `tools: []` selects nothing. An agent whose declared integration exposes no callable tool cannot be published, and a draft run fails at boot.
+- `tools: "*"` accepts every tool an upstream server advertises, only when the integration allows it.
+- The OAuth scopes requested at connection time are inferred from the selected tools.
+
+Large tool results are not pushed into the model's context. A result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/self-hosting/environment-variables).
+
+For connections, scopes and the catalog, see [Integrations](/integrations/how-integrations-work).
+
+## The `api_call` and `api_upload` tools
+
+`api_call` is the tool most integrations give an agent. It sends one authenticated HTTP request: the sidecar checks the target against the integration's `authorized_uris`, injects the credential and returns the response. `api_upload` is its companion for large files. Neither tool ever shows the credential to the model.
+
+### Names
+
+Like every integration tool, they are advertised as `{namespace}__{tool}`, with a namespace derived from the integration id: `@appstrate/gmail` gives `appstrate_gmail__api_call`.
+
+When an integration opts several auths into `api_call`, each auth gets its own tool, `api_call__<authToken>`. In `integrations_configuration` you select the unprefixed name (`api_call`, or `api_call__<authToken>`), and selecting either tool of the pair, `api_call` or `api_upload`, grants both.
+
+### Arguments of `api_call`
+
+| Argument         | Meaning                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`         | Required. The absolute URL, or a `{{field}}` holding the connection's base URL followed by a path. It must match the integration's `authorized_uris`.          |
+| `method`         | `GET`, `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`. Defaults to `GET`.                                                                                          |
+| `headers`        | Extra headers to forward. `Host`, hop-by-hop and framing headers are dropped.                                                                                  |
+| `body`           | A string, a JSON object (sent as `application/json` unless you set the header), `{ fromFile }`, `{ fromBytes, encoding: "base64" }` or `{ multipart: [...] }`. |
+| `substituteBody` | When true, `{{credential}}` placeholders in a text body are substituted. Off by default so a token cannot leak into a payload by accident.                     |
+| `responseMode`   | `{ toFile }`, described below.                                                                                                                                 |
+| `connection`     | Present only when several connections are bound to the integration, described below.                                                                           |
+
+### Sending a file: `body.fromFile`
+
+Pass `{ "fromFile": "outputs/report.pdf" }` as the body to send a workspace file without putting its bytes in the model's context. The agent runtime, not the sidecar, reads the file, because the sidecar has no access to the workspace. The path is workspace-relative, and a path that escapes the workspace or goes through a symlink is refused.
+
+The file is sent in one request, so it is capped at 10 MiB by default (`SIDECAR_MAX_REQUEST_BODY_BYTES`, with a hard ceiling of 100 MiB). Because the bytes cross to the sidecar as base64 inside one MCP message, raising the cap also means raising `SIDECAR_MAX_MCP_ENVELOPE_BYTES`. A file over the cap, a missing file or a refused path comes back as a tool error the model can act on, not as a failed run. For anything larger use `api_upload`.
+
+### Receiving a file: `responseMode.toFile`
+
+Pass `{ "responseMode": { "toFile": "outputs/export.csv" } }` to write the response body to a workspace file. The tool then returns a small descriptor instead of the body:
+
+```json
+{ "kind": "file", "path": "outputs/export.csv", "size": 48213, "status": 200 }
+```
+
+Missing parent folders are created. A target that resolves outside the workspace or through a symlink is refused with a tool error. Use it for binary downloads and for any response you want to process with a script rather than read.
+
+Without `toFile`, large responses still stay out of the model's context. A text body above the inline cap described earlier, any text body once the run-wide budget is used up, and every binary body are stored by the sidecar and then written by the agent runtime into a file under `resources/` in the workspace, which the model reads with its file tools.
+
+### Status and failure codes
+
+Without `toFile`, the result starts with a line `[api_call status=<code>]`, so the model sees the upstream HTTP status. With `toFile`, the descriptor carries `status`. A status of `0` means the sidecar answered itself: the call was refused before it was sent, or it failed after sending (a timeout, an unreachable host). When such a failure belongs to the shared vocabulary, the line names its code, for example `[api_call status=0 code=blocked_target]`, the `toFile` descriptor carries it as `code`, and the result's `_meta["dev.appstrate/api-call-error"]` holds it too. The codes are `unauthorized_target`, `blocked_target`, `credential_exfiltration_refused`, `upstream_unresolvable`, `credential_unusable`, `upstream_unreachable` and `upstream_timeout`, with the meanings listed in [Errors](/api/errors#code-unauthorized-target). The platform's credential proxy answers the same codes, and a run started with `appstrate run --integrations local` shows the agent the same line.
+
+### Resumable uploads: `api_upload`
+
+`api_upload` uploads a workspace file in chunks through a protocol the service supports. It exists only for an integration that declares `upload_protocols` on an auth in its `_meta["dev.appstrate/api"]` block. Of the built-in integrations, only [Google Drive](/integrations/catalog/google-drive) does, with `google-resumable`.
+
+| Argument         | Meaning                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `target`         | Required. The URL that starts the upload (for Drive, the endpoint with `uploadType=resumable`). It must match `authorized_uris`. |
+| `fromFile`       | Required. Workspace-relative path of the file.                                                                                   |
+| `uploadProtocol` | Required. One of the protocols the integration declared.                                                                         |
+| `metadata`       | Protocol-specific metadata, for example the file name and parents for Drive.                                                     |
+| `sourceMimeType` | MIME type of the bytes being uploaded. Distinct from the target type in `metadata`, which lets Drive convert a file on upload.   |
+| `partSizeBytes`  | Chunk size. Defaults are 8 MiB for `google-resumable`, 5 MiB for `s3-multipart` and `ms-resumable`, 4 MiB for `tus`.             |
+| `connection`     | As for `api_call`, when several connections are bound.                                                                           |
+
+The four protocols the runtime can drive are `google-resumable` (Drive, Cloud Storage, YouTube), `s3-multipart` (S3 and compatible stores: R2, MinIO, Backblaze B2), `tus` and `ms-resumable` (OneDrive, SharePoint, Microsoft Graph). Each has its own part-size rules: Google needs a multiple of 256 KiB, S3 needs at least 5 MiB for every part except the last, Microsoft Graph needs a multiple of 320 KiB up to 60 MiB. A bad `partSizeBytes` comes back as an error before anything is sent.
+
+The agent runtime reads the file as a stream, cuts it into chunks and sends each chunk through the sibling `api_call` tool, so every chunk gets the same credential injection and `authorized_uris` check as any other call. The file is limited to 100 MiB, a ceiling compiled into the runtime that no setting raises, and an empty file is refused. If an upload fails or is cancelled, the runtime tries to have the service discard the partial upload.
+
+The result is a single JSON object. On success it carries `ok: true`, the final upstream `status`, `headers` and `body`, the number of `chunks`, the `size` and the `sha256` of the bytes sent, so the agent can verify the upload. On failure it carries `ok: false`, an `error`, the last `status` and `bytesSent`.
+
+### Several connections: the `connection` parameter
+
+A run can bind up to 20 connections of one integration, for example two mailboxes or two SSH hosts. When a namespace has more than one, every tool of that namespace, `api_call` and `api_upload` included, gets a required `connection` parameter. It is a string restricted to the connection labels, and its description pairs each label with the account it stands for, so the model states which account a call acts on. The sidecar removes the parameter before forwarding the call. A missing or unknown value returns a tool error that lists the valid labels. With a single connection the tools carry no `connection` parameter at all.
+
+## Adding your own tools
+
+There is no tool-code package. To give agents a new capability, publish an **integration**:
+
+- an integration with `source.kind: "remote"` points at a hosted MCP server (Streamable HTTP or SSE);
+- an integration with `source.kind: "local"` references an **MCP server package** (type `mcp-server`, an MCP Bundle) that Appstrate runs in its own isolated container, one per connection bound to the run.
+
+Both are authored, versioned and shared like any [package](/features/packages). A local MCP server needs an isolating backend: the default `process` run adapter refuses to spawn one, with no override, so run it with `RUN_ADAPTER=docker` or `RUN_ADAPTER=firecracker`. See [Integrations](/integrations/how-integrations-work) and [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+
+## Related
+
+- [Agents](/features/agents) for the manifest fields.
+- [Sandbox and Sidecar](/features/sandbox-and-sidecar) for how tool calls are isolated.

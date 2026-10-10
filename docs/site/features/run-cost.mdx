@@ -1,0 +1,67 @@
+---
+title: Run Cost
+description: How Appstrate measures token usage and dollar cost per run, live and after the fact, and what a zero really means.
+---
+
+Every run reports what it consumed. The figures come from one place, a usage ledger written by the platform, so they stay comparable whether the run executed in a platform sandbox or on a remote runner.
+
+## What a run exposes
+
+| Field                         | Meaning                                                                                                                      |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `cost`                        | Total cost in US dollars. It is stored only when greater than zero, so a run with no priced usage has `null`.                |
+| `cost_pricing_status`         | How much of `cost` is backed by real rates: `priced`, `partial`, `unpriced`, or `null`.                                      |
+| `token_usage`                 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`.                                   |
+| `model_label`, `model_source` | The model the run used, and whether it came from the platform (`system`) or from the organization's own credentials (`org`). |
+
+`GET /api/runs/{id}` and the run list return them. While the run is in flight, the same figures stream over [realtime](/features/realtime) as `run_metric` events (`costSoFar`, `tokenUsage`, `costPricingStatus`), throttled per run.
+
+## How the cost is computed
+
+Each model call adds a row to a usage ledger. A run's `cost` is the sum of its rows, cached on the run when it finishes. There is one writer and one read path, so a UI total and an invoice cannot disagree.
+
+A row is priced from four disjoint token buckets, at the rates of the model:
+
+```
+cost = input x input_rate + output x output_rate
+     + cache_read x cache_read_rate + cache_write x cache_write_rate
+```
+
+Rates are in US dollars per million tokens. They come from, in order of precedence:
+
+1. a `cost` object set on the organization model (an operator override),
+2. the model registry bundled with the runtime, or the price list of OpenRouter for OpenRouter models.
+
+A rate card can define **price tiers**: when the input of a single request exceeds a threshold, the whole request is repriced at the tier rates.
+
+Where the rows come from depends on how inference reaches the model:
+
+- **API-key models** are served through the platform's LLM proxy, which writes one row per call.
+- **Subscription models** (see [LLM Models](/integrations/llm-models)) are metered from the runner's token counters and priced at the public API rates, so their cost is an estimate.
+- **Remote runs** report their usage through signed events. When their inference goes through the platform's LLM proxy, the proxy rows are the source of truth.
+- **Chat turns** are metered per turn and attributed to the chat session, not to a run (see [Chat](/using-appstrate/chat)).
+
+The platform prices usage itself and does not trust a figure computed inside the sandbox. Cost data is stored as floating point numbers, so a re-summation can differ from the stored total by sub-cent amounts.
+
+## A zero is not always free
+
+A cost of zero, or no cost at all, does not always mean the run was free. `cost_pricing_status` says which case you are looking at:
+
+| Status     | Meaning                                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `priced`   | Every token bucket that carried usage had a rate. The figure is complete.                                                               |
+| `partial`  | Some usage, typically cached input, had no rate and counted as zero. The figure is a floor.                                             |
+| `unpriced` | The model has no rates at all, for example a custom gateway model without a `cost` override. A `0` here means "not priced", not "free". |
+| `null`     | No claim. Runs finalized before the field existed, runs that produced no usage rows. Never read `null` as `priced`.                     |
+
+The web app withholds the amount of an `unpriced` run instead of showing `$0.00`, and marks a `partial` run as a lower bound. API consumers should do the same. To price a gateway model, set its `cost` when you create the model (see [LLM Models](/integrations/llm-models)).
+
+Every successful call that reached the provider ends up in the ledger. When the usage of a successful call cannot be parsed, the platform records a row with zero tokens so the call is still countable.
+
+## Limits and quotas
+
+`cost` is reporting, not a limit. A deployment can load the optional billing module (Stripe billing, credit quotas, usage metering), which admits or refuses usage before a run or chat turn starts. A refusal answers `402` with `quota_exceeded` or `subscription_blocked`.
+
+## Reference
+
+The full design, including settlement rules for billing consumers, is in [RUN_COST.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md).

@@ -1,0 +1,116 @@
+---
+title: Upgrading
+description: Back up, read the operator notes, then upgrade a self-hosted Appstrate instance.
+---
+
+An upgrade is more than an image swap. Migrations run at boot and cannot be rolled back, and some releases ask you to run a one-off script, change an environment variable or deploy images at a precise moment. Work through the steps in order.
+
+## 1. Check what you run and what is supported
+
+On the Docker tiers, the running version is `APPSTRATE_VERSION` in your install directory's `.env` (a Tier 0 `.env` has none). It is also shown at the bottom of the Organization settings and Preferences sidebars, and on `/health`. Image tags are the release version without a leading `v`, for example `1.0.0-beta.66`.
+
+Security fixes cover the last 12 releases or 6 months. An upgrade from outside that window is not supported: reinstall instead of upgrading in place. See [SECURITY.md](https://github.com/appstrate/appstrate/blob/main/SECURITY.md).
+
+## 2. Read the operator notes of every release you skip
+
+Open [`CHANGELOG.md`](https://github.com/appstrate/appstrate/blob/main/CHANGELOG.md) and read the **Operators** section of each release between your version and the target, plus every entry marked **BREAKING (operators)**. The `Unreleased` section at the top lists what is already on `main`. Do not rely on a summary: these notes are the contract. They cover things such as:
+
+- Pre-flight scripts to run before the deploy, from the matching release checkout, with your platform environment loaded (`DATABASE_URL`, and the encryption keys for scripts that decrypt). Each one is explained in [`scripts/migration/README.md`](https://github.com/appstrate/appstrate/blob/main/scripts/migration/README.md). A typical entry says to stop the app container, take a `pg_dump`, run a script in dry-run mode and then with `--apply`, and deploy.
+- Environment variables that are renamed, removed, newly required or read in a new format. Appstrate does not recognise a renamed variable: the old name is stripped as unknown and the setting silently falls back to its default. For example, since 1.0.0-beta.66 `BETTER_AUTH_ACTIVE_KID` is no longer read and `BETTER_AUTH_SECRETS` takes Better Auth's `<version>:<secret>` list, so a JSON value refuses boot; if a non-default kid was active, set `BETTER_AUTH_SECRET` to the secret that was active.
+- Behavior changes that need an action first. Examples from recent releases: integrations calling an internal API now need their host in `EGRESS_ALLOW_INTERNAL_HOSTS`, accounts named by `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` are no longer created by the sign-up form, the stored integration manifests must pass a pre-flight check, and a model in `SYSTEM_PROVIDER_KEYS` that the bundled model registry no longer records refuses boot (1.0.0-beta.65 asks you to run `bun run verify:system-models` from the release checkout, with your platform environment loaded, before the deploy). Since 1.0.0-beta.66, the boot also refuses while the database holds a credential encrypted under a key id that no configured key carries, and migrations `0080` and `0083` refuse to run, naming a repair script, while rows they would reject remain.
+- Sessions and links that do not survive the restart. Since 1.0.0-beta.65 (Better Auth 1.7.7), a magic link mailed before the upgrade is refused, and a Google or GitHub sign-in or account link started before it has to be started again. No data is rewritten. Upgrade every replica in the same cutover, and warn users with a pending link to request a new one.
+- Migrations that take an exclusive lock on a large table, so you can pick a quiet window.
+- Images that must move together. Deploy the platform and the runtime images (`appstrate-pi`, `appstrate-sidecar`, and the MCP runner images) at the same version. Boot refuses a mismatch.
+
+The database is on an internal Docker network and its port is not published by default (the root `docker-compose.yml` has a commented `ports:` line). Run a pre-flight script from a container on that network, or publish the port only for the duration of the window.
+
+## 3. Back up
+
+Take every backup before you stop or change anything. If a pre-flight script has to run with the app stopped, stop the application container first and dump after, so the dump is the true rollback point.
+
+**PostgreSQL** (Tier 1 and up). Run from the install directory (`~/appstrate` for installer installs):
+
+```bash
+docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -Fc appstrate' \
+  > appstrate-$(date +%Y%m%d-%H%M%S).dump
+```
+
+The service is named `appstrate-postgres` in the repository's root `docker-compose.yml`. An installer install runs under a derived Compose project name, so add `--project-name "$(jq -r .projectName .appstrate/project.json)"` to every `docker compose` command, even from the install directory.
+
+**PGlite** (Tier 0). Stop the instance first: copying a live PGlite directory can corrupt the backup.
+
+```bash
+cp -r ./data/pglite ./data/pglite.backup-$(date +%Y%m%d-%H%M%S)
+```
+
+The path is `PGLITE_DATA_DIR`, relative to the directory the process runs in.
+
+**Files.** Snapshot the `storagedata` volume or `FS_STORAGE_PATH` (filesystem storage), the `miniodata` volume (bundled MinIO), or your bucket (versioning or replication). Stored files and packages live here, outside the database dump.
+
+**Secrets.** Keep `.env` and, above all, `CONNECTION_ENCRYPTION_KEY`. A restored database is useless without the key that encrypted its credentials. When the installer upgrades, it copies `.env` and `docker-compose.yml` to `.backup` files and deletes them once the stack is healthy, so they remain only after a failed upgrade. Keep your own copies.
+
+**Redis** holds queued jobs (scheduled runs, webhook deliveries). It persists on a volume in the shipped Compose files. Snapshot it if losing queued work matters.
+
+## 4. Upgrade
+
+<Tabs items={['Installer (appstrate install)', 'Docker Compose']}>
+
+<Tab value="Installer (appstrate install)">
+
+Update the CLI, then re-run the installer in the same directory:
+
+```bash
+appstrate self-update
+appstrate install --dir ~/appstrate
+```
+
+Re-running `appstrate install` on an existing directory is an upgrade. It keeps your `.env` values (secrets included, so sessions and stored credentials survive), sets `APPSTRATE_VERSION` to the CLI's version, rewrites `docker-compose.yml`, starts the stack and waits for the health check. It inherits the installed tier, and restores the previous files if a step fails. To move to a specific version, pin it in the install script and let the script run the installer. `APPSTRATE_VERSION` takes the release with or without its `v` (`1.0.0-beta.66` or `v1.0.0-beta.66`). With `--yes`, the script installs and verifies that CLI, then runs `appstrate install --yes` with it, passing on the flags you give after `--`. The installer pins the images to the CLI's own version: the script does not hand `APPSTRATE_VERSION` on to it.
+
+```bash
+curl -fsSL https://get.appstrate.dev | APPSTRATE_VERSION=1.0.0-beta.66 bash -s -- --yes --dir ~/appstrate
+```
+
+To install the CLI only, set `APPSTRATE_NO_LAUNCH=1` instead of `--yes`, then run `appstrate install --dir ~/appstrate` yourself.
+
+If you installed the CLI through Bun, use `bun update -g appstrate` instead of `self-update`. The upgrade matrix between install channels is in [the CLI upgrade notes](https://github.com/appstrate/appstrate/blob/main/docs/cli/upgrades.md).
+
+Run `appstrate doctor` afterwards. It reports duplicate CLI installs and stale defaults pinned in an old `docker-compose.yml`. `appstrate install --upgrade-compose` removes those stale defaults without touching `.env`.
+
+</Tab>
+
+<Tab value="Docker Compose">
+
+```bash
+# 1. Set APPSTRATE_VERSION=<new release> in .env (all images move together)
+
+# 2. Pull and restart
+docker compose pull
+docker compose up -d
+```
+
+If you track the repository's Compose file, diff it against yours before you replace it: a new release can add services, volumes or environment lines. A variable that your file does not forward never reaches the container, and a file from before 1.0.0-beta.65 forwards fewer than the current ones (see [Docker Compose](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
+
+</Tab>
+
+</Tabs>
+
+Migrations are applied automatically. The tier templates run a one-shot `migrate` service first, so a bad migration fails `docker compose up` before the platform starts, and the platform checks again at boot. Runs that were in flight when the old version stopped are finalized as `failed`.
+
+## 5. Verify
+
+```bash
+curl https://appstrate.example.com/health
+docker compose logs appstrate --tail 100
+```
+
+Expect `status: "healthy"`. Then run a trivial agent end to end, and re-run any pre-flight script in dry-run mode if its notes ask for it after the deploy.
+
+## Rolling back
+
+There is no downgrade path for the database. Pinning the previous image works only if the new release applied no migration the old one cannot read, and you cannot tell without reading the release notes. When in doubt:
+
+1. Stop the stack.
+2. Restore the PostgreSQL dump (`pg_restore --clean --if-exists`) and, if the release changed files, the file snapshot.
+3. Pin the previous `APPSTRATE_VERSION` for all images, and start.
+
+If the problem persists, see [Troubleshooting](/self-hosting/troubleshooting).
