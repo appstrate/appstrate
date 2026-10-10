@@ -390,6 +390,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       }
     } else {
       for (const [key, value] of nonFileInputEntries) {
+        if (value === undefined) continue;
         sections.push(`- **${key}**: ${jsonText(value)}`);
       }
     }

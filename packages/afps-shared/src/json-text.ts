@@ -5,10 +5,9 @@
  * everything else is JSON-encoded so a reader can recover the value
  * unambiguously (`String({})` yields `[object Object]`, and `String(["a,b"])`
  * is indistinguishable from `["a", "b"]`). Numbers, booleans and `null` read
- * exactly as `String()` would. `value` is a JSON value: `undefined` (and other
- * non-JSON values) make `JSON.stringify` return `undefined`, so callers handle
- * those themselves.
+ * exactly as `String()` would. `undefined` is excluded by the type because
+ * `JSON.stringify(undefined)` is `undefined`.
  */
-export function jsonText(value: unknown): string {
+export function jsonText(value: NonNullable<unknown> | null): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }

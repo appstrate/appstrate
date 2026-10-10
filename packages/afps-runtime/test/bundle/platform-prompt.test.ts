@@ -832,5 +832,14 @@ describe("renderPlatformPrompt", () => {
       });
       expect(out).toContain("- **v** (string, optional): D — ```a ``b`` c```\n");
     });
+
+    it("omits an undefined input value when no input schema is given", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { gone: undefined, kept: "x" } }),
+      });
+      expect(out).not.toContain("gone");
+      expect(out).toContain("- **kept**: x\n");
+    });
   });
 });

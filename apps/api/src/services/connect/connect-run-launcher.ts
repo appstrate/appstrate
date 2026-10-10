@@ -124,7 +124,7 @@ function loginToolDiagnostic(msg: string): string | null {
 function stringifyInputs(inputs: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(inputs)) {
-    out[k] = jsonText(v);
+    if (v !== undefined) out[k] = jsonText(v);
   }
   return out;
 }

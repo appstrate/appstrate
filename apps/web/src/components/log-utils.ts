@@ -170,8 +170,7 @@ export interface RawLog {
 
 function formatToolArgs(args: unknown): string {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
-    const str = jsonText(args);
-    return (str ?? "").slice(0, 200);
+    return (args === undefined ? "" : jsonText(args)).slice(0, 200);
   }
 
   const parts: string[] = [];
