@@ -95,7 +95,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
       : usable.length > 0;
     if (dead) {
       throw invalidRequest(
-        "The selected model can no longer serve inference: its connection must be re-established in Settings → Models.",
+        "The selected model can no longer serve inference: its credential must be reconnected (Preferences → Model credentials for your own, Settings → Models for the organization's).",
       );
     }
     throw invalidRequest(

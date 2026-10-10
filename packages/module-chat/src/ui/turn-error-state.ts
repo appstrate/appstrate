@@ -100,7 +100,7 @@ const DEAD_CREDENTIAL: Fixable = {
 const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", fix: "billing" },
   subscription_blocked: { text: "turn.error.subscriptionBlocked", fix: "billing" },
-  // Raised for a subscription only, and a subscription is always its holder's own.
+  // Raised for a dead subscription, which is always its holder's own.
   needs_reconnection: { text: "turn.error.needsReconnection", fix: "personalModels" },
   org_deleting: { text: "turn.error.orgDeleting" },
   model_credential_required: {
