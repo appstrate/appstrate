@@ -15,6 +15,7 @@ import {
   decryptCredentialsToStringMap,
   resolveOAuthEndpoints,
   UnknownKeyIdError,
+  withProvenScopes,
 } from "@appstrate/connect";
 import type {
   RefreshContext as IntegrationRefreshContext,
@@ -83,6 +84,7 @@ async function refreshUnderLock(
   const { id: connectionId, credentialsEncrypted } = connection;
 
   let freshCiphertext = credentialsEncrypted;
+  let heldScopes: readonly string[] = [];
   // Callers that read different upstreams of the row never share a flight's result.
   const upstream = JSON.stringify([connection.clientRef, connection.oauthResource]);
   return dedupedRefresh<IntegrationRefreshResult>(`${connectionId}:${upstream}`, {
@@ -94,6 +96,7 @@ async function refreshUnderLock(
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
           expiresAt: integrationConnections.expiresAt,
+          scopesGranted: integrationConnections.scopesGranted,
           clientRef: integrationConnections.clientRef,
           oauthResource: integrationConnections.oauthResource,
           needsReconnection: integrationConnections.needsReconnection,
@@ -114,6 +117,7 @@ async function refreshUnderLock(
       }
       // Read even when forced: the exchange must spend the freshest stored refresh_token.
       freshCiphertext = row.credentialsEncrypted;
+      heldScopes = row.scopesGranted;
       if (force) return null;
       if (row.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return {
@@ -129,6 +133,7 @@ async function refreshUnderLock(
         packageIdForLog,
         authKeyForLog,
         freshCiphertext,
+        heldScopes,
         refreshContext,
       ),
   });
@@ -139,6 +144,7 @@ async function doRefresh(
   packageId: string,
   authKey: string,
   credentialsEncrypted: string,
+  heldScopes: readonly string[],
   ctx: IntegrationRefreshContext,
 ): Promise<IntegrationRefreshResult> {
   const current = decryptCredentialsToStringMap(credentialsEncrypted);
@@ -183,7 +189,12 @@ async function doRefresh(
   const finalRefreshToken = parsed.refreshToken ?? refreshToken;
   const expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
 
-  const responseScopes = parsed.scopesReturned;
+  const responseScopes =
+    parsed.scopesReturned &&
+    withProvenScopes(parsed.scopesReturned, heldScopes, {
+      refreshToken: finalRefreshToken,
+      idToken: tokenData.id_token,
+    });
 
   // The stored outputs, with what this response carries: a field the IdP does not
   // send again (`token_type`, `id_token`, `scope`) keeps the value the connect stored.

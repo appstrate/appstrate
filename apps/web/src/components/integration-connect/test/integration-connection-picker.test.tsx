@@ -71,7 +71,6 @@ function candidate(id: string, label: string): Candidate {
     needs_reconnection: false,
     missing_scopes: [],
     scope_fit: "unjudged",
-    rank: 0,
     is_own: true,
   };
 }
@@ -922,12 +921,12 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     },
   ];
   const LABELS = "44444444-4444-4444-8444-444444444444";
-  /** A candidate as the server judged it: its grant, what it misses, its fit and its rank. */
+  /** A candidate as the server judged it: its grant, what it misses and its fit. */
   const scoped = (
     id: string,
     granted: string[],
     missing: string[] = [],
-    verdict: Partial<Pick<Candidate, "scope_fit" | "rank">> = {},
+    verdict: Partial<Pick<Candidate, "scope_fit">> = {},
   ): Candidate => ({
     ...candidate(id, id),
     scopes_granted: granted,
@@ -990,11 +989,11 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     canConnect: true,
   });
 
-  it("lists the connections by the server's rank, whatever order they arrive in", () => {
+  it("lists the connections in the order the server ranked them", () => {
     const picker = pickerOver([
-      scoped(WEB, ["read"], ["send"], { rank: 2 }),
-      scoped(LABELS, ["read", "labels"], [], { scope_fit: "broader", rank: 1 }),
-      scoped(DB, ["read"], [], { rank: 0 }),
+      scoped(DB, ["read"]),
+      scoped(LABELS, ["read", "labels"], [], { scope_fit: "broader" }),
+      scoped(WEB, ["read"], ["send"]),
     ]);
     expect(picker.candidates.map((c) => c.id)).toEqual([DB, LABELS, WEB]);
   });

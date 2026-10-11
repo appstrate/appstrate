@@ -2210,7 +2210,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` above the maximum (`param: limit`)."
+            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3133,7 +3133,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` above the maximum (`param: limit`)."
+            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5517,7 +5517,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` above the maximum (`param: limit`)."
+            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5626,7 +5626,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` above the maximum (`param: limit`), or an unknown `fields` entry."
+            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7088,7 +7088,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer."
+            "description": "Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7766,7 +7766,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again."
+            "description": "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again."
           },
           "403": {
             "description": "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
@@ -11031,7 +11031,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` above the maximum (`param: limit`), or an unknown `fields` entry."
+            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15773,7 +15773,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` above the maximum (`param: limit`), or an unknown `fields` entry."
+            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -32603,7 +32603,7 @@
           },
           "candidates": {
             "type": "array",
-            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first (`rank`). An integration with no selection keeps every auth.",
+            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess, health, age, the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
             "items": {
               "type": "object",
               "required": [
@@ -32621,7 +32621,6 @@
                 "needs_reconnection",
                 "missing_scopes",
                 "scope_fit",
-                "rank",
                 "is_own"
               ],
               "properties": {
@@ -32691,11 +32690,6 @@
                   "type": "string",
                   "enum": ["exact", "unjudged", "broader", "missing"],
                   "description": "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`)."
-                },
-                "rank": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "description": "Place in the least-privilege order, 0 first: by `scope_fit`, then fewest missing scopes, least excess, health, age. It is the order the resolver's fallback picks by among the caller's connections of one account; `candidates` is listed in it."
                 },
                 "is_own": {
                   "type": "boolean"

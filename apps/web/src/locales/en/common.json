@@ -113,7 +113,7 @@
   "apiError.connection_not_ready": "This integration is not ready to be connected yet: ask an administrator to finish setting it up, then try again (with a new connection link if needed).",
   "apiError.connect_start_failed": "The connection could not be started. Request a new connection link.",
   "apiError.login_rejected": "The service refused the login: {{message}}",
-  "apiError.login_input_unencodable": "Field \"{{field}}\": the value contains a character the login request cannot carry.",
+  "apiError.login_input_unencodable": "Field \"{{field}}\": the login request cannot carry this value.",
   "apiError.login_url_refused": "The resulting login address is not allowed for this integration: {{message}}",
   "apiError.login_upstream_unavailable": "The service could not complete the login. Try again later.",
   "apiError.scope_not_in_catalog": "A selected scope does not exist in the integration's catalog: {{message}}",

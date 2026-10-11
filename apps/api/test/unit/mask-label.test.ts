@@ -80,13 +80,44 @@ describe("maskCredentialLabel", () => {
     ).toBe("us****.com");
   });
 
-  it("returns undefined when the sole field is writeOnly", () => {
+  it("fingerprints the one secret of a key-only auth", () => {
     const schema = {
       type: "object",
-      properties: { password: { type: "string", writeOnly: true } },
-      required: ["password"],
+      properties: { api_key: { type: "string", writeOnly: true }, base_url: { type: "string" } },
+      required: ["api_key"],
     };
-    expect(maskCredentialLabel(schema, { password: "supersecretvalue" })).toBeUndefined();
+    expect(maskCredentialLabel(schema, { api_key: "fc-xxxxxxxxf10b" })).toBe("fc****f10b");
+  });
+
+  it("never fingerprints a password, nor one secret among several", () => {
+    const password = { type: "string", format: "password" };
+    const secret = { type: "string", writeOnly: true };
+    expect(
+      maskCredentialLabel(
+        { type: "object", properties: { password }, required: ["password"] },
+        { password: "supersecretvalue" },
+      ),
+    ).toBeUndefined();
+    expect(
+      maskCredentialLabel(
+        { type: "object", properties: { key: secret, token: secret }, required: ["key", "token"] },
+        { key: "aaaaaaaaaaaa", token: "bbbbbbbbbbbb" },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("prefers the one non-secret field over a secret beside it", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        account_sid: { type: "string" },
+        auth_token: { type: "string", writeOnly: true },
+      },
+      required: ["account_sid", "auth_token"],
+    };
+    expect(
+      maskCredentialLabel(schema, { account_sid: "AC0123456789", auth_token: "toktoktoktok" }),
+    ).toBe("AC****6789");
   });
 
   it('handles union string types ["string","null"]', () => {

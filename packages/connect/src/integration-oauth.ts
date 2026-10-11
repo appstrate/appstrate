@@ -26,11 +26,12 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
-import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import type { Actor, OAuthClientResolver, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
+import { withProvenScopes } from "./token-utils.ts";
 import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-discovery.ts";
 
 /** How long an authorization request can still complete at the callback. */
@@ -249,7 +250,7 @@ export async function initiateIntegrationOAuth(
   for (const [key, value] of Object.entries(input.authorizationParams ?? {})) {
     if (value === undefined || value === null) continue;
     // OIDC `claims` is JSON-in-a-parameter; JSON is the only unambiguous encoding of a non-string.
-    params.set(key, jsonText(value as JsonValue));
+    params.set(key, jsonText(value));
   }
 
   const authUrl = `${endpoints.authorizationEndpoint}${endpoints.authorizationEndpoint.includes("?") ? "&" : "?"}${params.toString()}`;
@@ -426,7 +427,12 @@ export async function handleIntegrationOAuthCallback(
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
     // RFC 6749 §5.1: an omitted `scope` is the requested one.
-    scopesGranted: parsed.scopesReturned ?? stateRow.scopesRequested,
+    scopesGranted: parsed.scopesReturned
+      ? withProvenScopes(parsed.scopesReturned, stateRow.scopesRequested, {
+          refreshToken: tokenData.refresh_token,
+          idToken: tokenData.id_token,
+        })
+      : stateRow.scopesRequested,
     scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),

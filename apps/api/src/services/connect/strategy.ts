@@ -139,13 +139,13 @@ export function loginRejected(diagnostic: string): ApiError {
   });
 }
 
-/** A login input the login request cannot carry where it sits (a line break in a header value). */
+/** A login input the login request cannot carry where it sits (a line break in a header value, a `null`). */
 export function loginInputUnencodable(field: string): ApiError {
   return new ApiError({
     status: 400,
     code: "login_input_unencodable",
     title: "Login Input Unencodable",
-    detail: `The value of '${field}' contains a character this request cannot carry where it is placed.`,
+    detail: `The value of '${field}' is one this request cannot carry where it is placed.`,
     param: `credentials.${field}`,
   });
 }

@@ -294,6 +294,23 @@ export function parseTokenResponse(
 }
 
 /**
+ * `returned` plus the `expected` scopes (requested at connect, held at refresh) a token response
+ * proves without listing them, as Microsoft's `scope` does: `offline_access` by a refresh token,
+ * `openid` by an `id_token`.
+ */
+export function withProvenScopes(
+  returned: readonly string[],
+  expected: readonly string[],
+  proof: { refreshToken: unknown; idToken: unknown },
+): string[] {
+  const proven = [
+    ...(typeof proof.refreshToken === "string" ? ["offline_access"] : []),
+    ...(typeof proof.idToken === "string" ? ["openid"] : []),
+  ].filter((scope) => expected.includes(scope) && !returned.includes(scope));
+  return [...returned, ...proven];
+}
+
+/**
  * A client-authentication pair that cannot be correct — thrown by
  * {@link assertClientAuthCoherent}.
  *

@@ -114,22 +114,21 @@ describe("parseListPagination", () => {
     });
   });
 
-  it("refuses a limit above the maximum with a 400 naming `limit`", () => {
+  it("refuses a limit that is not an integer from 1 to the maximum with a 400 naming `limit`", () => {
     for (const [limit, opts] of [
       ["101", { defaultLimit: 50 }],
       ["9999", { defaultLimit: 50 }],
       ["51", { defaultLimit: 10, maxLimit: 50 }],
+      ["0", { defaultLimit: 50 }],
+      ["-3", { defaultLimit: 50 }],
+      ["1.5", { defaultLimit: 50 }],
+      ["abc", { defaultLimit: 50 }],
+      ["", { defaultLimit: 50 }],
     ] as const) {
       const err = catchError(() => parseListPagination(fakeCtx({ limit }), opts));
       expect(err).toMatchObject({ status: 400, code: "invalid_request", param: "limit" });
     }
     expect(parseListPagination(fakeCtx({ limit: "100" }), { defaultLimit: 50 }).limit).toBe(100);
-  });
-
-  it("falls back to the default for a limit that is no positive integer", () => {
-    for (const limit of ["abc", "0", "-3", "1.5"]) {
-      expect(parseListPagination(fakeCtx({ limit }), { defaultLimit: 50 }).limit).toBe(50);
-    }
   });
 
   it("clamps a negative offset back to 0", () => {

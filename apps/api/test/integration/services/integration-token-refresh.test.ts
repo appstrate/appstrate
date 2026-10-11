@@ -382,6 +382,14 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(row!.needsReconnection).toBe(false);
   });
 
+  it("keeps a held offline_access the refresh response's `scope` leaves out", async () => {
+    const connId = await seedConnection(["Mail.Read", "offline_access"]);
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "Mail.Read" });
+
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["Mail.Read", "offline_access"]);
+  });
+
   it("persists a widened grant (scope creep)", async () => {
     const connId = await seedConnection(["read"]);
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });

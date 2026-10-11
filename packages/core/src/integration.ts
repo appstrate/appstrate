@@ -1389,7 +1389,7 @@ export interface AgentIntegrationScopeError {
   /** Dotted JSON path into the agent manifest (`integrations.<id>.<field>`). */
   field: string;
   /** Stable machine-readable code consumed by route layer / UI. */
-  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized";
+  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized" | "invalid_format";
   /** Human-readable detail for surfaces that don't translate `code`. */
   message: string;
 }
@@ -1450,6 +1450,15 @@ export function validateAgentIntegrationScopes(
         });
       }
     }
+  }
+
+  for (const scope of selection.scopes ?? []) {
+    if (scopeTokenSchema.safeParse(scope).success) continue;
+    errors.push({
+      field: `integrations_configuration.${selection.id}.scopes`,
+      code: "invalid_format",
+      message: `Scope ${JSON.stringify(scope)} is not one OAuth scope token (RFC 6749 §3.3): no space, quote or backslash`,
+    });
   }
 
   if (selection.scopes && selection.scopes.length > 0) {

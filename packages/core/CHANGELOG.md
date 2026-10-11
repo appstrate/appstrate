@@ -22,12 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/integration`): one OAuth scope as an RFC 6749 §3.3
   `scope-token`, and the write-path rule listing a manifest's scopes that are
   not one (`default_scopes`, `scope_catalog` values,
-  `tools_policy.*.required_scopes`). (#1913)
+  `tools_policy.*.required_scopes`). `validateAgentIntegrationScopes` applies
+  the same rule to an agent's `scopes`, reporting `invalid_format`
+  (added to `AgentIntegrationScopeError.code`). (#1913)
 - **`isSecretField`** (`@appstrate/core/form`): whether a credential field is a
   secret, `writeOnly` or `format: "password"`. (#1913)
-- **`deniedScopesOf`** (`@appstrate/core/connect-handshake`) and
-  **`IntegrationConnectCompletion.scopes_denied`**: the scopes a connect flow
-  requested that the consent left out, on a successful completion. (#1913)
+- **`IntegrationConnectCompletion.scopesDenied`**
+  (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
+  that the consent left out, on a successful completion. (#1913)
 
 - **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
   ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied

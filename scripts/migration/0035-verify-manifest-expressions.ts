@@ -11,16 +11,22 @@
  * `{{field}}` in a delivery template (delivered as literal text) and each injected credential
  * a run now refuses as `exfiltration` (the `findUnboundedInjectedCredentials` hits
  * `credentialUrlPolicy` refuses). Exits 1 while any of them has one: a range (`^1.0.0`, the agent
- * editor's default) resolves older versions too. System packages are skipped: the image ships them
+ * editor's default) resolves older versions too. Two advisories are listed and never fail the
+ * run: `[scope]`, a scope the manifest write paths refuse (`findInvalidScopeTokens`: the manifest
+ * still loads, its next save is refused), and `[clear-secret]`, a credential field named like a
+ * secret that the schema does not mark `writeOnly` or `format: "password"` (the connect form
+ * shows its input in clear). System packages are skipped: the image ships them
  * (today's `system-packages/` has no issue) and an operator cannot edit one. What it means and how
  * to fix one: `scripts/migration/README.md`.
  */
 
 import { SQL } from "bun";
 import {
+  findInvalidScopeTokens,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
 } from "@appstrate/core/integration";
+import { isSecretField } from "@appstrate/core/form";
 
 export interface StoredManifest {
   id: string;
@@ -68,15 +74,45 @@ function literalPlaceholders(node: unknown, path: string[] = []): Issue[] {
   return Object.entries(node).flatMap(([k, v]) => literalPlaceholders(v, [...path, k]));
 }
 
-/** One line per issue: `<id>@<version> [expression|exfiltration] <path>: <message>`. */
+/** The names the connect form masked before it read the schema; a multi-line field never was. */
+const SECRET_NAME = /password|secret|token|key/i;
+const NEVER_MASKED_NAME = /^host_key$|cert|private_key|public_key|^(?:client_key|key)$/i;
+
+/** Credential fields named like a secret that the schema does not mark as one. */
+function unmarkedSecrets(manifest: unknown): Issue[] {
+  const auths = (manifest as { auths?: Record<string, unknown> } | null)?.auths ?? {};
+  return Object.entries(auths).flatMap(([authKey, auth]) => {
+    const properties =
+      (auth as { credentials?: { schema?: { properties?: Record<string, unknown> } } } | null)
+        ?.credentials?.schema?.properties ?? {};
+    return Object.entries(properties)
+      .filter(
+        ([name, prop]) =>
+          SECRET_NAME.test(name) &&
+          !NEVER_MASKED_NAME.test(name) &&
+          !(typeof prop === "object" && prop !== null && isSecretField(prop)),
+      )
+      .map(([name]) => ({
+        path: ["auths", authKey, "credentials", "schema", "properties", name],
+        message: `'${name}' is shown in clear by the connect form; mark it writeOnly`,
+      }));
+  });
+}
+
+/**
+ * One line per issue: `<id>@<version> [<kind>] <path>: <message>`. `advisories` counts the
+ * `[scope]` and `[clear-secret]` lines, which no connect or run refuses.
+ */
 export function manifestIssues(rows: readonly StoredManifest[]): {
   lines: string[];
   expressions: number;
   exfiltration: number;
+  advisories: number;
 } {
   const lines: string[] = [];
   let expressions = 0;
   let exfiltration = 0;
+  let advisories = 0;
   for (const row of rows) {
     const manifest: unknown = row.manifest && JSON.parse(row.manifest);
     const report = (kind: string, v: Issue) =>
@@ -92,8 +128,16 @@ export function manifestIssues(rows: readonly StoredManifest[]): {
       exfiltration += 1;
       report("exfiltration", v);
     }
+    for (const v of findInvalidScopeTokens(manifest)) {
+      advisories += 1;
+      report("scope", v);
+    }
+    for (const v of unmarkedSecrets(manifest)) {
+      advisories += 1;
+      report("clear-secret", v);
+    }
   }
-  return { lines, expressions, exfiltration };
+  return { lines, expressions, exfiltration, advisories };
 }
 
 if (import.meta.main) {
@@ -109,11 +153,12 @@ if (import.meta.main) {
   });
   await sql.close();
 
-  const { lines, expressions, exfiltration } = manifestIssues(rows);
+  const { lines, expressions, exfiltration, advisories } = manifestIssues(rows);
   for (const line of lines) process.stdout.write(`${line}\n`);
   process.stdout.write(
     `\n${rows.length} manifest(s) scanned: ${expressions} expression issue(s), ` +
-      `${exfiltration} injected credential(s) runs will refuse as exfiltration\n`,
+      `${exfiltration} injected credential(s) runs will refuse as exfiltration, ` +
+      `${advisories} advisory(ies) (scope, clear-secret)\n`,
   );
-  process.exit(lines.length > 0 ? 1 : 0);
+  process.exit(expressions + exfiltration > 0 ? 1 : 0);
 }

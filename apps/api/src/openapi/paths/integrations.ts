@@ -672,7 +672,7 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer.";
+  "A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer.";
 const CONNECT_LOGIN_502 =
   "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`.";
 const connectLogin502Headers = {
@@ -817,7 +817,7 @@ export const integrationsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "A `limit` above the maximum (`param: limit`), or an unknown `fields` entry.",
+            "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

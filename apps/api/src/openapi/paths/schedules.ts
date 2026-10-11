@@ -506,7 +506,7 @@ export const schedulesPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: "A `limit` above the maximum (`param: limit`).",
+          description: "A `limit` that is not an integer from 1 to the maximum (`param: limit`).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

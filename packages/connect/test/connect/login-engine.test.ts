@@ -365,8 +365,19 @@ describe("runLogin — security limits", () => {
     const now = Date.parse("2026-01-01T00:00:00Z");
     for (const [header, seconds] of [
       ["42", 42],
+      ["0", 0],
       ["Thu, 01 Jan 2026 00:01:30 GMT", 90],
+      // A date already past.
+      ["Wed, 31 Dec 2025 23:00:00 GMT", 0],
+      // Capped at a day.
+      ["999999", 86_400],
+      ["Fri, 01 Jan 2027 00:00:00 GMT", 86_400],
+      // Neither delay-seconds nor an HTTP-date.
       ["soon", undefined],
+      ["-5", undefined],
+      ["1.5", undefined],
+      ["2026-01-01", undefined],
+      ["9".repeat(32), undefined],
     ] as const) {
       const { impl } = fakeFetch([{ status: 429, headers: { "Retry-After": header } }]);
       const err = await runLogin(

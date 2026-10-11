@@ -72,7 +72,7 @@ function page(
 /**
  * Success: signal the opener/channel, then close (popup) or confirm (tab). `scopesDenied` (the
  * requested scopes the consent left out) is named on the page, which then stays long enough to
- * be read, and rides the signal as `scopes_denied`.
+ * be read, and rides the signal as `scopesDenied`.
  */
 export function popupHtmlClose(
   detail: OAuthCallbackDetail = {},
@@ -84,7 +84,7 @@ export function popupHtmlClose(
       ok: true,
       state: detail.state,
       packageId: detail.packageId,
-      ...(partial ? { scopes_denied: [...scopesDenied] } : {}),
+      ...(partial ? { scopesDenied: [...scopesDenied] } : {}),
     },
     `<p class="ok">&#10003; Intégration connectée.</p>${
       partial

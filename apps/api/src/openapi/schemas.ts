@@ -2269,7 +2269,7 @@ export const schemas = {
       candidates: {
         type: "array",
         description:
-          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first (`rank`). An integration with no selection keeps every auth.",
+          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess, health, age, the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
         items: {
           type: "object",
           required: [
@@ -2287,7 +2287,6 @@ export const schemas = {
             "needs_reconnection",
             "missing_scopes",
             "scope_fit",
-            "rank",
             "is_own",
           ],
           properties: {
@@ -2315,12 +2314,6 @@ export const schemas = {
               enum: [...CONNECTION_SCOPE_FITS],
               description:
                 "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`).",
-            },
-            rank: {
-              type: "integer",
-              minimum: 0,
-              description:
-                "Place in the least-privilege order, 0 first: by `scope_fit`, then fewest missing scopes, least excess, health, age. It is the order the resolver's fallback picks by among the caller's connections of one account; `candidates` is listed in it.",
             },
             is_own: { type: "boolean" },
           },

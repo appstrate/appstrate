@@ -5887,7 +5887,7 @@ export interface components {
             org_default_enforced: boolean;
             /** @description Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections. */
             can_add_connection: boolean;
-            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first (`rank`). An integration with no selection keeps every auth. */
+            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess, health, age, the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth. */
             candidates: {
                 /** Format: uuid */
                 id: string;
@@ -5919,8 +5919,6 @@ export interface components {
                  * @enum {string}
                  */
                 scope_fit: "exact" | "unjudged" | "broader" | "missing";
-                /** @description Place in the least-privilege order, 0 first: by `scope_fit`, then fewest missing scopes, least excess, health, age. It is the order the resolver's fallback picks by among the caller's connections of one account; `candidates` is listed in it. */
-                rank: number;
                 is_own: boolean;
             }[];
         };
@@ -8798,7 +8796,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` above the maximum (`param: limit`). */
+            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -12646,7 +12644,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` above the maximum (`param: limit`), or an unknown `fields` entry. */
+            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -12927,7 +12925,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
+            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
             400: components["responses"]["ValidationError"];
             /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. */
             403: {
@@ -13290,7 +13288,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. */
+            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -16625,7 +16623,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` above the maximum (`param: limit`), or an unknown `fields` entry. */
+            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -23425,7 +23423,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` above the maximum (`param: limit`). */
+            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24272,7 +24270,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` above the maximum (`param: limit`). */
+            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -26054,7 +26052,7 @@ export interface operations {
     listWebhookDeliveries: {
         parameters: {
             query?: {
-                /** @description Page size. A value above the maximum is refused with 400 (`param: limit`); any other value that is not a positive integer falls back to 20. */
+                /** @description Page size. A value that is not an integer from 1 to the maximum is refused with 400 (`param: limit`). */
                 limit?: number;
                 /** @description Keyset cursor — the `id` of the last delivery of the previous page. Supplied by the `Link: rel="next"` header. An id that is not a delivery of this webhook is a 400. */
                 startingAfter?: string;
@@ -27339,7 +27337,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` above the maximum (`param: limit`), or an unknown `fields` entry. */
+            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

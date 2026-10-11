@@ -8,7 +8,7 @@
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import { normalizeMime } from "@appstrate/afps-shared/mime";
 import { substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
 
@@ -134,7 +134,7 @@ export function substituteRequest<B extends string | null | undefined>(
 ): { url: string; headers: Record<string, string>; body: B extends string ? string : B } {
   const text: Record<string, string> = {};
   for (const [key, value] of Object.entries(inputs)) {
-    if (value !== null && value !== undefined) text[key] = jsonText(value as JsonValue);
+    if (value !== null && value !== undefined) text[key] = jsonText(value);
   }
   const render = (template: string, encode: PlaceholderEncoder) =>
     substituteVars(template, text, {

@@ -60,7 +60,7 @@ export interface IntegrationConnectCompletion {
    * OAuth scopes the flow requested that the consent did not grant; present only when `ok` is
    * `true` and some were left out. The connection exists, narrower than asked.
    */
-  scopes_denied?: string[] | undefined;
+  scopesDenied?: string[] | undefined;
 }
 
 /** Mint a completion payload with the shared discriminator applied. */
@@ -69,15 +69,9 @@ export function buildIntegrationConnectCompletion(detail: {
   state?: string | undefined;
   packageId?: string | undefined;
   error?: string | undefined;
-  scopes_denied?: string[] | undefined;
+  scopesDenied?: string[] | undefined;
 }): IntegrationConnectCompletion {
   return { type: INTEGRATION_CONNECT_MESSAGE_TYPE, ...detail };
-}
-
-/** The `scopes_denied` of a completion a listener received; empty when it names none. */
-export function deniedScopesOf(detail: IntegrationConnectCompletion): string[] {
-  const denied: unknown = detail.scopes_denied;
-  return Array.isArray(denied) ? denied.filter((s): s is string => typeof s === "string") : [];
 }
 
 /**

@@ -509,7 +509,7 @@ export const webhooksPaths = {
           name: "limit",
           in: "query",
           description:
-            "Page size. A value above the maximum is refused with 400 (`param: limit`); any other value that is not a positive integer falls back to 20.",
+            "Page size. A value that is not an integer from 1 to the maximum is refused with 400 (`param: limit`).",
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
         {

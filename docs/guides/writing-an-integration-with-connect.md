@@ -609,12 +609,15 @@ delivery.
 
 A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
 like a pasted credential, by the one required string field of `credentials.schema` that
-is not a secret, masked (`al****.com`), else `Connexion N`.
+is not a secret, masked (`al****.com`), else, when the only required string field is one
+secret that is not `format: "password"`, by that key, masked (`fc****f10b`), else
+`Connexion N`.
 
-**Mark every secret field `writeOnly: true`** (or `format: "password"`): an API key, a
-token, a password. It is the one rule the platform reads, never the field's name. The
-connect form masks the input of a secret and shows any other field in clear, and a
-secret never names the connection — so marking the password is also what lets the
+**Mark every secret field `writeOnly: true`** (an API key, a token) or
+`format: "password"` (a password a human chose, which never names a connection). It is
+the one rule the platform reads, never the field's name. The connect form masks the
+input of a secret and shows any other field in clear, and a secret beside a non-secret
+field never names the connection — so marking the password is also what lets the
 username do it.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect

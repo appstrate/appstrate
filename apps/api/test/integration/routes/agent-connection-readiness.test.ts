@@ -95,7 +95,7 @@ interface ReadinessResolution {
   source: string | null;
   error_code: string | null;
   resolved_connection_ids: string[];
-  candidates: Array<{ id: string; label?: string; scope_fit?: string; rank?: number }>;
+  candidates: Array<{ id: string; label?: string; scope_fit?: string }>;
 }
 interface ReadinessBody {
   blocks_run: boolean;
@@ -603,9 +603,9 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     const body = await readiness();
     const { resolution } = body.integrations.find((i) => i.integration_package_id === GMAIL)!;
 
-    expect(resolution.candidates.map((c) => [c.label, c.scope_fit, c.rank])).toEqual([
-      ["Lecture", "exact", 0],
-      ["Connexion 1", "broader", 1],
+    expect(resolution.candidates.map((c) => [c.label, c.scope_fit])).toEqual([
+      ["Lecture", "exact"],
+      ["Connexion 1", "broader"],
     ]);
     expect(resolution.resolved_connection_ids).toEqual([resolution.candidates[0]!.id]);
   });

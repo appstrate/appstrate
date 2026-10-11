@@ -257,14 +257,12 @@ export interface ConsumingAgentSummary {
 /**
  * One accessible connection annotated for the agent-page picker — adds the
  * scopes the agent's selected tools require that the connection lacks, how its
- * grant fits that selection, its place in the least-privilege order, and
- * whether the calling actor owns it.
+ * grant fits that selection, and whether the calling actor owns it. Listed
+ * least privilege first.
  */
 export interface IntegrationCandidate extends AccessibleIntegrationConnection {
   missing_scopes: string[];
   scope_fit: ConnectionScopeFit;
-  /** 0-based place in the least-privilege order the fallback binds by. */
-  rank: number;
   is_own: boolean;
 }
 

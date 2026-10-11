@@ -307,6 +307,22 @@ describe("declarative connect.login at the route boundary", () => {
     expect(received).toEqual([]);
   });
 
+  it("connect/fields: refuses a null value the login request needs, naming the field", async () => {
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.credentials.schema.properties.password = { type: ["string", "null"] };
+      }),
+    );
+
+    const res = await submitFields(ctx, { username: USERNAME, password: null });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as ProblemBody;
+    expect(body.code).toBe("login_input_unencodable");
+    expect(body.param).toBe("credentials.password");
+    expect(received).toEqual([]);
+  });
+
   it("connect/fields: names a connection without identity after its username, masked", async () => {
     await reseed(
       loginManifest(server.url.origin, (auth) => {

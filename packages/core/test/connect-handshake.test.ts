@@ -21,7 +21,6 @@ import {
   isIntegrationConnectCompletion,
   isIntegrationConnectMessage,
   type IntegrationConnectCompletion,
-  deniedScopesOf,
 } from "../src/connect-handshake.ts";
 
 const SELF = "https://app.appstrate.dev";
@@ -53,17 +52,6 @@ describe("buildIntegrationConnectCompletion", () => {
     expect(failed.ok).toBe(false);
     expect(failed.error).toBe("access_denied");
     expect(isIntegrationConnectCompletion(failed)).toBe(true);
-  });
-});
-
-describe("deniedScopesOf", () => {
-  it("reads the scopes a partial consent left out, and nothing off any other payload", () => {
-    const sent = buildIntegrationConnectCompletion({ ok: true, scopes_denied: ["mail.send"] });
-    expect(deniedScopesOf(sent)).toEqual(["mail.send"]);
-    expect(deniedScopesOf(buildIntegrationConnectCompletion({ ok: true }))).toEqual([]);
-    // Read off the wire: a malformed member is dropped, never joined into a message.
-    expect(deniedScopesOf({ scopes_denied: "mail.send" as unknown as string[] })).toEqual([]);
-    expect(deniedScopesOf({ scopes_denied: ["a", 1] as unknown as string[] })).toEqual(["a"]);
   });
 });
 

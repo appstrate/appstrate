@@ -3,17 +3,17 @@
 /**
  * Derive a human-recognisable connection label from a submitted credential bag: the masked
  * value of its one identifying field (`al****.com` for a username, `AC****1f2e` for an account
- * id). Used only when no upstream identity (email / login) was extracted, so the user can still
- * tell two connections of the same integration apart.
+ * id, `fc****f10b` for the key of a key-only auth). Used only when no upstream identity (email /
+ * login) was extracted, so the user can still tell two connections of the same integration apart.
  *
  * Selection is structural, by `credentials.schema`, never by field name:
  *
- *   1. Consider only `string`-typed properties.
- *   2. Drop the secrets (`isSecretField`: `writeOnly` or `format: "password"`), the fields the
- *      connect form masks. They never reach the label column, which is stored as plaintext.
- *   3. If the schema lists `required`, restrict to required fields (an optional `base_url`
- *      does not disqualify a single-identifier integration).
- *   4. Mask iff exactly ONE field survives; any other count falls back to "Connexion N".
+ *   1. Consider only `string`-typed properties, the required ones when the schema lists
+ *      `required` (an optional `base_url` does not disqualify a single-key integration).
+ *   2. Split them by `isSecretField`, the rule the connect form masks its inputs by.
+ *   3. Exactly one non-secret field: mask it. Several: no label.
+ *   4. None, and exactly one secret that is not `format: "password"`: mask that one. A
+ *      password never reaches the label column, which is stored as plaintext.
  *
  * The mask exposes a 2-char prefix + last 4, and skips values shorter than 8 chars.
  */
@@ -46,17 +46,15 @@ export function maskCredentialLabel(
   const properties = schema?.properties as Record<string, JSONSchema7> | undefined;
   if (!properties || typeof properties !== "object") return undefined;
 
-  let candidates = Object.entries(properties)
-    .filter(([, prop]) => prop && isStringTyped(prop) && !isSecretField(prop))
-    .map(([key]) => key);
-
-  const required = schema?.required;
-  if (Array.isArray(required) && required.length > 0) {
-    const requiredSet = new Set(required.filter((r): r is string => typeof r === "string"));
-    candidates = candidates.filter((key) => requiredSet.has(key));
-  }
-
-  const only = candidates[0];
-  if (candidates.length !== 1 || only === undefined) return undefined;
-  return fingerprintSecret(credentials[only]);
+  const listed = schema?.required;
+  const required = Array.isArray(listed) && listed.length > 0 ? new Set<unknown>(listed) : null;
+  const fields = Object.entries(properties).filter(
+    ([key, prop]) => prop && isStringTyped(prop) && (required === null || required.has(key)),
+  );
+  const plain = fields.filter(([, prop]) => !isSecretField(prop));
+  const secrets = fields.filter(([, prop]) => isSecretField(prop));
+  const [only] =
+    plain.length > 0 ? plain : secrets.filter(([, prop]) => prop.format !== "password");
+  if (!only || plain.length > 1 || (plain.length === 0 && secrets.length !== 1)) return undefined;
+  return fingerprintSecret(credentials[only[0]]);
 }

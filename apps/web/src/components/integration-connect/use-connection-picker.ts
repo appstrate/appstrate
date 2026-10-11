@@ -155,7 +155,7 @@ export function useConnectionPicker(
 
   const { resolution, run_blocking: runBlocking, required } = entry;
   const {
-    candidates: unranked,
+    candidates,
     resolved_connection_ids: resolvedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
@@ -163,8 +163,6 @@ export function useConnectionPicker(
   const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
-  // Least privilege first, in the order the server's fallback binds by.
-  const candidates = [...unranked].sort((a, b) => a.rank - b.rank);
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
   const missingScopeLabels = (c: IntegrationCandidate) =>

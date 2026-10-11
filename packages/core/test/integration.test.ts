@@ -2241,6 +2241,20 @@ describe("validateAgentIntegrationScopes", () => {
     expect(validateAgentIntegrationScopes({ id: "@official/gmail" }, m)).toEqual([]);
   });
 
+  it("refuses a scope that is not one OAuth scope token, catalog or not", () => {
+    const noCatalog = { ...m, auths: { primary: { type: "api_key" } } } as unknown as typeof m;
+    for (const manifest of [m, noCatalog]) {
+      const errors = validateAgentIntegrationScopes(
+        { id: "@official/gmail", scopes: ["read write"] },
+        manifest,
+      );
+      expect(errors.map((e) => [e.field, e.code])).toContainEqual([
+        "integrations_configuration.@official/gmail.scopes",
+        "invalid_format",
+      ]);
+    }
+  });
+
   it("accepts a subset selection of declared tools and catalog scopes", () => {
     expect(
       validateAgentIntegrationScopes(

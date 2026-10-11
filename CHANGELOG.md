@@ -190,7 +190,8 @@ integration_connections WHERE shared_with_org;` tells whether the step
     submitted base URL it may not reach `400 login_url_refused` with one
     `errors[]` entry per field, and a service that is unreachable, throttling
     or failing `502 login_upstream_unavailable` (was `bad_gateway`), relaying
-    the service's `Retry-After` as the header and `retry_after`.
+    the service's `Retry-After` as the header and `retry_after`, in whole
+    seconds and at most a day.
   - **`insufficient_scopes` names its remedy.** The item carries `remedy`:
     `new_connection`, `upgrade_or_new`, `rebind_by_admin` or
     `rebind_by_schedule_owner`. The MCP instructions and the OpenAPI
@@ -201,27 +202,35 @@ integration_connections WHERE shared_with_org;` tells whether the step
     item.
   - **The picker's least-privilege order is the server's.** Each
     `candidates[]` item of `GET /api/agents/{scope}/{name}/connection-readiness`
-    carries `scope_fit` (`exact`, `unjudged`, `broader`, `missing`) and `rank`,
-    and the list is served in that order, the one the resolver's fallback
-    binds by. The dashboard sorts on `rank` and no longer ranks on its own.
+    carries `scope_fit` (`exact`, `unjudged`, `broader`, `missing`), and the
+    list is served least privilege first, the order the resolver's fallback
+    binds by. The dashboard lists it as served and no longer ranks on its own.
   - **A partial OAuth consent is reported.** The callback page names the
     requested scopes the consent left out, its completion message carries them
-    as `scopes_denied`, the dashboard shows them, and the audit records
+    as `scopesDenied`, the dashboard shows them, and the audit records
     `integration.connection.scopes_denied` (`scopesRequested`, `scopesDenied`).
-    `integration.connection.created` records `scopesGranted`.
+    `integration.connection.created` records `scopesGranted`. A requested
+    `offline_access` counts as granted when the token response carries a
+    refresh token, and `openid` when it carries an `id_token`, at connect and
+    at refresh: an authorization server that leaves them out of `scope`
+    (Microsoft) no longer leaves such a connection short of its own defaults.
   - **`scopes` of a connect kickoff are RFC 6749 scope tokens.** A scope
     holding a space, a quote, a backslash or a non-ASCII character, or an empty
     one, is refused with `400 validation_failed` on `scopes[n]`. Writing an
     integration manifest applies the same rule to `default_scopes`,
-    `scope_catalog` values and `tools_policy.*.required_scopes`.
-  - **`limit` above the maximum is `400 invalid_request` on `limit`** on every
-    list that takes it (runs, run logs, schedule runs, integrations, the
-    provider registry, notifications, end-users, files, webhook deliveries,
-    and the sidecar's run history and memories); it used to fall back to the
-    default page size without saying so.
+    `scope_catalog` values and `tools_policy.*.required_scopes`, and writing an
+    agent to its `integrations_configuration.<id>.scopes` (`invalid_format`).
+  - **A `limit` that is not an integer from 1 to the maximum is
+    `400 invalid_request` on `limit`** on every list that takes it (runs, run
+    logs, schedule runs, integrations, the provider registry, notifications,
+    end-users, files, webhook deliveries, and the sidecar's run history and
+    memories): `0`, a negative, a fraction, text or a value above the maximum
+    used to fall back to the default page size without saying so. An absent
+    `limit` is still the default.
   - **`null` is an absent credential at every door.** A `connect.login` whose
-    template names an input that is `null` fails closed instead of sending the
-    text `null`, and an extracted output that is `null` is a missing output.
+    template names an input submitted as `null` is refused with
+    `400 login_input_unencodable` on that field instead of sending the text
+    `null`, and an extracted output that is `null` is a missing output.
 - **The connect form masks what the manifest marks secret** (#1913): a
   credential field is a password input when its schema says `writeOnly: true`
   or `format: "password"`, the rule the connection label already follows, and
@@ -232,11 +241,10 @@ integration_connections WHERE shared_with_org;` tells whether the step
   1.0.3, firecrawl 1.0.4, freshdesk 1.0.4, freshsales 1.0.3, github-mcp 1.1.4,
   loom 1.0.4, playwright-mcp 1.0.1, shopify 1.0.4, shortcut 1.0.3, ssh 1.0.2,
   stripe 1.0.4, teamwork 1.0.4, telegram 1.0.3, twenty-mcp 1.0.1, twilio 1.1.1,
-  webhooks 1.0.4, woocommerce 1.0.5, wordpress 1.0.5, zendesk 1.0.4. A new
-  connection of theirs with no identity is no longer labelled by a masked
-  fragment of its key: it takes the masked value of its one non-secret required
-  field (a Twilio Account SID, a Shopify domain, a Freshdesk subdomain), else
-  `Connexion N`. Existing labels are unchanged.
+  webhooks 1.0.4, woocommerce 1.0.5, wordpress 1.0.5, zendesk 1.0.4. A
+  connection with no identity is labelled by the masked value of its one
+  non-secret required field (a Twilio Account SID, a Shopify domain), else by
+  the masked key of a key-only auth, as before; a password is never used.
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).

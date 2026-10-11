@@ -375,7 +375,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     // The connection exists, narrower than asked.
     const connection = await storedConnection();
     expect(connection!.scopesGranted).toEqual(SCOPES);
-    expect(completionOf(html)).toMatchObject({ ok: true, scopes_denied: ["files.write"] });
+    expect(completionOf(html)).toMatchObject({ ok: true, scopesDenied: ["files.write"] });
     expect(html).toContain("files.write");
     const trail = await db
       .select()
@@ -407,7 +407,7 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     const html = await consentAndCallback(await beginConnect(ctx));
 
     expect(completionOf(html)).toEqual(expect.objectContaining({ ok: true }));
-    expect(completionOf(html)).not.toHaveProperty("scopes_denied");
+    expect(completionOf(html)).not.toHaveProperty("scopesDenied");
   });
 
   // #1871: scopes added in place reach every agent bound to the connection.

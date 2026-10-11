@@ -8,7 +8,6 @@ import {
   INTEGRATION_CONNECT_CHANNEL,
   acceptsCompletionMessage,
   completionMatches,
-  deniedScopesOf,
   type IntegrationConnectCompletion,
 } from "@appstrate/core/connect-handshake";
 import { ApiError } from "../../api/errors";
@@ -88,7 +87,7 @@ export function useHostedConnectPopup() {
             };
             const onHit = (completion: IntegrationConnectCompletion) => {
               cleanup();
-              resolve(deniedScopesOf(completion));
+              resolve(completion.scopesDenied ?? []);
             };
             // Which completion this popup is waiting for. Both carriers fan
             // out — a `BroadcastChannel` publish reaches every listener on the

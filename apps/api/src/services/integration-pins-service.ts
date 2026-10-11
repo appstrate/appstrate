@@ -603,18 +603,15 @@ async function resolveAgentIntegrationPick(args: {
   const ranked = manifest
     ? rankByLeastPrivilege({ manifest, agentTools, agentScopes }, scoped)
     : scoped.map((row) => ({ row, scopeFit: "unjudged" as const, missingScopes: [] }));
-  const candidates: IntegrationCandidate[] = ranked.map(
-    ({ row, scopeFit, missingScopes }, rank) => ({
-      ...row.c,
-      missing_scopes: missingScopes,
-      scope_fit: scopeFit,
-      rank,
-      is_own:
-        actor.type === "user"
-          ? row.c.owner_user_id === actor.id
-          : row.c.owner_end_user_id === actor.id,
-    }),
-  );
+  const candidates: IntegrationCandidate[] = ranked.map(({ row, scopeFit, missingScopes }) => ({
+    ...row.c,
+    missing_scopes: missingScopes,
+    scope_fit: scopeFit,
+    is_own:
+      actor.type === "user"
+        ? row.c.owner_user_id === actor.id
+        : row.c.owner_end_user_id === actor.id,
+  }));
 
   // `[]` (bound to none, or switched off here) has no member to name a source.
   const resolved = resolution.resolved[integrationId] ?? null;
