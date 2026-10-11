@@ -981,10 +981,14 @@ integration_connections WHERE shared_with_org;` tells whether the step
     does; a refreshed set that no longer fits them is not replayed.
   - The same rules reach `connect.login` and the requests of a `connect.tool`
     login tool: the empty, `.` or `..` path segment, the multipart rules, and
-    the media type. A login `body` holding a `{{name}}` now needs a
-    `content_type` (or `Content-Type` header) among the above; without one
-    the connect fails as `invalid_config`, and the sidecar answers a login
-    tool's request 400.
+    the media type. **BREAKING for manifest authors:** a `connect.login`
+    request `body` holding a `{{name}}` needs a `content_type` (or
+    `Content-Type` header) among the above. A manifest without one is
+    refused when it is written (create, save, publish, import; a dependency
+    imported in a bundle gets a warning), and an already published one fails
+    at connect start as `invalid_config`: declare the media type and
+    republish. A `Content-Type` that is itself a `{{name}}` is judged at
+    connect. The sidecar answers such a request of a login tool 400.
   - `@appstrate/connect` no longer re-exports `substituteVars`: import it from
     `@appstrate/afps-runtime/resolvers`.
 

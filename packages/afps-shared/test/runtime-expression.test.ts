@@ -119,7 +119,11 @@ describe("isSelectorOutput", () => {
 });
 
 describe("loginBlockIssues", () => {
-  const request = { url: "https://idp.example.com/login", body: "p={{password}}" };
+  const request = {
+    url: "https://idp.example.com/login",
+    content_type: "application/x-www-form-urlencoded",
+    body: "p={{password}}",
+  };
   const paths = (login: Parameters<typeof loginBlockIssues>[0]) =>
     loginBlockIssues(login).map((i) => i.path.join("."));
 
@@ -230,5 +234,49 @@ describe("loginBlockIssues", () => {
       "success_criteria.8",
       "success_criteria.9",
     ]);
+  });
+
+  describe("a request body holding a {{name}} needs a media type with an encoder", () => {
+    const body = (request: { content_type?: string; headers?: Record<string, string> }) =>
+      paths({ request: { url: "https://h.example/login", body: "p={{ password }}", ...request } });
+
+    it("refuses no media type and one with no encoder, naming the type", () => {
+      expect(body({})).toEqual(["request.body"]);
+      expect(body({ content_type: "application/graphql" })).toEqual(["request.body"]);
+      expect(body({ headers: { "content-TYPE": "application/octet-stream" } })).toEqual([
+        "request.body",
+      ]);
+      expect(body({ content_type: "multipart/form-data" })).toEqual(["request.body"]);
+      const [issue] = loginBlockIssues({
+        request: { body: "{{p}}", content_type: "application/graphql" },
+      });
+      expect(issue!.message).toContain("application/graphql");
+    });
+
+    it.each([
+      "application/json",
+      "application/json; charset=utf-8",
+      "application/vnd.api+json",
+      "application/x-ndjson",
+      "application/x-www-form-urlencoded",
+      "application/xml",
+      "application/soap+xml",
+      "multipart/form-data; boundary=B",
+      "text/plain",
+    ])("accepts %s, as content_type or as a header", (type) => {
+      expect(body({ content_type: type })).toEqual([]);
+      expect(body({ headers: { "Content-Type": type } })).toEqual([]);
+    });
+
+    it("reads the header ahead of content_type, as the engine does", () => {
+      expect(
+        body({ content_type: "application/json", headers: { "Content-Type": "application/sql" } }),
+      ).toEqual(["request.body"]);
+    });
+
+    it("accepts a body without placeholder, and leaves a templated Content-Type to the engine", () => {
+      expect(paths({ request: { body: "grant_type=password" } })).toEqual([]);
+      expect(body({ headers: { "Content-Type": "{{ct}}" } })).toEqual([]);
+    });
   });
 });

@@ -9,7 +9,7 @@
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { normalizeMime } from "@appstrate/afps-shared/mime";
+import { bodyEncoding, multipartBoundary } from "@appstrate/afps-shared/mime";
 import { referencesField, substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
 
 const CANNOT_CARRY = "contains a character this request cannot carry where it is placed";
@@ -111,20 +111,8 @@ function xmlEncoder(template: string): PlaceholderEncoder {
       : value.replace(/[&<>"']/g, (ch) => XML_ENTITIES[ch]!);
 }
 
-const JSON_MEDIA_TYPES: ReadonlySet<string> = new Set([
-  "application/json",
-  "text/json",
-  "application/x-json",
-  "application/x-ndjson",
-]);
-
 /** multipart: nothing that ends a part (CR, LF, the delimiter) or, in its headers, a quoted parameter. */
-function multipartEncoder(template: string, contentType: string): PlaceholderEncoder | null {
-  const boundary = /;\s*boundary=(?:"([^"]+)"|([^;\s"]+))/i
-    .exec(contentType)
-    ?.slice(1)
-    .find(Boolean);
-  if (boundary === undefined) return null;
+function multipartEncoder(template: string, boundary: string): PlaceholderEncoder {
   const delimiter = `--${boundary}`;
   const headerLines: Array<readonly [number, number]> = [];
   let inHeaders = false;
@@ -148,21 +136,26 @@ function multipartEncoder(template: string, contentType: string): PlaceholderEnc
   };
 }
 
-/** By media type; null for one with no encoder here. */
+/** By media type ({@link bodyEncoding}); null for one with no encoder. */
 function bodyEncoder(
   template: string,
   contentType: string | undefined,
   inputs: Readonly<Record<string, unknown>>,
 ): PlaceholderEncoder | null {
-  const mime = normalizeMime(contentType);
-  if (mime === "text/plain") return asIs;
-  if (mime === "application/x-www-form-urlencoded") return formComponent;
-  if (mime.startsWith("multipart/")) return multipartEncoder(template, contentType!);
-  if (JSON_MEDIA_TYPES.has(mime) || mime.endsWith("+json")) return jsonEncoder(template, inputs);
-  if (mime === "application/xml" || mime === "text/xml" || mime.endsWith("+xml")) {
-    return xmlEncoder(template);
+  switch (bodyEncoding(contentType)) {
+    case "text":
+      return asIs;
+    case "form":
+      return formComponent;
+    case "multipart":
+      return multipartEncoder(template, multipartBoundary(contentType)!);
+    case "json":
+      return jsonEncoder(template, inputs);
+    case "xml":
+      return xmlEncoder(template);
+    case null:
+      return null;
   }
-  return null;
 }
 
 /** RFC 6265 `cookie-octet`: a cookie value without `;`, `,`, space, `"`, `\` or a CTL. */

@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - substitutes a body only under a media type with an encoder: JSON (now with
     `application/x-ndjson`), form, XML, multipart with a `boundary`, and
     `text/plain` (as is). Any other, or none, throws the new
-    `RequestTemplateError` when the body holds a placeholder of the inputs;
+    `RequestTemplateError` when the body holds a placeholder of the inputs. The
+    list is afps-shared's `bodyEncoding`;
   - reads the body's media type from the rendered `Content-Type` header, and
     throws `RequestTemplateError` on headers holding one name twice in
     different case;

@@ -521,8 +521,9 @@ target, a header or a substituted text body, where a refused value is a
   naming the inputs in its authority.
 - `body` — by the media type of the `Content-Type` header (as rendered), else of
   `content_type`. A body holding a `{{name}}` needs one of these; under any other media
-  type, or none, the connect fails as `invalid_config` (a login tool's request is
-  answered 400), and a body with no placeholder is sent untouched:
+  type, or none, the manifest is refused when it is written and the connect fails as
+  `invalid_config` (a `Content-Type` that is itself a `{{name}}` is judged at connect; a
+  login tool's request is answered 400). A body with no placeholder is sent untouched:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
   - JSON (`application/json`, `text/json`, `application/x-json`, `application/x-ndjson`,
     any `+json`) escapes a value inside a string literal. A bare `{{name}}` is one JSON

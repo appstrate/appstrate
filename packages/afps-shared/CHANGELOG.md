@@ -41,8 +41,19 @@ consumer's publish rather than the first user's `npm install`.
   is IPv4-only) is reported in `invalid`. Hosts match `URL.hostname`
   exactly. (#1912)
 
+- **`bodyEncoding`**, **`multipartBoundary`**, type **`BodyEncoding`**
+  (`./mime`): how a `{{name}}` value is encoded into a text body of a
+  `Content-Type` (`json`, `form`, `xml`, `multipart` with a boundary, `text`
+  for `text/plain`), or `null`. The one list of the request substitution and
+  of `loginBlockIssues`. (#1915)
+
 ### Changed
 
+- **BREAKING: `loginBlockIssues`** (`./runtime-expression`) reports a
+  `request.body` holding a `{{name}}` whose `Content-Type` header, else
+  `content_type`, is absent or has no `bodyEncoding`; a templated
+  `Content-Type` is not judged. `LoginBlockView.request` reads
+  `content_type`. (#1915)
 - **BREAKING: `isTokenCount`** (`./token-usage`) accepts only a non-negative
   safe integer (was any finite non-negative number), the `integer` the AFPS
   spec and the `llm_usage` columns declare. `isTokenUsageTiers` follows: a band

@@ -177,3 +177,35 @@ export function isTextShapedContentType(contentType: string | null | undefined):
   const mime = normalizeMime(contentType);
   return mime !== "" && isTextShapedMime(mime);
 }
+
+const JSON_BODY_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  "application/json",
+  "text/json",
+  "application/x-json",
+  "application/x-ndjson",
+]);
+
+/** The `boundary` parameter of a multipart `Content-Type`. */
+export function multipartBoundary(contentType: string | null | undefined): string | undefined {
+  return /;\s*boundary=(?:"([^"]+)"|([^;\s"]+))/i
+    .exec(contentType ?? "")
+    ?.slice(1)
+    .find(Boolean);
+}
+
+export type BodyEncoding = "json" | "form" | "xml" | "multipart" | "text";
+
+/**
+ * How a `{{name}}` value is encoded into a text body of this `Content-Type`; null when none
+ * is: the one list of the request substitution (`@appstrate/afps-runtime`) and of the
+ * `connect.login` write-time rule. `text` (`text/plain`) is raw by declaration.
+ */
+export function bodyEncoding(contentType: string | null | undefined): BodyEncoding | null {
+  const mime = normalizeMime(contentType);
+  if (mime === "text/plain") return "text";
+  if (mime === "application/x-www-form-urlencoded") return "form";
+  if (mime.startsWith("multipart/")) return multipartBoundary(contentType) ? "multipart" : null;
+  if (JSON_BODY_MEDIA_TYPES.has(mime) || mime.endsWith("+json")) return "json";
+  if (mime === "application/xml" || mime === "text/xml" || mime.endsWith("+xml")) return "xml";
+  return null;
+}

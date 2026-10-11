@@ -253,7 +253,10 @@ describe("runLogin — security limits", () => {
   it("fails closed on an unresolved placeholder", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
-      login: { ...baseLogin, request: { ...baseLogin.request, body: "x={{missing}}" } },
+      login: {
+        ...baseLogin,
+        request: { ...baseLogin.request, content_type: "text/plain", body: "x={{missing}}" },
+      },
     };
     await expect(
       runLogin(config, {
