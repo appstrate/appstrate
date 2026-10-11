@@ -151,6 +151,7 @@ export const ROUTE_ACCESS = {
   },
   "/workspace-settings/auth": {
     feature: "oidc",
+    teamSpaceOnly: true,
     anyOf: ["space-settings:write"],
     operations: ["getSpaceSmtpConfig"],
   },

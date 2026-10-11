@@ -48,9 +48,10 @@ interface SettingsNavigationOptions {
     webhooks: boolean;
   };
   /**
-   * A personal space takes no members, keys, OAuth clients or end-users: the
-   * server answers 409 `personal_space_*` to every write behind those entries
-   * (the routes are `teamSpaceOnly` in `lib/route-access.ts`).
+   * A personal space takes no members, keys, OAuth clients, end-users or end-user
+   * sign-in configuration (SMTP, social): the server answers 409 `personal_space_*`
+   * to every write behind those entries (the routes are `teamSpaceOnly` in
+   * `lib/route-access.ts`).
    */
   inPersonalSpace?: boolean;
 }
@@ -143,7 +144,7 @@ export function buildSettingsNavigation({
           to: "/workspace-settings/auth",
           icon: Shield,
           labelKey: "appSettings.tabAuth",
-          show: features.oidc && can("space-settings:write"),
+          show: teamSpace && features.oidc && can("space-settings:write"),
         },
         {
           to: "/workspace-settings/api-keys",

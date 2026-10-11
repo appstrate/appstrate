@@ -192,6 +192,11 @@ export function OAuthPairingBody({
               </span>
             </Button>
           </div>
+          <ul className="text-muted-foreground list-disc space-y-1 pl-4 text-xs">
+            <li>{t("credentials.oauth.cliStepNode")}</li>
+            <li>{t("credentials.oauth.cliStepBrowser")}</li>
+            <li>{t("credentials.oauth.cliStepKeepOpen")}</li>
+          </ul>
           <div className="text-muted-foreground flex items-center gap-2 text-xs">
             <Spinner />
             <span>{t("credentials.oauth.cliWaiting")}</span>

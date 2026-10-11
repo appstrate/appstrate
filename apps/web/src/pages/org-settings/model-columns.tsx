@@ -57,16 +57,18 @@ export function useModelColumns({
   credentialLabels: ReadonlyMap<string, string>;
 }): DataColumn<OrgModelInfo>[] {
   const { t } = useTranslation(["settings", "common"]);
-  // A managed row hides its binding, so it names no credential. A member-served one is paid by
-  // whoever uses it: each member brings their own.
-  const credentialText = (m: OrgModelInfo) =>
-    m.binding === "managed"
-      ? "—"
+  // The provider that serves the row, by name: a system or managed model says so (its binding is
+  // never shown), an unbound one is served by whichever provider each member brings, a bound one
+  // by the named provider the Providers tab edits. Members who may not read that list get the
+  // service's name instead.
+  const providerText = (m: OrgModelInfo) =>
+    m.source === "built-in" || m.binding === "managed"
+      ? t("models.providerSystem")
       : m.binding === "member"
         ? t("models.credentialEachMember")
-        : m.credentialId === null
-          ? "—"
-          : (credentialLabels.get(m.credentialId) ?? "—");
+        : ((m.credentialId !== null ? credentialLabels.get(m.credentialId) : undefined) ??
+          m.provider_name ??
+          "—");
 
   return [
     {
@@ -99,19 +101,13 @@ export function useModelColumns({
     {
       id: "provider",
       header: t("models.col.provider"),
-      width: "minmax(88px,0.9fr)",
-      tier: 2,
-      cell: (m) => {
-        const provider = m.provider_name ?? m.providerId ?? m.apiShape;
-        return (
-          <span
-            className="text-muted-foreground block truncate text-xs"
-            title={provider ?? undefined}
-          >
-            {provider}
-          </span>
-        );
-      },
+      width: "minmax(190px,1.2fr)",
+      tier: 3,
+      cell: (m) => (
+        <span className="text-muted-foreground block truncate text-xs" title={providerText(m)}>
+          {providerText(m)}
+        </span>
+      ),
     },
     {
       id: "type",
@@ -129,17 +125,6 @@ export function useModelColumns({
       ),
     },
     {
-      id: "credential",
-      header: t("models.col.credential"),
-      width: "minmax(80px,1fr)",
-      tier: 3,
-      cell: (m) => (
-        <span className="text-muted-foreground block truncate text-xs" title={credentialText(m)}>
-          {credentialText(m)}
-        </span>
-      ),
-    },
-    {
       id: "status",
       header: t("models.col.status"),
       width: "minmax(92px,1fr)",
@@ -153,8 +138,7 @@ export function useModelColumns({
               failedKey="models.testFailed"
             />
           ) : m.needs_reconnection ? (
-            // Clipped to its column, never over the next one; the title holds the full text.
-            <ModelUnavailableBadge className="block max-w-full truncate" />
+            <ModelUnavailableBadge />
           ) : !m.enabled ? (
             <Badge variant="secondary" className="opacity-60">
               {t("models.disabled")}
@@ -287,11 +271,19 @@ export function useCredentialColumns({
             <div className="relative z-10 min-w-0">
               <InlineEditableLabel
                 value={pk.label}
-                // A subscription is renamed here too: its connection changes only
-                // through the reconnect, never its label.
+                // The one rename, for a key and for a subscription alike: the pencil changes
+                // the key, a subscription's connection changes only through the reconnect.
                 editable={pk.source === "custom" && can(pk, "edit")}
                 onSave={(newLabel) => onRename(pk, newLabel)}
               />
+              {pk.oauth_email && (
+                <span
+                  className="text-muted-foreground block truncate text-xs"
+                  title={pk.oauth_email}
+                >
+                  {pk.oauth_email}
+                </span>
+              )}
               {testResults[pk.id] && (
                 <div className="@xl/table:hidden">
                   <TestResultSpan
@@ -325,20 +317,6 @@ export function useCredentialColumns({
         ]
       : []),
     {
-      id: "account",
-      header: t("credentials.col.account"),
-      width: "minmax(84px,1.1fr)",
-      tier: 2,
-      cell: (pk) => (
-        <span
-          className="text-muted-foreground block truncate text-xs"
-          title={pk.oauth_email ?? undefined}
-        >
-          {pk.oauth_email ?? "—"}
-        </span>
-      ),
-    },
-    {
       id: "type",
       header: t("credentials.col.type"),
       width: "72px",
@@ -369,7 +347,10 @@ export function useCredentialColumns({
           // The flag also fires on a stored secret that no longer decrypts,
           // which reaches api-key credentials — where the fix is to re-enter
           // the key (Edit), not to reconnect an account.
-          <Badge variant="destructive">
+          <Badge
+            variant="destructive"
+            title={isOauth(pk) ? undefined : t("credentials.unavailableHint")}
+          >
             {isOauth(pk)
               ? t("credentials.oauth.needsReconnection")
               : t("models.credentialUnavailable")}

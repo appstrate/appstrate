@@ -375,53 +375,50 @@ export function ClientsTable({
   const deleteMutation =
     confirmDelete && tierOf(confirmDelete) === "org" ? deleteOrgClient : deleteSpaceClient;
 
+  // The header's button and the empty list's are the same action; only the header's carries the
+  // test ids and the compact size.
+  const registerClient = (inEmpty: boolean) => {
+    if (!canRegister) return null;
+    const trigger = (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className={inEmpty ? undefined : "h-7 text-xs"}
+        data-testid={inEmpty ? undefined : `oauth-client-register-${authKey}`}
+        onClick={canManageOrg ? undefined : () => newClient.open(`${authKey}:space`)}
+      >
+        <Plus size={14} />
+        {t("integration.clients.register")}
+        {canManageOrg && <ChevronDown size={14} />}
+      </Button>
+    );
+    // Two levels to register at: the choice is made before the form,
+    // not inside it, so the form stays the one it always was.
+    if (!canManageOrg) return trigger;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => newClient.open(`${authKey}:space`)}>
+            {t("integration.clients.registerSpace")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => newClient.open(`${authKey}:org`)}
+            data-testid={inEmpty ? undefined : `org-oauth-client-register-${authKey}`}
+          >
+            {t("integration.clients.registerOrg")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
   return (
     <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <h4 className="text-sm font-medium">{t("integration.clients.title")}</h4>
-        {canRegister &&
-          (canManageOrg ? (
-            // Two levels to register at: the choice is made before the form,
-            // not inside it, so the form stays the one it always was.
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  data-testid={`oauth-client-register-${authKey}`}
-                >
-                  <Plus size={14} />
-                  {t("integration.clients.register")}
-                  <ChevronDown size={14} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => newClient.open(`${authKey}:space`)}>
-                  {t("integration.clients.registerSpace")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => newClient.open(`${authKey}:org`)}
-                  data-testid={`org-oauth-client-register-${authKey}`}
-                >
-                  {t("integration.clients.registerOrg")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs"
-              onClick={() => newClient.open(`${authKey}:space`)}
-              data-testid={`oauth-client-register-${authKey}`}
-            >
-              <Plus size={14} />
-              {t("integration.clients.register")}
-            </Button>
-          ))}
+        {registerClient(false)}
       </div>
 
       {/* The one answer the table exists for, then the rule in one line. */}
@@ -449,9 +446,7 @@ export function ClientsTable({
         // The reason, not just the fact: `DataTable` owes a default when the
         // caller writes no message, and a default is all this had.
         error={<ErrorState error={spaceClients.error} compact />}
-        // The register button above is the way out of an empty list, and it is
-        // already written out — the empty state does not re-offer it. On an
-        // auto-provisioned auth the reason the list is empty IS the state, so
+        // On an auto-provisioned auth the reason the list is empty IS the state, so
         // it is the empty state's hint rather than a second sentence above a
         // table saying the same thing in other words.
         empty={
@@ -466,7 +461,9 @@ export function ClientsTable({
             }
             icon={KeyRound}
             compact
-          />
+          >
+            {registerClient(true)}
+          </EmptyState>
         }
       />
 

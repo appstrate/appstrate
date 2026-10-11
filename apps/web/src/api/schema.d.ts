@@ -25261,6 +25261,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: components["responses"]["NotFound"];
+            /** @description The space is a personal space, which takes no end-user sign-in configuration (`personal_space_takes_no_end_user_sign_in`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -25390,6 +25399,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: components["responses"]["NotFound"];
+            /** @description The space is a personal space, which takes no end-user sign-in configuration (`personal_space_takes_no_end_user_sign_in`). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };

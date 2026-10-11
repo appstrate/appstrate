@@ -112,6 +112,7 @@ describe("routeVerdict", () => {
       "/workspace-settings/api-keys",
       "/workspace-settings/oauth",
       "/workspace-settings/end-users",
+      "/workspace-settings/auth",
     ];
     for (const path of teamSpaceOnly) {
       expect(routeVerdict(path, all, { oidc: true }, true)).toBe("absent");

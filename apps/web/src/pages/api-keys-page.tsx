@@ -13,7 +13,7 @@ import {
   useRevokeApiKey,
   type ApiKeyInfo,
 } from "../hooks/use-api-keys";
-import { ErrorState, EmptyState } from "../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../components/page-states";
 import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../components/page-actions-menu";
@@ -81,7 +81,14 @@ export function ApiKeysPage() {
             hint={t("settings:apiKeys.emptyHint")}
             icon={KeyRound}
             compact
-          />
+          >
+            {can("api-keys:create") && (
+              <EmptyStateAction
+                label={t("settings:apiKeys.createBtn")}
+                onClick={() => newApiKey.open()}
+              />
+            )}
+          </EmptyState>
         }
       />
 

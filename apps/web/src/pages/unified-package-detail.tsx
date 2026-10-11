@@ -450,6 +450,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     // in the package's HOME space, never in the space being browsed.
     canRestore: !isBuiltIn && !!homeWritable,
     canDelete: !isBuiltIn && !!homeDeletable,
+    // The page's « Créer une version » (PackageActionsDropdown's `isMutable`).
+    onCreate:
+      !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned
+        ? () => newVersion.open()
+        : undefined,
     latestVersion: latestVersionForDiff,
     currentManifest,
     currentContent,

@@ -16,9 +16,11 @@
  * picker's single "custom endpoint" row and are configured through the shared
  * endpoint fields, which own the API type, the base URL and the key.
  *
- * An OAuth row can be renamed here and nothing else: its connection changes
- * only through the reconnect affordance, which re-enters the modal with the
- * exact credential targeted. No key is ever sent for an OAuth row.
+ * Renaming is never done here: the name is edited in place in the table
+ * (`InlineEditableLabel`), the one rename. Editing a key-based row changes its
+ * key; an OAuth row's connection changes only through the reconnect
+ * affordance, which re-enters the modal with the exact credential targeted.
+ * No key is ever sent for an OAuth row.
  */
 
 import { useState } from "react";
@@ -264,7 +266,11 @@ function CredentialFormBody({
 
   const oauthDismiss = usePairingDismissConfirm(onClose);
 
-  const title = credential ? t("credentials.form.editTitle") : t("credentials.form.title");
+  const title = !credential
+    ? t("credentials.form.title")
+    : isOAuthSelected
+      ? t("credentials.form.reconnectTitle", { label: credential.label })
+      : t("credentials.form.editTitle", { label: credential.label });
 
   const labelField = (
     <div className="space-y-2">
@@ -285,30 +291,12 @@ function CredentialFormBody({
     </div>
   );
 
-  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds
-  // back). An existing row is renamed here, and reconnected only when flagged.
+  // OAuth-selected: the pairing body owns the connection (the helper POSTs creds back). An
+  // existing row only gets here to be reconnected; its name is changed in the table.
   if (isOAuthSelected && selectedOption?.providerId) {
-    const showPairing = !isEditing || !!credential?.needs_reconnection;
     return (
       <>
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
-          title={title}
-          // Only a rename is saved here; a new or reconnecting pairing is finished by the helper.
-          actions={
-            isEditing ? (
-              <>
-                <Button type="button" variant="outline" onClick={oauthDismiss.requestClose}>
-                  {t("btn.cancel")}
-                </Button>
-                <Button type="submit" form="pk-form" disabled={isPending}>
-                  {isPending ? <Spinner /> : t("btn.save")}
-                </Button>
-              </>
-            ) : undefined
-          }
-        >
+        <Modal open onClose={oauthDismiss.requestClose} title={title}>
           <div className="space-y-4">
             {!isEditing && (
               <div className="space-y-2">
@@ -334,20 +322,13 @@ function CredentialFormBody({
                 </Select>
               </div>
             )}
-            {isEditing && (
-              <form id="pk-form" onSubmit={onFormSubmit} noValidate>
-                {labelField}
-              </form>
-            )}
-            {showPairing && (
-              <OAuthPairingBody
-                key={selectedOption.providerId}
-                providerId={selectedOption.providerId}
-                credentialId={credential?.id}
-                onConnected={() => onClose()}
-                onBusyChange={oauthDismiss.onBusyChange}
-              />
-            )}
+            <OAuthPairingBody
+              key={selectedOption.providerId}
+              providerId={selectedOption.providerId}
+              credentialId={credential?.id}
+              onConnected={() => onClose()}
+              onBusyChange={oauthDismiss.onBusyChange}
+            />
           </div>
         </Modal>
         {oauthDismiss.confirmDialog}
@@ -412,7 +393,7 @@ function CredentialFormBody({
           </Select>
         </div>
 
-        {labelField}
+        {!isEditing && labelField}
 
         {needsBaseUrlOverride ? (
           <EndpointFields

@@ -60,7 +60,7 @@ import { useModalParam } from "../../hooks/use-modal-param";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
 import { toLiveSlug, toSlug } from "../../lib/strings";
 import { Modal } from "../modal";
-import { EmptyState } from "../page-states";
+import { EmptyState, EmptyStateAction } from "../page-states";
 import { TableRowActions } from "../table-row-actions";
 import type { SchemaField } from "./types";
 import { DraftInput, KeywordInput, NumberKeywordInput } from "./keyword-inputs";
@@ -140,7 +140,9 @@ export function SchemaFieldList({
       </div>
 
       {fields.length === 0 ? (
-        <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact />
+        <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact>
+          <EmptyStateAction label={t("editor.fieldAdd")} onClick={() => editing.open("new")} />
+        </EmptyState>
       ) : (
         <div className="border-border overflow-hidden rounded-lg border">
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>

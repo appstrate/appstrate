@@ -38,7 +38,7 @@ const PROVIDER_ID = "claude-code";
 const PROVIDER_LABEL = /Claude Code/;
 const STORAGE_KEY = "appstrate_pending_pairings";
 
-const CREDENTIAL_DIALOG = "Ajouter une clé de provider de modèle";
+const CREDENTIAL_DIALOG = "Ajouter un fournisseur";
 const CONFIRM_DIALOG = "Fermer la fenêtre de connexion ?";
 const SUCCESS_TOAST = "Provider OAuth connecté avec succès";
 
@@ -53,8 +53,8 @@ interface MintedPairing {
  * straight from the rendered CLI command.
  */
 async function mintPairingViaUi(page: Page): Promise<MintedPairing> {
-  await page.getByRole("tab", { name: "Clés de providers de modèles", exact: true }).click();
-  await page.getByRole("button", { name: "Ajouter une clé", exact: true }).first().click();
+  await page.getByRole("tab", { name: "Fournisseurs", exact: true }).click();
+  await page.getByRole("button", { name: "Ajouter un fournisseur", exact: true }).first().click();
 
   const dialog = page.getByRole("dialog", { name: CREDENTIAL_DIALOG });
   await dialog.locator("#pk-provider").click();

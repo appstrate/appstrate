@@ -8,7 +8,7 @@ import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hook
 import { formatDateField } from "../lib/format-date";
 import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState, EmptyStateAction, ErrorState } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
 import {
   DropdownMenu,
@@ -34,6 +34,8 @@ interface VersionHistoryProps {
   canDelete: boolean;
   /** Compare that version with the current draft, in the section's own modal. */
   onCompare?: (version: string) => void;
+  /** Present when the caller may create a version: the same act as the page's Actions menu. */
+  onCreate?: () => void;
 }
 
 export function VersionHistory({
@@ -42,6 +44,7 @@ export function VersionHistory({
   canRestore,
   canDelete,
   onCompare,
+  onCreate,
 }: VersionHistoryProps) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: versions, isLoading, error } = usePackageVersions(type, packageId);
@@ -97,7 +100,11 @@ export function VersionHistory({
             icon={History}
             message={t(search || states.length ? "version.noMatch" : "version.noVersions")}
             compact
-          />
+          >
+            {onCreate && !search && !states.length && (
+              <EmptyStateAction label={t("version.createVersion")} onClick={onCreate} />
+            )}
+          </EmptyState>
         }
         columns={[
           {

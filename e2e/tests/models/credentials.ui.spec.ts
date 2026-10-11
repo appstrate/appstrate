@@ -18,7 +18,7 @@ import type { APIResponse, Locator, Page } from "@playwright/test";
 
 const SETTINGS_PATH = "/org-settings/models";
 /** `credentials.title` — the tab, and `credentials.delete` — the row's trash button. */
-const CREDENTIALS_TAB = "Clés de providers de modèles";
+const CREDENTIALS_TAB = "Fournisseurs";
 const DELETE = "Supprimer";
 const CONFIRM = "Confirmer";
 const MODEL_ID = "claude-sonnet-4-5-20250929";
@@ -77,7 +77,7 @@ test.describe("Provider keys — UI", () => {
     // The page counts the models on the key itself, so the operator learns
     // what to do first instead of a refusal after the click.
     await expect(
-      dialog.getByText(`La clé "${key.label}" est utilisée par 1 modèle.`),
+      dialog.getByText(`Le fournisseur « ${key.label} » est utilisé par 1 modèle.`),
     ).toBeVisible();
     await expect(dialog.getByRole("button", { name: CONFIRM })).toBeDisabled();
     await dialog.getByRole("button", { name: "Annuler" }).click();
@@ -89,7 +89,7 @@ test.describe("Provider keys — UI", () => {
     await page.getByRole("tab", { name: CREDENTIALS_TAB }).click();
     await credentialRow(page, key.id).getByRole("button", { name: DELETE }).click();
     const confirm = page.getByRole("dialog", { name: CONFIRM });
-    await expect(confirm.getByText(`Supprimer la clé "${key.label}" ?`)).toBeVisible();
+    await expect(confirm.getByText(`Supprimer le fournisseur « ${key.label} » ?`)).toBeVisible();
     await confirm.getByRole("button", { name: CONFIRM }).click();
 
     await expect(confirm).toBeHidden();

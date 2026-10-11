@@ -47,6 +47,12 @@ and here. Paths below are relative to `apps/web/src/` unless they start with
   being explored right; a pick always ends on a workspace). Products are tabs
   (`components/product-tabs.tsx`), the foot is the profile (`components/nav-user.tsx`).
   Navigation links are `SidebarNavLink`.
+- **The sidebar's two groups are split by what you do, not by object type**
+  (`components/nav-org.tsx`). Activité is what happened: Tableau de bord, Fichiers,
+  Runs. Construire is what you configure and assemble: Agents, Skills, Intégrations,
+  Planifications (last: a schedule is a trigger you set up, like an agent). The order
+  is declared once there; the collapsed bar, the phone sheet and the active state
+  all read it.
 - The sidebar collapses completely (shadcn `offcanvas`, Cmd+B); the header then
   carries the burger and the hover peek. On a phone it is a `Sheet`. Navigation
   state is not duplicated: the header's trail is not drawn by the page, a
@@ -128,7 +134,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   select, switch or toggle on change; a text on blur or Enter, Escape reverts
   (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
   a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
-  (`components/inline-editable-label.tsx`), the one rename affordance.
+  (`components/inline-editable-label.tsx`), the one rename affordance: it shows a
+  pencil on hover, and a row's pencil button never renames, it edits what the name
+  does not (a provider's key), in a modal with no name field.
 - **Several values valid only together** are assembled in a modal that commits
   once (model, proxy, OAuth client, webhook). **A list of independently valid
   values** commits each entry on its own.
@@ -156,6 +164,11 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   replaces it).
 - A linked object (a schedule's agent) is shown as its preview card (identity
   tile, name, description, arrow), never as a bare link.
+- **What does not apply to an object is not shown**, not shown disabled: one sentence says
+  why, once, where the rows would have been (a personal workspace keeps its name and the line
+  « toujours privé, vous seul pour membre »: no visibility, default role, redirect domains or
+  deletion). A control that stays visible but dead is for a right the person lacks, with its
+  reason (section 11), not for a setting the object cannot have.
 - "Inherit" is always an explicit option and names what it inherits
   (« Hériter (Mistral Medium) »).
 - **Choosing connections: one component, everywhere** (`ConnectionChoiceMenu`,
@@ -290,10 +303,26 @@ A `Select` never holds hundreds of entries.
   needs `relative z-10`. A menu deed that opens the page's own modal pre-filled
   on the row says so in the modal's URL value (`?view-as=space:viewer`, the
   roles page's « Prévisualiser »), the same modal as the page's Actions menu.
-- States: `LoadingState`, `EmptyState` (says what to do and where the button
-  is: never promise a button that is not on screen), `ErrorState error=…`, and
+- States: `LoadingState`, `EmptyState`, `ErrorState error=…`, and
   for an unreadable resource `ResourceErrorState`
   (`components/page-states.tsx`). Never a silent redirect.
+- **An empty collection you can add to always offers the add button**
+  (`EmptyStateAction`, `components/page-states.tsx`, a white outline button with a
+  `+`, as `children` of the `EmptyState`), and only to someone who may add: the same
+  condition, label and handler (`useModalParam(...).open`, `creation.open`) as the entry
+  in the page's Actions menu (`SettingsPageActions`, `PageActionsMenu`), written once and
+  reused, never a second implementation. The Actions entry stays: the empty button
+  repeats it, it does not replace it. The button repeats a MENU entry, which is
+  hidden until opened; it never repeats a button that is already visible beside
+  the list (the connections table's toolbar already carries « Ajouter une
+  connexion », its empty state adds nothing, and a Preferences page whose
+  « Ajouter un fournisseur » is a visible button does the same): two identical
+  buttons on one screen read as a mistake. A person who may not add gets the sentence alone
+  (it says who can, or says nothing about creating); the hint never promises a button
+  that is not on screen. A filtered empty (« Aucun résultat ») offers « Tout effacer »,
+  never the add button. Not concerned: collections nobody creates by hand (runs, the
+  journal, memory, devices and CLI sessions, shares, tools of a catalogue, files) and
+  an empty state that is a fault or a locked page.
 - Adding something is one gesture: the surface (white) outline button with a `+`
   icon, or an item in the Actions menu, opening a modal; when « create » means a
   whole editor (agent, skill) it is a link to that page.

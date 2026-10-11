@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Pencil } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "./spinner";
@@ -76,19 +77,26 @@ export function InlineEditableLabel({
     return (
       <span
         className={cn(
-          "block truncate text-sm font-medium",
-          editable && "cursor-pointer hover:underline",
+          "group/label flex min-w-0 items-center gap-1.5",
+          editable && "cursor-pointer",
         )}
-        title={value}
         onClick={() => {
           if (editable) {
             setDraft(value);
             setEditing(true);
           }
         }}
-        data-testid={testId}
       >
-        {value}
+        <span className="truncate text-sm font-medium" title={value} data-testid={testId}>
+          {value}
+        </span>
+        {/* The only sign that the name can be changed: nothing else tells a name from a label. */}
+        {editable && (
+          <Pencil
+            className="text-muted-foreground size-3 shrink-0 opacity-0 transition-opacity group-hover/label:opacity-100"
+            aria-hidden
+          />
+        )}
       </span>
     );
   }

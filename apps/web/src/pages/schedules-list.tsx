@@ -8,7 +8,7 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
-import { EmptyState, ErrorState } from "../components/page-states";
+import { EmptyState, EmptyStateAction, ErrorState } from "../components/page-states";
 import { SchedulesTable, useScheduleColumns } from "../components/schedules-table";
 import { ScheduleCard } from "../components/schedule-card";
 import { CardGrid } from "../components/card-grid";
@@ -92,7 +92,11 @@ export function SchedulesListPage() {
       hint={t("schedules.emptyHint")}
       icon={Calendar}
       compact
-    />
+    >
+      {can("schedules:write") && (
+        <EmptyStateAction label={t("schedules.create")} onClick={() => newSchedule.open()} />
+      )}
+    </EmptyState>
   );
 
   return (

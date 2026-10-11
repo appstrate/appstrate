@@ -53,7 +53,7 @@ import { RoleCatalogState } from "../../../components/role-catalog-state";
 import { SettingsPageActions } from "../../../components/settings/settings-page-actions";
 import { SpaceRoleSelect } from "../../../components/space-role-select";
 import { ViewAsDialog } from "../../../components/view-as-dialog";
-import { ErrorState, EmptyState } from "../../../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
 import { useSpaceMemberColumns } from "./space-member-columns";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../rbac-deeds";
@@ -258,7 +258,11 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
               hint={t("spaceMembers.emptyHint")}
               icon={Users}
               compact
-            />
+            >
+              {deeds.includes("add") && (
+                <EmptyStateAction label={t("spaceMembers.add")} onClick={() => addParam.open()} />
+              )}
+            </EmptyState>
           }
         />
       )}

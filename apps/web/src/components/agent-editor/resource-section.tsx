@@ -34,7 +34,7 @@ import {
 import { Spinner } from "../spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
-import { ErrorState, EmptyState } from "../page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../page-states";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
@@ -599,7 +599,11 @@ function SelectedResources({
           message={canReadCatalog ? emptyLabel : t("editor.catalogUnreadable")}
           icon={SearchX}
           compact
-        />
+        >
+          {canReadCatalog && (
+            <EmptyStateAction label={t("editor.resourceAdd")} onClick={() => picker.open()} />
+          )}
+        </EmptyState>
       ) : (
         <div className="border-border overflow-hidden rounded-lg border">
           {!canReadCatalog && (

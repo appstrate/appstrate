@@ -160,6 +160,7 @@
   "apiError.personal_space_takes_no_keys": "Un espace personnel n'accepte pas de clé API. Créez la clé dans un espace d'équipe.",
   "apiError.personal_space_takes_no_end_users": "Un espace personnel n'accepte pas d'end-user. Créez-le dans un espace d'équipe.",
   "apiError.personal_space_takes_no_oauth_clients": "Un espace personnel n'accepte pas de client OAuth. Enregistrez-le dans un espace d'équipe.",
+  "apiError.personal_space_takes_no_end_user_sign_in": "Un espace personnel n'accepte pas de configuration de connexion pour les utilisateurs finaux (SMTP, fournisseurs sociaux). Configurez-la dans un espace d'équipe.",
   "apiError.personal_space_has_no_members": "Un espace personnel appartient à un seul membre. Convertissez-le d'abord en espace d'équipe.",
   "apiError.personal_space_immutable": "Un espace personnel est toujours privé : seul son nom peut être modifié.",
   "apiError.personal_space_not_deletable": "Un espace personnel est supprimé au départ de son propriétaire. Convertissez-le en espace d'équipe pour conserver son contenu.",

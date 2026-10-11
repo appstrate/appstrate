@@ -59,6 +59,8 @@ export interface PackageCollectionProps {
   emptyMessage: string;
   emptyHint?: ReactNode;
   emptyIcon: LucideIcon;
+  /** The page's creation button, when the caller may create: the empty list offers it. */
+  emptyAction?: ReactNode;
   list: ListState;
   view: ListView;
   /** Absent when the view is the surface's decision, not the reader's. */
@@ -126,6 +128,7 @@ export function PackageCollection({
   emptyMessage,
   emptyHint,
   emptyIcon,
+  emptyAction,
   list,
   view,
   onViewChange,
@@ -226,7 +229,9 @@ export function PackageCollection({
       </Button>
     </EmptyState>
   ) : (
-    <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact />
+    <EmptyState message={emptyMessage} hint={emptyHint} icon={emptyIcon} compact>
+      {emptyAction}
+    </EmptyState>
   );
 
   return (

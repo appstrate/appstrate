@@ -29,7 +29,7 @@ import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { CredentialsSection } from "../../components/model-credentials-section";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { useModelColumns } from "./model-columns";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
@@ -107,8 +107,11 @@ export function ModelsList({
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}
-        // No action of its own: the button above is the same one, and it stays.
-        empty={<EmptyState message={t("models.empty")} icon={BrainCircuit} compact />}
+        empty={
+          <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
+            {canWrite && <EmptyStateAction label={t("models.add")} onClick={onCreate} />}
+          </EmptyState>
+        }
       />
     </>
   );
@@ -245,6 +248,7 @@ export function OrgSettingsModelsPage() {
               });
             }}
             onConnectOAuth={(credential) => editPkParam.open(credential.id)}
+            onAdd={canWriteCredentials ? () => newPk.open() : undefined}
             showOwner
           />
         </>

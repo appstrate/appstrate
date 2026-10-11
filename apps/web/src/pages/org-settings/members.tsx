@@ -14,7 +14,7 @@ import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
@@ -223,7 +223,11 @@ export function OrgSettingsMembersPage() {
           hint={t("orgSettings.noMembersHint")}
           icon={Users}
           compact
-        />
+        >
+          {canInvite && (
+            <EmptyStateAction label={t("orgSettings.inviteMember")} onClick={() => invite.open()} />
+          )}
+        </EmptyState>
       )}
 
       <ConfirmModal

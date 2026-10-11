@@ -14,6 +14,7 @@ import { usePackageViewStore } from "../stores/list-view-store";
 import { useListParams } from "../lib/list-params";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
+import { EmptyStateAction } from "../components/page-states";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { useModalParam } from "../hooks/use-modal-param";
 import { ImportModal } from "../components/import-modal";
@@ -52,6 +53,8 @@ interface PackageTabProps {
   emptyMessage: string;
   emptyHint: ReactNode;
   emptyIcon: LucideIcon;
+  /** The creation button the empty list offers, when the caller may create. */
+  emptyAction?: ReactNode;
   /** What the list holds, plural, for the search box: "Agents", "Skills". */
   entity: string;
   /** What KIND it holds. Decides which columns can say anything at all. */
@@ -69,6 +72,7 @@ export function PackageTab({
   emptyMessage,
   emptyHint,
   emptyIcon,
+  emptyAction,
   entity,
   holds,
   extraActions,
@@ -99,6 +103,7 @@ export function PackageTab({
         emptyMessage={emptyMessage}
         emptyHint={emptyHint}
         emptyIcon={emptyIcon}
+        emptyAction={emptyAction}
         list={list}
         view={view}
         onViewChange={setView}
@@ -147,6 +152,11 @@ export function PackageList() {
         emptyMessage={t("list.empty")}
         emptyHint={<SpaceLibraryHint type="agent" />}
         emptyIcon={Layers}
+        emptyAction={
+          can("agents:write") ? (
+            <EmptyStateAction label={t("list.create")} onClick={creation.open} />
+          ) : undefined
+        }
         extraActions={
           can("agents:write") || canActivate || canImport ? (
             <PageActionsMenu>

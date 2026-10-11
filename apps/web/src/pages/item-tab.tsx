@@ -12,6 +12,7 @@ import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
 import { packageNewPath } from "../lib/package-paths";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import { EmptyStateAction } from "../components/page-states";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import { openAsModal } from "../lib/modal-route";
@@ -87,6 +88,14 @@ export function ItemTab({
         emptyMessage={t("packages.emptyItems", { type: typeLabel })}
         emptyHint={<SpaceLibraryHint type={type} />}
         emptyIcon={presentation.emptyIcon}
+        emptyAction={
+          canCreate ? (
+            <EmptyStateAction
+              label={t("list.createItem", { ns: "agents", type: typeLabel })}
+              onClick={creation.open}
+            />
+          ) : undefined
+        }
         extraActions={
           canCreate || canImport || canActivate ? (
             <PageActionsMenu>

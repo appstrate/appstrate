@@ -61,9 +61,9 @@ export function NavOrg() {
   const unread = unreadCount ?? 0;
 
   // Two groups, split by what you are DOING rather than by object type:
-  // Activité is what is happening (and what is scheduled to happen), Construire
-  // is what you assemble. Schedules moved out of the old "Automatisation" for
-  // that reason — a schedule is upcoming activity, not a thing you build.
+  // Activité is what happened (dashboard, runs, files), Construire is what you
+  // configure and assemble (agents, skills, integrations, schedules). A schedule
+  // is a trigger you set up, like an agent, so it ends Construire.
   // Runs is rendered specially (running spinner + unread badge) inside Activité.
   // Every entry, Runs included, is shown exactly when its route's declaration
   // (`lib/route-access.ts`) opens the page it lands on — a custom space role
@@ -75,16 +75,13 @@ export function NavOrg() {
     { path: "/files", label: t("nav.files"), icon: FileText },
   ]);
 
-  const activityTailItems = reachable([
-    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
-  ]);
-
   // No "local MCP servers" entry: a server is the engine of a local
   // integration and reached from it, never used on its own.
   const buildItems = reachable([
     { path: "/agents", label: t("nav.agents"), icon: Layers },
     { path: "/skills", label: t("nav.skills"), icon: Wrench },
     { path: "/integrations", label: t("nav.integrations"), icon: Boxes },
+    { path: "/schedules", label: t("nav.schedules"), icon: Calendar },
   ]);
 
   const renderItems = (items: NavItem[]) =>
@@ -142,7 +139,6 @@ export function NavOrg() {
               )}
             </SidebarMenuItem>
           )}
-          {renderItems(activityTailItems)}
         </SidebarMenu>
       </SidebarGroup>
 

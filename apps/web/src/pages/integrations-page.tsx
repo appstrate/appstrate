@@ -12,7 +12,7 @@ import { CollectionTabs } from "../components/collection-tabs";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
-import { ErrorState, EmptyState } from "../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
@@ -133,7 +133,11 @@ export function IntegrationsPage() {
       icon={filtering ? SearchX : Boxes}
       compact
       message={filtering ? t("integrations.empty.filtered") : t("integrations.empty.organization")}
-    />
+    >
+      {!filtering && can("integrations:write") && (
+        <EmptyStateAction label={t("integrations.create")} onClick={creation.open} />
+      )}
+    </EmptyState>
   );
 
   return (

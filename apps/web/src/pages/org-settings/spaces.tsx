@@ -24,7 +24,7 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useSpaceSwitcher } from "../../hooks/use-current-space";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
@@ -112,8 +112,11 @@ export function OrgSettingsSpacesPage() {
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}
         empty={
-          // No action of its own: the button above is the same one.
-          <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow} />
+          <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
+            {can("spaces:write") && (
+              <EmptyStateAction label={t("spaces.create")} onClick={() => newSpace.open()} />
+            )}
+          </EmptyState>
         }
       />
 

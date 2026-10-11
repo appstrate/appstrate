@@ -38,7 +38,12 @@ import { ScopeMultiSelect } from "../../components/scope-multi-select";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import {
+  LoadingState,
+  ErrorState,
+  EmptyState,
+  EmptyStateAction,
+} from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
@@ -261,7 +266,14 @@ export function OrgSettingsRolesPage() {
                       hint={t("roles.emptyHint")}
                       icon={ShieldCheck}
                       compact
-                    />
+                    >
+                      {deeds.includes("create") && (
+                        <EmptyStateAction
+                          label={t("roles.create")}
+                          onClick={() => roleParam.open("new")}
+                        />
+                      )}
+                    </EmptyState>
                   }
                 />
               </SettingsGroup>

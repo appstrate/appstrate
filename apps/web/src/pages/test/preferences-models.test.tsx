@@ -137,7 +137,7 @@ function rowOf(html: string, text: string): string {
 }
 
 /** What a cell shows when its label can be renamed in place. */
-const RENAMABLE = "hover:underline";
+const RENAMABLE = "cursor-pointer";
 
 describe("the Preferences models page, for a member who holds connect", () => {
   const html = renderFor(["model-provider-credentials:connect"]);

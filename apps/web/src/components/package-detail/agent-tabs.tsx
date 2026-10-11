@@ -23,7 +23,7 @@ import { AgentRunButton } from "./agent-run-button";
 import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
-import { EmptyState } from "../page-states";
+import { EmptyState, EmptyStateAction } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { openAsModal } from "../../lib/modal-route";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
@@ -141,7 +141,10 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       {!schedules || schedules.length === 0 ? (
         <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
           {can("schedules:write") && (
-            <Button onClick={() => newSchedule.open(packageId)}>{t("btn.add")}</Button>
+            <EmptyStateAction
+              label={t("schedule.titleNew")}
+              onClick={() => newSchedule.open(packageId)}
+            />
           )}
         </EmptyState>
       ) : (

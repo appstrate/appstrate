@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { Globe } from "lucide-react";
+import { Globe, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
@@ -28,6 +28,7 @@ import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-select
 import { ModelUnselectableNote } from "../model-availability-badge";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { useCanReach } from "../../hooks/use-can-reach";
+import { usePermissions } from "../../hooks/use-permissions";
 import { openAsModal } from "../../lib/modal-route";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
@@ -339,11 +340,12 @@ function ModelSectionEditor({
 
 // ─── Proxy Section ──────────────────────────────────────────────────
 
-/** The organisation has no proxy to route through: say where one is added. */
+/** The organisation has no proxy to route through: the button opens the proxy creation itself. */
 function NoProxyState() {
   const { t } = useTranslation(["agents", "settings"]);
   const location = useLocation();
   const canReach = useCanReach();
+  const { can } = usePermissions();
   return (
     <EmptyState
       icon={Globe}
@@ -351,9 +353,10 @@ function NoProxyState() {
       message={t("detail.configuration.proxyEmpty")}
       hint={t("detail.configuration.proxyEmptyHint")}
     >
-      {canReach("/org-settings/proxies") && (
+      {canReach("/org-settings/proxies") && can("proxies:write") && (
         <Button asChild variant="outline" size="sm">
-          <Link to="/org-settings/proxies" state={openAsModal(location)}>
+          <Link to="/org-settings/proxies?newProxy=1" state={openAsModal(location)}>
+            <Plus />
             {t("proxies.add", { ns: "settings" })}
           </Link>
         </Button>

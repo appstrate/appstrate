@@ -16,7 +16,7 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { PageActionsMenu } from "@/components/page-actions-menu";
-import { ErrorState, EmptyState } from "@/components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "@/components/page-states";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
@@ -87,7 +87,16 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}
-        empty={<EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound} />}
+        empty={
+          <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
+            {can("oauth-clients:write") && (
+              <EmptyStateAction
+                label={t("settings:oauthClients.createBtn")}
+                onClick={() => setSelectedClient("new")}
+              />
+            )}
+          </EmptyState>
+        }
       />
 
       <OAuthClientFormModal

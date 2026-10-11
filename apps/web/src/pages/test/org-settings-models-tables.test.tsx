@@ -114,7 +114,7 @@ function rowOf(html: string, text: string): string {
 }
 
 /** What a cell shows when its label can be renamed in place. */
-const RENAMABLE = "hover:underline";
+const RENAMABLE = "cursor-pointer";
 
 describe("the credentials table, as Bob sees it", () => {
   const html = credentialsPage([ORG_KEY, BOB_SUBSCRIPTION, ALICE_SUBSCRIPTION]);
@@ -226,5 +226,53 @@ describe("the models table, for the credential each model names", () => {
 
   it("says that each member brings their own credential, for an unbound model", () => {
     expect(row(unbound)).toContain(settingsFr["models.credentialEachMember"]);
+  });
+});
+
+describe("the empty models and credentials lists", () => {
+  const emptyModels = (canWrite: boolean) =>
+    render(
+      <ModelsList
+        models={[]}
+        isLoading={false}
+        error={null}
+        onCreate={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onSetDefault={() => {}}
+        settingDefaultId={null}
+        canWrite={canWrite}
+        canDelete={false}
+        credentialLabels={new Map()}
+      />,
+      { queryClient: seededClient() },
+    );
+  const emptyCredentials = (onAdd?: () => void) =>
+    render(
+      <CredentialsSection
+        credentials={[]}
+        isLoading={false}
+        error={null}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onRename={async () => {}}
+        onConnectOAuth={() => {}}
+        onAdd={onAdd}
+        showOwner
+      />,
+      { queryClient: seededClient() },
+    );
+
+  it("offers the add button to someone who may add a model, and not to anyone else", () => {
+    // The Actions menu is closed in a static render: this button is the empty state's.
+    expect(emptyModels(true)).toContain(settingsFr["models.add"]);
+    expect(emptyModels(false)).toContain(settingsFr["models.empty"]);
+    expect(emptyModels(false)).not.toContain(settingsFr["models.add"]);
+  });
+
+  it("offers the add button to someone who may add a provider, and not to anyone else", () => {
+    expect(emptyCredentials(() => {})).toContain(settingsFr["credentials.add"]);
+    expect(emptyCredentials()).toContain(settingsFr["credentials.empty"]);
+    expect(emptyCredentials()).not.toContain(settingsFr["credentials.add"]);
   });
 });

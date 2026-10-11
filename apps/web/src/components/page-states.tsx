@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { SearchX, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Plus, SearchX, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { cn } from "@appstrate/ui/cn";
 import { errorDetail } from "../lib/mutation-error";
@@ -154,6 +155,22 @@ export function EmptyState({
       )}
       {children && <div className="mt-4 flex items-center gap-2">{children}</div>}
     </div>
+  );
+}
+
+/**
+ * The creation button of an empty collection, in the treatment every addition has
+ * (a white outline button with a `+`). It does exactly what the page's Actions menu
+ * entry does, so the caller hands it the same label and the same handler, and
+ * renders it only under the same permission; a person who may not create gets no
+ * button.
+ */
+export function EmptyStateAction({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Button type="button" variant="outline" size="sm" onClick={onClick}>
+      <Plus />
+      {label}
+    </Button>
   );
 }
 

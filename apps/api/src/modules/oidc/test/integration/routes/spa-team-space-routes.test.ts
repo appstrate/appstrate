@@ -32,6 +32,21 @@ const CREATE_IN_PERSONAL_SPACE: Record<
   string,
   (ctx: TestContext, personalId: string) => Response | Promise<Response>
 > = {
+  "/workspace-settings/auth": (ctx, personalId) =>
+    app.request(`/api/spaces/${personalId}/smtp-config`, {
+      method: "PUT",
+      headers: {
+        ...authHeaders(ctx, { "X-Space-Id": personalId }),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        host: "smtp.example.com",
+        port: 587,
+        username: "mailer",
+        pass: "secret",
+        from_address: "noreply@example.com",
+      }),
+    }),
   "/workspace-settings/oauth": (ctx, personalId) =>
     app.request("/api/oauth/clients", {
       method: "POST",
@@ -73,4 +88,17 @@ describe("SPA teamSpaceOnly OIDC routes ↔ personal-space refusals", () => {
       expect(problem.code).toMatch(/^personal_space_/);
     });
   }
+
+  it("/workspace-settings/auth: a social provider is refused there too", async () => {
+    const res = await app.request(`/api/spaces/${personalId}/social-providers/google`, {
+      method: "PUT",
+      headers: {
+        ...authHeaders(ctx, { "X-Space-Id": personalId }),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ client_id: "id", client_secret: "secret" }),
+    });
+    const problem = await expectProblem(res, 409);
+    expect(problem.code).toBe("personal_space_takes_no_end_user_sign_in");
+  });
 });

@@ -22,7 +22,7 @@ import { useConnectionTest, type TestResult } from "../../hooks/use-connection-t
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
 import { NoAccessState } from "../../components/route-gate";
@@ -244,9 +244,11 @@ export function OrgSettingsProxiesPage() {
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}
-        // No action of its own: the button above the table is the same one, and
-        // it does not go away when the list is empty.
-        empty={<EmptyState message={t("proxies.empty")} icon={Globe} compact />}
+        empty={
+          <EmptyState message={t("proxies.empty")} icon={Globe} compact>
+            {canWrite && <EmptyStateAction label={t("proxies.add")} onClick={onCreate} />}
+          </EmptyState>
+        }
       />
 
       <ProxyFormModal

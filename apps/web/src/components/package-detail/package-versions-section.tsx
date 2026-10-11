@@ -29,6 +29,7 @@ export function PackageVersionsSection({
   packageId,
   canRestore,
   canDelete,
+  onCreate,
   latestVersion,
   currentManifest,
   currentContent,
@@ -38,6 +39,7 @@ export function PackageVersionsSection({
   packageId: string;
   canRestore: boolean;
   canDelete: boolean;
+  onCreate?: () => void;
   latestVersion?: LatestVersion;
   currentManifest?: Record<string, unknown>;
   currentContent?: string | null;
@@ -75,6 +77,7 @@ export function PackageVersionsSection({
         type={type}
         canRestore={canRestore}
         canDelete={canDelete}
+        onCreate={onCreate}
         onCompare={(version) => compareParam.open(version)}
       />
 

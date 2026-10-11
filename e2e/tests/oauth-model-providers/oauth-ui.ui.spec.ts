@@ -33,8 +33,6 @@ test.describe("OAuth Model Providers — UI smoke", () => {
     await expect(page.getByRole("tab", { name: "Modèles", exact: true })).toBeVisible({
       timeout: 10_000,
     });
-    await expect(
-      page.getByRole("tab", { name: "Clés de providers de modèles", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Fournisseurs", exact: true })).toBeVisible();
   });
 });

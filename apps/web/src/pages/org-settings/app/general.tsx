@@ -162,146 +162,150 @@ function GeneralForm({
           />
         </SettingRow>
 
-        <SettingRow
-          variant="field"
-          label={t("applications.redirectDomains")}
-          description={t("applications.redirectDomainsHint")}
-          status={feedback("domains")}
-        >
-          <div className="flex w-full flex-col gap-2">
-            {activeDomains.map((domain, index) => (
-              <div key={index} className="flex w-full items-center gap-2">
-                <Input
-                  type="text"
-                  value={domain}
-                  disabled={updateMutation.isPending}
-                  className="min-w-0 flex-1"
-                  onChange={(e) =>
-                    setEditedDomains((prev) =>
-                      (prev ?? domains).map((d, i) => (i === index ? e.target.value : d)),
-                    )
-                  }
-                  // Commits when you leave the field, like every other setting
-                  // here; Enter is the same answer for a single-line input.
-                  onBlur={() => commitDomains(activeDomains)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                  placeholder="example.com"
-                />
+        {application.personal ? (
+          <p className="text-muted-foreground text-sm">{t("spaces.personal.settingsLocked")}</p>
+        ) : (
+          <>
+            <SettingRow
+              variant="field"
+              label={t("applications.redirectDomains")}
+              description={t("applications.redirectDomainsHint")}
+              status={feedback("domains")}
+            >
+              <div className="flex w-full flex-col gap-2">
+                {activeDomains.map((domain, index) => (
+                  <div key={index} className="flex w-full items-center gap-2">
+                    <Input
+                      type="text"
+                      value={domain}
+                      disabled={updateMutation.isPending}
+                      className="min-w-0 flex-1"
+                      onChange={(e) =>
+                        setEditedDomains((prev) =>
+                          (prev ?? domains).map((d, i) => (i === index ? e.target.value : d)),
+                        )
+                      }
+                      // Commits when you leave the field, like every other setting
+                      // here; Enter is the same answer for a single-line input.
+                      onBlur={() => commitDomains(activeDomains)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      placeholder="example.com"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={updateMutation.isPending}
+                      aria-label={t("btn.delete", { ns: "common" })}
+                      onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
+                    >
+                      <X size={16} />
+                    </Button>
+                  </div>
+                ))}
+                {/* Adding one does not save: an empty row is not a domain. It
+                commits when the field it opened is filled and left. */}
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="icon"
+                  variant="outline"
+                  size="sm"
                   disabled={updateMutation.isPending}
-                  aria-label={t("btn.delete", { ns: "common" })}
-                  onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
+                  className="self-start"
+                  onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
                 >
-                  <X size={16} />
+                  <Plus size={14} className="mr-1.5" />
+                  {t("applications.addDomain")}
                 </Button>
               </div>
-            ))}
-            {/* Adding one does not save: an empty row is not a domain. It
-                commits when the field it opened is filled and left. */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={updateMutation.isPending}
-              className="self-start"
-              onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
-            >
-              <Plus size={14} className="mr-1.5" />
-              {t("applications.addDomain")}
-            </Button>
-          </div>
-        </SettingRow>
+            </SettingRow>
 
-        {application.personal && (
-          <p className="text-muted-foreground mb-4 text-sm">
-            {t("spaces.personal.settingsLocked")}
-          </p>
-        )}
-
-        {/* Who reaches this space without an explicit membership row (RBAC
+            {/* Who reaches this space without an explicit membership row (RBAC
             spec §3.1). Radios rather than a select: the three answers differ
             in consequence, not in degree, and each needs its sentence. */}
-        <SettingRow
-          variant="field"
-          label={t("spaces.visibilityLabel")}
-          description={t("spaces.visibilityHint")}
-          status={feedback("visibility")}
-        >
-          <div className="flex w-full flex-col gap-3">
-            <RadioGroup
-              value={activeVisibility}
-              onValueChange={(value) => commitVisibility(value as SpaceVisibility)}
-              disabled={application.isDefault || application.personal || updateMutation.isPending}
-              aria-label={t("spaces.visibilityLabel")}
+            <SettingRow
+              variant="field"
+              label={t("spaces.visibilityLabel")}
+              description={t("spaces.visibilityHint")}
+              status={feedback("visibility")}
             >
-              {SPACE_VISIBILITIES.map((value) => (
-                <div key={value} className="flex items-start gap-2">
-                  <RadioGroupItem
-                    value={value}
-                    id={`space-visibility-${value}`}
-                    className="mt-1 shrink-0"
-                  />
-                  <Label
-                    htmlFor={`space-visibility-${value}`}
-                    className="flex min-w-0 flex-col items-start gap-1"
-                  >
-                    <span>{t(`spaces.visibility.${value}`)}</span>
-                    <span className="text-muted-foreground text-sm leading-relaxed font-normal">
-                      {t(`spaces.visibilityDesc.${value}`)}
-                    </span>
-                  </Label>
-                </div>
-              ))}
-            </RadioGroup>
-            <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
-            {/* A pick commits at once, so the consequence of closing is said
+              <div className="flex w-full flex-col gap-3">
+                <RadioGroup
+                  value={activeVisibility}
+                  onValueChange={(value) => commitVisibility(value as SpaceVisibility)}
+                  disabled={application.isDefault || updateMutation.isPending}
+                  aria-label={t("spaces.visibilityLabel")}
+                >
+                  {SPACE_VISIBILITIES.map((value) => (
+                    <div key={value} className="flex items-start gap-2">
+                      <RadioGroupItem
+                        value={value}
+                        id={`space-visibility-${value}`}
+                        className="mt-1 shrink-0"
+                      />
+                      <Label
+                        htmlFor={`space-visibility-${value}`}
+                        className="flex min-w-0 flex-col items-start gap-1"
+                      >
+                        <span>{t(`spaces.visibility.${value}`)}</span>
+                        <span className="text-muted-foreground text-sm leading-relaxed font-normal">
+                          {t(`spaces.visibilityDesc.${value}`)}
+                        </span>
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+                <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
+                {/* A pick commits at once, so the consequence of closing is said
                 while the space is still open: implicit members lose access and
                 the server unshares the connections they shared here. */}
-            {activeVisibility === "open" && !application.isDefault && !application.personal && (
-              <p className="text-muted-foreground text-xs">
-                {t("spaces.closeUnsharesConnections")}
-              </p>
-            )}
-            {application.isDefault && (
-              <p className="text-muted-foreground text-xs">{t("spaces.visibilityDefaultLocked")}</p>
-            )}
-          </div>
-        </SettingRow>
+                {activeVisibility === "open" && !application.isDefault && (
+                  <p className="text-muted-foreground text-xs">
+                    {t("spaces.closeUnsharesConnections")}
+                  </p>
+                )}
+                {application.isDefault && (
+                  <p className="text-muted-foreground text-xs">
+                    {t("spaces.visibilityDefaultLocked")}
+                  </p>
+                )}
+              </div>
+            </SettingRow>
 
-        {/* Only an `open` space has implicit members, so only it has a preset
+            {/* Only an `open` space has implicit members, so only it has a preset
             to give them. */}
-        {activeVisibility === "open" && (
-          <SettingRow
-            variant="field"
-            label={t("spaces.defaultRoleLabel")}
-            description={t("spaces.defaultRoleHint")}
-            status={feedback("defaultRole")}
-          >
-            <div className="flex w-full flex-col gap-2">
-              <SpaceRoleSelect
-                id="space-default-role"
-                className="w-full sm:w-[240px]"
-                value={activeDefaultRole}
-                options={presetOptions}
-                fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
-                disabled={application.personal || updateMutation.isPending}
-                onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
-              />
-              <RoleCatalogState
-                isLoading={rolesLoading}
-                rolesKnown={rolesKnown}
-                error={rolesError}
-                refetch={() => void refetchRoles()}
-                emptyMessage={presetOptions.length === 0 ? t("spaces.noAssignablePresets") : null}
-              />
-              <p className="text-muted-foreground text-xs">{t("spaces.defaultRoleImpact")}</p>
-            </div>
-          </SettingRow>
+            {activeVisibility === "open" && (
+              <SettingRow
+                variant="field"
+                label={t("spaces.defaultRoleLabel")}
+                description={t("spaces.defaultRoleHint")}
+                status={feedback("defaultRole")}
+              >
+                <div className="flex w-full flex-col gap-2">
+                  <SpaceRoleSelect
+                    id="space-default-role"
+                    className="w-full sm:w-[240px]"
+                    value={activeDefaultRole}
+                    options={presetOptions}
+                    fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
+                    disabled={updateMutation.isPending}
+                    onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
+                  />
+                  <RoleCatalogState
+                    isLoading={rolesLoading}
+                    rolesKnown={rolesKnown}
+                    error={rolesError}
+                    refetch={() => void refetchRoles()}
+                    emptyMessage={
+                      presetOptions.length === 0 ? t("spaces.noAssignablePresets") : null
+                    }
+                  />
+                  <p className="text-muted-foreground text-xs">{t("spaces.defaultRoleImpact")}</p>
+                </div>
+              </SettingRow>
+            )}
+          </>
         )}
       </SettingsGroup>
 
@@ -309,7 +313,7 @@ function GeneralForm({
           the CONTROL — a button that opens a confirm — which is what the row
           pattern says a destructive setting looks like, rather than a red-bordered
           card that reads as a different kind of screen. */}
-      {!application.isDefault && can("spaces:delete") && (
+      {!application.isDefault && !application.personal && can("spaces:delete") && (
         <SettingsGroup title={t("applications.dangerZone")}>
           <SettingRow
             variant="action"

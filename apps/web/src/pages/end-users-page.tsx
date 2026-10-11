@@ -14,7 +14,7 @@ import {
   type EndUserInfo,
 } from "../hooks/use-end-users";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { LoadingState, ErrorState, EmptyState, EmptyStateAction } from "../components/page-states";
 import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
@@ -188,7 +188,12 @@ function EndUsersPageContent() {
               hint={t("applications.noEndUsersHint")}
               icon={Users}
               compact
-            />
+            >
+              <EmptyStateAction
+                label={t("applications.newEndUser")}
+                onClick={() => newEndUser.open()}
+              />
+            </EmptyState>
           )
         }
       />

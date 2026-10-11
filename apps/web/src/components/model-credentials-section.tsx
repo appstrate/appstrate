@@ -16,7 +16,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useCredentialColumns } from "../pages/org-settings/model-columns";
 import { DataTable } from "./data-table";
-import { EmptyState, ErrorState } from "./page-states";
+import { EmptyState, EmptyStateAction, ErrorState } from "./page-states";
 
 export function CredentialsSection({
   credentials,
@@ -26,6 +26,7 @@ export function CredentialsSection({
   onDelete,
   onRename,
   onConnectOAuth,
+  onAdd,
   showOwner,
   empty,
 }: {
@@ -36,6 +37,8 @@ export function CredentialsSection({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => Promise<void>;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
+  /** The page's « add » deed, given only to a caller who may add: the empty list repeats it. */
+  onAdd?: () => void;
   /** Whether the owner column shows; a personal-only list has one owner, the caller. */
   showOwner: boolean;
   /** Empty-state copy; the organization's by default. */
@@ -71,7 +74,9 @@ export function CredentialsSection({
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}
         empty={
-          <EmptyState message={emptyCopy.message} hint={emptyCopy.hint} icon={KeyRound} compact />
+          <EmptyState message={emptyCopy.message} hint={emptyCopy.hint} icon={KeyRound} compact>
+            {onAdd && <EmptyStateAction label={t("credentials.add")} onClick={onAdd} />}
+          </EmptyState>
         }
       />
     </div>

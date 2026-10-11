@@ -86,7 +86,7 @@ describe("the models page for a member who can only read models", () => {
   it("renders the models tab, and offers no credentials tab to open", () => {
     const { html } = renderFor(MEMBER);
     expect(html).toContain("Modèles");
-    expect(html).not.toContain("Clés de providers de modèles");
+    expect(html).not.toContain("Fournisseurs");
   });
 });
 

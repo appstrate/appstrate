@@ -115,7 +115,7 @@ describe("unified settings navigation", () => {
 
   it("drops the team-space entries in a personal space, whatever the grants", () => {
     // The owner of a personal space holds the admin preset there; the server
-    // still refuses every write behind these four screens.
+    // still refuses every write behind these five screens.
     const all = () => true;
     const shown = buildSettingsNavigation({
       can: all,
@@ -127,9 +127,12 @@ describe("unified settings navigation", () => {
       "/workspace-settings/api-keys",
       "/workspace-settings/oauth",
       "/workspace-settings/end-users",
+      "/workspace-settings/auth",
     ]) {
       expect(shown).not.toContain(path);
     }
     expect(shown).toContain("/workspace-settings/general");
+    // A webhook pinned to a personal space is accepted (201), so its page stays.
+    expect(shown).toContain("/workspace-settings/webhooks");
   });
 });
