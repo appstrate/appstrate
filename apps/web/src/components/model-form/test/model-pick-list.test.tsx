@@ -80,14 +80,6 @@ describe("ModelPickList", () => {
     expect(html).toContain('value="qwen"');
   });
 
-  it("says where each description came from, and stays silent when nothing did", () => {
-    const html = list();
-    expect(html).toContain(settingsFr["models.form.discoverSourceEndpoint"]);
-    expect(html).toContain(settingsFr["models.form.discoverSourceCatalog"]);
-    // One badge each, and none for the model neither source described.
-    expect(html.split(settingsFr["models.form.discoverSourceCatalog"]).length - 1).toBe(1);
-  });
-
   it("shows a context window only for the models that reported one", () => {
     const html = list();
     expect(html).toContain("33k");

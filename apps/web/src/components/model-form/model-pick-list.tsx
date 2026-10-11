@@ -8,7 +8,6 @@
 
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
@@ -41,13 +40,6 @@ function PickRow({
   extras: RowExtras;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const sourceLabel =
-    row.source === "catalog"
-      ? t("models.form.discoverSourceCatalog")
-      : row.source === "endpoint"
-        ? t("models.form.discoverSourceEndpoint")
-        : null;
-
   return (
     <div className="flex items-center gap-2 px-3 py-2">
       <Checkbox id={id} checked={checked} onCheckedChange={(v) => onCheckedChange(Boolean(v))} />
@@ -57,11 +49,6 @@ function PickRow({
           <span className="text-muted-foreground block truncate font-mono text-xs">{row.id}</span>
         )}
       </Label>
-      {sourceLabel && (
-        <Badge variant="secondary" className="shrink-0">
-          {sourceLabel}
-        </Badge>
-      )}
       {row.contextWindow !== null && (
         <span className="text-muted-foreground shrink-0 text-xs">
           {Math.round(row.contextWindow / 1000)}k
