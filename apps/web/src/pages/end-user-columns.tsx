@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Trash2 } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { Pencil, Trash2 } from "lucide-react";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { usePermissions } from "../hooks/use-permissions";
 import { TableRowActions } from "../components/table-row-actions";
@@ -82,13 +82,17 @@ export function useEndUserColumns({
       align: "end",
       cell: (user) => (
         <TableRowActions
-          primary={{ label: t("common:btn.edit"), onSelect: () => onEdit(user) }}
           menuLabel={t("applications.moreEndUserActions", {
             name: endUserDisplayName(user, t("applications.anonymousUser")),
           })}
           isPending={deletingUserId === user.id}
           pendingLabel={t("common:loading")}
         >
+          <DropdownMenuItem onSelect={() => onEdit(user)}>
+            <Pencil />
+            {t("common:btn.edit")}
+          </DropdownMenuItem>
+          {canDelete && <DropdownMenuSeparator />}
           {canDelete && (
             <DropdownMenuItem
               onSelect={() => onDelete(user)}

@@ -37,7 +37,11 @@ import {
 } from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
-import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
+import {
+  useCredentialColumns,
+  useMemberProviderColumns,
+  useModelColumns,
+} from "../../pages/org-settings/model-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
@@ -182,13 +186,17 @@ const SETS = {
         testingIds: new Set(),
         testResults: {},
         settingDefaultId: null,
+        togglingId: null,
+        renamingId: null,
+        onRenamingChange: () => {},
         onTest: () => {},
         onEdit: () => {},
         onDelete: () => {},
         onSetDefault: () => {},
+        onRename: async () => {},
+        onToggleEnabled: () => {},
         canWrite: true,
         canDelete: true,
-        credentialLabels: new Map(),
       }),
     ),
   credentials: () =>
@@ -197,13 +205,23 @@ const SETS = {
         registry: undefined,
         testingIds: new Set(),
         testResults: {},
+        renamingId: null,
+        onRenamingChange: () => {},
         onTest: () => {},
         onEdit: () => {},
         onDelete: () => {},
-        onRename: () => {},
+        onRename: async () => {},
         onConnectOAuth: () => {},
-        // The administrator's list, the wider of the two: it adds the owner column.
-        showOwner: true,
+      }),
+    ),
+  memberProviders: () =>
+    columnsFrom(() =>
+      useMemberProviderColumns({
+        registry: undefined,
+        testingIds: new Set(),
+        testResults: {},
+        onTest: () => {},
+        userId: "user_1",
       }),
     ),
   proxies: () =>
@@ -245,8 +263,7 @@ const SETS = {
         spaces: () => ["Production"],
       }),
     ),
-  applications: () =>
-    columnsFrom(() => useSpaceColumns({ defaultLabel: "Défaut", onOpen: () => {} })),
+  applications: () => columnsFrom(() => useSpaceColumns({ defaultLabel: "Défaut" })),
   connections: () =>
     columnsFrom(() =>
       useConnectionColumns({
@@ -306,12 +323,7 @@ const SETS = {
         onDelete: () => {},
       }),
     ),
-  integrations: () =>
-    columnsFrom(() =>
-      useIntegrationListColumns({
-        onOpen: () => {},
-      }),
-    ),
+  integrations: () => columnsFrom(() => useIntegrationListColumns()),
   apiKeys: () =>
     columnsFrom(() =>
       useApiKeyColumns({

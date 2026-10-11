@@ -13,7 +13,8 @@ import { SettingsGroup } from "../../components/settings/setting-row";
 import { Spinner } from "../../components/spinner";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { AlertTriangle, Plus } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { PageActionsMenu } from "../../components/page-actions-menu";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
@@ -44,6 +45,7 @@ export function PreferencesModelsPage() {
   // from the credentials already held (deleting is never gated by the policy).
   const personalModelCredentialsDisabled = orgSettings?.personal_model_credentials === false;
   const personalModelCredentialsAllowed = orgSettings?.personal_model_credentials === true;
+  const canAdd = canConnect && personalModelCredentialsAllowed;
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
   const createCredential = useCreateModelProviderCredential();
@@ -116,17 +118,14 @@ export function PreferencesModelsPage() {
 
       <div className="mb-4 flex items-start justify-between gap-4">
         <p className="text-muted-foreground text-sm">{t("modelCredentials.description")}</p>
-        {canConnect && personalModelCredentialsAllowed && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={openCreate}
-          >
-            <Plus />
-            {t("credentials.add")}
-          </Button>
+        {/* The same Actions menu as the organization's pages. */}
+        {canAdd && (
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="create-credential" onSelect={openCreate}>
+              <Plus />
+              {t("credentials.add")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
         )}
       </div>
 
@@ -138,7 +137,8 @@ export function PreferencesModelsPage() {
         onDelete={(credential) => setConfirmDelete(credential)}
         onRename={renameCredential}
         onConnectOAuth={openEdit}
-        showOwner={false}
+        // The add deed is in the Actions menu, which is closed: the empty list repeats it.
+        onAdd={canAdd ? openCreate : undefined}
         empty={{
           message: t("modelCredentials.empty"),
           hint: t("modelCredentials.emptyHint"),

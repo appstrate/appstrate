@@ -61,6 +61,7 @@ import { CustomEndpointItem } from "./model-form/provider-picker";
 import { PROVIDER_ICONS } from "./icons";
 import { ProviderPickerGroups } from "./provider-picker-groups";
 import { OAuthPairingBody } from "./oauth-pairing-body";
+import { PreferencesModelsLink } from "./preferences-models-link";
 import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
 
 /**
@@ -82,6 +83,11 @@ interface CredentialFormModalProps {
   onSubmit: (data: CredentialFormData) => void;
   /** The caller's own credential: the picker offers only what a member may own. */
   personal?: boolean;
+  /**
+   * The organization's providers are API keys: a subscription is always personal, so the
+   * picker leaves it out and says where to connect it.
+   */
+  apiKeyOnly?: boolean;
 }
 
 interface CredentialFormFields {
@@ -123,17 +129,25 @@ function CredentialFormBody({
   onSubmit,
   onClose,
   personal,
+  apiKeyOnly,
 }: {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: (data: CredentialFormData) => void;
   onClose: () => void;
   personal: boolean;
+  apiKeyOnly: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
-  const options = buildOptions(personal ? registry.filter((p) => p.personal_allowed) : registry);
+  const options = buildOptions(
+    personal
+      ? registry.filter((p) => p.personal_allowed)
+      : apiKeyOnly && !credential
+        ? registry.filter((p) => p.authMode !== "oauth2")
+        : registry,
+  );
 
   const [selectedId, setSelectedId] = useState<string>(() => {
     if (credential?.providerId) {
@@ -391,6 +405,14 @@ function CredentialFormBody({
               />
             </SelectContent>
           </Select>
+          {apiKeyOnly && !isEditing && (
+            <p className="text-muted-foreground text-sm">
+              {t("credentials.form.subscriptionNote")}{" "}
+              <PreferencesModelsLink>
+                {t("credentials.form.subscriptionNoteLink")}
+              </PreferencesModelsLink>
+            </p>
+          )}
         </div>
 
         {!isEditing && labelField}
@@ -474,6 +496,7 @@ export function CredentialFormModal({
   isPending,
   onSubmit,
   personal = false,
+  apiKeyOnly = false,
 }: CredentialFormModalProps) {
   if (!open) return null;
   // Re-mount on every (re)open so internal state (selected provider,
@@ -487,6 +510,7 @@ export function CredentialFormModal({
       onSubmit={onSubmit}
       onClose={onClose}
       personal={personal}
+      apiKeyOnly={apiKeyOnly}
     />
   );
 }

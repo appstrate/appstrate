@@ -11,6 +11,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient, type QueryCache } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import settingsFr from "../../locales/fr/settings.json";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -83,14 +84,20 @@ describe("the models page for a member who can only read models", () => {
     expect(credentialFlags.filter((enabled) => enabled !== false)).toEqual([]);
   });
 
-  it("renders the models tab, and offers no credentials tab to open", () => {
+  it("renders the one models table, with no section on the members' providers", () => {
     const { html } = renderFor(MEMBER);
     expect(html).toContain("Modèles");
-    expect(html).not.toContain("Fournisseurs");
+    expect(html).not.toContain(settingsFr["models.members.title"]);
   });
 });
 
 describe("the models page for an admin who holds the credentials permission", () => {
+  it("offers the section on the members' providers, closed", () => {
+    const { html } = renderFor(ADMIN);
+    expect(html).toContain(settingsFr["models.members.title"]);
+    expect(html).not.toContain(settingsFr["models.members.description"]);
+  });
+
   it("CONTROL: registers the credentials list enabled, so the gate is the permission", () => {
     const { credentialFlags } = renderFor(ADMIN);
     expect(credentialFlags.length).toBeGreaterThan(0);

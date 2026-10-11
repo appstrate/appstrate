@@ -122,9 +122,7 @@ export function IntegrationsPage() {
   const countOf = (value: IntegrationExecution) =>
     organizationIntegrations.filter((row) => integrationExecution(row) === value).length;
 
-  const openIntegration = (integration: IntegrationSummaryWire) =>
-    navigate(`/integrations/${integration.id}`);
-  const allColumns = useIntegrationListColumns({ onOpen: openIntegration }).filter((column) =>
+  const allColumns = useIntegrationListColumns().filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
   );
   const columns = visibleColumns(allColumns, visibility.hidden);

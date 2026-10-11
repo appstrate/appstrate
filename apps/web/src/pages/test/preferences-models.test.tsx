@@ -154,26 +154,32 @@ describe("the Preferences models page, for a member who holds connect", () => {
     expect(html).not.toContain(settingsFr["credentials.col.owner"]);
   });
 
-  it("lets the caller rename and edit their own key", () => {
+  const menu = (credential: ModelProviderCredentialInfo) =>
+    `aria-label="${settingsFr["credentials.moreActions"].replace("{{name}}", credential.label)}"`;
+
+  it("lets the caller rename an own key and an own subscription, from the name or the menu", () => {
     expect(row(MY_KEY)).toContain(RENAMABLE);
-    expect(row(MY_KEY)).toContain(`aria-label="${settingsFr["credentials.edit"]}"`);
-  });
-
-  it("lets the caller rename an own subscription, and reconnect it when it needs it", () => {
+    expect(row(MY_KEY)).toContain(menu(MY_KEY));
     expect(row(MY_SUBSCRIPTION)).toContain(RENAMABLE);
-    expect(row(MY_SUBSCRIPTION)).toContain(settingsFr["credentials.oauth.reconnect"]);
+    expect(row(MY_SUBSCRIPTION)).toContain(menu(MY_SUBSCRIPTION));
   });
 
-  it("offers the add button", () => {
-    expect(html).toContain(settingsFr["credentials.add"]);
+  it("keeps every deed in the menu: no pencil on the row", () => {
+    expect(row(MY_KEY)).not.toContain(`aria-label="${settingsFr["credentials.edit"]}"`);
+    expect(row(MY_SUBSCRIPTION)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
+  });
+
+  it("offers the add deed in the Actions menu, and repeats nothing while the list has rows", () => {
+    expect(html).toContain("data-page-actions-trigger");
+    expect(html).not.toContain(settingsFr["credentials.add"]);
   });
 });
 
 describe("the Preferences models page, before the org settings load", () => {
   const html = renderFor(["model-provider-credentials:connect"], false);
 
-  it("withholds the add button and claims no policy", () => {
-    expect(html).not.toContain(settingsFr["credentials.add"]);
+  it("withholds the Actions menu and claims no policy", () => {
+    expect(html).not.toContain("data-page-actions-trigger");
     expect(html).not.toContain(settingsFr["modelCredentials.policyDisabled"]);
   });
 });
@@ -185,7 +191,7 @@ describe("the Preferences models page, for a caller without connect", () => {
     expect(html).toContain(MY_KEY.label);
   });
 
-  it("offers no add button", () => {
-    expect(html).not.toContain(settingsFr["credentials.add"]);
+  it("offers no Actions menu", () => {
+    expect(html).not.toContain("data-page-actions-trigger");
   });
 });

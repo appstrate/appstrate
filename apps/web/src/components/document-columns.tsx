@@ -110,25 +110,25 @@ export function useDocumentColumns({
       cell: (doc) => {
         const runHref = showRunLink ? documentRunHref(doc) : undefined;
         const canKeep = doc.capabilities.keep && Boolean(doc.expiresAt);
-        const hasMenu = Boolean(runHref || canKeep || doc.capabilities.delete);
+        const hasMenu = Boolean(
+          doc.capabilities.download || runHref || canKeep || doc.capabilities.delete,
+        );
+        const hasNonDestructive = Boolean(doc.capabilities.download || runHref || canKeep);
 
         return (
           <TableRowActions
-            primary={
-              doc.capabilities.download
-                ? {
-                    label: t("row.download"),
-                    icon: Download,
-                    onSelect: () => onDownload(doc),
-                  }
-                : undefined
-            }
             menuLabel={hasMenu ? t("row.moreActions", { name: doc.name }) : undefined}
             isPending={pendingKeepId === doc.id}
             pendingLabel={t("common:loading")}
           >
             {hasMenu ? (
               <>
+                {doc.capabilities.download && (
+                  <DropdownMenuItem onSelect={() => onDownload(doc)}>
+                    <Download />
+                    {t("row.download")}
+                  </DropdownMenuItem>
+                )}
                 {runHref && (
                   <DropdownMenuItem asChild>
                     <Link to={runHref}>
@@ -145,7 +145,7 @@ export function useDocumentColumns({
                 )}
                 {doc.capabilities.delete && (
                   <>
-                    {(runHref || canKeep) && <DropdownMenuSeparator />}
+                    {hasNonDestructive && <DropdownMenuSeparator />}
                     <DropdownMenuItem
                       onSelect={() => onDelete(doc)}
                       className="text-destructive focus:text-destructive"

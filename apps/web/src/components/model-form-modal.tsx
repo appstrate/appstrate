@@ -27,6 +27,7 @@ import {
   useDiscoverModels,
   useModelProviderCredentials,
   useProvidersRegistry,
+  type ModelProviderCredentialInfo,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
 import { ErrorState, LoadingState } from "./page-states";
@@ -55,12 +56,15 @@ interface ModelFormModalProps {
   open: boolean;
   onClose: () => void;
   model: OrgModelInfo | null;
+  /** A provider of the organization the new model starts bound to (« Add a model » on its row). */
+  credential?: ModelProviderCredentialInfo | null;
   isPending: boolean;
   onSubmit: ModelFormSubmit;
 }
 
 interface ModelFormBodyProps {
   model: OrgModelInfo | null;
+  credential?: ModelProviderCredentialInfo | null;
   onSubmit: ModelFormSubmit;
   /** How many models the pick list has checked; `null` = single model. */
   onMultiSelectionChange?: (count: number | null) => void;
@@ -86,6 +90,7 @@ export function ModelFormBody(props: ModelFormBodyProps) {
 
 function ModelForm({
   model,
+  credential,
   onSubmit,
   onMultiSelectionChange,
   registry,
@@ -94,7 +99,7 @@ function ModelForm({
 
   // Every non-aliased row carries its credential's providerId; aliases hide
   // their binding and the models page refuses to edit them.
-  const [providerId, setProviderId] = useState(model?.providerId ?? "");
+  const [providerId, setProviderId] = useState(model?.providerId ?? credential?.providerId ?? "");
   const selectedProvider = useMemo(
     () => getProviderById(providerId, registry),
     [registry, providerId],
@@ -119,10 +124,14 @@ function ModelForm({
   } = useAppForm<ModelFormFields>({
     defaultValues: {
       label: model?.label ?? "",
-      apiShape: model?.apiShape ?? "",
-      baseUrl: model?.base_url ?? "",
+      apiShape: model?.apiShape ?? credential?.apiShape ?? "",
+      baseUrl:
+        model?.base_url ??
+        credential?.base_url ??
+        getProviderById(credential?.providerId ?? "", registry)?.defaultBaseUrl ??
+        "",
       modelId: model?.modelId ?? "",
-      credentialId: model?.credentialId ?? "",
+      credentialId: model?.credentialId ?? credential?.id ?? "",
       inlineApiKey: "",
       capabilitiesExplicit: !!model && rowOverridesCatalog(model, catalogEntry(model.modelId)),
       inputText: model?.input?.includes("text") !== false,
@@ -587,6 +596,7 @@ function ModelForm({
 function ModelFormDialog({
   onClose,
   model,
+  credential,
   isPending,
   onSubmit,
 }: Omit<ModelFormModalProps, "open">) {
@@ -619,8 +629,9 @@ function ModelFormDialog({
       <fieldset disabled={isPending} className="min-w-0">
         {/* Key forces remount when the target model changes, resetting all state */}
         <ModelFormBody
-          key={model?.id ?? "__create__"}
+          key={model?.id ?? credential?.id ?? "__create__"}
           model={model}
+          credential={credential}
           onSubmit={onSubmit}
           onMultiSelectionChange={setSelectionCount}
         />

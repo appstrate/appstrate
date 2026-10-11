@@ -10,17 +10,11 @@ import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
 import { EmptyState, EmptyStateAction, ErrorState } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
+import { TableRowActions } from "./table-row-actions";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
-import { Trash2, MoreHorizontal, RotateCcw, History, GitCompareArrows } from "lucide-react";
+import { Trash2, RotateCcw, History, GitCompareArrows } from "lucide-react";
 
 interface VersionHistoryProps {
   packageId: string;
@@ -146,52 +140,42 @@ export function VersionHistory({
                   header: "",
                   width: "48px" as const,
                   cell: (version: NonNullable<typeof versions>[number]) => (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          aria-label={t("version.actionsFor", { version: version.version })}
+                    <TableRowActions
+                      menuLabel={t("version.actionsFor", { version: version.version })}
+                    >
+                      {onCompare && (
+                        <DropdownMenuItem onSelect={() => onCompare(version.version)}>
+                          <GitCompareArrows />
+                          {t("version.compareWithDraft")}
+                        </DropdownMenuItem>
+                      )}
+                      {canRestore && (
+                        <DropdownMenuItem
+                          disabled={restoreVersion.isPending || deleteVersion.isPending}
+                          onSelect={() =>
+                            setConfirmState({ type: "restore", version: version.version })
+                          }
                         >
-                          <MoreHorizontal className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {onCompare && (
-                          <DropdownMenuItem onSelect={() => onCompare(version.version)}>
-                            <GitCompareArrows />
-                            {t("version.compareWithDraft")}
-                          </DropdownMenuItem>
-                        )}
-                        {canRestore && (
+                          <RotateCcw />
+                          {t("version.restore")}
+                        </DropdownMenuItem>
+                      )}
+                      {canDelete && (
+                        <>
+                          {(onCompare || canRestore) && <DropdownMenuSeparator />}
                           <DropdownMenuItem
-                            disabled={restoreVersion.isPending || deleteVersion.isPending}
+                            className="text-destructive focus:text-destructive"
+                            disabled={deleteVersion.isPending || restoreVersion.isPending}
                             onSelect={() =>
-                              setConfirmState({ type: "restore", version: version.version })
+                              setConfirmState({ type: "delete", version: version.version })
                             }
                           >
-                            <RotateCcw />
-                            {t("version.restore")}
+                            <Trash2 />
+                            {t("btn.delete", { ns: "common" })}
                           </DropdownMenuItem>
-                        )}
-                        {canDelete && (
-                          <>
-                            {(onCompare || canRestore) && <DropdownMenuSeparator />}
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              disabled={deleteVersion.isPending || restoreVersion.isPending}
-                              onSelect={() =>
-                                setConfirmState({ type: "delete", version: version.version })
-                              }
-                            >
-                              <Trash2 />
-                              {t("btn.delete", { ns: "common" })}
-                            </DropdownMenuItem>
-                          </>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                        </>
+                      )}
+                    </TableRowActions>
                   ),
                 },
               ]

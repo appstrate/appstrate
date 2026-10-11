@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@appstrate/ui/components/dialog";
+import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 
 interface ModalProps {
   open: boolean;
@@ -30,7 +31,7 @@ export function Modal({
 }: ModalProps) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !preventClose && onClose()}>
-      <DialogContent className={className}>
+      <DialogContent className={className} onEscapeKeyDown={keepOpenWhileRenaming}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>

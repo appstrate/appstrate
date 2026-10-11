@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The model-provider credentials table, shared by the organization page and the
- * caller's own Preferences page. Its rows are whatever the caller may see: an
- * administrator's list holds the organization's rows, a member's only their own.
+ * The caller's own model providers (Preferences › Mes fournisseurs): a table whose rows hold
+ * every deed in their « … » menu. The organization's providers are the grouped models table.
  */
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import { useConnectionTest } from "../hooks/use-connection-test";
@@ -27,7 +27,6 @@ export function CredentialsSection({
   onRename,
   onConnectOAuth,
   onAdd,
-  showOwner,
   empty,
 }: {
   credentials: ModelProviderCredentialInfo[] | undefined;
@@ -37,21 +36,22 @@ export function CredentialsSection({
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => Promise<void>;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  /** The page's « add » deed, given only to a caller who may add: the empty list repeats it. */
+  /** The page's « add » deed (in its Actions menu), given only to a caller who may add: the empty list repeats it. */
   onAdd?: () => void;
-  /** Whether the owner column shows; a personal-only list has one owner, the caller. */
-  showOwner: boolean;
-  /** Empty-state copy; the organization's by default. */
-  empty?: { message: string; hint?: string };
+  /** Empty-state copy. */
+  empty: { message: string; hint?: string };
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
   const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
   const { data: registry } = useProvidersRegistry();
 
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+
   const columns = useCredentialColumns({
-    showOwner,
     registry,
+    renamingId,
+    onRenamingChange: setRenamingId,
     testingIds,
     testResults,
     onTest: handleTest,
@@ -61,8 +61,6 @@ export function CredentialsSection({
     onConnectOAuth,
   });
 
-  const emptyCopy = empty ?? { message: t("credentials.empty"), hint: t("credentials.emptyHint") };
-
   return (
     <div className="mb-8">
       <DataTable
@@ -70,11 +68,20 @@ export function CredentialsSection({
         columns={columns}
         rows={credentials ?? []}
         rowKey={(pk) => pk.id}
+        // A click on a row changes what it holds: the key, or the pairing of a subscription.
+        rowAction={(pk) => (pk.authMode === "oauth2" ? onConnectOAuth(pk) : onEdit(pk))}
+        rowActionable={(pk) =>
+          pk.source === "custom" &&
+          (pk.authMode === "oauth2"
+            ? pk.needs_reconnection === true && pk.allowed_actions.includes("reconnect")
+            : pk.allowed_actions.includes("edit"))
+        }
+        rowLabel={(pk) => pk.label}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}
         empty={
-          <EmptyState message={emptyCopy.message} hint={emptyCopy.hint} icon={KeyRound} compact>
+          <EmptyState message={empty.message} hint={empty.hint} icon={KeyRound} compact>
             {onAdd && <EmptyStateAction label={t("credentials.add")} onClick={onAdd} />}
           </EmptyState>
         }

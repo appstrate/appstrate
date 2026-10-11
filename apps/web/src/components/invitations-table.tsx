@@ -99,6 +99,8 @@ export function InvitationsTable({
         columns={columns}
         rows={visible}
         rowKey={(invitation) => invitation.id}
+        rowAction={canEdit ? (invitation) => editParam.open(invitation.id) : undefined}
+        rowLabel={(invitation) => t("orgSettings.editInvitationOf", { email: invitation.email })}
         isLoading={false}
       />
       <Modal

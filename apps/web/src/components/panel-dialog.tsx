@@ -18,6 +18,7 @@ import { cn } from "@appstrate/ui/cn";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
+import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 
 interface PanelDialogProps {
   /** Announced to screen readers; the visible heading lives in `rail`. */
@@ -149,6 +150,7 @@ export function PanelDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         closeLabel={closeLabel}
+        onEscapeKeyDown={keepOpenWhileRenaming}
         className={[
           "flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0",
           // Full screen on a phone: two panes side by side do not survive

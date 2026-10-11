@@ -185,7 +185,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
-  "integration.auth.type.", // components/integration-connect/{inline-connect-button,connection-picker-menu}.tsx
+  "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
   "integration.admin.usage.",

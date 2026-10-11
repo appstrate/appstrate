@@ -22,6 +22,7 @@
  * instead of one row component holding both.
  */
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpFromLine, Building2, CircleCheck, Pencil, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -267,12 +268,22 @@ export function useConnectionColumns({
   methodLabel?: (connection: IntegrationConnection) => string;
 }): DataColumn<IntegrationConnection>[] {
   const { t } = useTranslation("settings");
+  // The row whose name is in edit: « Rename » is in one column, the name in another.
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   return [
     {
       id: "account",
       header: t("integration.connection.col.account"),
       width: "minmax(100px,1.5fr)",
-      cell: (c) => <AccountCell connection={c} packageId={packageId} isAdmin={isAdmin} />,
+      cell: (c) => (
+        <AccountCell
+          connection={c}
+          packageId={packageId}
+          isAdmin={isAdmin}
+          renaming={renamingId === c.id}
+          onRenamingChange={(renaming) => setRenamingId(renaming ? c.id : null)}
+        />
+      ),
     },
     ...(methodLabel
       ? [
@@ -358,6 +369,8 @@ export function useConnectionColumns({
           {...(authForConnection?.(c) ?? { authKey, authType, canRenew })}
           isOwn={isConnectionOwnedBy(c, userId)}
           isAdmin={isAdmin}
+          renaming={renamingId === c.id}
+          onRename={() => setRenamingId(c.id)}
         />
       ),
     },

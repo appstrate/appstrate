@@ -61,6 +61,12 @@ function useUpdateModel() {
   });
 }
 
+/** A row's own quick edit (rename, switch on or off): a refusal is toasted by the mutation cache. */
+export function usePatchModel() {
+  const invalidate = useInvalidateModels();
+  return $api.useMutation("patch", "/api/models/{id}", { onSuccess: invalidate });
+}
+
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });

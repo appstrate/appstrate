@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Settings2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../components/data-table";
 import { IntegrationIcon } from "../components/integration-icon";
-import { TableRowActions } from "../components/table-row-actions";
 import type { IntegrationSummaryWire } from "../hooks/use-integrations";
 import {
   integrationOrigin,
@@ -15,11 +13,7 @@ import {
 } from "../lib/integration-collection";
 
 /** One comparable integration fact per column. */
-export function useIntegrationListColumns({
-  onOpen,
-}: {
-  onOpen: (integration: IntegrationSummaryWire) => void;
-}): DataColumn<IntegrationSummaryWire>[] {
+export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[] {
   const { t } = useTranslation("settings");
 
   return [
@@ -102,23 +96,6 @@ export function useIntegrationListColumns({
               : "integrations.badge.inactive",
           )}
         </Badge>
-      ),
-    },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (integration) => (
-        <TableRowActions
-          primary={{
-            label: t("integrations.open", {
-              name: integration.manifest.display_name ?? integration.id,
-            }),
-            icon: Settings2,
-            onSelect: () => onOpen(integration),
-          }}
-        />
       ),
     },
   ];

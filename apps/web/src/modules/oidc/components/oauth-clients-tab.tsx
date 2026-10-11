@@ -84,6 +84,12 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         columns={columns}
         rows={data ?? []}
         rowKey={(client) => client.clientId}
+        rowAction={
+          can("oauth-clients:write") ? (client) => setSelectedClient(client.clientId) : undefined
+        }
+        rowLabel={(client) =>
+          t("settings:oauthClients.editClient", { name: client.name ?? client.clientId })
+        }
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}

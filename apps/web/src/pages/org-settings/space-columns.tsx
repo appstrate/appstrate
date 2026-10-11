@@ -15,9 +15,8 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { FolderInput, Settings, Trash2 } from "lucide-react";
+import { FolderInput, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
@@ -37,13 +36,11 @@ export interface ApplicationRow {
 
 export function useSpaceColumns({
   defaultLabel,
-  onOpen,
   onConvert,
   onSweep,
   actionsBusy,
 }: {
   defaultLabel: string;
-  onOpen: (spaceId: string) => void;
   /** Turn an orphaned personal space into a team space. Absent without the grant. */
   onConvert?: (spaceId: string) => void;
   /** Empty and delete an orphaned personal space. Absent without the grant. */
@@ -58,7 +55,13 @@ export function useSpaceColumns({
       header: t("applications.nameLabel"),
       width: "minmax(160px,1.6fr)",
       cell: (app) => (
-        <span className="block truncate text-sm font-medium" title={spaceLabel(app, t)}>
+        <span
+          className="block truncate text-sm font-medium"
+          // A `closed` space is listed so the caller knows it exists, not so they
+          // can be dropped into it (pinning one 403s every space-scoped request,
+          // same rule as the org switcher): its row is static and says why.
+          title={isSpaceEnterable(app) ? spaceLabel(app, t) : t("spaces.requestAccess")}
+        >
           {spaceLabel(app, t)}
         </span>
       ),
@@ -107,7 +110,8 @@ export function useSpaceColumns({
       align: "end",
       cell: (app) => {
         // An orphan cannot be entered — its owner is gone — so it offers the
-        // two acts that resolve it instead of the gear every other row has.
+        // two acts that resolve it. Every other row has no menu: a click on it
+        // opens its settings, which is its one deed.
         const orphaned = Boolean(app.orphaned_at);
         if (orphaned && (onConvert || onSweep)) {
           return (
@@ -132,27 +136,7 @@ export function useSpaceColumns({
             </TableRowActions>
           );
         }
-        return (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            // A `closed` space is listed so the caller knows it exists, not so
-            // they can be dropped into it: pinning one 403s every space-scoped
-            // request. Same rule as the org switcher.
-            disabled={orphaned || !isSpaceEnterable(app)}
-            onClick={() => onOpen(app.id)}
-            title={
-              isSpaceEnterable(app)
-                ? t("nav.appSettings", { ns: "common" })
-                : t("spaces.requestAccess")
-            }
-            aria-label={t("nav.appSettings", { ns: "common" })}
-            data-testid={`application-settings-${app.id}`}
-          >
-            <Settings size={16} />
-          </Button>
-        );
+        return null;
       },
     },
   ];

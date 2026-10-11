@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, FlaskConical, Globe, Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable, type DataColumn } from "../../components/data-table";
@@ -28,8 +28,8 @@ import { TableRowActions } from "../../components/table-row-actions";
 import { NoAccessState } from "../../components/route-gate";
 
 /**
- * The proxy column set. A proxy has no page of its own, so the row is static
- * and the actions live in the last column — which is why it has no header: a
+ * The proxy column set. A proxy has no page of its own: a click on a custom
+ * row opens its edit modal, and every action lives in the last column — which is why it has no header: a
  * column the reader cannot be told about is a column they cannot hide.
  */
 export function useProxyColumns({
@@ -136,15 +136,16 @@ export function useProxyColumns({
         return (
           <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
-              primary={
-                isCustom && onEdit
-                  ? { label: t("proxies.edit"), onSelect: () => onEdit(p) }
-                  : undefined
-              }
               menuLabel={t("proxies.moreActions", { name: p.label })}
               isPending={isTesting || isSettingDefault}
               pendingLabel={t("common:loading")}
             >
+              {isCustom && onEdit && (
+                <DropdownMenuItem onSelect={() => onEdit(p)}>
+                  <Pencil />
+                  {t("proxies.edit")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => onTest(p.id)} disabled={isTesting}>
                 <FlaskConical />
                 {t("proxies.test")}
@@ -241,6 +242,9 @@ export function OrgSettingsProxiesPage() {
         columns={columns}
         rows={proxies ?? []}
         rowKey={(p) => p.id}
+        rowAction={canWrite ? onEdit : undefined}
+        rowActionable={(p) => p.source !== "built-in"}
+        rowLabel={(p) => t("proxies.editNamed", { name: p.label })}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}

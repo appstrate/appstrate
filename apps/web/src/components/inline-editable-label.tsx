@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Pencil } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
@@ -36,6 +36,8 @@ export function InlineEditableLabel({
   allowEmpty = false,
   placeholder,
   testId,
+  editing: controlledEditing,
+  onEditingChange,
 }: {
   value: string;
   editable: boolean;
@@ -44,12 +46,36 @@ export function InlineEditableLabel({
   allowEmpty?: boolean;
   placeholder?: string;
   testId?: string;
+  /**
+   * Controlled edit mode: a menu entry (« Renommer ») starts the edit from outside. Left out, the
+   * label keeps its own state and a click on the name is the only way in.
+   */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const { t } = useTranslation("common");
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
+  const [ownEditing, setOwnEditing] = useState(false);
+  const editing = controlledEditing ?? ownEditing;
+  // What was typed since the edit began; `null` reads the stored value, so an edit started from
+  // outside never opens on a stale draft.
+  const [typed, setTyped] = useState<string | null>(null);
+  const draft = typed ?? value;
+  const setEditing = (next: boolean) => {
+    if (!next) setTyped(null);
+    setOwnEditing(next);
+    onEditingChange?.(next);
+  };
+  const inputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+
+  // Entering edit mode, from a click or from the menu, lands in the field with its text selected.
+  useEffect(() => {
+    if (editable && editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editable, editing]);
 
   const commit = async () => {
     if (savingRef.current) return;
@@ -81,10 +107,7 @@ export function InlineEditableLabel({
           editable && "cursor-pointer",
         )}
         onClick={() => {
-          if (editable) {
-            setDraft(value);
-            setEditing(true);
-          }
+          if (editable) setEditing(true);
         }}
       >
         <span className="truncate text-sm font-medium" title={value} data-testid={testId}>
@@ -104,11 +127,13 @@ export function InlineEditableLabel({
   return (
     <div className="flex min-w-0 items-center gap-1" aria-busy={saving}>
       <Input
-        autoFocus
+        ref={inputRef}
+        // Read by the dialogs: Escape here cancels the rename, not the overlay.
+        data-inline-editing=""
         value={draft}
         disabled={saving}
         placeholder={placeholder}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => setTyped(e.target.value)}
         onBlur={() => void commit()}
         onKeyDown={(e) => {
           if (e.key === "Enter") void commit();

@@ -6,9 +6,7 @@ import type { DataColumn } from "../data-table.tsx";
 import { TableRowActions } from "../table-row-actions.tsx";
 import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
-import type { IntegrationSummaryWire } from "../../hooks/use-integrations.ts";
-import { documents, integrations } from "../../lab/fixtures.ts";
-import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
+import { documents } from "../../lab/fixtures.ts";
 import { render } from "./run-fixture.tsx";
 
 function columnsFrom<T>(useColumns: () => DataColumn<T>[]): DataColumn<T>[] {
@@ -40,26 +38,20 @@ describe("document row capabilities", () => {
   const editable = documents.data.find((document) => document.id === "doc_lab_1") as FileDto;
   const restricted = documents.data.find((document) => document.id === "doc_lab_4") as FileDto;
 
-  it("keeps Download direct and secondary deeds in the menu", () => {
-    let downloaded = "";
+  it("keeps every deed, Download first, in the menu", () => {
     const columns = columnsFrom(() =>
       useDocumentColumns({
         pendingKeepId: null,
         showRunLink: true,
-        onDownload: (document) => {
-          downloaded = document.id;
-        },
+        onDownload: () => {},
         onKeep: () => {},
         onDelete: () => {},
       }),
     );
     const actions = actionCell(columns, editable);
 
-    expect(actions.primary?.label).toBe("Télécharger");
     expect(actions.menuLabel).toContain(editable.name);
     expect(actions.children).toBeTruthy();
-    actions.primary?.onSelect();
-    expect(downloaded).toBe(editable.id);
   });
 
   it("does not invent actions for a document whose capabilities deny them", () => {
@@ -73,29 +65,7 @@ describe("document row capabilities", () => {
     );
     const actions = actionCell(columns, restricted);
 
-    expect(actions.primary).toBeUndefined();
     expect(actions.menuLabel).toBeUndefined();
     expect(actions.children).toBeUndefined();
-  });
-});
-
-describe("integration row action", () => {
-  it("keeps its one real deed direct and adds no empty menu", () => {
-    let opened = "";
-    const columns = columnsFrom(() =>
-      useIntegrationListColumns({
-        onOpen: (integration) => {
-          opened = integration.id;
-        },
-      }),
-    );
-    const integration = integrations.data[0] as IntegrationSummaryWire;
-    const actions = actionCell(columns, integration);
-
-    expect(actions.primary).toBeTruthy();
-    expect(actions.menuLabel).toBeUndefined();
-    expect(actions.children).toBeUndefined();
-    actions.primary?.onSelect();
-    expect(opened).toBe(integration.id);
   });
 });

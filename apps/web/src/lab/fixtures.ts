@@ -4660,6 +4660,26 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       updatedAt: "2026-06-11T16:45:00.000Z",
     },
     {
+      // An organization key no model is bound to yet: its row shows the line to add one.
+      id: "cred_mistral",
+      label: "Mistral (équipe)",
+      apiShape: "openai",
+      base_url: null,
+      source: "custom",
+      authMode: "api_key",
+      providerId: null,
+      oauth_email: null,
+      needs_reconnection: false,
+      owner_type: "org",
+      owner_id: null,
+      owner_name: null,
+      created_by: "Pierre",
+      allowed_actions: ["edit", "delete", "test"],
+      bindable: true,
+      createdAt: "2026-09-02T10:00:00.000Z",
+      updatedAt: "2026-09-02T10:00:00.000Z",
+    },
+    {
       // The lab member's own subscription, dead: the reconnect is theirs to do.
       id: "cred_oauth",
       label: "Claude Code",

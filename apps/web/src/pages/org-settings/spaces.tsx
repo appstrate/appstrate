@@ -23,7 +23,8 @@ import { AppWindow, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useSpaceSwitcher } from "../../hooks/use-current-space";
+import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
+import { spaceLabel } from "../../lib/space-label";
 import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -78,7 +79,6 @@ export function OrgSettingsSpacesPage() {
 
   const columns = useSpaceColumns({
     defaultLabel: t("spaces.default"),
-    onOpen: handleSpaceClick,
     // Only an orphaned space offers them, and only to whoever may write spaces.
     onConvert: can("spaces:write") ? (id) => setPending({ id, action: "convert" }) : undefined,
     onSweep: can("spaces:write") ? (id) => setPending({ id, action: "sweep" }) : undefined,
@@ -108,6 +108,9 @@ export function OrgSettingsSpacesPage() {
         columns={columns}
         rows={spaces ?? []}
         rowKey={(space) => space.id}
+        rowAction={(space) => handleSpaceClick(space.id)}
+        rowActionable={(space) => !space.orphaned_at && isSpaceEnterable(space)}
+        rowLabel={(space) => spaceLabel(space, t)}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}

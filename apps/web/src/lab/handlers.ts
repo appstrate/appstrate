@@ -73,6 +73,8 @@ const settingsByOrg = new Map<string, Partial<OrgSettings>>();
 const renamedCredentials = new Map<string, string>();
 const addedCredentials: f.Json200<"/api/model-provider-credentials", "get">["data"] = [];
 const deletedCredentials = new Set<string>();
+/** Models renamed or switched on/off in this lab session. */
+const patchedModels = new Map<string, { label?: string; enabled?: boolean }>();
 
 type LabCredential = f.Json200<"/api/model-provider-credentials", "get">["data"][number];
 
@@ -1017,7 +1019,30 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/models$/,
-    handler: (_u, s) => ({ status: 200, body: { ...f.models, data: list(f.models.data, s) } }),
+    handler: (_u, s) => ({
+      status: 200,
+      body: {
+        ...f.models,
+        data: list(
+          f.models.data.map((m) => ({ ...m, ...patchedModels.get(m.id) })),
+          s,
+        ),
+      },
+    }),
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/models\/[^/]+$/,
+    handler: (url, _s, _h, body) => {
+      const id = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+      const patch = (typeof body === "object" && body !== null ? body : {}) as {
+        label?: string;
+        enabled?: boolean;
+      };
+      patchedModels.set(id, { ...patchedModels.get(id), ...patch });
+      const row = f.models.data.find((m) => m.id === id);
+      return { status: 200, body: { ...row, ...patchedModels.get(id) } };
+    },
   },
   {
     method: "GET",

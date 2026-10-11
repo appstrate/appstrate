@@ -6,13 +6,14 @@
  * An invitation is a record like a member is — the same fields in the same
  * order on every row — so it takes the table rather than the stacked card that
  * reprinted "Accès à l'organisation" and "Rôles dans les espaces" on each one.
- * Editing is the one frequent deed and stays direct; copying the link and
- * cancelling live in the menu, cancelling last because it is destructive.
+ * Editing is what a click on the row does, and it is the menu's first entry;
+ * copying the link and cancelling follow, cancelling last because it is
+ * destructive.
  *
  * Out of the table component so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
-import { Link2, Trash2 } from "lucide-react";
+import { Link2, Pencil, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { components } from "../api/schema";
 import type { DataColumn } from "./data-table";
@@ -95,15 +96,16 @@ export function useInvitationColumns({
       align: "end",
       cell: (invitation) => (
         <TableRowActions
-          primary={
-            canEdit
-              ? { label: t("orgSettings.editInvitation"), onSelect: () => onEdit(invitation) }
-              : undefined
-          }
           menuLabel={t("orgSettings.moreInvitationActions", { email: invitation.email })}
           isPending={isCanceling}
           pendingLabel={t("common:loading")}
         >
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => onEdit(invitation)}>
+              <Pencil />
+              {t("orgSettings.editInvitation")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={() => onCopyLink(invitation)}>
             <Link2 />
             {t("common:btn.copyLink")}

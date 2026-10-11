@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Pencil, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { SecretRevealModal } from "../../../components/secret-reveal-modal";
@@ -71,11 +71,16 @@ export function OAuthClientActions({
   return (
     <>
       <TableRowActions
-        primary={canWrite ? { label: t("common:btn.edit"), onSelect: onEdit } : undefined}
         menuLabel={t("oauthClients.moreActions", { name: rowName })}
         isPending={isPending}
         pendingLabel={t("common:loading")}
       >
+        {canWrite && (
+          <DropdownMenuItem onSelect={onEdit}>
+            <Pencil />
+            {t("common:btn.edit")}
+          </DropdownMenuItem>
+        )}
         {canWrite && (
           <DropdownMenuItem
             onSelect={() => handleUpdate({ isFirstParty: !client.isFirstParty })}

@@ -135,8 +135,9 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
   a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
   (`components/inline-editable-label.tsx`), the one rename affordance: it shows a
-  pencil on hover, and a row's pencil button never renames, it edits what the name
-  does not (a provider's key), in a modal with no name field.
+  pencil on hover, and the row's « Edit » (in its « … » menu) never renames, it
+  edits what the name does not (a provider's key), in a modal with no name field;
+  « Rename » is its own menu entry that starts this inline edit.
 - **Several values valid only together** are assembled in a modal that commits
   once (model, proxy, OAuth client, webhook). **A list of independently valid
   values** commits each entry on its own.
@@ -292,15 +293,38 @@ A `Select` never holds hundreds of entries.
   (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
   truncated with a tooltip. Déclencheur names who or what launched it, and a dash
   when nothing is recorded: no column is left blank.
+- **A table with groups** (`groups` instead of `rows` on `DataTable`: Settings › Models, a
+  provider and its models): a group is a parent row with its own cells (`group.cell(columnId)`:
+  a name, a status, a « … »), a fold button before its first read cell (`aria-expanded`, named
+  « Replier / Déplier <group> »), and its rows indented under it, drawn with the table's columns.
+  A group with no rows shows `emptyRow` (the next step, e.g. « Ajouter un modèle »); a group
+  whose own row is only a name and a sentence is `wide` (its first cell spans the others). A
+  click on the group's row folds it, or goes where `onSelect` says (the group's own « Modifier »).
+  The fold is the reader's, kept per person and per table (its `label`) in `localStorage`
+  (`stores/collapsed-groups-store.ts`, absent storage costs only the fold). Columns, tiers,
+  held columns and resizing work as in a flat table; the table is empty only with no group.
+  Build the groups in a pure function under `lib/` (`lib/model-groups.ts`), not in the cell code.
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
-- **A row's end**: `TableRowActions` (`components/table-row-actions.tsx`), one
-  frequent deed direct, the secondary and destructive ones in the « … » menu; no
-  pencil on a row that has no editable whole, no empty menu for one deed. A
-  control that is the setting (role, default, share) stays in its own column.
-  A row is a link through the first cell (`rowHref`), a titled element inside it
-  needs `relative z-10`. A menu deed that opens the page's own modal pre-filled
+- **A row has ONE way to act** (`TableRowActions`, `components/table-row-actions.tsx`):
+  the « … » menu holds EVERY action of the row, and nothing else sits at the
+  row's end. No pencil, download, reconnect or gear icon beside it, in any
+  table. Order, always: edit or rename first, the resource's own deeds next,
+  delete last behind a separator. A click on the row opens what its main deed
+  did: its detail through `rowHref` (a row link is never replaced), else its
+  edit modal through `rowAction` (`rowActionable` leaves the rows it does not
+  apply to static: a built-in proxy, a space you are not a member of). **Rename**
+  of a name that is an `InlineEditableLabel` is a menu entry too (`btn.rename`):
+  it puts the name in edit, focused and selected (`editing` / `onEditingChange`,
+  and `renaming` on `TableRowActions` so the menu does not take focus back); a
+  click on the name stays a shortcut. A row with nothing to offer has no menu
+  (no `menuLabel`), and a row whose only deed is the click (an integration that
+  opens its page) has none either: no empty menu for one deed. A control that
+  IS the setting (role select, switch, tick, share editor, default) stays in its
+  own column; it is not an action of the row. `row-actions-one-way.test.ts`
+  fails on a direct action beside the menu. A row is a link through the first
+  cell (`rowHref`), a titled element inside it needs `relative z-10`. A menu deed that opens the page's own modal pre-filled
   on the row says so in the modal's URL value (`?view-as=space:viewer`, the
   roles page's « Prévisualiser »), the same modal as the page's Actions menu.
 - States: `LoadingState`, `EmptyState`, `ErrorState error=…`, and

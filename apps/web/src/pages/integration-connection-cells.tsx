@@ -21,15 +21,19 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { Bot, ShieldCheck, Trash2 } from "lucide-react";
-import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
+import { Bot, Pencil, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../components/confirm-modal";
 import { InlineEditableLabel } from "../components/inline-editable-label";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 import { ConnectionScopeBadge } from "../components/integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../components/integration-connect/connection-share-editor";
 import { ConnectionVariablesLine } from "../components/integration-connect/connection-variables-line";
-import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
+import { useHostedConnectPopup } from "../components/integration-connect/use-integration-oauth-popup";
 import { ConnectionDeleteImpact } from "../components/integration-connect/connection-delete-impact";
 import { ConnectionTeardownSteps } from "../components/integration-connect/connection-teardown-steps";
 import { connectionLockHintKey } from "../components/integration-connect/connection-ownership";
@@ -129,17 +133,23 @@ function useRowGrants(connection: IntegrationConnection, isAdmin: boolean) {
  * button the product owner ruled out ("Direct manipulation in forms. No Edit
  * button revealing a field"), and it left the app with two rename affordances:
  * click-to-edit on the credentials table, pencil-then-field here. One now, the
- * shared `InlineEditableLabel`. The label cannot be cleared: a run addresses
+ * shared `InlineEditableLabel`, started by a click on the name or by « Rename »
+ * in the row's menu. The label cannot be cleared: a run addresses
  * each bound connection by it, so an emptied field just cancels the edit.
  */
 export function AccountCell({
   connection,
   packageId,
   isAdmin,
+  renaming,
+  onRenamingChange,
 }: {
   connection: IntegrationConnection;
   packageId: string;
   isAdmin: boolean;
+  /** The row's « Rename » menu entry puts the name in edit; a click on the name does too. */
+  renaming: boolean;
+  onRenamingChange: (renaming: boolean) => void;
 }) {
   const { t } = useTranslation("settings");
   const renameConnection = useRenameIntegrationConnection();
@@ -152,6 +162,8 @@ export function AccountCell({
       <InlineEditableLabel
         value={connection.label}
         editable={canRename}
+        editing={renaming}
+        onEditingChange={onRenamingChange}
         placeholder={t("integration.connection.labelPlaceholder")}
         testId={`label-edit-${connection.id}`}
         onSave={async (next) => {
@@ -247,7 +259,7 @@ export function ScopeCell({
   );
 }
 
-/** Reconnect direct when needed; destructive disconnect stays in the menu. */
+/** Every deed of the row sits in its « … » menu: rename, reconnect when needed, then delete. */
 export function ConnectionActionsCell({
   connection,
   packageId,
@@ -256,6 +268,8 @@ export function ConnectionActionsCell({
   canRenew,
   isOwn,
   isAdmin,
+  renaming,
+  onRename,
 }: {
   connection: IntegrationConnection;
   packageId: string;
@@ -264,13 +278,16 @@ export function ConnectionActionsCell({
   canRenew: boolean;
   isOwn: boolean;
   isAdmin: boolean;
+  renaming: boolean;
+  onRename: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const { openPopup, isPending: reconnecting } = useHostedConnectPopup();
   const disconnect = useDisconnectIntegrationConnection();
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Read only while the confirmation is open; the button waits for it.
   const deleteImpact = useConnectionDeleteImpact(confirmDelete ? connection.id : undefined);
-  const { canConnect, lockKey } = useRowGrants(connection, isAdmin);
+  const { canConnect, canRename, lockKey } = useRowGrants(connection, isAdmin);
   const { text: lockHint, agents: pinningAgents } = useLockText(
     connection,
     packageId,
@@ -278,42 +295,61 @@ export function ConnectionActionsCell({
     lockKey,
   );
   const canReach = useCanReach();
-  if (!isOwn) return <span className="text-muted-foreground text-xs">—</span>;
+  // Deleting and reconnecting are the owner's; renaming is also a governor's.
+  if (!isOwn && !canRename) return <span className="text-muted-foreground text-xs">—</span>;
+  const canReconnect =
+    isOwn && connection.needs_reconnection && canConnect && canRenew && authType === "oauth2";
   // An admin pin or the space default names the row: deleting it is refused
   // until it is removed from there.
   return (
     <>
       <div className="relative z-10 flex items-center justify-end gap-1">
-        {connection.needs_reconnection && canConnect && canRenew && authType === "oauth2" && (
-          <InlineConnectButton
-            packageId={packageId}
-            authKey={authKey}
-            connectionId={connection.id}
-            iconOnly
-          />
-        )}
         <TableRowActions
           menuLabel={t("integration.connection.moreActions", { name: connection.label })}
-          isPending={disconnect.isPending}
+          isPending={disconnect.isPending || reconnecting}
           pendingLabel={t("common:loading")}
+          renaming={renaming}
         >
-          <DropdownMenuItem
-            onSelect={() => setConfirmDelete(true)}
-            disabled={disconnect.isPending || !!lockHint}
-            className="text-destructive focus:text-destructive"
-            data-testid={`connection-delete-${connection.id}`}
-          >
-            <Trash2 />
-            {t("integration.connection.delete")}
-          </DropdownMenuItem>
+          {canRename && (
+            <DropdownMenuItem
+              onSelect={onRename}
+              data-testid={`connection-rename-${connection.id}`}
+            >
+              <Pencil />
+              {t("btn.rename", { ns: "common" })}
+            </DropdownMenuItem>
+          )}
+          {canReconnect && (
+            <DropdownMenuItem
+              onSelect={() => void openPopup({ packageId, authKey, connectionId: connection.id })}
+              data-testid={`connection-reconnect-${connection.id}`}
+            >
+              <RefreshCw />
+              {t("detail.integrationReconnect", { ns: "agents" })}
+            </DropdownMenuItem>
+          )}
+          {isOwn && (
+            <>
+              {(canRename || canReconnect) && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                onSelect={() => setConfirmDelete(true)}
+                disabled={disconnect.isPending || !!lockHint}
+                className="text-destructive focus:text-destructive"
+                data-testid={`connection-delete-${connection.id}`}
+              >
+                <Trash2 />
+                {t("integration.connection.delete")}
+              </DropdownMenuItem>
+            </>
+          )}
           {/* Said in the menu, where the dead item is: a disabled item takes no hover. */}
-          {lockHint && (
+          {isOwn && lockHint && (
             <DropdownMenuLabel className="text-muted-foreground max-w-64 text-xs font-normal">
               {lockHint}
             </DropdownMenuLabel>
           )}
           {/* Each agent holding it, one click away for whoever may open it. */}
-          {pinningAgents
+          {(isOwn ? pinningAgents : [])
             .filter((agent) => canReach(packageDetailPath("agent", agent.id)))
             .map((agent) => (
               <DropdownMenuItem key={agent.id} asChild>
@@ -324,7 +360,7 @@ export function ConnectionActionsCell({
               </DropdownMenuItem>
             ))}
           {/* And the way to unlock it, one click away, for whoever may. */}
-          {lockHint && isAdmin && (
+          {isOwn && lockHint && isAdmin && (
             <DropdownMenuItem asChild>
               <Link to={{ search: "?integrationSettings=access", hash: "#configuration" }}>
                 <ShieldCheck />
