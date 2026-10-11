@@ -165,6 +165,7 @@ describe("connect-run failures at the route boundary", () => {
     const body = (await res.json()) as ProblemBody;
     expect(body.detail).toContain("MFA code required");
     expect(body.detail).toContain("Check the credentials you submitted");
+    expect(body.code).toBe("login_rejected");
     expect(body.param).toBe("credentials");
   });
 

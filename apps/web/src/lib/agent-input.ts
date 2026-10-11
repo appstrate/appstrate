@@ -18,7 +18,7 @@
  * reject.
  */
 
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
 import type { JSONSchemaObject, SchemaWrapper } from "@appstrate/core/form";
 import {
   resolvedInputDefaults,
@@ -126,7 +126,7 @@ export function storedInputValues(settings: AgentInputSettings): Record<string, 
  */
 export function formatInputValue(value: unknown): string {
   if (value === undefined) return "—";
-  return jsonText(value);
+  return jsonText(value as JsonValue);
 }
 
 /**

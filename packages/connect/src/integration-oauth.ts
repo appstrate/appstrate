@@ -26,7 +26,7 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
 import type { Actor, OAuthClientResolver, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
@@ -249,7 +249,7 @@ export async function initiateIntegrationOAuth(
   for (const [key, value] of Object.entries(input.authorizationParams ?? {})) {
     if (value === undefined || value === null) continue;
     // OIDC `claims` is JSON-in-a-parameter; JSON is the only unambiguous encoding of a non-string.
-    params.set(key, jsonText(value));
+    params.set(key, jsonText(value as JsonValue));
   }
 
   const authUrl = `${endpoints.authorizationEndpoint}${endpoints.authorizationEndpoint.includes("?") ? "&" : "?"}${params.toString()}`;

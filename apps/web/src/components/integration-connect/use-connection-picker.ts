@@ -18,7 +18,7 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution } from "./integration-run-readiness";
-import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
+import { scopeLabels } from "./connection-scope-fit";
 import {
   requiredScopesForAgent,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -163,21 +163,8 @@ export function useConnectionPicker(
   const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
-  const fits = new Map(
-    unranked.map((c) => [
-      c.id,
-      scopeFit({
-        manifest,
-        authKey: c.auth_key,
-        granted: c.scopes_granted,
-        missing: c.missing_scopes,
-        required: requiredScopesFor(c.auth_key),
-      }),
-    ]),
-  );
-  const scopeFitOf = (c: IntegrationCandidate) => fits.get(c.id) ?? "unjudged";
-  // Compatible first, least privilege leading.
-  const candidates = sortByScopeFit(unranked, scopeFitOf);
+  // Least privilege first, in the order the server's fallback binds by.
+  const candidates = [...unranked].sort((a, b) => a.rank - b.rank);
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
   const missingScopeLabels = (c: IntegrationCandidate) =>
@@ -351,7 +338,6 @@ export function useConnectionPicker(
     // Labels shared by several components
     ownerLabel,
     setLabel,
-    scopeFitOf,
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,

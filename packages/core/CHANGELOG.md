@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`INSUFFICIENT_SCOPES_REMEDIES`** / **`InsufficientScopesRemedy`**
+  (`@appstrate/core/integration`): how an `insufficient_scopes` item clears,
+  `new_connection` | `upgrade_or_new` | `rebind_by_admin` |
+  `rebind_by_schedule_owner`, carried as `ConnectionResolutionError.remedy` and
+  `ResolutionFieldError.remedy` (`@appstrate/core/api-errors`). (#1913)
+- **`CONNECTION_SCOPE_FITS`** / **`ConnectionScopeFit`**
+  (`@appstrate/core/integration`): a connection's grant against an agent's
+  selection, least privilege first: `exact` | `unjudged` | `broader` |
+  `missing`. (#1913)
+- **`scopeTokenSchema`** and **`findInvalidScopeTokens`**
+  (`@appstrate/core/integration`): one OAuth scope as an RFC 6749 §3.3
+  `scope-token`, and the write-path rule listing a manifest's scopes that are
+  not one (`default_scopes`, `scope_catalog` values,
+  `tools_policy.*.required_scopes`). (#1913)
+- **`isSecretField`** (`@appstrate/core/form`): whether a credential field is a
+  secret, `writeOnly` or `format: "password"`. (#1913)
+- **`deniedScopesOf`** (`@appstrate/core/connect-handshake`) and
+  **`IntegrationConnectCompletion.scopes_denied`**: the scopes a connect flow
+  requested that the consent left out, on a successful completion. (#1913)
+
 - **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
   ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
   over the org role resolved later. Absent, the caller is uncapped. (#1911)
@@ -95,6 +115,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `off`, or when what it sends is not known. (#1774)
 
 ### Changed
+
+- **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
+  `scopesGranted` and `missingScopes`, and a
+  `ResolutionFieldError.candidate_connections` item
+  (`@appstrate/core/api-errors`) `scopes_granted` and `missing_scopes`: what
+  each candidate holds and what the agent's selection misses on it. (#1913)
 
 - **Breaking for module consumers:** the `credentialSource` unions in
   `BeforeUsageParams`, `LlmUsageLedgerRow` and `PlatformServices.usage.list`,

@@ -715,6 +715,9 @@ describe("credential-proxy integration-resolver", () => {
             account_id: "live",
             owned_by_actor: true,
             needs_reconnection: false,
+
+            scopes_granted: ["read"],
+            missing_scopes: [],
           },
           {
             id: deadId,
@@ -722,6 +725,9 @@ describe("credential-proxy integration-resolver", () => {
             account_id: "dead",
             owned_by_actor: true,
             needs_reconnection: true,
+
+            scopes_granted: ["read"],
+            missing_scopes: [],
           },
           {
             id: sharedId,
@@ -729,6 +735,9 @@ describe("credential-proxy integration-resolver", () => {
             account_id: "shared",
             owned_by_actor: false,
             needs_reconnection: false,
+
+            scopes_granted: ["read"],
+            missing_scopes: [],
           },
         ].sort(byId),
       );

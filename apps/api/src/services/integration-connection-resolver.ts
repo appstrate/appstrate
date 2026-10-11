@@ -49,6 +49,9 @@ import {
   manifestAuthKeySet,
   manifestHasRequiredAuth,
   CONNECT_FLOW_CODES,
+  CONNECTION_SCOPE_FITS,
+  type ConnectionScopeFit,
+  type InsufficientScopesRemedy,
   type IntegrationManifest,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -97,9 +100,14 @@ export function toLaunchOverrides(
   return ids ? { ids, source } : null;
 }
 
-export interface IntegrationRequirement {
+interface RequirementTarget {
   integrationId: string;
   manifest: IntegrationManifest;
+}
+
+/** An agent's declared integration. */
+interface AgentRequirement extends RequirementTarget {
+  kind: "agent";
   /** The EFFECTIVE selection (below) is non-empty or `"*"` — what the spawn resolver starts. */
   hasSelectedTools: boolean;
   /** The agent's own tool selection; drives scope inference (`"*"` → the auth's default scopes). */
@@ -114,8 +122,25 @@ export interface IntegrationRequirement {
   requiredAuthKey?: string;
   /** Effective selection (`tools[]`, else `default_tools`); absent → any auth serves it. */
   effectiveTools?: readonly string[] | "*";
-  /** A credential-proxy call: no agent selection, so no scope tells own rows apart. */
-  noAgentSelection?: boolean;
+}
+
+/**
+ * A credential-proxy call. No agent selects anything: every declared auth serves, no scope is
+ * required or tells own rows apart, and the call cannot proceed without a connection.
+ */
+interface ProxyRequirement extends RequirementTarget {
+  kind: "proxy";
+}
+
+export type IntegrationRequirement = AgentRequirement | ProxyRequirement;
+
+/** What the cascade reads of a requirement, a proxy call's being fixed. */
+type CascadeRequirement = Omit<AgentRequirement, "kind"> & Pick<IntegrationRequirement, "kind">;
+
+function cascadeRequirement(req: IntegrationRequirement): CascadeRequirement {
+  return req.kind === "agent"
+    ? req
+    : { ...req, hasSelectedTools: true, agentTools: [], agentScopes: [], required: true };
 }
 
 interface ResolveConnectionsInput {
@@ -159,7 +184,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     if (result.kind === "unbound") warnings.push(result.warning);
   };
 
-  for (const req of input.requirements) {
+  for (const req of input.requirements.map(cascadeRequirement)) {
     // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
     if (
       !req.required &&
@@ -240,7 +265,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       actorEndUserId: input.actorEndUserId ?? null,
       auth,
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
-      ...(req.noAgentSelection ? { noAgentSelection: true } : {}),
+      kind: req.kind,
     });
 
     record(req.integrationId, result);
@@ -281,7 +306,7 @@ interface ResolveOneArgs {
   auth: AuthFilter;
   /** Set when the dep's `auth_key` filtered out every live row: the auths those rows use. */
   availableAuthKeys?: string[];
-  noAgentSelection?: boolean;
+  kind: IntegrationRequirement["kind"];
 }
 
 type ResolveOneResult =
@@ -468,7 +493,7 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
     return errorOf(args, {
       code: "must_choose_connection",
       message: `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
-      candidateConnections: serving.map((c) => candidateOf(args, c)),
+      candidateConnections: serving.map((c) => candidateOf(args, c, missingScopesOf(args, c))),
     });
   }
   return gapOf(args, nothingOwnServes(args, serving));
@@ -476,16 +501,14 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
 
 /**
  * Own `oauth2` connections of ONE known account, auth and instance (variables) differ only by
- * scopes, so no account is chosen. Ranked by what the agent misses, then what the row grants
- * beyond the agent's scopes and `default_scopes`, then what the defaults miss, then breadth, then
- * health: a narrow row (dead, or short of a newer default) is never traded for a broader one.
- * `null` otherwise, and with no agent selection.
+ * scopes, so no account is chosen: the least-privileged one ({@link rankByLeastPrivilege}), the
+ * oldest on a tie. `null` otherwise, and for a proxy call, which selects nothing.
  */
 function leastPrivilegedOfOneAccount(
   args: ResolveOneArgs,
   own: ConnectionRow[],
 ): ConnectionRow | null {
-  if (args.noAgentSelection) return null;
+  if (args.kind === "proxy") return null;
   const [first] = own;
   const auth = args.manifest.auths?.[first!.authKey];
   const account = displayAccountId(first!.accountId);
@@ -496,40 +519,92 @@ function leastPrivilegedOfOneAccount(
     c.accountId === account &&
     sameConnectionVariables(connectionVariablesOf(c.variables), variables);
   if (!own.every(sameUpstream)) return null;
-  const { manifest } = args;
-  const authKey = first!.authKey;
-  const defaults = auth.default_scopes ?? [];
-  const allowed = new Set(
-    expandScopesGranted([...oauthScopesForAuth(args, authKey), ...defaults], manifest, authKey),
+  const oldestFirst = [...own].sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
   );
-  // Catalog scopes only (IdP echoes aside), `implies` expanded: an umbrella is never narrower.
-  const declared = (c: ConnectionRow) =>
-    partitionScopesByAuthCatalog(auth, expandScopesGranted(c.scopesGranted, manifest, authKey))
-      .declared;
-  const ranked = own.map((c) => ({
-    c,
-    agentMissing: missingScopesForConnection({
-      manifest,
-      authKey,
-      granted: c.scopesGranted,
-      agentTools: args.agentTools,
-      agentScopes: args.agentScopes,
-    }).length,
-    excess: declared(c).filter((scope) => !allowed.has(scope)).length,
-    defaultMissing: scopesNotCovered(defaults, c.scopesGranted, manifest, authKey).length,
-    breadth: declared(c).length,
-  }));
-  ranked.sort(
-    (a, b) =>
-      a.agentMissing - b.agentMissing ||
-      a.excess - b.excess ||
-      a.defaultMissing - b.defaultMissing ||
-      a.breadth - b.breadth ||
-      Number(a.c.needsReconnection) - Number(b.c.needsReconnection) ||
-      a.c.createdAt.getTime() - b.c.createdAt.getTime() ||
-      a.c.id.localeCompare(b.c.id),
-  );
-  return ranked[0]!.c;
+  return rankByLeastPrivilege(args, oldestFirst)[0]!.row;
+}
+
+type ScopeSelection = Pick<ResolveOneArgs, "manifest" | "agentTools" | "agentScopes">;
+type ScopedRow = Pick<ConnectionRow, "authKey" | "scopesGranted" | "needsReconnection">;
+
+/**
+ * `rows` least privilege first, each with its fit and the scopes the selection misses on it.
+ * Ordered by fit (`CONNECTION_SCOPE_FITS`), then what the agent misses, what the row grants
+ * beyond the agent's scopes and `default_scopes`, what the defaults miss, breadth, then health:
+ * a narrow row (dead, or short of a newer default) is never traded for a broader one. Ties keep
+ * the given order. Breadth counts catalog scopes only (IdP echoes aside), `implies` expanded:
+ * an umbrella is never narrower.
+ */
+export function rankByLeastPrivilege<T extends ScopedRow>(
+  selection: ScopeSelection,
+  rows: readonly T[],
+): { row: T; scopeFit: ConnectionScopeFit; missingScopes: string[] }[] {
+  const { manifest } = selection;
+  const standings = rows.map((row) => {
+    const { authKey } = row;
+    const auth = manifest.auths?.[authKey];
+    const defaults = auth?.default_scopes ?? [];
+    const allowed = new Set(
+      expandScopesGranted(
+        [...oauthScopesForAuth(selection, authKey), ...defaults],
+        manifest,
+        authKey,
+      ),
+    );
+    const declared = partitionScopesByAuthCatalog(
+      auth,
+      expandScopesGranted(row.scopesGranted, manifest, authKey),
+    ).declared;
+    const missingScopes = missingScopesOf(selection, row);
+    const excess = declared.filter((scope) => !allowed.has(scope)).length;
+    const judged = auth?.type === "oauth2" && (auth.scope_catalog?.length ?? 0) > 0;
+    const scopeFit: ConnectionScopeFit =
+      missingScopes.length > 0
+        ? "missing"
+        : !judged
+          ? "unjudged"
+          : excess > 0
+            ? "broader"
+            : "exact";
+    const order = [
+      CONNECTION_SCOPE_FITS.indexOf(scopeFit),
+      missingScopes.length,
+      excess,
+      scopesNotCovered(defaults, row.scopesGranted, manifest, authKey).length,
+      declared.length,
+      Number(row.needsReconnection),
+    ];
+    return { row, scopeFit, missingScopes, order };
+  });
+  standings.sort((a, b) => {
+    const at = a.order.findIndex((key, i) => key !== b.order[i]);
+    return at === -1 ? 0 : a.order[at]! - b.order[at]!;
+  });
+  return standings.map(({ row, scopeFit, missingScopes }) => ({ row, scopeFit, missingScopes }));
+}
+
+function missingScopesOf(
+  selection: ScopeSelection,
+  conn: Pick<ConnectionRow, "authKey" | "scopesGranted">,
+): string[] {
+  return missingScopesForConnection({
+    manifest: selection.manifest,
+    authKey: conn.authKey,
+    granted: conn.scopesGranted,
+    agentTools: selection.agentTools,
+    agentScopes: selection.agentScopes,
+  });
+}
+
+/** How an under-scoped member of the set `source` bound clears. */
+function scopeRemedy(
+  source: ConnectionResolutionSource,
+  ownedByActor: boolean,
+): InsufficientScopesRemedy {
+  if (source === "admin_pin" || source === "org_default_enforced") return "rebind_by_admin";
+  if (source === "schedule_override") return "rebind_by_schedule_owner";
+  return ownedByActor ? "upgrade_or_new" : "new_connection";
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
@@ -582,7 +657,7 @@ function nothingOwnServes(args: ResolveOneArgs, serving: ConnectionRow[]): Gap {
   if (serving.length > 0) {
     return {
       code: "must_choose_connection",
-      candidateConnections: serving.map((c) => candidateOf(args, c)),
+      candidateConnections: serving.map((c) => candidateOf(args, c, missingScopesOf(args, c))),
       message: `Integration '${args.integrationId}' has only connections shared by other members — choose one explicitly (member pin or run override), or connect your own`,
     };
   }
@@ -608,7 +683,7 @@ function connectTarget(args: ConnectTargetArgs): { authKey?: string; requiredSco
 
 /** The rows a requirement may bind or offer — the 409's candidates and the picker's alike. */
 export function servingCandidates<T>(
-  req: Pick<IntegrationRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
+  req: Pick<AgentRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
   rows: readonly T[],
   authKeyOf: (row: T) => string,
 ): T[] {
@@ -624,7 +699,7 @@ interface AuthFilter {
 }
 
 function authFilterOf(
-  req: Pick<IntegrationRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
+  req: Pick<AgentRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
 ): AuthFilter {
   return {
     live: manifestAuthKeySet(req.manifest),
@@ -667,7 +742,7 @@ function declaredAuthKey(manifest: IntegrationManifest, key: string): string | n
   return manifest.auths?.[key] ? key : null;
 }
 
-function oauthScopesForAuth(args: ConnectTargetArgs, authKey: string): string[] {
+function oauthScopesForAuth(args: ScopeSelection, authKey: string): string[] {
   if (args.manifest.auths?.[authKey]?.type !== "oauth2") return [];
   return requiredScopesForAgent({
     manifest: args.manifest,
@@ -696,13 +771,14 @@ export function actorIdentityOf(actor: Actor): ActorIdentity {
   };
 }
 
-/** Project a candidate row onto the picker-facing shape carried by the 409. */
+/** A candidate row as the 409 carries it; `missingScopes` is the selection's gap on it. */
 export function candidateOf(
   actor: ActorIdentity,
   conn: Pick<
     ConnectionRow,
-    "id" | "label" | "accountId" | "needsReconnection" | "userId" | "endUserId"
+    "id" | "label" | "accountId" | "needsReconnection" | "userId" | "endUserId" | "scopesGranted"
   >,
+  missingScopes: string[],
 ): ConnectionCandidate {
   return {
     id: conn.id,
@@ -710,6 +786,8 @@ export function candidateOf(
     accountId: conn.accountId,
     ownedByActor: isOwnedByActor(actor, conn),
     needsReconnection: conn.needsReconnection,
+    scopesGranted: conn.scopesGranted,
+    missingScopes,
   };
 }
 
@@ -750,13 +828,7 @@ function checkHealth(
     });
   }
 
-  const missing = missingScopesForConnection({
-    manifest: args.manifest,
-    authKey: conn.authKey,
-    granted: conn.scopesGranted,
-    agentTools: args.agentTools,
-    agentScopes: args.agentScopes,
-  });
+  const missing = missingScopesOf(args, conn);
   if (missing.length > 0) {
     return errorOf(args, {
       code: "insufficient_scopes",
@@ -766,6 +838,7 @@ function checkHealth(
       // The FULL requirement, not the diff: some providers treat each consent as the whole grant.
       requiredScopes: oauthScopesForAuth(args, conn.authKey),
       ownedByActor,
+      remedy: scopeRemedy(source, ownedByActor),
       source,
       message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
     });
@@ -910,6 +983,8 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
             account_id: c.accountId,
             owned_by_actor: c.ownedByActor,
             needs_reconnection: c.needsReconnection,
+            scopes_granted: c.scopesGranted,
+            missing_scopes: c.missingScopes,
           })),
         }
       : {}),
@@ -922,10 +997,9 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
             : {}),
         }
       : {}),
-    // Scope-diff detail on insufficient_scopes: the caller chooses between a new
-    // connection and an upgrade (own connection only), or reports it (foreign owner).
     ...(e.code === "insufficient_scopes"
       ? {
+          ...(e.remedy ? { remedy: e.remedy } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.missingScopes && e.missingScopes.length > 0
             ? { missing_scopes: e.missingScopes }
@@ -984,13 +1058,14 @@ async function buildRequirement(
 export function requirementOf(
   entry: ManifestIntegrationEntry,
   manifest: IntegrationManifest,
-): IntegrationRequirement {
+): AgentRequirement {
   const wildcard = entry.tools === "*";
   // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);
   const hasSelectedTools =
     isToolsWildcard(effectiveTools) || (Array.isArray(effectiveTools) && effectiveTools.length > 0);
   return {
+    kind: "agent",
     integrationId: entry.id,
     manifest,
     hasSelectedTools,

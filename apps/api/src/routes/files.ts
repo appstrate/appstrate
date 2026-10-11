@@ -83,7 +83,7 @@ const listFilesQuerySchema = z
     chat_session_id: z.string().optional(),
     context_chat_session_id: z.string().optional(),
     startingAfter: z.string().optional(),
-    // Coerced by `parseListPagination` (out-of-range falls back to the default).
+    // Coerced by `parseListPagination` (above the maximum is a 400).
     limit: z.string().optional(),
   })
   .strict();

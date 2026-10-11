@@ -7,7 +7,7 @@
  * spawn/credentials resolvers and the sidecar's MITM listener.
  */
 
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // `HttpDeliveryPlan` lives once in @appstrate/afps-runtime (the dependency-free
@@ -65,7 +65,7 @@ export function toCredentialStringMap(raw: Record<string, unknown>): Record<stri
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(raw)) {
     if (v === null || v === undefined) continue;
-    out[k] = jsonText(v);
+    out[k] = jsonText(v as JsonValue);
   }
   return out;
 }

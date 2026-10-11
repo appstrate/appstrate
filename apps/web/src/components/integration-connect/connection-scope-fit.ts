@@ -2,11 +2,6 @@
 
 import { expandScopesGranted, type IntegrationManifest } from "@appstrate/core/integration";
 
-/** `unjudged`: covers the agent, but the auth (non-oauth2, or no catalog) gives no breadth. */
-export type ScopeFit = "exact" | "unjudged" | "broader" | "missing";
-
-const FIT_RANK: Record<ScopeFit, number> = { exact: 0, unjudged: 1, broader: 2, missing: 3 };
-
 const SUMMARY_MAX = 2;
 
 /** The manifest's `scope_catalog` label of each scope, the raw scope when it declares none. */
@@ -43,34 +38,4 @@ export function summarizeScopes(
   const labels = scopeLabels(manifest, authKey, ordered.length > 0 ? ordered : scopes);
   const shown = labels.slice(0, SUMMARY_MAX).join(" · ");
   return labels.length > SUMMARY_MAX ? `${shown} +${labels.length - SUMMARY_MAX}` : shown;
-}
-
-/**
- * Coverage is the server's verdict (`missing`). Breadth compares the granted scopes the catalog
- * declares with `required ∪ default_scopes`, expanded through `implies`.
- */
-export function scopeFit(input: {
-  manifest: IntegrationManifest;
-  authKey: string;
-  granted: readonly string[];
-  missing: readonly string[];
-  required: readonly string[];
-}): ScopeFit {
-  if (input.missing.length > 0) return "missing";
-  const auth = input.manifest.auths?.[input.authKey];
-  if (auth?.type !== "oauth2" || !auth.scope_catalog?.length) return "unjudged";
-  const declared = new Set(auth.scope_catalog.map((entry) => entry.value));
-  const allowed = new Set(
-    expandScopesGranted(
-      [...input.required, ...(auth.default_scopes ?? [])],
-      input.manifest,
-      input.authKey,
-    ),
-  );
-  return input.granted.some((s) => declared.has(s) && !allowed.has(s)) ? "broader" : "exact";
-}
-
-/** Stable: exact → unjudged → broader → missing. */
-export function sortByScopeFit<T>(items: readonly T[], fitOf: (item: T) => ScopeFit): T[] {
-  return [...items].sort((a, b) => FIT_RANK[fitOf(a)] - FIT_RANK[fitOf(b)]);
 }

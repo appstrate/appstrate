@@ -23,10 +23,9 @@ interface ListPagination {
 }
 
 /**
- * Parse `limit` / `offset` from the query string with the codebase's standard
- * coercion (`z.coerce.number().int()...catch(default)`). Out-of-range or
- * non-numeric values fall back to the defaults rather than 400-ing — matches
- * `/runs`, `/notifications`, `/schedules`.
+ * Parse `limit` / `offset` from the query string. A `limit` above `maxLimit` (default 100) is a
+ * 400 on `limit`: serving fewer rows than asked would read as the whole list. Any other value that
+ * is not a positive integer, and a negative or non-numeric `offset`, fall back to the defaults.
  */
 export function parseListPagination(
   c: Context,
@@ -37,9 +36,9 @@ export function parseListPagination(
     .number()
     .int()
     .min(1)
-    .max(maxLimit)
     .catch(opts.defaultLimit)
     .parse(c.req.query("limit") ?? opts.defaultLimit);
+  if (limit > maxLimit) throw invalidRequest(`limit must be at most ${maxLimit}`, "limit");
   const offset = z.coerce
     .number()
     .int()

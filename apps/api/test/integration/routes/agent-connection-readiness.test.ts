@@ -95,7 +95,7 @@ interface ReadinessResolution {
   source: string | null;
   error_code: string | null;
   resolved_connection_ids: string[];
-  candidates: Array<{ id: string }>;
+  candidates: Array<{ id: string; label?: string; scope_fit?: string; rank?: number }>;
 }
 interface ReadinessBody {
   blocks_run: boolean;
@@ -529,11 +529,15 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, GMAIL_AGENT);
 
+    await seedGmailConnection("Connexion 1", grant);
+  }
+
+  async function seedGmailConnection(label: string, grant: string[]) {
     await db.insert(integrationConnections).values({
       integrationId: GMAIL,
       authKey: "primary",
       accountId: "user@example.com",
-      label: "Connexion 1",
+      label,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
@@ -581,11 +585,28 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     const body = await readiness();
     expect(body.blocks_run).toBe(true);
     const err = body.errors.find((e) => e.field === `integrations.${GMAIL}`) as
-      { code: string; missing_scopes?: string[] } | undefined;
+      { code: string; missing_scopes?: string[]; remedy?: string } | undefined;
     expect(err?.code).toBe("insufficient_scopes");
+    // The caller's own connection, bound by no governing layer.
+    expect(err?.remedy).toBe("upgrade_or_new");
     // Only the genuinely absent scope — `email` must not ride along.
     expect(err?.missing_scopes).toEqual([readonly]);
 
     expect((await launch()).status).toBe(409);
+  });
+
+  it("ranks the picker's candidates least privilege first, the one the fallback binds leading", async () => {
+    // Listed oldest first, the broad one would lead.
+    await seedWildcardGmailAgent([...GOOGLE_GRANT, "https://www.googleapis.com/auth/gmail.modify"]);
+    await seedGmailConnection("Lecture", GOOGLE_GRANT);
+
+    const body = await readiness();
+    const { resolution } = body.integrations.find((i) => i.integration_package_id === GMAIL)!;
+
+    expect(resolution.candidates.map((c) => [c.label, c.scope_fit, c.rank])).toEqual([
+      ["Lecture", "exact", 0],
+      ["Connexion 1", "broader", 1],
+    ]);
+    expect(resolution.resolved_connection_ids).toEqual([resolution.candidates[0]!.id]);
   });
 });

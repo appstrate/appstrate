@@ -15,7 +15,10 @@
 
 import { describe, it, expect } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  INSUFFICIENT_SCOPES_REMEDIES,
+} from "@appstrate/core/integration";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { RUN_AND_WAIT_LONG_POLL_RESUME } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
@@ -96,13 +99,13 @@ describe("MCP server instructions — connect bullet", () => {
       expect(part).toContain("`connection_overrides`");
       // …and the caller is told where the new connection's id comes from.
       expect(part).toMatch(/`listIntegrationConnections`|only when `source` is `fallback_auto`/);
-      // The layers a member cannot override themselves.
-      for (const layer of ["admin_pin", "org_default_enforced", "schedule_override"]) {
-        expect(part).toContain(`\`${layer}\``);
+      // The item's own `remedy` decides, every value named.
+      for (const remedy of INSUFFICIENT_SCOPES_REMEDIES) {
+        expect(part).toContain(`\`${remedy}\``);
       }
       // `connection_id` only on a reconnect, or an upgrade the owner chose.
       expect(bullet).toContain("for a needs_reconnection item only");
-      expect(part).toMatch(/`connection_id`[^.]*only when `owned_by_actor` is true/);
+      expect(part).toMatch(/Under `upgrade_or_new` only[^.]*`connection_id`/);
     }
     const cannotConnect = instructionsFor(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
     expect(cannotConnect).toContain("An `insufficient_scopes` item carries no `connect_url`");

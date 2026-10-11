@@ -70,6 +70,8 @@ function candidate(id: string, label: string): Candidate {
     origin_space_id: null,
     needs_reconnection: false,
     missing_scopes: [],
+    scope_fit: "unjudged",
+    rank: 0,
     is_own: true,
   };
 }
@@ -920,10 +922,18 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     },
   ];
   const LABELS = "44444444-4444-4444-8444-444444444444";
-  const scoped = (id: string, granted: string[], missing: string[] = []): Candidate => ({
+  /** A candidate as the server judged it: its grant, what it misses, its fit and its rank. */
+  const scoped = (
+    id: string,
+    granted: string[],
+    missing: string[] = [],
+    verdict: Partial<Pick<Candidate, "scope_fit" | "rank">> = {},
+  ): Candidate => ({
     ...candidate(id, id),
     scopes_granted: granted,
     missing_scopes: missing,
+    scope_fit: missing.length > 0 ? "missing" : "exact",
+    ...verdict,
   });
   type OpenPopup = NonNullable<ConnectionPickerDeps["openPopup"]>;
 
@@ -980,11 +990,11 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     canConnect: true,
   });
 
-  it("lists compatible connections first, the ones granting no more than asked leading", () => {
+  it("lists the connections by the server's rank, whatever order they arrive in", () => {
     const picker = pickerOver([
-      scoped(WEB, ["read"], ["send"]),
-      scoped(LABELS, ["read", "labels"]),
-      scoped(DB, ["read"]),
+      scoped(WEB, ["read"], ["send"], { rank: 2 }),
+      scoped(LABELS, ["read", "labels"], [], { scope_fit: "broader", rank: 1 }),
+      scoped(DB, ["read"], [], { rank: 0 }),
     ]);
     expect(picker.candidates.map((c) => c.id)).toEqual([DB, LABELS, WEB]);
   });
@@ -1095,7 +1105,7 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
 
   it("shows each row's grant against the agent, and offers a connection with its scopes", () => {
     const exact = scoped(DB, ["read", "send"]);
-    const broader = scoped(LABELS, ["read", "send", "labels"]);
+    const broader = scoped(LABELS, ["read", "send", "labels"], [], { scope_fit: "broader" });
     const short = scoped(WEB, ["read"], ["send"]);
     const picker = pickerOver([short, broader, exact], { agentScopes: ["send"] });
     const trees: ReactNode[] = [];

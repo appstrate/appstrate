@@ -183,6 +183,17 @@ describe.each(["oauth2", "session"] as const)("connect/%s — scope catalog", (s
     );
   });
 
+  it("refuses a scope that is not one RFC 6749 scope-token, whatever the catalog", async () => {
+    // Joined with spaces into the consent request, `a b` would ask for two scopes.
+    for (const scope of ["anything admin", 'quo"te', ""]) {
+      const res = await kickoff(ctx, surface, "open", { scopes: [scope] });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { code: string; errors?: { field: string }[] };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors?.map((e) => e.field)).toEqual(["scopes[0]"]);
+    }
+  });
+
   it("accepts a kickoff that requests no scopes at all", async () => {
     const res = await kickoff(ctx, surface, "catalogued", {});
     expect(res.status).toBe(200);

@@ -279,6 +279,9 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
+  // RFC 6749 §3.3 separates scopes with a space. The comma and the literal `%20` are a tolerance
+  // for authorization servers that answer otherwise (GitHub joins with commas), at a cost: `,` is
+  // a legal scope-token character, so a scope holding one is read back as several.
   const scopes =
     typeof tokenData.scope === "string" ? tokenData.scope.split(/[\s,]+|%20/).filter(Boolean) : [];
 

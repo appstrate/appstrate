@@ -184,4 +184,17 @@ describe("substituteRequest — refusals name the field, never the value", () =>
     expect(render("cookie", "abc-123_~!")).toBe("sid=abc-123_~!");
     expect(render("X-Other", "x; y")).toBe("sid=x; y");
   });
+
+  it("renders a non-string input as its JSON text and leaves a null one's placeholder intact", () => {
+    const { body } = substituteRequest(
+      {
+        url: "https://h.example/",
+        headers: {},
+        body: "{{port}} {{hosts}} {{gone}}",
+        contentType: "text/plain",
+      },
+      { port: 5432, hosts: ["a,b"], gone: null },
+    );
+    expect(body).toBe('5432 ["a,b"] {{gone}}');
+  });
 });

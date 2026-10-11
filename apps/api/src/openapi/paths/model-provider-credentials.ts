@@ -146,6 +146,11 @@ export const modelProviderCredentialsPaths = {
             },
           },
         },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "A `limit` above the maximum (`param: limit`), or an unknown `fields` entry.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

@@ -35,6 +35,8 @@ import {
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findInvalidScopeTokens,
+  scopeTokenSchema,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -846,6 +848,39 @@ describe("findNonSnakeCaseIdentityClaimKeys — write-path identity key casing",
     expect(findNonSnakeCaseIdentityClaimKeys(withClaims({ account_id: "$.id" }))).toEqual([]);
     expect(findNonSnakeCaseIdentityClaimKeys(withLogin(["user_id"]))).toEqual([]);
     expect(findNonSnakeCaseIdentityClaimKeys(null)).toEqual([]);
+  });
+});
+
+describe("scope tokens — RFC 6749 §3.3", () => {
+  it("accepts NQCHAR tokens and refuses a space, a quote, a backslash, a control or nothing", () => {
+    for (const ok of ["read", "https://www.googleapis.com/auth/gmail.readonly", "repo:status!"]) {
+      expect(scopeTokenSchema.safeParse(ok).success).toBe(true);
+    }
+    for (const bad of ["", "read write", 're"ad', "re\\ad", "read\n", "lecture é"]) {
+      expect(scopeTokenSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("locates every scope of a manifest that is not one token", () => {
+    const found = findInvalidScopeTokens({
+      auths: {
+        primary: {
+          type: "oauth2",
+          default_scopes: ["openid", "read write"],
+          scope_catalog: [{ value: "read" }, { value: 'adm"in' }],
+        },
+        key: { type: "api_key" },
+      },
+      tools_policy: { send: { required_scopes: { primary: ["mail.send", "a b"] } } },
+    });
+    expect(found.map((v) => v.path.join("."))).toEqual([
+      "auths.primary.default_scopes.1",
+      "auths.primary.scope_catalog.1.value",
+      "tools_policy.send.required_scopes.primary.1",
+    ]);
+    expect(findInvalidScopeTokens({ auths: { primary: { default_scopes: ["openid"] } } })).toEqual(
+      [],
+    );
   });
 });
 

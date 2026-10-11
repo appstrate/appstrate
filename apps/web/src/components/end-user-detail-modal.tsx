@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy } from "lucide-react";
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
 import { Modal } from "./modal";
 import { ConfirmModal } from "./confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
@@ -225,7 +225,7 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
                   <Badge key={key} variant="outline" className="text-xs font-normal">
                     <span className="font-medium">{key}</span>
                     <span className="text-muted-foreground mx-1">:</span>
-                    <span>{jsonText(val)}</span>
+                    <span>{jsonText(val as JsonValue)}</span>
                   </Badge>
                 ))}
               </div>

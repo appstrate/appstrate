@@ -8,6 +8,7 @@
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
+import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
 import { normalizeMime } from "@appstrate/afps-shared/mime";
 import { substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
 
@@ -118,8 +119,9 @@ function headerEncoder(name: string): PlaceholderEncoder {
 }
 
 /**
- * `request` with each `{{name}}` of `inputs` encoded in place (others left intact). The body's media
- * type is its `Content-Type` header's, else `contentType`. Throws {@link UnencodableInputError}.
+ * `request` with each `{{name}}` of `inputs` encoded in place (others left intact, a `null` or
+ * `undefined` input's included: it is absent). The body's media type is its `Content-Type`
+ * header's, else `contentType`. Throws {@link UnencodableInputError}.
  */
 export function substituteRequest<B extends string | null | undefined>(
   request: {
@@ -132,7 +134,7 @@ export function substituteRequest<B extends string | null | undefined>(
 ): { url: string; headers: Record<string, string>; body: B extends string ? string : B } {
   const text: Record<string, string> = {};
   for (const [key, value] of Object.entries(inputs)) {
-    text[key] = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
+    if (value !== null && value !== undefined) text[key] = jsonText(value as JsonValue);
   }
   const render = (template: string, encode: PlaceholderEncoder) =>
     substituteVars(template, text, {

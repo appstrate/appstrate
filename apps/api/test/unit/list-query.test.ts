@@ -10,6 +10,15 @@ import {
 } from "../../src/lib/list-query.ts";
 
 /** Minimal Context stub exposing only `req.query(name)`. */
+function catchError(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+}
+
 function fakeCtx(query: Record<string, string | undefined>): Context {
   return { req: { query: (name: string) => query[name] } } as unknown as Context;
 }
@@ -105,9 +114,22 @@ describe("parseListPagination", () => {
     });
   });
 
-  it("falls back to the default for an out-of-range or garbage limit", () => {
-    expect(parseListPagination(fakeCtx({ limit: "9999" }), { defaultLimit: 50 }).limit).toBe(50);
-    expect(parseListPagination(fakeCtx({ limit: "abc" }), { defaultLimit: 50 }).limit).toBe(50);
+  it("refuses a limit above the maximum with a 400 naming `limit`", () => {
+    for (const [limit, opts] of [
+      ["101", { defaultLimit: 50 }],
+      ["9999", { defaultLimit: 50 }],
+      ["51", { defaultLimit: 10, maxLimit: 50 }],
+    ] as const) {
+      const err = catchError(() => parseListPagination(fakeCtx({ limit }), opts));
+      expect(err).toMatchObject({ status: 400, code: "invalid_request", param: "limit" });
+    }
+    expect(parseListPagination(fakeCtx({ limit: "100" }), { defaultLimit: 50 }).limit).toBe(100);
+  });
+
+  it("falls back to the default for a limit that is no positive integer", () => {
+    for (const limit of ["abc", "0", "-3", "1.5"]) {
+      expect(parseListPagination(fakeCtx({ limit }), { defaultLimit: 50 }).limit).toBe(50);
+    }
   });
 
   it("clamps a negative offset back to 0", () => {

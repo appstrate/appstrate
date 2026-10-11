@@ -43,6 +43,7 @@ import {
   unresolvedPlaceholders,
 } from "@appstrate/afps-runtime/resolvers";
 import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
+import { jsonText, type JsonValue } from "@appstrate/afps-shared/json-text";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { evaluateJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { parseCredentialRef } from "@appstrate/afps-shared/credential-template";
@@ -57,6 +58,7 @@ import {
 } from "@appstrate/afps-shared/runtime-expression";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
+import { toCredentialStringMap } from "../integration-credentials.ts";
 
 interface LoginLimits {
   // Per-request timeout. Maps to the manifest field `connect.limits.request_timeout_ms`.
@@ -160,6 +162,8 @@ interface LoginResult {
  */
 export class LoginError extends Error {
   readonly upstreamStatus?: number;
+  /** The target's `Retry-After` on an `upstream_failed` answer, in seconds. */
+  readonly retryAfterSeconds?: number;
   readonly timeoutMs?: number;
   readonly field?: string;
   readonly fields?: readonly string[];
@@ -184,6 +188,7 @@ export class LoginError extends Error {
      */
     options?: ErrorOptions & {
       upstreamStatus?: number;
+      retryAfterSeconds?: number;
       timeoutMs?: number;
       field?: string;
       fields?: readonly string[];
@@ -192,6 +197,7 @@ export class LoginError extends Error {
     super(message, options);
     this.name = "LoginError";
     this.upstreamStatus = options?.upstreamStatus;
+    this.retryAfterSeconds = options?.retryAfterSeconds;
     this.timeoutMs = options?.timeoutMs;
     this.field = options?.field;
     this.fields = options?.fields;
@@ -333,11 +339,9 @@ function readJsonPointer(root: unknown, pointer: string): unknown {
   return cur;
 }
 
-function stringifyValue(v: unknown): string {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  return JSON.stringify(v);
+/** An extracted JSON value as the credential it is stored as; `null` is an absent one. */
+function outputText(v: unknown): string | undefined {
+  return v === null || v === undefined ? undefined : jsonText(v as JsonValue);
 }
 
 function parseSetCookie(headers: Headers, name: string): string | undefined {
@@ -439,18 +443,17 @@ function applyOutput(
     if (expr.kind === "status") return String(res.status);
     if (expr.kind === "header") return res.headers.get(expr.name) ?? undefined;
     if (expr.pointer === undefined) return res.bodyText;
-    const v = readJsonPointer(bodyJson(res, name), expr.pointer);
-    return v === undefined ? undefined : stringifyValue(v);
+    return outputText(readJsonPointer(bodyJson(res, name), expr.pointer));
   }
 
   // Arazzo Selector Object form (`{ context, selector, type }`).
   if (isSelectorOutput(out)) {
     const doc = bodyJson(res, name);
-    const v =
+    return outputText(
       out.type === "jsonpointer"
         ? readJsonPointer(doc, out.selector)
-        : evaluateJsonPath(doc, out.selector);
-    return v === undefined ? undefined : stringifyValue(v);
+        : evaluateJsonPath(doc, out.selector),
+    );
   }
 
   switch (out.from) {
@@ -465,8 +468,7 @@ function applyOutput(
       if (!claims) {
         throw new LoginError(`'${name}' jwt decode failed`, "extract_failed");
       }
-      const v = readJsonPointer(claims, out.path);
-      return v === undefined ? undefined : stringifyValue(v);
+      return outputText(readJsonPointer(claims, out.path));
     }
     case "regex": {
       const m = new RegExp(out.pattern).exec(regexSubject(out.source, res));
@@ -513,6 +515,14 @@ function failedStatusReason(status: number, login: LoginRequestSpec): LoginError
   return judged || REFUSAL_STATUSES.has(status) ? "rejected" : "unexpected_status";
 }
 
+/** RFC 9110 §10.2.3 `Retry-After` (delay-seconds or HTTP-date) as whole seconds from `now`. */
+function retryAfterSeconds(header: string | null, now: number): number | undefined {
+  if (header === null) return undefined;
+  if (/^\d+$/.test(header.trim())) return Number(header);
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, Math.ceil((date - now) / 1000));
+}
+
 /** The inputs that fill the authority of URL template `url`. */
 function authorityInputs(url: string): string[] {
   const authority = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0]!;
@@ -547,22 +557,21 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     );
   }
 
-  const vars = { ...ctx.inputs };
-
-  // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never
-  // be sent literally upstream).
+  // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never be sent
+  // literally upstream). A `null` input supplies nothing: it is an absent credential.
+  const supplied = toCredentialStringMap(ctx.inputs);
   const unresolved = [
     login.request.url,
     login.request.body ?? "",
     ...Object.values(login.request.headers ?? {}),
-  ].flatMap((template) => unresolvedPlaceholders(template, vars));
+  ].flatMap((template) => unresolvedPlaceholders(template, supplied));
   if (unresolved.length > 0) {
     throw new LoginError(
       `unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,
       "unresolved_placeholder",
     );
   }
-  const { url, headers, body } = renderRequest(login.request, vars);
+  const { url, headers, body } = renderRequest(login.request, ctx.inputs);
   const urlFields = authorityInputs(login.request.url);
   const urlRefused = (message: string, options?: ErrorOptions) =>
     new LoginError(message, "url_not_allowed", {
@@ -655,8 +664,14 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
 
   if (!passesSuccessCriteria(response, login.success_criteria)) {
     // Never log/echo the body — only the status.
-    throw new LoginError(`unexpected status ${res.status}`, failedStatusReason(res.status, login), {
+    const reason = failedStatusReason(res.status, login);
+    const retryAfter =
+      reason === "upstream_failed"
+        ? retryAfterSeconds(res.headers.get("retry-after"), now())
+        : undefined;
+    throw new LoginError(`unexpected status ${res.status}`, reason, {
       upstreamStatus: res.status,
+      ...(retryAfter !== undefined ? { retryAfterSeconds: retryAfter } : {}),
     });
   }
 

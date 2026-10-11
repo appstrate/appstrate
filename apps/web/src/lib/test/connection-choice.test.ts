@@ -22,6 +22,8 @@ const CANDIDATE = {
   account_id: "me@acme.test",
   owned_by_actor: true,
   needs_reconnection: false,
+  scopes_granted: [],
+  missing_scopes: [],
 };
 
 describe("integrationIdOfField", () => {

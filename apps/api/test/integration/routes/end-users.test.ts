@@ -170,7 +170,6 @@ describe("End-Users API", () => {
       it.each([
         ["abc", "non-numeric"],
         ["-5", "below the minimum"],
-        ["1e9", "above the maximum"],
       ])("falls back to the default page size for ?limit=%s (%s)", async (value) => {
         const res = await app.request(`/api/end-users?limit=${value}`, {
           headers: apiKeyHeaders(),
@@ -181,6 +180,13 @@ describe("End-Users API", () => {
         expect(body.limit).toBe(PAGE);
         expect(body.data).toHaveLength(PAGE);
         expect(body.hasMore).toBe(true);
+      });
+
+      it("refuses a limit above the maximum, naming `limit`", async () => {
+        const res = await app.request("/api/end-users?limit=1e9", { headers: apiKeyHeaders() });
+
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { param?: string }).param).toBe("limit");
       });
 
       it("honours a valid limit", async () => {

@@ -181,6 +181,63 @@ integration_connections WHERE shared_with_org;` tells whether the step
 
 ### Changed
 
+- **BREAKING (API): connect and scopes** (#1913).
+  - **Login refusals carry their own code.** A `connect.login` or
+    `connect.tool` login the service refused is `400 login_rejected` on
+    `credentials` (was `invalid_request`, told apart by a `detail` starting
+    `Login failed:`; that prefix is gone). A value the login request cannot
+    carry is `400 login_input_unencodable` on `credentials.<field>`, a
+    submitted base URL it may not reach `400 login_url_refused` with one
+    `errors[]` entry per field, and a service that is unreachable, throttling
+    or failing `502 login_upstream_unavailable` (was `bad_gateway`), relaying
+    the service's `Retry-After` as the header and `retry_after`.
+  - **`insufficient_scopes` names its remedy.** The item carries `remedy`:
+    `new_connection`, `upgrade_or_new`, `rebind_by_admin` or
+    `rebind_by_schedule_owner`. The MCP instructions and the OpenAPI
+    description branch on it instead of restating the decision from `source`
+    and `owned_by_actor`.
+  - **`must_choose_connection` candidates carry their scopes**:
+    `scopes_granted` and `missing_scopes` on every `candidate_connections`
+    item.
+  - **The picker's least-privilege order is the server's.** Each
+    `candidates[]` item of `GET /api/agents/{scope}/{name}/connection-readiness`
+    carries `scope_fit` (`exact`, `unjudged`, `broader`, `missing`) and `rank`,
+    and the list is served in that order, the one the resolver's fallback
+    binds by. The dashboard sorts on `rank` and no longer ranks on its own.
+  - **A partial OAuth consent is reported.** The callback page names the
+    requested scopes the consent left out, its completion message carries them
+    as `scopes_denied`, the dashboard shows them, and the audit records
+    `integration.connection.scopes_denied` (`scopesRequested`, `scopesDenied`).
+    `integration.connection.created` records `scopesGranted`.
+  - **`scopes` of a connect kickoff are RFC 6749 scope tokens.** A scope
+    holding a space, a quote, a backslash or a non-ASCII character, or an empty
+    one, is refused with `400 validation_failed` on `scopes[n]`. Writing an
+    integration manifest applies the same rule to `default_scopes`,
+    `scope_catalog` values and `tools_policy.*.required_scopes`.
+  - **`limit` above the maximum is `400 invalid_request` on `limit`** on every
+    list that takes it (runs, run logs, schedule runs, integrations, the
+    provider registry, notifications, end-users, files, webhook deliveries,
+    and the sidecar's run history and memories); it used to fall back to the
+    default page size without saying so.
+  - **`null` is an absent credential at every door.** A `connect.login` whose
+    template names an input that is `null` fails closed instead of sending the
+    text `null`, and an extracted output that is `null` is a missing output.
+- **The connect form masks what the manifest marks secret** (#1913): a
+  credential field is a password input when its schema says `writeOnly: true`
+  or `format: "password"`, the rule the connection label already follows, and
+  never because of its name. An integration whose manifest marks nothing shows
+  every field in clear: mark each secret. The 24 system integrations that take
+  a pasted secret mark it and move one patch version: activecampaign 1.0.4,
+  brevo 1.0.3, browser-use 1.0.1, browserless 1.0.1, coolify-mcp 1.0.1, fathom
+  1.0.3, firecrawl 1.0.4, freshdesk 1.0.4, freshsales 1.0.3, github-mcp 1.1.4,
+  loom 1.0.4, playwright-mcp 1.0.1, shopify 1.0.4, shortcut 1.0.3, ssh 1.0.2,
+  stripe 1.0.4, teamwork 1.0.4, telegram 1.0.3, twenty-mcp 1.0.1, twilio 1.1.1,
+  webhooks 1.0.4, woocommerce 1.0.5, wordpress 1.0.5, zendesk 1.0.4. A new
+  connection of theirs with no identity is no longer labelled by a masked
+  fragment of its key: it takes the masked value of its one non-secret required
+  field (a Twilio Account SID, a Shopify domain, a Freshdesk subdomain), else
+  `Connexion N`. Existing labels are unchanged.
+
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
   - A refused tool call is a tool result with `isError: true` and JSON text

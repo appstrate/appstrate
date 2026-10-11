@@ -8,6 +8,8 @@ import {
   INTEGRATION_CONNECT_CHANNEL,
   acceptsCompletionMessage,
   completionMatches,
+  deniedScopesOf,
+  type IntegrationConnectCompletion,
 } from "@appstrate/core/connect-handshake";
 import { ApiError } from "../../api/errors";
 import { toastError } from "../../lib/mutation-error";
@@ -66,6 +68,7 @@ export function useHostedConnectPopup() {
         if (!popup) {
           throw new Error("popup_blocked");
         }
+        let scopesDenied: string[];
         try {
           const session = await initiateConnect.mutateAsync({
             params: { path: { packageId: input.packageId, authKey: input.authKey } },
@@ -76,16 +79,16 @@ export function useHostedConnectPopup() {
             },
           });
           popup.location.href = session.connect_url;
-          await new Promise<void>((resolve, reject) => {
+          scopesDenied = await new Promise<string[]>((resolve, reject) => {
             const cleanup = () => {
               clearInterval(poll);
               clearTimeout(timer);
               window.removeEventListener("message", onMessage);
               bc?.close();
             };
-            const onHit = () => {
+            const onHit = (completion: IntegrationConnectCompletion) => {
               cleanup();
-              resolve();
+              resolve(deniedScopesOf(completion));
             };
             // Which completion this popup is waiting for. Both carriers fan
             // out — a `BroadcastChannel` publish reaches every listener on the
@@ -97,7 +100,7 @@ export function useHostedConnectPopup() {
             const target = { packageId: input.packageId };
             // Success only: an `ok: false` completion is a failed connect, and
             // the popup-close poll below is what settles that case.
-            const isSuccess = (data: unknown): boolean =>
+            const isSuccess = (data: unknown): data is IntegrationConnectCompletion =>
               completionMatches(data, target) && data.ok === true;
             const onMessage = (e: MessageEvent) => {
               // The completion pages (hosted form + OAuth popup HTML) are served
@@ -105,7 +108,7 @@ export function useHostedConnectPopup() {
               // it must not stand in for a real connect. Origin first, then the
               // correlation, in one call.
               if (!acceptsCompletionMessage(e, window.location.origin, target)) return;
-              if (isSuccess(e.data)) onHit();
+              if (isSuccess(e.data)) onHit(e.data);
             };
             window.addEventListener("message", onMessage);
             let bc: BroadcastChannel | null = null;
@@ -114,7 +117,7 @@ export function useHostedConnectPopup() {
               // correlation only, which is what `isSuccess` applies.
               bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
               bc.onmessage = (e) => {
-                if (isSuccess(e.data)) onHit();
+                if (isSuccess(e.data)) onHit(e.data);
               };
             } catch {
               /* BroadcastChannel unsupported — postMessage + close-poll cover it */
@@ -134,7 +137,7 @@ export function useHostedConnectPopup() {
             const poll = setInterval(() => {
               if (popup.closed) {
                 cleanup();
-                resolve();
+                resolve([]);
               }
             }, POPUP_POLL_INTERVAL_MS);
           });
@@ -150,6 +153,9 @@ export function useHostedConnectPopup() {
         // (status cards, pickers, the connections page) reflects the new
         // connection without waiting for a window-focus refetch.
         await invalidateIntegrationQueries(qc);
+        if (scopesDenied.length > 0) {
+          toast.warning(t("integration.popup.scopesDenied", { scopes: scopesDenied.join(", ") }));
+        }
         return true;
       } catch (err) {
         if (err instanceof Error && err.message === "popup_blocked") {
