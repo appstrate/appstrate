@@ -57,11 +57,12 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
@@ -448,6 +449,23 @@ function ResizeHandle({
   );
 }
 
+/** What answers a click by itself: a click on it is its own, not the row's. */
+const OWN_CLICK =
+  'a,button,input,select,textarea,label,summary,[role="button"],[role="menuitem"],[role="checkbox"],[role="switch"],[role="combobox"],[role="radio"],[role="tab"],[tabindex]:not([tabindex="-1"])';
+
+/**
+ * A raised element sits above the row's cover and takes the click meant for the row: a name
+ * kept readable (its `title`), or the wrapper of a held first column. Whatever is not a control
+ * hands the click over. A plain click only (a modifier is the link's own business), on what is
+ * inside the row (a menu portal bubbles through React, not through the DOM).
+ */
+function handOver(e: MouseEvent<HTMLElement>, open: () => void) {
+  const target = e.target as Element;
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  if (!e.currentTarget.contains(target) || target.closest(OWN_CLICK)) return;
+  open();
+}
+
 export function DataTable<T>({
   columns,
   rows,
@@ -467,6 +485,11 @@ export function DataTable<T>({
   // The order lives in `collection.ts`, shared with the card grid: a caller
   // hands either body the same props and gets the same answer.
   const verdict = collectionVerdict(state, rows.length);
+  const navigate = useNavigate();
+  const open = (row: T, href: string | undefined) => {
+    if (href) navigate(href, { state: rowState?.(row) });
+    else if (rowAction && (rowActionable?.(row) ?? true)) rowAction(row);
+  };
   const isLoading = verdict === "loading";
   const frameRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -687,8 +710,9 @@ export function DataTable<T>({
                       className={cn(
                         rowGrid,
                         "group/row border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
-                        interactive && "hover:bg-muted/50 transition-colors",
+                        interactive && "hover:bg-muted/50 cursor-pointer transition-colors",
                       )}
+                      onClick={interactive ? (e) => handOver(e, () => open(row, href)) : undefined}
                     >
                       {/* The row is a target as a whole. The cover is the row's, not
                         the first cell's: a held cell is `sticky`, which makes it the

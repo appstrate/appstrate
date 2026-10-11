@@ -43,6 +43,8 @@ export interface ProviderRow {
   models: OrgModelInfo[];
   /** The key can no longer serve (a dead subscription, a secret that no longer decrypts). */
   unavailable: boolean;
+  /** It carries models, and every one of them is switched off. */
+  disabled: boolean;
 }
 
 const INSTANCE_ROW_ID = "instance";
@@ -103,7 +105,7 @@ export function providerRows(
 ): ProviderRow[] {
   const usable = models.filter((m) => m.enabled);
   const system = usable.filter(isSystemModel);
-  const unbound = memberModels(usable);
+  const unbound = memberModels(models);
   const rows: ProviderRow[] = [];
 
   for (const pk of credentials) {
@@ -111,6 +113,13 @@ export function providerRows(
     if (pk.source === "built-in") continue;
     const provider = resolveProviderEntry(pk, registry);
     const kind = kindOf(pk);
+    const bound =
+      kind === "org-key"
+        ? models.filter((m) => m.credentialId === pk.id && !isSystemModel(m))
+        : provider
+          ? unbound.filter((m) => serves(provider, m, registry))
+          : [];
+    const served = bound.filter((m) => m.enabled);
     rows.push({
       id: pk.id,
       kind,
@@ -120,13 +129,9 @@ export function providerRows(
       serviceName: provider?.displayName ?? null,
       owner: kind === "org-key" ? "org" : `user:${pk.owner_id}`,
       ownerName: pk.owner_name,
-      models:
-        kind === "org-key"
-          ? usable.filter((m) => m.credentialId === pk.id && !isSystemModel(m))
-          : provider
-            ? unbound.filter((m) => serves(provider, m, registry))
-            : [],
+      models: served,
       unavailable: pk.needs_reconnection === true,
+      disabled: bound.length > 0 && served.length === 0,
     });
   }
 
@@ -149,6 +154,7 @@ export function providerRows(
       ownerName: null,
       models: bound,
       unavailable: bound.some((m) => m.needs_reconnection),
+      disabled: false,
     });
   }
 
@@ -164,6 +170,7 @@ export function providerRows(
       ownerName: null,
       models: system,
       unavailable: false,
+      disabled: false,
     });
   }
 
@@ -181,8 +188,8 @@ export function providerRows(
 
 /**
  * The services a person may serve with a key of their own: those with a fixed endpoint that
- * list their models without a key to ask with. The organization's open-to-personal-keys
- * summary names these, and « Modifier » edits their models.
+ * list their models without a key to ask with. The organization opens some of them to
+ * personal keys (`personalServiceRows`), and « Choose the models » edits each one's models.
  */
 export function personalModelServices(
   registry: readonly ProviderRegistryEntry[],
@@ -196,49 +203,84 @@ export function personalModelServices(
   );
 }
 
-export interface ServiceSummary {
+/** A person who connected a personal key or subscription for a service. */
+export interface ServiceHolder {
+  id: string;
+  name: string | null;
+  /** The caller: the cell says « vous ». */
+  mine: boolean;
+}
+
+/** A service open to personal keys: the models left to them, and who plugged a key in. */
+export interface PersonalServiceRow {
+  /** The service's provider id. */
+  id: string;
   service: ProviderRegistryEntry;
+  /** The models usable with a personal key of this service, switched-on ones only. */
   models: OrgModelInfo[];
+  /** Everyone the server shows the caller, the caller first. */
+  holders: ServiceHolder[];
+  /** Keys are connected and none of them can serve any more. */
+  unavailable: boolean;
+  /** Models are left to personal keys, and every one of them is switched off. */
+  disabled: boolean;
 }
 
 /**
- * Per service, the models usable with a personal key: the services the organization already
- * has something for (a key, or a model left to personal keys), each with its models or none.
+ * One row per service open to personal keys: the ones with a model left to them, and the ones
+ * somebody already connected a key for (a key with no model to serve still shows, with none).
+ * A subscription belongs to the service whose models its plan offers (Claude Code to Anthropic).
  */
-export function personalModelSummary(
+export function personalServiceRows(
   models: readonly OrgModelInfo[],
-  rows: readonly ProviderRow[],
+  credentials: readonly ModelProviderCredentialInfo[],
   registry: readonly ProviderRegistryEntry[],
-): ServiceSummary[] {
-  const unbound = memberModels(models);
-  const known = new Set([
-    ...unbound.map((m) => m.providerId),
-    ...rows.filter((r) => r.kind !== "system").flatMap((r) => r.serviceIds),
-  ]);
-  return personalModelServices(registry)
-    .filter((service) => known.has(service.providerId))
-    .map((service) => ({
+  userId: string | undefined,
+): PersonalServiceRow[] {
+  const members = memberModels(models);
+  const personal = credentials.filter((pk) => pk.owner_type === "user");
+  return personalModelServices(registry).flatMap((service) => {
+    const left = members.filter((m) => m.providerId === service.providerId);
+    const served = left.filter((m) => m.enabled);
+    const keys = personal.filter((pk) => {
+      const provider = resolveProviderEntry(pk, registry);
+      return (
+        !!provider &&
+        (provider.providerId === service.providerId ||
+          served.some((m) => serves(provider, m, registry)))
+      );
+    });
+    if (left.length === 0 && keys.length === 0) return [];
+    const holders = new Map<string, ServiceHolder>();
+    for (const pk of keys) {
+      const id = pk.owner_id ?? pk.id;
+      holders.set(id, { id, name: pk.owner_name, mine: id === userId });
+    }
+    return {
+      id: service.providerId,
       service,
-      models: unbound.filter((m) => m.providerId === service.providerId),
-    }));
+      models: served,
+      holders: [...holders.values()].sort((a, b) => Number(b.mine) - Number(a.mine)),
+      unavailable: keys.length > 0 && keys.every((pk) => pk.needs_reconnection === true),
+      disabled: left.length > 0 && served.length === 0,
+    };
+  });
 }
 
-export interface ProviderFilters {
-  types: string[];
-  services: string[];
-  owners: string[];
-}
+/** What the State column says about a row, in the order it is read. Nothing when all is well. */
+export type RowState = "unavailable" | "default" | "disabled" | "no-key";
 
-/** Dimensions narrow each other, values of one are alternatives (the toolbar's rule). */
-export function filterProviderRows(
-  rows: readonly ProviderRow[],
-  filters: ProviderFilters,
-): ProviderRow[] {
-  return rows.filter(
-    (row) =>
-      (filters.types.length === 0 || filters.types.includes(row.kind)) &&
-      (filters.services.length === 0 ||
-        row.serviceIds.some((id) => filters.services.includes(id))) &&
-      (filters.owners.length === 0 || filters.owners.includes(row.owner)),
-  );
+export function rowStates(row: {
+  models: readonly OrgModelInfo[];
+  unavailable: boolean;
+  disabled: boolean;
+  /** Personal services: nobody connected a key. */
+  noKey?: boolean;
+}): RowState[] {
+  const states: RowState[] = [];
+  if (row.unavailable) states.push("unavailable");
+  if (row.models.some((m) => m.is_default)) states.push("default");
+  if (row.disabled) states.push("disabled");
+  if (row.noKey) states.push("no-key");
+  return states;
 }

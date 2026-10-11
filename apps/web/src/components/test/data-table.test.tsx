@@ -154,6 +154,7 @@ describe("the row's link", () => {
   it("renders a static row when there is nowhere to go", () => {
     const html = table({ rowHref: () => undefined });
     expect(html).not.toContain("<a ");
+    expect(html).not.toContain("cursor-pointer");
     expect(html).toContain("Alpha");
   });
 });
@@ -166,6 +167,8 @@ describe("states", () => {
     expect(html).toContain('aria-label="Ligne Alpha"');
     expect(html).toContain("absolute inset-0 cursor-pointer");
     expect(html).toContain("hover:bg-muted/50");
+    // The row itself shows the hand, so a name raised above the cover does too.
+    expect(html).toContain("hover:bg-muted/50 cursor-pointer");
   });
 
   it("replaces the head with the empty node — it would label nothing", () => {

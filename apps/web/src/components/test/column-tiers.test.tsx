@@ -38,6 +38,7 @@ import {
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
 import { useProviderColumns } from "../../pages/org-settings/provider-columns.tsx";
+import { usePersonalServiceColumns } from "../../pages/org-settings/personal-service-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
@@ -175,12 +176,11 @@ const SETS = {
   runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
   schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
   packages: () => columnsFrom(() => usePackageColumns()),
-  // The organization's providers table, the wider of the two.
+  // The organization's providers table, no Type column.
   providers: () =>
     columnsFrom(() =>
       useProviderColumns({
         registry: undefined,
-        userId: "user_1",
         testingIds: new Set(),
         testResults: {},
         renamingId: null,
@@ -195,12 +195,11 @@ const SETS = {
         canWriteModels: true,
       }),
     ),
-  // Preferences: the caller's own providers, no owner column.
+  // Preferences: the caller's own providers, with the kind of each.
   myProviders: () =>
     columnsFrom(() =>
       useProviderColumns({
         registry: undefined,
-        userId: "user_1",
         testingIds: new Set(),
         testResults: {},
         renamingId: null,
@@ -211,8 +210,13 @@ const SETS = {
         onReconnect: () => {},
         onDelete: () => {},
         canWriteModels: false,
-        hideOwner: true,
+        showType: true,
       }),
+    ),
+  // The services open to personal keys (Settings › Models › Clés perso).
+  personalServices: () =>
+    columnsFrom(() =>
+      usePersonalServiceColumns({ canWriteModels: true, onChooseModels: () => {} }),
     ),
   proxies: () =>
     columnsFrom(() =>

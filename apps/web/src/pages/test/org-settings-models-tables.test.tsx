@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The providers table as an administrator reads it: a key per row (organization, personal,
- * subscription) and the instance, each with the models it makes usable.
+ * The providers tables as an administrator reads them: the organization's keys and the instance
+ * on one tab, the services open to personal keys on the other, each row with the models it
+ * makes usable and one State column. The personal kinds of key (Preferences) are the first
+ * table with its Type column.
  *
  * A row carries no marker of its own (the table is a `DataTable`), so a row is read from its
  * label to the next row.
@@ -17,13 +19,14 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
-import { providerRows } from "../../lib/model-providers.ts";
+import { personalServiceRows, providerRows } from "../../lib/model-providers.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
 const { ProvidersTable } = await import("../../components/providers-table.tsx");
+const { PersonalServicesTable } = await import("../../components/personal-services-table.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 
@@ -46,7 +49,16 @@ const CREATED = "2026-07-01T10:00:00.000Z";
 
 /** What `providerRows` reads of the registry: the services, and what a subscription offers. */
 const SERVICES = [
-  { providerId: "anthropic", displayName: "Anthropic", authMode: "api_key", models: [] },
+  {
+    providerId: "anthropic",
+    displayName: "Anthropic",
+    authMode: "api_key",
+    apiShape: "anthropic-messages",
+    defaultBaseUrl: "https://api.anthropic.com",
+    baseUrlOverridable: false,
+    personal_allowed: true,
+    models: [{ id: "claude-sonnet-4-5" }],
+  },
   {
     providerId: "claude-code",
     displayName: "Claude Code",
@@ -106,6 +118,7 @@ const DEAD_KEY = credential({
   label: "Clé morte",
   needs_reconnection: true,
 });
+const OFF_KEY = credential({ id: "cred_off", label: "Clé éteinte" });
 
 /** The table row holding `text`, up to the next row, so a cell is read off its own row. */
 function rowOf(html: string, text: string): string {
@@ -146,12 +159,12 @@ const noop = () => {};
 function providersTable(
   models: OrgModelInfo[],
   credentials: ModelProviderCredentialInfo[],
-  over: { canWrite?: boolean } = {},
+  over: { canWrite?: boolean; showType?: boolean } = {},
 ): string {
   return render(
     <ProvidersTable
       rows={providerRows(models, credentials, SERVICES, "usr_me")}
-      userId="usr_me"
+      showType={over.showType}
       isLoading={false}
       error={null}
       empty={{ message: settingsFr["providers.empty"] }}
@@ -179,65 +192,71 @@ describe("the providers table", () => {
         source: "built-in",
         credentialId: "cred_builtin",
       }),
+      model({ id: "mdl_off", label: "Claude éteint", credentialId: "cred_off", enabled: false }),
     ],
     [
       ORG_KEY,
       EMPTY_KEY,
       DEAD_KEY,
+      OFF_KEY,
       MY_KEY,
       BOB_SUBSCRIPTION,
       credential({ id: "cred_builtin", source: "built-in", providerId: null }),
     ],
   );
+  const system = settingsFr["providers.type.system"];
 
-  it("heads the columns Provider, Type, Service, Belongs to, Models", () => {
+  it("heads the columns Provider, Service, Models, State, and no Type nor owner", () => {
     for (const key of [
       "providers.col.provider",
-      "providers.col.type",
       "providers.col.service",
-      "providers.col.owner",
       "providers.col.models",
+      "providers.col.state",
     ] as const) {
       expect(html).toContain(settingsFr[key]);
     }
+    expect(html).not.toContain(`>${settingsFr["providers.col.type"]}<`);
+    expect(html).not.toContain("Appartient à");
   });
 
-  it("names what each row is: organization key, personal key, personal subscription, system", () => {
-    expect(rowOf(html, ORG_KEY.label)).toContain(settingsFr["providers.type.orgKey"]);
-    expect(rowOf(html, MY_KEY.label)).toContain(settingsFr["providers.type.personalKey"]);
-    expect(rowOf(html, BOB_SUBSCRIPTION.label)).toContain(
+  it("names the instance's row Système, and says where its models come from", () => {
+    expect(rowOf(html, system)).toContain(settingsFr["providers.instanceName"]);
+  });
+
+  it("heads a Type column when asked, and names a personal key and a subscription in it", () => {
+    const typed = providersTable([], [MY_KEY, BOB_SUBSCRIPTION], { showType: true });
+    expect(typed).toContain(`>${settingsFr["providers.col.type"]}<`);
+    expect(rowOf(typed, MY_KEY.label)).toContain(settingsFr["providers.type.personalKey"]);
+    expect(rowOf(typed, BOB_SUBSCRIPTION.label)).toContain(
       settingsFr["providers.type.subscription"],
     );
-    expect(rowOf(html, settingsFr["providers.instanceName"])).toContain(
-      settingsFr["providers.type.system"],
-    );
   });
 
-  it("says whose each row is, « vous » for the caller", () => {
-    expect(rowOf(html, ORG_KEY.label)).toContain(settingsFr["providers.owner.org"]);
-    expect(rowOf(html, MY_KEY.label)).toContain("Moi (vous)");
-    expect(rowOf(html, BOB_SUBSCRIPTION.label)).toContain("Bob");
-    expect(rowOf(html, settingsFr["providers.instanceName"])).toContain(
-      settingsFr["providers.owner.instance"],
-    );
-  });
-
-  it("lists the models a provider makes usable, the default one badged", () => {
+  it("lists the models a provider makes usable, the default one marked by a star", () => {
     const row = rowOf(html, ORG_KEY.label);
     expect(row).toContain("Claude Sonnet");
     expect(row).toContain("Claude Opus");
-    expect(row).toContain(settingsFr["models.default"]);
+    expect(row).toContain("lucide-star");
     expect(rowOf(html, MY_KEY.label)).toContain("Claude pour tous");
-    expect(rowOf(html, settingsFr["providers.instanceName"])).toContain("Modèle système");
+    expect(rowOf(html, system)).toContain("Modèle système");
   });
 
   it("says « Aucun » for a provider with no model", () => {
     expect(rowOf(html, EMPTY_KEY.label)).toContain(settingsFr["providers.noModels"]);
   });
 
-  it("badges only a provider with a problem", () => {
+  it("gathers the states in one column: unavailable, default, disabled, and nothing otherwise", () => {
     expect(rowOf(html, DEAD_KEY.label)).toContain(settingsFr["models.credentialUnavailable"]);
-    expect(rowOf(html, ORG_KEY.label)).not.toContain(settingsFr["models.credentialUnavailable"]);
+    expect(rowOf(html, ORG_KEY.label)).toContain(`>${settingsFr["models.default"]}<`);
+    expect(rowOf(html, OFF_KEY.label)).toContain(settingsFr["providers.state.disabled"]);
+    const quiet = rowOf(html, EMPTY_KEY.label);
+    expect(quiet).not.toContain(settingsFr["models.credentialUnavailable"]);
+    expect(quiet).not.toContain(`>${settingsFr["models.default"]}<`);
+    expect(quiet).not.toContain(settingsFr["providers.state.disabled"]);
+    // No badge beside the name any more.
+    expect(
+      rowOf(html, DEAD_KEY.label).split(settingsFr["models.credentialUnavailable"]),
+    ).toHaveLength(2);
   });
 
   it("gives the holder's rows a menu, and another person's subscription a test only", () => {
@@ -264,5 +283,66 @@ describe("a click on a row", () => {
   it("leads nowhere from a personal key", () => {
     const html = providersTable([], [MY_KEY], { canWrite: true });
     expect(rowOf(html, MY_KEY.label)).not.toContain(`aria-label="${MY_KEY.label}"`);
+  });
+});
+
+describe("the personal keys table", () => {
+  const personalHtml = (
+    models: OrgModelInfo[],
+    credentials: ModelProviderCredentialInfo[],
+    canWrite = false,
+  ) =>
+    render(
+      <PersonalServicesTable
+        rows={personalServiceRows(models, credentials, SERVICES, "usr_me")}
+        isLoading={false}
+        error={null}
+        canWriteModels={canWrite}
+        onChooseModels={noop}
+      />,
+      { queryClient: seededClient() },
+    );
+  const MEMBER_MODEL = model({
+    id: "mdl_m",
+    label: "Claude pour tous",
+    credentialId: null,
+    binding: "member",
+  });
+  const html = personalHtml([MEMBER_MODEL], [MY_KEY, BOB_SUBSCRIPTION]);
+
+  it("heads the columns Service, Models, Connected keys, State", () => {
+    for (const key of [
+      "providers.col.service",
+      "providers.col.models",
+      "providers.col.keys",
+      "providers.col.state",
+    ] as const) {
+      expect(html).toContain(settingsFr[key]);
+    }
+  });
+
+  it("makes a row of each service open to personal keys, with its models and who plugged in", () => {
+    const row = rowOf(html, "Anthropic");
+    expect(row).toContain("Claude pour tous");
+    expect(row).toContain("Moi (vous), Bob");
+  });
+
+  it("says « Aucune clé connectée » where nobody plugged a key in", () => {
+    const row = rowOf(personalHtml([MEMBER_MODEL], []), "Anthropic");
+    expect(row).toContain(settingsFr["providers.noKeys"]);
+    expect(row).toContain(settingsFr["providers.state.noKey"]);
+    expect(rowOf(html, "Anthropic")).not.toContain(settingsFr["providers.state.noKey"]);
+  });
+
+  it("gives a caller who may write models the menu and the click, a reader neither", () => {
+    const writer = personalHtml([MEMBER_MODEL], [], true);
+    expect(rowOf(writer, "Anthropic")).toContain(
+      `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", "Anthropic")}"`,
+    );
+    expect(rowOf(writer, "Anthropic")).toContain(`aria-label="Anthropic"`);
+    expect(rowOf(html, "Anthropic")).not.toContain(`aria-label="Anthropic"`);
+    expect(rowOf(html, "Anthropic")).not.toContain(
+      settingsFr["providers.moreActions"].slice(0, 12),
+    );
   });
 });

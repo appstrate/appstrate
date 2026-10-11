@@ -153,8 +153,10 @@ describe("the Preferences models page, for a member who holds connect", () => {
     expect(html).not.toContain(ALICE_KEY.label);
   });
 
-  it("drops the owner column, since every row is the caller's own", () => {
-    expect(html).not.toContain(settingsFr["providers.col.owner"]);
+  it("has no owner column, since every row is the caller's own, and says the kind of key", () => {
+    expect(html).not.toContain("Appartient à");
+    expect(html).toContain(`>${settingsFr["providers.col.type"]}<`);
+    expect(html).toContain(settingsFr["providers.col.state"]);
   });
 
   const menu = (credential: ModelProviderCredentialInfo) =>

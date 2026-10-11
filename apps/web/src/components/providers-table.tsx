@@ -23,11 +23,10 @@ import type { ProviderRow } from "../lib/model-providers";
 
 export function ProvidersTable({
   rows,
-  userId,
   isLoading,
   error,
   empty,
-  hideOwner,
+  showType,
   canWriteModels,
   onRename,
   onChooseModels,
@@ -37,12 +36,12 @@ export function ProvidersTable({
   onSetDefault,
 }: {
   rows: ProviderRow[];
-  userId: string | undefined;
   isLoading: boolean;
   error: unknown;
   /** What an empty table says, and the deed it offers a caller who may. */
   empty: { message: string; hint?: string; action?: ReactNode };
-  hideOwner?: boolean;
+  /** Preferences: the caller's keys are of two kinds, the column says which. */
+  showType?: boolean;
   canWriteModels: boolean;
   onRename: (pk: ModelProviderCredentialInfo, label: string) => Promise<void>;
   /** Only the organization's page chooses models and sets the default. */
@@ -62,7 +61,6 @@ export function ProvidersTable({
 
   const columns = useProviderColumns({
     registry,
-    userId,
     testingIds,
     testResults,
     renamingId,
@@ -75,7 +73,7 @@ export function ProvidersTable({
     onDelete,
     onSetDefault,
     canWriteModels,
-    hideOwner,
+    showType,
   });
 
   return (

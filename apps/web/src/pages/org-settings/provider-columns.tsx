@@ -6,12 +6,12 @@
  * A column set is data, not a screen, and lives beside its table so that
  * `column-tiers.test.tsx` can hold it to the tier rule. The rows are
  * `ProviderRow`s (`lib/model-providers.ts`): a key or the instance, and the models it makes
- * usable. Everything a row can do is in its « … » menu; a click on an organization key's row
- * chooses its models.
+ * usable. One State column says what is worth saying (`rowStates`), nothing when all is well.
+ * Everything a row can do is in its « … » menu; a click on an organization key's row chooses
+ * its models.
  */
 
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import {
   CheckCircle2,
   FlaskConical,
@@ -22,7 +22,6 @@ import {
   Server,
   Trash2,
 } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -39,11 +38,12 @@ import type { TestResult } from "../../hooks/use-connection-test";
 import type { DataColumn } from "../../components/data-table";
 import { getProviderIcon } from "../../components/icons";
 import { resolveProviderEntry } from "../../lib/provider-registry-helpers";
-import type { ProviderKind, ProviderRow } from "../../lib/model-providers";
+import { rowStates, type ProviderKind, type ProviderRow } from "../../lib/model-providers";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { ModelsCell } from "../../components/provider-models-cell";
+import { RowStateCell } from "../../components/row-state-cell";
 
 /** What the caller may do with a credential row: the server's verdict (`allowed_actions`). */
 function allowed(
@@ -64,18 +64,8 @@ function useTypeText() {
     })[kind];
 }
 
-/** Who a provider belongs to, in words: the organization, a person (« vous » for the caller), the instance. */
-function ownerText(row: ProviderRow, userId: string | undefined, t: TFunction<"settings">): string {
-  if (row.owner === "org") return t("providers.owner.org");
-  if (row.owner === "instance") return t("providers.owner.instance");
-  const name = row.ownerName ?? "—";
-  return row.owner === `user:${userId}` ? `${name} (${t("credentials.you")})` : name;
-}
-
 interface ProviderColumnsArgs {
   registry: ProviderRegistryEntry[] | undefined;
-  /** The caller's id: their own rows say « vous ». */
-  userId: string | undefined;
   testingIds: ReadonlySet<string>;
   testResults: Record<string, TestResult | null>;
   /** The row whose name is being edited in place. */
@@ -90,14 +80,13 @@ interface ProviderColumnsArgs {
   onSetDefault?: (m: OrgModelInfo) => void;
   /** Resolved once by the page: a deed absent here 403s if clicked. */
   canWriteModels: boolean;
-  /** Preferences lists the caller's own providers: the owner column would say « vous » on every row. */
-  hideOwner?: boolean;
+  /** Preferences lists personal keys of two kinds, a key or a subscription: it says which. */
+  showType?: boolean;
 }
 
-/** The providers table's columns: a key (or the instance), what it is, whose it is, its models. */
+/** The providers table's columns: a key (or the instance), its service, its models, its state. */
 export function useProviderColumns({
   registry,
-  userId,
   testingIds,
   testResults,
   renamingId,
@@ -110,7 +99,7 @@ export function useProviderColumns({
   onDelete,
   onSetDefault,
   canWriteModels,
-  hideOwner = false,
+  showType = false,
 }: ProviderColumnsArgs): DataColumn<ProviderRow>[] {
   const { t } = useTranslation(["settings", "common"]);
   const typeText = useTypeText();
@@ -120,7 +109,7 @@ export function useProviderColumns({
     {
       id: "provider",
       header: t("providers.col.provider"),
-      width: "minmax(118px,1.7fr)",
+      width: "minmax(110px,1.7fr)",
       cell: (row) => {
         const pk = row.credential;
         const Icon =
@@ -134,7 +123,7 @@ export function useProviderColumns({
         const result = testResults[row.id];
         const label =
           row.kind === "system"
-            ? t("providers.instanceName")
+            ? t("providers.type.system")
             : row.label || t("providers.col.provider");
         return (
           <div className="flex min-w-0 items-center gap-2">
@@ -146,29 +135,18 @@ export function useProviderColumns({
               <KeyRound className="text-muted-foreground size-4 shrink-0" />
             )}
             <div className="min-w-0">
-              <div className="relative z-10 w-fit max-w-full min-w-0">
-                {pk && allowed(pk, "edit") ? (
-                  <InlineEditableLabel
-                    value={pk.label}
-                    editable
-                    editing={renamingId === pk.id}
-                    onEditingChange={(editing) => onRenamingChange(editing ? pk.id : null)}
-                    onSave={(next) => onRename(pk, next)}
-                  />
-                ) : (
-                  <span className="block truncate text-sm font-medium" title={label}>
-                    {label}
-                  </span>
-                )}
-              </div>
-              {row.unavailable && (
-                <Badge
-                  variant="failed"
-                  className="mt-0.5"
-                  title={pk?.authMode === "oauth2" ? undefined : t("credentials.unavailableHint")}
-                >
-                  {t("models.credentialUnavailable")}
-                </Badge>
+              {pk && allowed(pk, "edit") ? (
+                <InlineEditableLabel
+                  value={pk.label}
+                  editable
+                  editing={renamingId === pk.id}
+                  onEditingChange={(editing) => onRenamingChange(editing ? pk.id : null)}
+                  onSave={(next) => onRename(pk, next)}
+                />
+              ) : (
+                <span className="block truncate text-sm font-medium" title={label}>
+                  {label}
+                </span>
               )}
               {pk?.oauth_email && (
                 <span
@@ -196,7 +174,7 @@ export function useProviderColumns({
       id: "type",
       header: t("providers.col.type"),
       width: "minmax(96px,0.8fr)",
-      tier: 2,
+      tier: 3,
       cell: (row) => (
         <span className="text-muted-foreground block truncate text-xs" title={typeText(row.kind)}>
           {typeText(row.kind)}
@@ -206,21 +184,11 @@ export function useProviderColumns({
     {
       id: "service",
       header: t("providers.col.service"),
-      width: "minmax(96px,0.9fr)",
+      width: "minmax(90px,0.9fr)",
       tier: 2,
-      cell: (row) => (
-        <span className="block truncate text-sm" title={row.serviceName ?? undefined}>
-          {row.serviceName ?? "—"}
-        </span>
-      ),
-    },
-    {
-      id: "owner",
-      header: t("providers.col.owner"),
-      width: "minmax(130px,1fr)",
-      tier: 3,
       cell: (row) => {
-        const text = ownerText(row, userId, t);
+        // The instance spans several services: its row says where its models come from.
+        const text = row.serviceName ?? (row.kind === "system" ? t("providers.instanceName") : "—");
         return (
           <span className="block truncate text-sm" title={text}>
             {text}
@@ -231,8 +199,28 @@ export function useProviderColumns({
     {
       id: "models",
       header: t("providers.col.models"),
-      width: "minmax(106px,1.8fr)",
-      cell: (row) => <ModelsCell row={row} registry={entries} />,
+      width: "minmax(100px,1.8fr)",
+      cell: (row) => (
+        <ModelsCell
+          models={row.models}
+          registry={entries}
+          serviceIds={row.kind === "system" ? row.serviceIds : undefined}
+        />
+      ),
+    },
+    {
+      id: "state",
+      header: t("providers.col.state"),
+      width: "minmax(100px,1.2fr)",
+      tier: 2,
+      cell: (row) => (
+        <RowStateCell
+          states={rowStates(row)}
+          unavailableHint={
+            row.credential?.authMode === "oauth2" ? undefined : t("credentials.unavailableHint")
+          }
+        />
+      ),
     },
     {
       id: "actions",
@@ -247,7 +235,7 @@ export function useProviderColumns({
           if (!canWriteModels || choices.length === 0) return null;
           return (
             <TableRowActions
-              menuLabel={t("providers.moreActions", { name: t("providers.instanceName") })}
+              menuLabel={t("providers.moreActions", { name: t("providers.type.system") })}
               pendingLabel={t("common:loading")}
             >
               <DropdownMenuSub>
@@ -341,5 +329,5 @@ export function useProviderColumns({
       },
     },
   ];
-  return hideOwner ? columns.filter((column) => column.id !== "owner") : columns;
+  return showType ? columns : columns.filter((column) => column.id !== "type");
 }

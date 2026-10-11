@@ -2,7 +2,7 @@
 
 /**
  * Preferences › My providers: the caller's own keys and subscriptions, in the table of the
- * organization's providers narrowed to them. The Models column says what each lets them use.
+ * organization's providers narrowed to them, with the kind of each. The Models column says what each lets them use.
  */
 
 import { useState } from "react";
@@ -139,8 +139,7 @@ export function PreferencesModelsPage() {
 
       <ProvidersTable
         rows={rows}
-        userId={userId}
-        hideOwner
+        showType
         isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}
         error={credentialsQuery.error ?? modelsQuery.error}
         // The add deed is in the Actions menu, which is closed: the empty list repeats it.

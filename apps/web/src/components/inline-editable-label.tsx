@@ -7,8 +7,11 @@ import { Spinner } from "./spinner";
 
 /**
  * A table row's name, renamed in place. **It opens only when something drives it**: the row's
- * « Renommer » entry sets `editing`, and a click on the name does nothing, nor does a pencil
- * appear on hover (both made noise in a table whose « … » menu already holds the rename). Saves
+ * « Renommer » entry sets `editing`, and a click on the name does not edit it, nor does a pencil
+ * appear on hover (both made noise in a table whose « … » menu already holds the rename). Out of
+ * edit it is the row's text: raised above the row's cover so its `title` reads, and a click on
+ * it opens the row like a click anywhere else (`DataTable` hands it over). In edit it is raised
+ * too, or the cover would take the field's clicks. Saves
  * on blur or Enter, cancels on Escape, and only fires `onSave` when the trimmed value actually
  * changed.
  *
@@ -93,7 +96,7 @@ export function InlineEditableLabel({
   if (!editable || !editing) {
     return (
       <span
-        className="block min-w-0 truncate text-sm font-medium"
+        className="relative z-10 block w-fit max-w-full min-w-0 truncate text-sm font-medium"
         title={value}
         data-testid={testId}
       >
@@ -103,7 +106,7 @@ export function InlineEditableLabel({
   }
 
   return (
-    <div className="flex min-w-0 items-center gap-1" aria-busy={saving}>
+    <div className="relative z-10 flex min-w-0 items-center gap-1" aria-busy={saving}>
       <Input
         ref={inputRef}
         // Read by the dialogs: Escape here cancels the rename, not the overlay.

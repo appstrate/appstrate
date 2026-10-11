@@ -192,6 +192,7 @@ export const SCREENS = [
   { path: "/org-settings/applications", name: "settings-applications" },
   { path: "/org-settings/library", name: "settings-library" },
   { path: "/org-settings/models", name: "settings-models" },
+  { path: "/org-settings/models?tab=personal", name: "settings-models-personal" },
   { path: "/org-settings/proxies", name: "settings-proxies" },
   { path: "/org-settings/oauth", name: "settings-oauth" },
   { path: "/org-settings/cli-sessions", name: "settings-cli-sessions" },

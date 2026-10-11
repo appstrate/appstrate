@@ -6,7 +6,7 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
-import { filterProviderRows, personalModelSummary, providerRows } from "../model-providers.ts";
+import { personalServiceRows, providerRows, rowStates } from "../model-providers.ts";
 
 const CREATED = "2026-07-01T10:00:00.000Z";
 
@@ -188,49 +188,80 @@ describe("providerRows", () => {
     expect(unseen[0]).toMatchObject({ id: "cred_org", credential: null, label: "Anthropic" });
   });
 
-  it("lists only the models that are switched on", () => {
+  it("lists only the models that are switched on, and says when every one is off", () => {
     const off = providerRows([model({ enabled: false })], [ORG_KEY], REGISTRY, "usr_me");
     expect(off[0]!.models).toEqual([]);
+    expect(off[0]!.disabled).toBe(true);
+    expect(row("cred_org").disabled).toBe(false);
+    // A key with no model at all is not « disabled »: there is nothing to switch back on.
+    expect(row("cred_empty").disabled).toBe(false);
   });
 });
 
-describe("filterProviderRows", () => {
-  const rows = providerRows(
-    [BOUND, MEMBER_A, SYSTEM],
-    [BUILT_IN, ORG_KEY, MY_KEY],
-    REGISTRY,
-    "usr_me",
-  );
-  const none = { types: [], services: [], owners: [] };
+describe("personalServiceRows", () => {
+  const models = [
+    BOUND,
+    MEMBER_A,
+    model({
+      id: "mdl_off",
+      providerId: "mistral",
+      modelId: "mistral-medium",
+      credentialId: null,
+      binding: "member",
+      enabled: false,
+    }),
+  ];
+  const rows = personalServiceRows(models, [ORG_KEY, BOB_SUBSCRIPTION, MY_KEY], REGISTRY, "usr_me");
+  const row = (id: string) => rows.find((r) => r.id === id)!;
 
-  it("keeps everything with no filter", () => {
-    expect(filterProviderRows(rows, none)).toHaveLength(rows.length);
+  it("makes a row of each service with a model left to personal keys", () => {
+    expect(rows.map((r) => r.id)).toEqual(["anthropic", "mistral"]);
+    expect(row("anthropic").models.map((m) => m.id)).toEqual(["mdl_m"]);
   });
 
-  it("narrows by type, service and owner, alternatives within one dimension", () => {
-    expect(filterProviderRows(rows, { ...none, types: ["personal-key"] }).map((r) => r.id)).toEqual(
-      ["cred_me"],
-    );
-    expect(
-      filterProviderRows(rows, { ...none, types: ["org-key", "system"] }).map((r) => r.id),
-    ).toEqual(["cred_org", "instance"]);
-    expect(filterProviderRows(rows, { ...none, owners: ["instance"] }).map((r) => r.id)).toEqual([
-      "instance",
+  it("names who plugged a key in, a subscription under the service it serves, the caller first", () => {
+    expect(row("anthropic").holders).toEqual([
+      { id: "usr_me", name: "Moi", mine: true },
+      { id: "usr_bob", name: "Bob", mine: false },
     ]);
+    expect(row("mistral").holders).toEqual([]);
+  });
+
+  it("says when every model of a service is switched off", () => {
+    expect(row("mistral")).toMatchObject({ models: [], disabled: true });
+    expect(row("anthropic").disabled).toBe(false);
+  });
+
+  it("keeps a service a key was connected for, though no model is left to it", () => {
+    const [only] = personalServiceRows([], [MY_KEY], REGISTRY, "usr_me");
+    expect(only).toMatchObject({ id: "anthropic", models: [], disabled: false });
+  });
+
+  it("leaves out a service nothing is open for, and the organization's own keys", () => {
+    expect(personalServiceRows([BOUND], [ORG_KEY], REGISTRY, "usr_me")).toEqual([]);
+  });
+
+  it("flags a service whose every key needs reconnecting", () => {
+    const dead = { ...MY_KEY, needs_reconnection: true };
+    expect(personalServiceRows([MEMBER_A], [dead], REGISTRY, "usr_me")[0]!.unavailable).toBe(true);
     expect(
-      filterProviderRows(rows, { ...none, types: ["org-key"], owners: ["user:usr_me"] }),
-    ).toEqual([]);
-    expect(filterProviderRows(rows, { ...none, services: ["anthropic"] })).toHaveLength(3);
+      personalServiceRows([MEMBER_A], [dead, BOB_SUBSCRIPTION], REGISTRY, "usr_me")[0]!.unavailable,
+    ).toBe(false);
   });
 });
 
-describe("personalModelSummary", () => {
-  it("names each service the organization has something for, with its models or none", () => {
-    const rows = providerRows([BOUND, MEMBER_A], [ORG_KEY, EMPTY_KEY], REGISTRY, "usr_me");
-    const summary = personalModelSummary([BOUND, MEMBER_A], rows, REGISTRY);
-    expect(summary.map((s) => [s.service.providerId, s.models.map((m) => m.id)])).toEqual([
-      ["anthropic", ["mdl_m"]],
-      ["mistral", []],
-    ]);
+describe("rowStates", () => {
+  const base = { models: [BOUND], unavailable: false, disabled: false };
+
+  it("says nothing when all is well and the row does not carry the default", () => {
+    expect(rowStates(base)).toEqual([]);
+  });
+
+  it("gathers what is worth saying, in reading order", () => {
+    expect(
+      rowStates({ ...base, models: [model({ is_default: true })], unavailable: true }),
+    ).toEqual(["unavailable", "default"]);
+    expect(rowStates({ ...base, models: [], disabled: true })).toEqual(["disabled"]);
+    expect(rowStates({ ...base, noKey: true })).toEqual(["no-key"]);
   });
 });

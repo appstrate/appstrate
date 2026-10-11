@@ -134,7 +134,7 @@ function useRowGrants(connection: IntegrationConnection, isAdmin: boolean) {
  * button revealing a field"), and it left the app with two rename affordances:
  * click-to-edit on the credentials table, pencil-then-field here. One now, the
  * shared `InlineEditableLabel`, started by « Rename » in the row's menu (a click
- * on the name does nothing). The label cannot be cleared: a run addresses
+ * on the name opens the row, like the rest of it). The label cannot be cleared: a run addresses
  * each bound connection by it, so an emptied field just cancels the edit.
  */
 export function AccountCell({
