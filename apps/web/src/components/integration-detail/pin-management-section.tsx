@@ -30,7 +30,8 @@ import {
   useDeleteIntegrationPin,
 } from "../../hooks/use-integrations";
 import { connectionOptionLabel, type ConnectionSet } from "../../lib/connection-set";
-import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
+import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
+import { connectionSetOption } from "../integration-connect/connection-set-option";
 
 /**
  * Per-agent pins: one per (agent, integration), holding the whole bound SET, replaced on
@@ -204,7 +205,7 @@ export function NewPinForm({
         </Select>
       </div>
       <div className="min-w-[12rem] flex-1">
-        <p id="pin-add-connections-label" className="mb-2 block text-sm font-medium">
+        <p className="mb-2 block text-sm font-medium">
           {t("integration.admin.pinManagement.colConnections")}
         </p>
         {connections.length === 0 && (
@@ -212,15 +213,12 @@ export function NewPinForm({
             {t("integration.admin.pinManagement.noPinnableConnections")}
           </p>
         )}
-        <ConnectionSetChecklist
-          options={connections.map((c) => ({
-            id: c.id,
-            label: <ConnectionOptionLabel connection={c} />,
-          }))}
+        <ConnectionSetPicker
+          options={connections.map(connectionSetOption)}
           value={newConnectionIds}
           onChange={setNewConnectionIds}
-          idPrefix="pin-add-connection"
-          labelledBy="pin-add-connections-label"
+          testPrefix="pin-add-pick"
+          testKey="connections"
           allowNone
           noneHint={t("integration.admin.pinManagement.noneHint")}
         />

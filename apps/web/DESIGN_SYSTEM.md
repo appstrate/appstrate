@@ -158,23 +158,35 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   tile, name, description, arrow), never as a bare link.
 - "Inherit" is always an explicit option and names what it inherits
   (« Hériter (Mistral Medium) »).
-- **A connection picker** (`components/integration-connect/connection-picker-menu.tsx`,
-  the agent's and the schedule's Connexions, one component): **what is ticked is
-  what is CHOSEN**, never a second tick for what the cascade would give. Rows
-  follow the cascade: « Hériter » first (ticked while nothing is chosen), then the
-  explicit connections, then « Aucune connexion » (withheld for a required
-  integration). Each row is a label and one line of the same form: « Hériter » /
-  « Utilise 12****oken, la connexion par défaut de l'espace » (the layer in the
-  server's words, `run.connSource.*`: space default, member's choice, automatic),
-  « 12****oken » / « Clé API · connectée depuis Default », « Aucune connexion » /
-  « L'agent s'exécute sans cette intégration ». The trigger reads the current choice
-  like a select (« Hériter (12****oken) », the same form as the model and proxy « Hériter (Mistral Medium) », the name, « 2 connexions », « Aucune
-  connexion ») and never carries a « + »: that means add, and belongs to the
-  « Ajouter une connexion » entry. The model is 0..N connections per integration:
-  with several to pick from, the rows are checkboxes, « Valider » writes the ticked
-  set, and « Hériter » and « Aucune connexion » write at once and exclude the
-  others; with one, radios that write at once. The row that is the current choice is
-  never greyed (choosing it again does nothing): only an unavailable option is.
+- **Choosing connections: one component, everywhere** (`ConnectionChoiceMenu`,
+  `components/integration-connect/connection-choice-menu.tsx`). A trigger that reads the
+  current choice like a select (« Hériter (12****oken) », the same form as the model and proxy
+  « Hériter (Mistral Medium) », the name, « 2 connexions », « Aucune connexion »; never a « + »,
+  which means add and belongs to the « Ajouter une connexion » entry), and a menu in **three
+  exclusive modes, first-level radios** so that « Hériter » reads as an alternative to the
+  choice below it, not a row of it: ( ) **Hériter** / « Utilise 12****oken, la connexion par
+  défaut de l'espace » (the layer in the server's words, `run.connSource.*`), ( ) **Choisir des
+  connexions** / « Cochez celles à utiliser », with the connections indented under it as
+  **checkboxes** (one connection is still a box; capped at `MAX_CONNECTIONS_PER_INTEGRATION`;
+  ticking one moves the mode to « Choisir »), ( ) **Aucune connexion** / « L'agent s'exécute
+  sans cette intégration » (absent for a required integration); then « Ajouter une
+  connexion » and « Gérer les connexions ». Each connection row is a name and one line of the
+  same form (« Clé API · connectée depuis Default »). What is ticked is what is CHOSEN, never a
+  second tick for what the cascade would give. A mode a usage cannot answer is left out; with
+  the list alone the menu shows the boxes without a radio. Where it serves, and how it writes:
+  - the **agent's** and a **schedule's** Connexions (`PickerMenu`, fed by the readiness verdict):
+    all three modes, « Valider » writes the ticked set, « Hériter » and « Aucune connexion »
+    write at once, a lone connection writes when ticked (unticking it goes back to « Hériter »);
+  - the **organisation default** of an integration page (`OrgDefaultSection`): the list alone
+    (an empty set is « no default », which its own select says), each tick commits alone;
+  - **pins** of an integration page (`NewPinForm`): « Choisir » and « Aucune connexion », no
+    « Hériter » (a pin is the exception, its absence is the delete button), a form value;
+  - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
+    the creation modal): after a 409 the candidates and « Aucune connexion » when optional, no
+    « Hériter » (the server just said the actor's own resolution cannot decide); an optional
+    integration nothing refused keeps « Hériter » (the absence of a pick) and « Aucune connexion ».
+  - Usages over a plain list go through `ConnectionSetPicker` (same file, a controlled value:
+    `null` no choice, `[]` none, each tick handed to `onChange`).
 
 ## 5. Choosing a value
 
@@ -185,7 +197,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                             |
 | On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                 |
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                 |
-| Several connections of one integration                               | `ConnectionSetChecklist` (`integration-detail/connection-set-checklist.tsx`, checkboxes capped at the integration's maximum)                                                                                       |
+| Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                             |
 | A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's |
 | A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                            |
 | A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                     |
@@ -238,7 +250,10 @@ A `Select` never holds hundreds of entries.
      table no longer fits, it scrolls sideways and holds its name column (the
      first read column, with the ticks before it) and its row's end (the
      headerless « … » column) in place (`sticky`), so a row is always named and
-     its actions are always in reach. A scroll is better than a lost control, and
+     its actions are always in reach. When the held columns would take more than
+     half the table's width (a phone, a side panel), they let go and the whole
+     table scrolls as one: a strip of a few pixels between them reads nothing.
+     A scroll is better than a lost control, and
      a « … » menu is not the place for a dropdown: a control that is the setting
      (role, share, default) stays in its own column.
   2. **Columns resize.** Every column with a head has a handle on its right edge
@@ -404,11 +419,17 @@ A `Select` never holds hundreds of entries.
   or a result the screen does not show. No success toast where the row or the
   field already shows the change.
 - An expected refusal that asks for a choice (a 409 naming candidates) is a
-  form state with the choice, said by `ScheduleConnectionRefusals` wherever the
-  write can be refused (Connexions and Identité of a schedule), not
-  « Erreur d'enregistrement ». Any other refusal puts the control back on the
-  stored value and is toasted, with no inline error under it (`ActorSelect` in a
-  schedule's identity).
+  form state with the choice, not « Erreur d'enregistrement » and not a fault: an
+  `info` alert per integration, said by `ScheduleConnectionRefusals` wherever the
+  write can be refused (Connexions and Identité of a schedule). It names whose
+  connection and which integration by its display name, and says why the server
+  cannot decide (« Choisissez la connexion Telegram pour e2e-C Membre » / « e2e-C
+  Membre a plusieurs connexions Telegram. Une planification se lance seule : elle ne peut pas
+  demander laquelle utiliser au moment de l'exécution. »); the choice is the
+  `ConnectionChoiceMenu` under it. A refusal that is a fault (a connection the
+  identity no longer reaches) is the one destructive list. Any other refusal puts
+  the control back on the stored value and is toasted, with no inline error under
+  it (`ActorSelect` in a schedule's identity).
 - **Tooltips** explain an icon or a disabled control, never carry the only copy
   of information. They are shadcn `Tooltip`s under the one `TooltipProvider` at
   the app's root (`main.tsx`; `test/render.tsx` mounts it for the no-DOM tests),

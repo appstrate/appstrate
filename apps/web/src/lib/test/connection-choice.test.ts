@@ -4,9 +4,11 @@ import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
   integrationIdOfField,
+  isChoiceRequest,
   refusalReasonKey,
   scheduleConnectionChoices,
   type ConnectionChoice,
+  type ConnectionRefusal,
 } from "../connection-choice.ts";
 
 function missingConnection(errors: unknown[] | undefined): ApiError {
@@ -72,18 +74,26 @@ describe("scheduleConnectionChoices", () => {
 });
 
 describe("refusalReasonKey", () => {
-  const key = (code: ConnectionChoice["code"], candidates = [CANDIDATE]) =>
-    refusalReasonKey({ integrationId: "@acme/gmail", code, candidates });
+  const key = (code: ConnectionRefusal["code"]) =>
+    refusalReasonKey({ integrationId: "@acme/gmail", code, candidates: [] });
 
   it("tells each refusal apart", () => {
-    expect(key("must_choose_connection")).toBe("schedule.connectionOverrides.mustChoose");
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
     expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
     expect(key("override_outranked")).toBe("error.overrideOutranked");
     expect(key("required_integration_unbound")).toBe("error.requiredIntegrationUnbound");
   });
+});
 
-  it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {
-    expect(key("must_choose_connection", [])).toBe("schedule.connectionOverrides.actorMustChoose");
+describe("isChoiceRequest", () => {
+  it("is a request for a choice, never a fault, only for a connection left to choose", () => {
+    const choice = (code: ConnectionChoice["code"]): ConnectionChoice => ({
+      integrationId: "@acme/gmail",
+      code,
+      candidates: [],
+    });
+    expect(isChoiceRequest(choice("must_choose_connection"))).toBe(true);
+    expect(isChoiceRequest(choice("override_connection_unavailable"))).toBe(false);
+    expect(isChoiceRequest(choice("required_integration_unbound"))).toBe(false);
   });
 });

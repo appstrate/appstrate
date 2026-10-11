@@ -37,6 +37,16 @@ export interface ConnectionChoice {
   candidates: ConnectionChoiceCandidate[];
 }
 
+/** An integration refused for a reason no pick fixes alone (see `isChoiceRequest`). */
+export type ConnectionRefusal = ConnectionChoice & {
+  code: Exclude<ConnectionChoice["code"], "must_choose_connection">;
+};
+
+/** A connection the schedule cannot settle by itself: it asks for a choice rather than fails. */
+export function isChoiceRequest(choice: ConnectionChoice): boolean {
+  return choice.code === "must_choose_connection";
+}
+
 function isScheduleChoiceCode(code: string): code is ConnectionChoice["code"] {
   return SCHEDULE_CHOICE_CODES.some((c) => c === code);
 }
@@ -61,11 +71,8 @@ export function scheduleConnectionChoices(err: unknown): ConnectionChoice[] {
   );
 }
 
-/**
- * Why an integration was refused, as an `agents` key. An open choice with no candidate is one
- * only the actor (or an admin pin) can make.
- */
-export function refusalReasonKey(choice: ConnectionChoice): string {
+/** Why an integration was refused, as an `agents` key. */
+export function refusalReasonKey(choice: ConnectionRefusal): string {
   switch (choice.code) {
     case "override_connection_unavailable":
       return "schedule.connectionOverrides.unavailable";
@@ -75,10 +82,6 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
       return "error.overrideOutranked";
     case "required_integration_unbound":
       return "error.requiredIntegrationUnbound";
-    case "must_choose_connection":
-      return choice.candidates.length > 0
-        ? "schedule.connectionOverrides.mustChoose"
-        : "schedule.connectionOverrides.actorMustChoose";
   }
 }
 

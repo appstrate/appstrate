@@ -1,33 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
   Ban,
   Users,
-  Check,
   Plus,
-  ChevronDown,
   RefreshCw,
   Settings,
   type LucideIcon,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { useSpaces } from "../../hooks/use-spaces";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import { AMBER_TEXT } from "./connection-picker-states";
+import { ConnectionChoiceMenu, type ChoiceRow } from "./connection-choice-menu";
 import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
 
@@ -55,19 +44,9 @@ const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
   connect: Plus,
 };
 
-/** One choice of the menu: its label, and one line saying what it means. */
-function ChoiceLabel({ label, description }: { label: string; description: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <span className="truncate font-medium">{label}</span>
-      <span className="text-muted-foreground text-[0.65rem] break-words">{description}</span>
-    </div>
-  );
-}
-
 const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
 
-/** The picker's dropdown: its trigger, the choices in cascade order, and the write/connect entries. */
+/** The agent's connection picker: the one choice menu, fed by the readiness verdict. */
 export function PickerMenu({
   integrationId,
   picker,
@@ -95,7 +74,6 @@ export function PickerMenu({
     storedIds,
     unavailableIds,
     checkedIds,
-    atCap,
     oneClick,
     displayConns,
     underScopedConns,
@@ -209,231 +187,145 @@ export function PickerMenu({
       deadConns.length > 0 ||
       (pickedNone && required)
     : runBlocking;
-  const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
-  // What the menu ticks is what is CHOSEN. "Hériter" and "Aucune connexion" exclude the explicit
-  // connections: ticking one of these while the other is on stands for the whole change.
-  const ticking = checkedIds.length > 0;
-  const inheritChecked = explicitIds === null && !ticking;
-  const noneChecked = pickedNone && !ticking;
-  // One connection to pick from: radios. Several: boxes, written by "Valider".
-  const choiceRole = oneClick ? "menuitemradio" : "menuitemcheckbox";
-  const indicator = (checked: boolean) =>
-    oneClick ? (
-      <Check className={`size-3.5 ${checked ? "" : "opacity-0"}`} />
-    ) : (
-      <Checkbox checked={checked} aria-hidden tabIndex={-1} className="pointer-events-none" />
-    );
+  const rows: ChoiceRow[] = candidates.map((c) => {
+    const fit = scopeFitOf(c);
+    const missing = missingScopeLabels(c).join(", ");
+    // Only the connection owner can renew via OAuth — a foreign
+    // shared connection's tokens belong to someone else. We still
+    // let the actor pin a foreign needs_reconnection row (their
+    // pick survives once the owner renews it).
+    const canRenew =
+      canConnect && c.needs_reconnection && c.is_own && auths[c.auth_key]?.type === "oauth2";
+    return {
+      id: c.id,
+      name: c.label,
+      muted: fit === "missing",
+      description: candidateDescription(c),
+      extra: (
+        <>
+          {fit === "missing" ? (
+            <span
+              className={`truncate text-[0.65rem] ${AMBER_TEXT}`}
+              title={c.missing_scopes.join(" ")}
+            >
+              {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
+            </span>
+          ) : (
+            <ScopeSummaryText
+              manifest={manifest}
+              authKey={c.auth_key}
+              scopes={c.scopes_granted}
+              className="text-muted-foreground truncate text-[0.65rem]"
+            />
+          )}
+          {fit === "broader" && (
+            <span className="text-muted-foreground truncate text-[0.65rem] italic">
+              {t("detail.integrationMemberPicker.broaderThanAgent")}
+            </span>
+          )}
+        </>
+      ),
+      trailing: canRenew ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-warning hover:text-warning ml-1 h-6 gap-1 px-2 text-[0.65rem]"
+          disabled={oauthPending}
+          onClick={(e) => {
+            // Block the DropdownMenuItem's onSelect so the renew
+            // click doesn't also toggle the dead row.
+            e.preventDefault();
+            e.stopPropagation();
+            void renewConnection(c);
+          }}
+          data-testid={`member-pick-renew-${c.id}`}
+          aria-label={t("detail.integrationMemberPicker.renew")}
+        >
+          <RefreshCw className="size-3" />
+          {t("detail.integrationMemberPicker.renew")}
+        </Button>
+      ) : undefined,
+    };
+  });
 
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? AMBER_TEXT : ""}`}
-          data-testid={`member-pick-${integrationId}`}
-        >
-          <TriggerIcon className="size-3" />
-          <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-          <ChevronDown className="size-3 opacity-60" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-w-[20rem]">
-        <DropdownMenuLabel className="text-[0.7rem]">
-          {t("detail.integrationMemberPicker.title")}
-        </DropdownMenuLabel>
-        {/* The cascade's turn comes first: the default, then what is chosen over it, then none.
-            Ticking it again does nothing; going back is picking it. */}
-        <DropdownMenuItem
-          role={choiceRole}
-          aria-checked={inheritChecked}
-          disabled={busy}
-          onSelect={() => {
-            if (explicitIds !== null) void persist(null);
-          }}
-          data-testid={`member-pick-reset-${integrationId}`}
-        >
-          {indicator(inheritChecked)}
-          <ChoiceLabel
-            label={t("detail.integrationMemberPicker.inherit")}
-            description={inheritDescription}
-          />
-        </DropdownMenuItem>
-        {candidates.map((c) => {
-          const fit = scopeFitOf(c);
-          const missing = missingScopeLabels(c).join(", ");
-          const isChecked = checkedIds.includes(c.id);
-          // Only the connection owner can renew via OAuth — a foreign
-          // shared connection's tokens belong to someone else. We still
-          // let the actor pin a foreign needs_reconnection row (their
-          // pick survives once the owner renews it).
-          const canRenew =
-            canConnect && c.needs_reconnection && c.is_own && auths[c.auth_key]?.type === "oauth2";
-          return (
-            <DropdownMenuItem
-              key={c.id}
-              // The row is the checkbox a screen reader sees; the box is a glyph.
-              role={choiceRole}
-              aria-checked={isChecked}
-              disabled={oneClick ? busy : atCap && !isChecked}
-              // Toggling must not close the menu — "Valider" writes.
-              onSelect={(e) => {
-                if (oneClick) {
-                  // Ticked already: nothing to do (back to the cascade is "Hériter").
-                  if (explicitIds?.length === 1 && explicitIds[0] === c.id) return;
-                  void persist([c.id]);
-                  return;
-                }
-                e.preventDefault();
-                toggle(c.id);
-              }}
-              data-testid={`member-pick-option-${c.id}`}
-            >
-              {indicator(isChecked)}
-              <div className="flex min-w-0 flex-1 flex-col">
-                {/* An incompatible row is muted on its name; its reason stays legible. */}
-                <span className={`truncate font-medium ${fit === "missing" ? "opacity-60" : ""}`}>
-                  {c.label}
-                </span>
-                <span className="text-muted-foreground text-[0.65rem] break-words">
-                  {candidateDescription(c)}
-                </span>
-                {fit === "missing" ? (
-                  <span
-                    className={`truncate text-[0.65rem] ${AMBER_TEXT}`}
-                    title={c.missing_scopes.join(" ")}
-                  >
-                    {t("detail.integrationMemberPicker.missingScopes", { scopes: missing })}
-                  </span>
-                ) : (
-                  <ScopeSummaryText
-                    manifest={manifest}
-                    authKey={c.auth_key}
-                    scopes={c.scopes_granted}
-                    className="text-muted-foreground truncate text-[0.65rem]"
-                  />
-                )}
-                {fit === "broader" && (
-                  <span className="text-muted-foreground truncate text-[0.65rem] italic">
-                    {t("detail.integrationMemberPicker.broaderThanAgent")}
-                  </span>
-                )}
-              </div>
-              {canRenew && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-warning hover:text-warning ml-1 h-6 gap-1 px-2 text-[0.65rem]"
-                  disabled={oauthPending}
-                  onClick={(e) => {
-                    // Block the DropdownMenuItem's onSelect so the renew
-                    // click doesn't also toggle the dead row.
-                    e.preventDefault();
-                    e.stopPropagation();
-                    void renewConnection(c);
-                  }}
-                  data-testid={`member-pick-renew-${c.id}`}
-                  aria-label={t("detail.integrationMemberPicker.renew")}
-                >
-                  <RefreshCw className="size-3" />
-                  {t("detail.integrationMemberPicker.renew")}
-                </Button>
-              )}
-            </DropdownMenuItem>
-          );
-        })}
-        {unavailableIds.map((id) => (
-          <DropdownMenuItem
-            key={id}
-            disabled
-            role={choiceRole}
-            aria-checked={false}
-            data-testid={`member-pick-unavailable-${id}`}
-          >
-            {indicator(false)}
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium line-through">
-                {t("detail.integrationMemberPicker.unavailableRow")}
-              </span>
-              <span className="text-muted-foreground truncate text-[0.65rem]">
-                {t("detail.integrationMemberPicker.unavailableRowHint")}
-              </span>
-            </div>
-          </DropdownMenuItem>
-        ))}
-        {atCap && (
-          <DropdownMenuLabel className="text-muted-foreground text-[0.65rem] font-normal">
-            {t("detail.integrationMemberPicker.maxReached", {
-              max: MAX_CONNECTIONS_PER_INTEGRATION,
-            })}
-          </DropdownMenuLabel>
-        )}
-        {!required && (
-          <DropdownMenuItem
-            role={choiceRole}
-            aria-checked={noneChecked}
-            disabled={busy}
-            onSelect={() => {
-              if (!pickedNone) void persist([]);
-            }}
-            data-testid={`member-pick-none-${integrationId}`}
-          >
-            {indicator(noneChecked)}
-            <ChoiceLabel
-              label={t("detail.integrationMemberPicker.none")}
-              description={t("detail.integrationMemberPicker.noneHint")}
-            />
-          </DropdownMenuItem>
-        )}
-        {/* Nothing ticked, nothing to write: "Hériter" and "Aucune connexion" write on their own. */}
-        {!oneClick && hasCandidates && ticking && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={!canApply}
-              onSelect={(e) => {
-                // Stays open on a refused write, so the ticks stay editable.
-                e.preventDefault();
+    <ConnectionChoiceMenu
+      testPrefix="member-pick"
+      testKey={integrationId}
+      title={t("detail.integrationMemberPicker.title")}
+      compact
+      trigger={{
+        label: triggerLabel,
+        icon: triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger],
+        warn: triggerWarn,
+      }}
+      storedMode={explicitIds === null ? "inherit" : pickedNone ? "none" : "choose"}
+      inherit={{ description: inheritDescription }}
+      {...(required ? {} : { none: { description: t("detail.integrationMemberPicker.noneHint") } })}
+      rows={rows}
+      checkedIds={checkedIds}
+      unavailableIds={unavailableIds}
+      unavailableRow={{
+        label: t("detail.integrationMemberPicker.unavailableRow"),
+        hint: t("detail.integrationMemberPicker.unavailableRowHint"),
+      }}
+      busy={busy}
+      onToggle={(id) => {
+        if (!oneClick) {
+          toggle(id);
+          return;
+        }
+        // One connection to pick from: ticking it writes at once, unticking it goes back to the
+        // cascade, the only other answer that is not « none ».
+        void persist(checkedIds.includes(id) ? null : [id]).then((ok) => {
+          if (ok) setOpen(false);
+        });
+      }}
+      onInherit={() => void persist(null)}
+      onNone={() => void persist([])}
+      {...(!oneClick && hasCandidates
+        ? {
+            apply: {
+              enabled: canApply,
+              onApply: () =>
                 void persist(checkedIds).then((ok) => {
                   if (ok) setOpen(false);
-                });
-              }}
-              data-testid={`member-pick-apply-${integrationId}`}
-            >
-              <Check className="size-3.5" />
-              <span className="font-medium">
-                {t("detail.integrationMemberPicker.apply", { count: checkedIds.length })}
-              </span>
-            </DropdownMenuItem>
-          </>
-        )}
-        {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
-        {canAddConnection &&
-          authKeys.map((k) => (
-            <DropdownMenuItem
-              key={`add-${k}`}
-              onSelect={() => void triggerConnect(k)}
-              data-testid={`member-pick-add-${integrationId}-${k}`}
-            >
-              <Plus className="size-3.5" />
-              <span>{addLabel(k)}</span>
-            </DropdownMenuItem>
-          ))}
-        {/* Escape hatch to the integration page for the full connection
-            management surface (rename, sharing, delete, OAuth client). */}
-        {canOpenIntegration && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => navigate(integrationPath)}
-              data-testid={`member-pick-manage-${integrationId}`}
-            >
-              <Settings className="size-3.5" />
-              <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+                }),
+            },
+          }
+        : {})}
+      open={open}
+      onOpenChange={onOpenChange}
+      footer={
+        <>
+          {canAddConnection && hasCandidates && authKeys.length > 0 && <DropdownMenuSeparator />}
+          {canAddConnection &&
+            authKeys.map((k) => (
+              <DropdownMenuItem
+                key={`add-${k}`}
+                onSelect={() => void triggerConnect(k)}
+                data-testid={`member-pick-add-${integrationId}-${k}`}
+              >
+                <Plus className="size-3.5" />
+                <span>{addLabel(k)}</span>
+              </DropdownMenuItem>
+            ))}
+          {/* Escape hatch to the integration page for the full connection
+              management surface (rename, sharing, delete, OAuth client). */}
+          {canOpenIntegration && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={() => navigate(integrationPath)}
+                data-testid={`member-pick-manage-${integrationId}`}
+              >
+                <Settings className="size-3.5" />
+                <span>{t("detail.integrationMemberPicker.manageConnections")}</span>
+              </DropdownMenuItem>
+            </>
+          )}
+        </>
+      }
+    />
   );
 }

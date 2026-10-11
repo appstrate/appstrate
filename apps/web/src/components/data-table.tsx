@@ -70,7 +70,7 @@ import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
 import { useColumnWidths, type ColumnWidths } from "../stores/column-widths-store";
 
-export type DataColumnWidth = `${number}px` | `minmax(${number}px,${number}fr)`;
+type DataColumnWidth = `${number}px` | `minmax(${number}px,${number}fr)`;
 
 interface DataColumnBase<T> {
   /** Stable handle, independent of the label — a column set is a list of these. */
@@ -196,8 +196,12 @@ export function visibleColumns<T>(columns: DataColumn<T>[], hidden: string[]): D
 const SKELETON_ROWS = 3;
 /** Nobody needs a column wider than this; it also bounds a fit-to-content on a long value. */
 const MAX_COLUMN_WIDTH = 720;
-/** The room a table that holds columns must leave to what scrolls beside them, or it holds nothing. */
-const MIN_SCROLLING_ROOM = 64;
+/**
+ * The share of the table's width that must stay free to scroll beside the held
+ * columns. Below it the strip in between is too narrow to read, and the whole
+ * table scrolls as one instead.
+ */
+const MIN_SCROLLING_SHARE = 0.5;
 /** One arrow press on a resize handle; Shift triples it. */
 const KEY_STEP = 16;
 
@@ -487,15 +491,15 @@ export function DataTable<T>({
     const viewport = frame?.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]");
     if (!frame || !viewport) return;
     const update = () => {
-      // Held columns that fill the screen leave nothing to scroll through (a
-      // name, a tick and a « … » on a phone), and what cannot be reached is
-      // worse than what is not held: release them.
+      // Held columns that take most of the width leave a strip too narrow to
+      // read (a name, a tick and a « … » on a phone or in a side panel):
+      // release them and let the whole table scroll.
       const heldWidth = Array.from(
         frame.querySelectorAll<HTMLElement>("thead [data-data-table-held]"),
       ).reduce((sum, head) => sum + head.getBoundingClientRect().width, 0);
       frame.toggleAttribute(
         "data-data-table-unheld",
-        heldWidth + MIN_SCROLLING_ROOM > viewport.clientWidth,
+        heldWidth > viewport.clientWidth * (1 - MIN_SCROLLING_SHARE),
       );
       frame.toggleAttribute("data-scrolled-start", viewport.scrollLeft > 0);
       frame.toggleAttribute(

@@ -20,7 +20,8 @@ import {
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
 import { SaveFeedback } from "../settings/save-feedback";
-import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
+import { ConnectionSetPicker } from "../integration-connect/connection-choice-menu";
+import { connectionSetOption } from "../integration-connect/connection-set-option";
 
 /**
  * Org-wide default connections for this integration — the cross-agent
@@ -152,18 +153,13 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
         </div>
         {shared.length > 0 && mode !== "choice" ? (
           <div className="min-w-0">
-            <p id="org-default-connections-label" className="mb-3 text-sm font-medium">
-              {connectionsLabel}
-            </p>
-            <ConnectionSetChecklist
-              options={shared.map((c) => ({
-                id: c.id,
-                label: <ConnectionOptionLabel connection={c} />,
-              }))}
-              value={connectionIds}
+            <p className="mb-3 text-sm font-medium">{connectionsLabel}</p>
+            <ConnectionSetPicker
+              options={shared.map(connectionSetOption)}
+              value={connectionIds.length > 0 ? connectionIds : null}
               onChange={(next) => void save(next ?? [], mode === "forced", mode)}
-              idPrefix="org-default-connection"
-              labelledBy="org-default-connections-label"
+              testPrefix="org-default-pick"
+              testKey="connections"
               unavailableIds={unavailableIds}
               disabled={isLoading || isError || pendingValue !== null}
             />

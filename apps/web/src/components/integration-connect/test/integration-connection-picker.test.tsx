@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
-import { isValidElement, type ReactNode } from "react";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { $api, type components } from "../../../api/client.ts";
@@ -27,6 +27,10 @@ import {
 import { ConfirmModal } from "../../confirm-modal.tsx";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
+import {
+  ConnectionChoiceMenu,
+  type ConnectionChoiceMenuProps,
+} from "../connection-choice-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
 import { ScopeSummaryText } from "../scope-summary-text.tsx";
 import {
@@ -409,7 +413,12 @@ function MenuProbe({
   picker: ConnectionPicker;
   onTree: (tree: ReactNode) => void;
 }) {
-  onTree(PickerMenu({ integrationId: INTEGRATION, picker }));
+  // The picker feeds the one choice menu: its tree is that menu's, read through the adapter.
+  const adapter = PickerMenu({
+    integrationId: INTEGRATION,
+    picker,
+  }) as ReactElement<ConnectionChoiceMenuProps>;
+  onTree(ConnectionChoiceMenu(adapter.props));
   return null;
 }
 
@@ -655,26 +664,65 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     ).not.toContain(none);
   });
 
-  it("reads out 'no connection' as a radio, checked when it is the stored choice", () => {
-    const noneItem = (res: Resolution) => {
+  it("reads out the three modes as radios, and the connections under « Choisir » as boxes", () => {
+    const tree = (res: Resolution) => {
       const trees: ReactNode[] = [];
       render(<MenuProbe picker={pickerFor(res)} onTree={(tree) => trees.push(tree)} />);
-      return propsOf(trees[0], `member-pick-none-${INTEGRATION}`);
+      return trees[0];
     };
-    const none = resolution({ source: null, member_pinned_connection_ids: [] });
-    // Several connections to pick from: the choices are boxes, "no connection" among them.
-    expect(noneItem(none)).toMatchObject({ role: "menuitemcheckbox", "aria-checked": true });
-    expect(noneItem(resolution({}))).toMatchObject({
-      role: "menuitemcheckbox",
-      "aria-checked": false,
-    });
-    // One connection to pick from: radios.
-    const single = (over: Partial<Resolution>) =>
-      resolution({ candidates: [candidate(WEB, "web")], ...over });
-    expect(noneItem(single({ source: null, member_pinned_connection_ids: [] }))).toMatchObject({
+    const none = tree(resolution({ source: null, member_pinned_connection_ids: [] }));
+    expect(propsOf(none, `member-pick-none-${INTEGRATION}`)).toMatchObject({
       role: "menuitemradio",
       "aria-checked": true,
     });
+    expect(propsOf(none, `member-pick-reset-${INTEGRATION}`)).toMatchObject({
+      role: "menuitemradio",
+      "aria-checked": false,
+    });
+    expect(propsOf(none, `member-pick-choose-${INTEGRATION}`)).toMatchObject({
+      role: "menuitemradio",
+      "aria-checked": false,
+    });
+    expect(propsOf(none, `member-pick-option-${WEB}`)).toMatchObject({
+      role: "menuitemcheckbox",
+      "aria-checked": false,
+    });
+    // One connection to pick from is still a box, never a radio of its own.
+    const single = tree(
+      resolution({
+        candidates: [candidate(WEB, "web")],
+        source: null,
+        member_pinned_connection_ids: [WEB],
+      }),
+    );
+    expect(propsOf(single, `member-pick-option-${WEB}`)).toMatchObject({
+      role: "menuitemcheckbox",
+      "aria-checked": true,
+    });
+    expect(propsOf(single, `member-pick-choose-${INTEGRATION}`)).toMatchObject({
+      "aria-checked": true,
+    });
+    expect(propsOf(single, `member-pick-reset-${INTEGRATION}`)).toMatchObject({
+      "aria-checked": false,
+    });
+  });
+
+  it("withholds « Aucune connexion » for a required integration, keeping the other two modes", () => {
+    const tree = (required: boolean) => {
+      const trees: ReactNode[] = [];
+      render(
+        <MenuProbe
+          picker={pickerFor(resolution({ source: null }), { required })}
+          onTree={(tree) => trees.push(tree)}
+        />,
+      );
+      return trees[0];
+    };
+    expect(propsOf(tree(false), `member-pick-none-${INTEGRATION}`)).toBeDefined();
+    const required = tree(true);
+    expect(propsOf(required, `member-pick-none-${INTEGRATION}`)).toBeUndefined();
+    expect(propsOf(required, `member-pick-reset-${INTEGRATION}`)).toBeDefined();
+    expect(propsOf(required, `member-pick-choose-${INTEGRATION}`)).toBeDefined();
   });
 
   it("offers nothing to pick before the readiness entry, and so `required`, is known", () => {

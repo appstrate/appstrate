@@ -24,6 +24,7 @@ import { SettingRow } from "./settings/setting-row";
 import { InlineTextSetting } from "./settings/inline-text-setting";
 import { RoleLimitNotice } from "./role-limit-notice";
 import { ActorSelect } from "./actor-select";
+import { useActorName } from "../hooks/use-actor-name";
 import { PackageVersionSelect } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
 import { AgentIdentityTile } from "./agent-identity";
@@ -255,6 +256,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
   const [choices, setChoices] = useState<ConnectionChoice[]>([]);
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const { integrations } = useFiredIntegrations(schedule);
+  const actorName = useActorName(actor);
 
   // The stored picks name the previous identity's connections: a new actor
   // starts without them, as the create form does.
@@ -292,11 +294,13 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
       </SettingRow>
       {choices.length > 0 && (
         <div className="space-y-4">
-          <ScheduleConnectionRefusals choices={choices} />
+          <ScheduleConnectionRefusals choices={choices} actorName={actorName} />
           <ScheduleActorConnectionChoice
             choices={choices}
             integrations={integrations ?? []}
             value={picks}
+            // The alert above has just said whose connections these are.
+            showContext={false}
             onChange={(integrationId, connectionIds) =>
               setPicks(
                 withConnectionOverride(
@@ -515,6 +519,10 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
   const { user } = useAuth();
   const [choices, setChoices] = useState<ConnectionChoice[]>([]);
   const { version: firedVersion, integrations } = useFiredIntegrations(schedule);
+  const actorName = useActorName({
+    userId: schedule.userId ?? undefined,
+    endUserId: schedule.endUserId ?? undefined,
+  });
   const picks = schedule.connection_overrides ?? {};
   // The pickers judge the VIEWER's connections: the agent's table speaks only
   // for a schedule that runs as the viewer. Another actor's connections are
@@ -549,7 +557,7 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
   }
   return (
     <div className="space-y-4">
-      <ScheduleConnectionRefusals choices={choices} />
+      <ScheduleConnectionRefusals choices={choices} actorName={actorName} />
       {actorIsViewer ? (
         <AgentIntegrationsBlock
           entries={integrations}

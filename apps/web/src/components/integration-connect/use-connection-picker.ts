@@ -19,10 +19,7 @@ import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution, unboundLabel } from "./integration-run-readiness";
 import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
-import {
-  requiredScopesForAgent,
-  MAX_CONNECTIONS_PER_INTEGRATION,
-} from "@appstrate/core/integration";
+import { requiredScopesForAgent } from "@appstrate/core/integration";
 import {
   canApplyConnectionSet,
   checkedConnectionIds,
@@ -229,7 +226,6 @@ export function useConnectionPicker(
         : null;
   // Why nothing is inherited, when the verdict says (not connected, several to choose from...).
   const inheritedUnbound = unboundLabel(resolution.warning);
-  const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
   const oneClick = candidates.length === 1;
 
   const toConns = (ids: string[]) => ids.map(byId).filter((c): c is IntegrationCandidate => !!c);
@@ -355,7 +351,6 @@ export function useConnectionPicker(
     storedIds,
     unavailableIds,
     checkedIds,
-    atCap,
     oneClick,
     displayConns,
     underScopedConns,

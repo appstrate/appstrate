@@ -7,12 +7,14 @@
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
+import type { ReactNode } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import { $api } from "../../api/client.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { spaceStore } from "../../stores/space-store.ts";
 import { NewPinForm, PinManagementSection } from "../integration-detail/pin-management-section.tsx";
+import { descriptionOf, menuItems, type MenuItem } from "../../test/connection-menu-tree.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -77,7 +79,33 @@ function renderSection(opts: {
   }
 }
 
-/** The form behind "Ajouter", with the connections shared into the space. */
+function Form({
+  connections,
+  onItems,
+}: {
+  connections: (typeof SHARED)[];
+  onItems: (items: Map<string, MenuItem>) => void;
+}) {
+  const tree: ReactNode = NewPinForm({
+    packageId: GMAIL,
+    agents: [{ agent_package_id: "@acme/mailer", display_name: "Mailer" }],
+    connections: connections as never,
+    onDone: () => {},
+  });
+  onItems(menuItems(tree));
+  return null;
+}
+
+/** The form behind "Ajouter", with the connections shared into the space: the items of its menu. */
+function formItems(connections: (typeof SHARED)[]): Map<string, MenuItem> {
+  let items = new Map<string, MenuItem>();
+  render(<Form connections={connections} onItems={(found) => (items = found)} />, {
+    queryClient: new QueryClient(),
+  });
+  return items;
+}
+
+/** The form rendered closed, as the page shows it. */
 function renderForm(connections: (typeof SHARED)[]): string {
   return render(
     <NewPinForm
@@ -92,22 +120,24 @@ function renderForm(connections: (typeof SHARED)[]): string {
 
 const t = (key: string) => i18n.t(`settings:integration.admin.pinManagement.${key}`);
 
-describe("PinManagementSection — 'Aucune connexion'", () => {
-  it("is offered beside the shared connections", () => {
-    const html = renderForm([SHARED]);
-    expect(html).toContain('data-testid="pin-add-connection-none"');
-    expect(html).toContain(i18n.t("agents:detail.integrationMemberPicker.none"));
-    expect(html).toContain(`pin-add-connection-${SHARED.id}`);
+describe("PinManagementSection, 'Aucune connexion'", () => {
+  it("is a mode of the connection menu, beside the shared connections", () => {
+    const items = formItems([SHARED]);
+    expect(items.get("pin-add-pick-none-connections")).toMatchObject({ role: "menuitemradio" });
+    expect(items.get("pin-add-pick-choose-connections")).toMatchObject({ role: "menuitemradio" });
+    expect(items.has(`pin-add-pick-option-${SHARED.id}`)).toBe(true);
+    // An exception to the default: « Hériter » is the pin's absence, which the table's delete does.
+    expect(items.has("pin-add-pick-reset-connections")).toBe(false);
+    expect(renderForm([SHARED])).toContain("pin-add-pick-connections");
   });
 
   it("says both outcomes, since the agent may require the integration", async () => {
-    const html = renderForm([SHARED]);
-    expect(html).toContain(
-      "L'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige",
-    );
+    const hint = () =>
+      descriptionOf(formItems([SHARED]).get("pin-add-pick-none-connections")?.children);
+    expect(hint()).toBe("L'agent s'exécute sans cette intégration, ou ne démarre pas s'il l'exige");
     await i18n.changeLanguage("en");
     try {
-      expect(renderForm([SHARED])).toContain(
+      expect(hint()).toBe(
         "The agent runs without this integration, or does not start if it requires it",
       );
     } finally {
@@ -117,8 +147,9 @@ describe("PinManagementSection — 'Aucune connexion'", () => {
   });
 
   it("is offered even when no connection is shared, which only stops pinning one", () => {
+    const items = formItems([]);
+    expect(items.has("pin-add-pick-none-connections")).toBe(true);
     const html = renderForm([]);
-    expect(html).toContain('data-testid="pin-add-connection-none"');
     expect(html).toContain('data-testid="pin-add-submit"');
     expect(html).toContain(t("noPinnableConnections"));
   });

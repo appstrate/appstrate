@@ -17,7 +17,7 @@ import {
 import { cn } from "@appstrate/ui/cn";
 import { $api } from "../api/client";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useEndUsers, useEndUser } from "../hooks/use-end-users";
+import { useEndUsers } from "../hooks/use-end-users";
 import { useAuth } from "../hooks/use-auth";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
@@ -25,6 +25,7 @@ import { useRoles } from "../hooks/use-roles";
 import { useSpaceMembers } from "../hooks/use-space-members";
 import { mayGovernMemberSchedule } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
+import { primaryLabel, useActorName } from "../hooks/use-actor-name";
 
 interface ActorSelectProps {
   value?: ActorValue;
@@ -40,11 +41,6 @@ interface Option {
   actor: ActorValue;
   name: string;
   email: string | null;
-}
-
-/** Primary line for an option — name, falling back to email then id. */
-function primaryLabel(name: string | null | undefined, email: string | null, id: string): string {
-  return name || email || id;
 }
 
 /**
@@ -144,33 +140,7 @@ export function ActorSelect({
     [endUsers],
   );
 
-  // Resolve the selected end-user's label even when it isn't in the current
-  // search page (the trigger must show it regardless of the active query).
-  const selectedEndUserInList = endUsers.some((eu) => eu.id === value?.endUserId);
-  const { data: selectedEndUser } = useEndUser(
-    !selectedEndUserInList && value?.endUserId ? value.endUserId : "",
-  );
-
-  const selectedLabel = useMemo(() => {
-    if (value?.userId) {
-      const m = members.find((mm) => mm.userId === value.userId);
-      if (m) return primaryLabel(m.displayName, m.email ?? null, m.userId);
-      return value.userId;
-    }
-    if (value?.endUserId) {
-      const inList = endUsers.find((eu) => eu.id === value.endUserId);
-      if (inList) return primaryLabel(inList.name, inList.email, inList.externalId || inList.id);
-      if (selectedEndUser) {
-        return primaryLabel(
-          selectedEndUser.name,
-          selectedEndUser.email,
-          selectedEndUser.externalId || selectedEndUser.id,
-        );
-      }
-      return value.endUserId;
-    }
-    return null;
-  }, [value, members, endUsers, selectedEndUser]);
+  const selectedLabel = useActorName(value);
 
   const select = (actor: ActorValue) => {
     onChange(actor);
