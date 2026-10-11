@@ -506,16 +506,19 @@ variable, so a declarative login cannot target a per-connection upstream.
 Each `{{name}}` value is encoded for the place it takes, so a value never adds a
 parameter, a member, a part or a header line (the sidecar does the same for the
 `{{name}}` a `connect.tool` login tool writes into its own requests, by their
-`Content-Type`):
+`Content-Type`, and every `api_call` path for the `{{field}}` an agent writes into a
+target, a header or a substituted text body, where a refused value is a
+`credential_unusable`):
 
 - `url` — a placeholder that starts the template is a base URL, inserted as is; the
   resulting URL must still match `authorized_uris`. Every other value is percent-encoded
   as one component wherever it sits — a path segment, a query component, a fragment, but
   also a port, a userinfo or a value right after the host or the base. Write the `/` a
   URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
-  never `https://example.com{{path}}`, whose `/` would be encoded. A URL refused for its
-  host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request` naming
-  the inputs in its authority.
+  never `https://example.com{{path}}`, whose `/` would be encoded. Before the query, a
+  value that is `.` or `..` is refused: no encoding keeps it one segment. A URL refused
+  for its host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request`
+  naming the inputs in its authority.
 - `body` — by the media type of the `Content-Type` header, else of `content_type`:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
   - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a

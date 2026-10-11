@@ -4,22 +4,31 @@
 /** The caller half of an `api_call`, prepared the same way by the platform proxy, the sidecar and the local CLI. */
 
 import { InvalidHeaderValueError, isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { substituteVars, unresolvedPlaceholders } from "./template-vars.ts";
+import { substituteRequest, UnencodableInputError } from "./request-template.ts";
+import { unresolvedPlaceholders } from "./template-vars.ts";
 
 export interface PreparedApiCallRequest {
   /** Holds decrypted values: for the wire, never for a message. */
   url: string;
   headers: Record<string, string>;
+  /** The call's text body, substituted; null when the call gave none to substitute. */
+  body: string | null;
   /** Names of the headers a credential value went into: a hop leaving the allowlist strips them. */
   credentialHeaders: string[];
-  /** Every template of the call (target, headers, body): `credentialUrlPolicy`'s input. */
+  /** Every template of the call (target, headers, body, body parts): `credentialUrlPolicy`'s input. */
   templates: string[];
 }
 
 type Prepared =
   | { ok: true; request: PreparedApiCallRequest }
   /** `message` names placeholder keys and header names, never a value. */
-  | { ok: false; refusal: { kind: "unresolved_placeholder" | "invalid_header"; message: string } };
+  | {
+      ok: false;
+      refusal: {
+        kind: "unresolved_placeholder" | "invalid_header" | "credential_unusable";
+        message: string;
+      };
+    };
 
 function unresolved(where: string, keys: readonly string[]): Prepared {
   return {
@@ -41,24 +50,27 @@ function repairAuthScheme(headerName: string, template: string): string {
 }
 
 /**
- * Substitute `fields` into the target and the caller's headers, or refuse on the first defect: the
- * target, then each header (value invalid as written, then an unresolved placeholder), then
- * `bodyTemplates`, the strings the caller's own body substitution reads.
+ * Substitute `fields` into the target, the caller's headers and its text `body`, each value encoded
+ * for the place it takes ({@link substituteRequest}; the body by the caller's `Content-Type`), or
+ * refuse on the first defect: an unresolved placeholder in the target, then each header (value
+ * invalid as written, then unresolved), then the body and `bodyParts`; last, a value its place
+ * cannot carry. `bodyParts` are the strings of a structured body (JSON leaves, multipart fields)
+ * the caller substitutes itself, where its serializer does the encoding.
  */
 export function prepareApiCallRequest(call: {
   target: string;
   headers: Readonly<Record<string, string>>;
-  bodyTemplates: readonly string[];
+  body: string | null;
+  bodyParts?: readonly string[];
   fields: Readonly<Record<string, string>>;
 }): Prepared {
-  const { target, fields, bodyTemplates } = call;
+  const { target, fields, body, bodyParts = [] } = call;
   const missingIn = (template: string) => unresolvedPlaceholders(template, fields);
 
   const missingInTarget = missingIn(target);
   if (missingInTarget.length > 0) return unresolved("target", missingInTarget);
 
-  const headers: Record<string, string> = {};
-  const credentialHeaders: string[] = [];
+  const templates: Record<string, string> = {};
   for (const [name, written] of Object.entries(call.headers)) {
     const template = repairAuthScheme(name, written);
     if (!isHttpFieldValue(template)) {
@@ -67,20 +79,32 @@ export function prepareApiCallRequest(call: {
     }
     const missing = missingIn(template);
     if (missing.length > 0) return unresolved(`header "${name}"`, missing);
-    headers[name] = substituteVars(template, fields, { keepUnresolved: true });
-    if (headers[name] !== template) credentialHeaders.push(name);
+    templates[name] = template;
   }
 
-  const missingInBody = bodyTemplates.flatMap(missingIn);
+  const missingInBody = [...(body === null ? [] : [body]), ...bodyParts].flatMap(missingIn);
   if (missingInBody.length > 0) return unresolved("body", missingInBody);
 
+  let rendered;
+  try {
+    rendered = substituteRequest({ url: target, headers: templates, body }, fields);
+  } catch (err) {
+    if (!(err instanceof UnencodableInputError)) throw err;
+    return { ok: false, refusal: { kind: "credential_unusable", message: err.message } };
+  }
   return {
     ok: true,
     request: {
-      url: substituteVars(target, fields, { keepUnresolved: true }),
-      headers,
-      credentialHeaders,
-      templates: [target, ...Object.values(call.headers), ...bodyTemplates],
+      ...rendered,
+      credentialHeaders: Object.keys(templates).filter(
+        (name) => rendered.headers[name] !== templates[name],
+      ),
+      templates: [
+        target,
+        ...Object.values(call.headers),
+        ...(body === null ? [] : [body]),
+        ...bodyParts,
+      ],
     },
   };
 }

@@ -3,8 +3,9 @@
 
 /**
  * `{{name}}` substitution into an HTTP request, each value encoded for its place so it cannot change
- * the request's structure (AFPS §7.7). Shared by the declarative `connect.login` engine and the
- * sidecar's `connect.tool` login. Not escaped: a multipart part's own headers, an unknown media type.
+ * the request's structure (AFPS §7.7). Shared by every `api_call` path, the declarative
+ * `connect.login` engine and the sidecar's `connect.tool` login. Not escaped: a multipart part's own
+ * headers, an unknown media type.
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
@@ -26,9 +27,20 @@ export class UnencodableInputError extends Error {
 
 const asIs: PlaceholderEncoder = (value) => value;
 
-/** URL: a leading placeholder is a base URL, as is (the caller gates it); any other is one component. */
-const urlValue: PlaceholderEncoder = (value, _key, offset) =>
-  offset === 0 ? value : encodeURIComponent(value);
+/**
+ * URL: a leading placeholder is a base URL, as is (the caller gates it); any other is one component,
+ * and before the query never a dot segment, which percent-encoding does not neutralise.
+ */
+function urlEncoder(template: string): PlaceholderEncoder {
+  const pathEnd = template.search(/[?#]/);
+  return (value, key, offset) => {
+    if (offset === 0) return value;
+    if ((value === "." || value === "..") && (pathEnd === -1 || offset < pathEnd)) {
+      throw new UnencodableInputError(key, "is a dot segment, which a URL path cannot carry");
+    }
+    return encodeURIComponent(value);
+  };
+}
 
 /** One WHATWG `application/x-www-form-urlencoded` component. */
 const formComponent: PlaceholderEncoder = (value) =>
@@ -152,7 +164,7 @@ export function substituteRequest<B extends string | null | undefined>(
       ? render(request.body, bodyEncoder(request.body, contentType, inputs))
       : request.body;
   return {
-    url: render(request.url, urlValue),
+    url: render(request.url, urlEncoder(request.url)),
     headers,
     body: body as B extends string ? string : B,
   };

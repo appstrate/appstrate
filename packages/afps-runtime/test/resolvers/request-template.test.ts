@@ -41,6 +41,18 @@ describe("substituteRequest — URL", () => {
     expect(rendered).toBe("https://h.example/a%2Fb?q=1%26admin%3D1#x%23y");
     expect([...new URL(rendered).searchParams.keys()]).toEqual(["q"]);
   });
+
+  it("refuses a dot segment in the path, which no encoding keeps from climbing", () => {
+    for (const seg of [".", ".."]) {
+      expect(() => url("https://h.example/users/{{seg}}/keys", { seg })).toThrow(
+        UnencodableInputError,
+      );
+      expect(url("https://h.example/users?q={{seg}}", { seg })).toBe(
+        `https://h.example/users?q=${seg}`,
+      );
+    }
+    expect(url("https://h.example/v{{seg}}/x", { seg: "1.2" })).toBe("https://h.example/v1.2/x");
+  });
 });
 
 describe("substituteRequest — bodies", () => {

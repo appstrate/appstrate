@@ -942,6 +942,29 @@ integration_connections WHERE shared_with_org;` tells whether the step
 
 ### Security
 
+- **BREAKING: an `api_call` encodes each `{{field}}` for the place it takes**
+  (#1915), on the three paths (platform credential proxy, sidecar, CLI), through
+  one request preparation shared with `connect.login`. A credential value was
+  inserted raw: one holding `&`, `#`, `/`, `?`, `"` or a line break added a
+  query parameter, a path segment, a JSON member or a header line to the call.
+  - Target: a `{{field}}` that starts it is a base URL, inserted as is
+    (`{{site_url}}/wp-json/…`); every other one is percent-encoded as one
+    component, and a value that is `.` or `..` before the query is refused. A
+    field holding several path segments, a whole query string or a `host:port`
+    no longer spreads over the URL: write the `/`, `?`, `&` and `:` in the
+    target.
+  - Text body (`substituteBody`): by the call's `Content-Type`. JSON escapes a
+    value inside a string literal and renders a bare `{{field}}` as a JSON
+    string; form bodies get a form component; XML gets entities; any other
+    media type, or none, takes the value as is.
+  - Headers: the value as is; a line break, another control character or a
+    character above U+00FF is refused, and in a `Cookie` header any character
+    outside RFC 6265 `cookie-octet`.
+  - A refused value is a `credential_unusable` (502 on
+    `/api/credential-proxy/proxy`) naming the credential field, never its
+    value; nothing is sent. The rendered URL is what `authorized_uris` and the
+    egress checks judge.
+
 - **A self-registered OAuth client no longer names the platform's pages and
   emails** (#1825). An `instance`-level client took its own `name` as the
   brand of the login, consent and account pages and as the sender name of the

@@ -1186,7 +1186,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type` (JSON, form, XML; as is otherwise). A value its place cannot carry (a line break in a header, a dot segment in the path) is a `credential_unusable`.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1201,7 +1201,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type` (JSON, form, XML; as is otherwise). A value its place cannot carry (a line break in a header, a dot segment in the path) is a `credential_unusable`.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1216,7 +1216,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type` (JSON, form, XML; as is otherwise). A value its place cannot carry (a line break in a header, a dot segment in the path) is a `credential_unusable`.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1231,7 +1231,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type` (JSON, form, XML; as is otherwise). A value its place cannot carry (a line break in a header, a dot segment in the path) is a `credential_unusable`.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1248,7 +1248,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type` (JSON, form, XML; as is otherwise). A value its place cannot carry (a line break in a header, a dot segment in the path) is a `credential_unusable`.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -11029,7 +11029,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11190,7 +11190,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11356,7 +11356,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11522,7 +11522,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11683,7 +11683,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;

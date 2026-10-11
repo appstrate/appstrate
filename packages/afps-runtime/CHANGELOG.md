@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `api_call` values encoded for their place (#1915, BREAKING)
+
+- `prepareApiCallRequest` (`./resolvers`) renders the target, the headers and
+  the text body through `substituteRequest`. It takes `body` (the text body to
+  substitute, or `null`) and optional `bodyParts` (strings of a structured body
+  the caller substitutes itself) in place of `bodyTemplates`, returns the
+  substituted `body`, and refuses a value its place cannot carry with the new
+  refusal kind `credential_unusable`.
+- `substituteRequest` refuses, with `UnencodableInputError`, a URL value that
+  is `.` or `..` before the query.
+- `LocalIntegrationResolver` sends the prepared body: a string body is escaped
+  for the call's `Content-Type`.
+
+### Removed (BREAKING)
+
+- `ResolveBodyStreamOptions.transformString` (`./resolvers`): a caller
+  substitutes a string body before `resolveBodyForFetch`.
+
 ### Added — login inputs encoded for their place (#1818)
 
 - `substituteRequest` (`./resolvers`): substitutes `{{name}}` into a request's

@@ -224,13 +224,15 @@ export function credentialScope(integrationId: string, connectionId: string): st
   return `${integrationId}\u0000${connectionId}`;
 }
 
-/** Strings substituted in a `substituteBody: true` body (JSON escaping would hide `{{\tkey}}`). */
-function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
+/**
+ * Strings a structured `substituteBody: true` body substitutes itself, before its serializer
+ * encodes them (JSON escaping would hide `{{\tkey}}`). A text body is the shared preparation's.
+ */
+function structuredBodyStrings(body: ApiCallRequestBody): Iterable<string> {
   switch (body.kind) {
     case "none":
-      return [];
     case "buffered":
-      return body.text !== undefined ? [body.text] : [];
+      return [];
     case "formData":
       return body.fieldTemplates ?? [];
     case "json":
@@ -267,17 +269,27 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return { ok: false, error: `Credential fetch failed: ${getErrorMessage(err)}` };
   }
 
-  // 3. Substitute {{vars}} in the target and the caller's headers; refuse an unresolved one, there
-  //    or in a string the body substitutes (text, multipart fields, JSON leaves).
+  // 3. Substitute {{vars}} in the target, the caller's headers and a text body, each encoded for
+  //    its place; refuse an unresolved one, there or in a multipart field or a JSON leaf.
   const prepareFor = (fields: Record<string, string>) =>
     prepareApiCallRequest({
       target: targetUrl,
       headers: args.callerHeaders,
-      bodyTemplates: substituteBody ? [...substitutedBodyStrings(body)] : [],
+      body: substituteBody && body.kind === "buffered" ? (body.text ?? null) : null,
+      bodyParts: substituteBody ? [...structuredBodyStrings(body)] : [],
       fields,
     });
   const prepared = prepareFor(creds.credentials);
-  if (!prepared.ok) return { ok: false, error: prepared.refusal.message };
+  if (!prepared.ok) {
+    const { kind, message } = prepared.refusal;
+    return kind === "credential_unusable"
+      ? {
+          ok: false,
+          code: kind,
+          error: `Integration "${integrationId}": the connection's credential is unusable (${message}); nothing was sent`,
+        }
+      : { ok: false, error: message };
+  }
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
@@ -306,9 +318,10 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
 
-  /** Build the request body with credential substitution applied. */
+  /** The request body: `text` when the preparation substituted one, else built from `body`. */
   const buildBody = (
     activeCreds: Record<string, string>,
+    text: string | null,
   ): ArrayBuffer | string | FormData | undefined => {
     switch (body.kind) {
       case "none":
@@ -322,22 +335,20 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
           deepSubstituteJson(body.value, substituteBody ? activeCreds : undefined),
         );
       case "buffered":
-        return substituteBody && body.text !== undefined
-          ? substituteVars(body.text, activeCreds)
-          : body.bytes;
+        return text ?? body.bytes;
       default:
         return assertNever(body);
     }
   };
 
   /**
-   * One outbound attempt, from the caller's headers as prepared for `activeCreds`; the body is
-   * substituted here. Returns
+   * One outbound attempt, from the caller's headers and text body as prepared for `activeCreds`;
+   * a structured body is substituted here. Returns
    * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (
     activeCreds: CredentialsResponse,
-    caller: Pick<PreparedApiCallRequest, "headers" | "credentialHeaders">,
+    caller: Pick<PreparedApiCallRequest, "headers" | "credentialHeaders" | "body">,
   ): Promise<{
     response: Response;
     finalUrl: string;
@@ -388,7 +399,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     const init: RequestInit & Record<string, unknown> = {
       method,
       headers: resolvedHeaders,
-      body: buildBody(activeCreds.credentials),
+      body: buildBody(activeCreds.credentials, caller.body),
       proxy: args.proxyUrl || undefined,
     };
     const sent = await fetchApiCall({

@@ -23,7 +23,7 @@
  * (spaceId, integrationId) and focuses purely on the mechanics.
  */
 
-import { substituteVars, applyInjectedCredentialHeaderToHeaders } from "@appstrate/connect";
+import { applyInjectedCredentialHeaderToHeaders } from "@appstrate/connect";
 import {
   buildInjectedCredentialHeader,
   credentialCarryingHeader,
@@ -40,10 +40,7 @@ import {
   urlPolicyRefusalMessage,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
-import {
-  assertHttpFieldValue,
-  InvalidHeaderValueError,
-} from "@appstrate/afps-shared/delivery-http";
+import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
@@ -97,14 +94,15 @@ interface ProxyCallInput {
   /** Upstream URL — validated against the integration's `authorizedUris`. */
   target: string;
   /**
-   * Headers forwarded to upstream. Placeholder substitution (`{{field}}`)
-   * runs against the credential fields; the proxy adds the credential
-   * header (e.g. `Authorization`) server-side.
+   * Headers forwarded to upstream. Each `{{field}}` takes its credential field,
+   * encoded for its place; the proxy adds the credential header (e.g.
+   * `Authorization`) server-side.
    */
   headers?: Record<string, string>;
   /**
    * Optional request body. String bodies have `{{field}}` placeholders
-   * substituted when `substituteBody` is true. A `ReadableStream` is
+   * substituted when `substituteBody` is true, each value encoded for the
+   * body's `Content-Type`. A `ReadableStream` is
    * forwarded verbatim (streaming upload path — no substitution possible,
    * no 401-retry). When a `ReadableStream` body is provided and the
    * upstream returns 401 after using the platform credential, the result
@@ -234,15 +232,15 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   const fields = resolved.credentials;
-  const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
   const prepared = prepareApiCallRequest({
     target: input.target,
     headers: input.headers ?? {},
-    bodyTemplates: bodyTemplate !== null ? [bodyTemplate] : [],
+    body: typeof input.body === "string" && input.substituteBody ? input.body : null,
     fields,
   });
   if (!prepared.ok) {
     const { kind, message } = prepared.refusal;
+    if (kind === "credential_unusable") throw unusableCredential(message, input.integrationId);
     throw new ProxyCallError(kind === "invalid_header" ? "invalid_request" : kind, message);
   }
   const { url: target, templates } = prepared.request;
@@ -273,11 +271,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const headers = new Headers();
   let credentialInjection;
   try {
-    for (const [k, value] of Object.entries(prepared.request.headers)) {
-      // The caller's own value was checked as written; one the credential spoils is unusable.
-      assertHttpFieldValue(k, value);
-      headers.set(k, value);
-    }
+    for (const [k, value] of Object.entries(prepared.request.headers)) headers.set(k, value);
     credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
   } catch (err) {
     throw err instanceof InvalidHeaderValueError
@@ -287,20 +281,9 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   const carrier = credentialCarryingHeader(credentialInjection);
   if (carrier) sensitiveHeaderNames.add(carrier);
 
-  // Body substitution (opt-in; body may be bytes). Bun's global fetch
-  // accepts string / Uint8Array / ReadableStream directly.
-  // ReadableStream bodies bypass substitution — they are forwarded as-is.
-  let body: string | Uint8Array | ReadableStream<Uint8Array> | undefined;
+  // The substituted text body (opt-in), else the caller's bytes or stream as is.
   const isStreamBody = input.body instanceof ReadableStream;
-  if (input.body !== undefined && input.body !== null) {
-    if (isStreamBody) {
-      body = input.body as ReadableStream<Uint8Array>;
-    } else if (bodyTemplate !== null) {
-      body = substituteVars(bodyTemplate, fields);
-    } else {
-      body = input.body as string | Uint8Array;
-    }
-  }
+  const body = prepared.request.body ?? input.body ?? undefined;
 
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
