@@ -515,24 +515,28 @@ target, a header or a substituted text body, where a refused value is a
   as one component wherever it sits — a path segment, a query component, a fragment, but
   also a port, a userinfo or a value right after the host or the base. Write the `/` a
   URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
-  never `https://example.com{{path}}`, whose `/` would be encoded. Before the query, a
-  value that is `.` or `..` is refused: no encoding keeps it one segment. A URL refused
+  never `https://example.com{{path}}`, whose `/` would be encoded. A path segment its
+  placeholders render empty, `.` or `..` is refused: no encoding keeps it one segment. A URL refused
   for its host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request`
   naming the inputs in its authority.
-- `body` — by the media type of the `Content-Type` header, else of `content_type`:
+- `body` — by the media type of the `Content-Type` header (as rendered), else of
+  `content_type`. A body holding a `{{name}}` needs one of these; under any other media
+  type, or none, the connect fails as `invalid_config` (a login tool's request is
+  answered 400), and a body with no placeholder is sent untouched:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
-  - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a
-    value inside a string literal. A bare `{{name}}` is one JSON value of the input's
-    type: the submitted credentials are first typed by `credentials.schema`, so a field
-    declared `number` goes as a number (`"1234"` → `1234`) and a field declared `string`
-    as a JSON string whatever it spells (`"0123"`, `"true"`). A `connect.tool` login
-    tool's inputs are strings: a bare position takes them as JSON strings;
+  - JSON (`application/json`, `text/json`, `application/x-json`, `application/x-ndjson`,
+    any `+json`) escapes a value inside a string literal. A bare `{{name}}` is one JSON
+    value of the input's type: the submitted credentials are first typed by
+    `credentials.schema`, so a field declared `number` goes as a number
+    (`"1234"` → `1234`) and a field declared `string` as a JSON string whatever it
+    spells (`"0123"`, `"true"`). A `connect.tool` login tool's inputs are strings: a bare
+    position takes them as JSON strings;
   - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
     in a CDATA section;
-  - `multipart/*` refuses a value carrying CR or LF, so a value adds no part. A value
-    inside a part's own headers (a `Content-Disposition` `filename="{{name}}"`) is not
-    escaped: keep placeholders in part bodies;
-  - any other body takes the value as is.
+  - `multipart/*` (its `boundary` parameter required) refuses a value carrying CR, LF or
+    the boundary delimiter, so a value adds no part, and on a part's own header lines (a
+    `Content-Disposition` `filename="{{name}}"`) a value carrying `"` or `\` too;
+  - `text/plain` takes the value as is.
 - header values — the value as is; one carrying a line break, another control character
   or a character above U+00FF is refused, and in a `Cookie` header any character outside
   RFC 6265 `cookie-octet` too (`;`, `,`, space, `"`, `\`).

@@ -224,10 +224,7 @@ export function credentialScope(integrationId: string, connectionId: string): st
   return `${integrationId}\u0000${connectionId}`;
 }
 
-/**
- * Strings a structured `substituteBody: true` body substitutes itself, before its serializer
- * encodes them (JSON escaping would hide `{{\tkey}}`). A text body is the shared preparation's.
- */
+/** Strings a structured body substitutes itself, read before JSON escaping hides `{{\tkey}}`. */
 function structuredBodyStrings(body: ApiCallRequestBody): Iterable<string> {
   switch (body.kind) {
     case "none":
@@ -269,8 +266,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return { ok: false, error: `Credential fetch failed: ${getErrorMessage(err)}` };
   }
 
-  // 3. Substitute {{vars}} in the target, the caller's headers and a text body, each encoded for
-  //    its place; refuse an unresolved one, there or in a multipart field or a JSON leaf.
+  // 3. Substitute {{vars}} in the target, the caller's headers and a text body.
   const prepareFor = (fields: Record<string, string>) =>
     prepareApiCallRequest({
       target: targetUrl,
@@ -318,7 +314,6 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
 
-  /** The request body: `text` when the preparation substituted one, else built from `body`. */
   const buildBody = (
     activeCreds: Record<string, string>,
     text: string | null,
@@ -342,8 +337,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   };
 
   /**
-   * One outbound attempt, from the caller's headers and text body as prepared for `activeCreds`;
-   * a structured body is substituted here. Returns
+   * One outbound attempt, from the call as prepared for `activeCreds`. Returns
    * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (

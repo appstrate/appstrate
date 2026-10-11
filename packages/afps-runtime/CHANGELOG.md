@@ -13,12 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the text body through `substituteRequest`. It takes `body` (the text body to
   substitute, or `null`) and optional `bodyParts` (strings of a structured body
   the caller substitutes itself) in place of `bodyTemplates`, returns the
-  substituted `body`, and refuses a value its place cannot carry with the new
-  refusal kind `credential_unusable`.
-- `substituteRequest` refuses, with `UnencodableInputError`, a URL value that
-  is `.` or `..` before the query.
-- `LocalIntegrationResolver` sends the prepared body: a string body is escaped
-  for the call's `Content-Type`.
+  substituted `body`, and refuses with two new kinds: `credential_unusable` for
+  a value its place cannot carry (a `bodyParts` value that is not well-formed
+  Unicode included), `invalid_body` for a body it has no encoder for.
+- `substituteRequest`, for every caller (`api_call`, `connect.login`, the MITM
+  listener):
+  - refuses, with `UnencodableInputError`, a path segment its placeholders
+    render empty, `.` or `..` (percent-encoded dots included). The rendered
+    segment is judged, not the value: `x{{v}}y` takes `..`. Host and port
+    placeholders are no path segment;
+  - substitutes a body only under a media type with an encoder: JSON (now with
+    `application/x-ndjson`), form, XML, multipart with a `boundary`, and
+    `text/plain` (as is). Any other, or none, throws the new
+    `RequestTemplateError` when the body holds a placeholder of the inputs;
+  - reads the body's media type from the rendered `Content-Type` header, and
+    throws `RequestTemplateError` on headers holding one name twice in
+    different case;
+  - multipart: refuses a value holding `--<boundary>`, and `"` or `\` in a
+    value on a part-header line;
+  - XML: a `<![CDATA[` inside a comment opens no CDATA section.
+- `UnencodableInputError` messages name the placeholder (`{{field}} …`), where
+  they read `input 'field' …`.
+- `LocalIntegrationResolver` substitutes a string body only under
+  `substituteBody: true`, escaped for the call's `Content-Type`, and answers
+  `credential_unusable` for a CR/LF a credential puts in a header
+  (`RESOLVER_HEADER_INVALID` stays the agent's own header value).
+- `redactCredentialHost` no longer throws on a credential value that is not
+  well-formed Unicode.
 
 ### Removed (BREAKING)
 

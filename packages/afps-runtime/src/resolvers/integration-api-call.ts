@@ -461,11 +461,11 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         }
         callerHeaders[key] = value;
       }
-      // A string body is the only one substituted (never multipart).
+      // A string body is the only one substituted (never multipart), on the caller's opt-in.
       const prepared = prepareApiCallRequest({
         target: req.target,
         headers: callerHeaders,
-        body: typeof req.body === "string" ? req.body : null,
+        body: typeof req.body === "string" && req.substituteBody ? req.body : null,
         fields,
       });
       if (!prepared.ok) {

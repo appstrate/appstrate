@@ -2,7 +2,11 @@
 // Copyright 2025-2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
-import { substituteRequest, UnencodableInputError } from "../../src/resolvers/request-template.ts";
+import {
+  RequestTemplateError,
+  substituteRequest,
+  UnencodableInputError,
+} from "../../src/resolvers/request-template.ts";
 
 const url = (template: string, inputs: Record<string, unknown>) =>
   substituteRequest({ url: template, headers: {}, body: undefined }, inputs).url;
@@ -42,16 +46,35 @@ describe("substituteRequest — URL", () => {
     expect([...new URL(rendered).searchParams.keys()]).toEqual(["q"]);
   });
 
-  it("refuses a dot segment in the path, which no encoding keeps from climbing", () => {
-    for (const seg of [".", ".."]) {
+  it("refuses a path segment a value renders as a dot segment or empty", () => {
+    for (const seg of [".", "..", ""]) {
       expect(() => url("https://h.example/users/{{seg}}/keys", { seg })).toThrow(
         UnencodableInputError,
       );
-      expect(url("https://h.example/users?q={{seg}}", { seg })).toBe(
-        `https://h.example/users?q=${seg}`,
+      expect(() => url("{{base}}/users/{{seg}}", { base: "https://h.example", seg })).toThrow(
+        UnencodableInputError,
+      );
+      expect(url("https://h.example/users?q={{seg}}#{{seg}}", { seg })).toBe(
+        `https://h.example/users?q=${seg}#${seg}`,
       );
     }
+    expect(() => url("https://h.example/a/.{{x}}/b", { x: "" })).toThrow(UnencodableInputError);
+    expect(() => url("https://h.example/a/.{{x}}/b", { x: "." })).toThrow(UnencodableInputError);
+    expect(() => url("https://h.example/a/%2E{{x}}/b", { x: "." })).toThrow(UnencodableInputError);
+    expect(() => url("https://h.example/a/{{x}}{{y}}", { x: ".", y: "." })).toThrow(
+      UnencodableInputError,
+    );
+  });
+
+  it("judges the rendered segment, not the value: a dot value inside a longer segment is sent", () => {
+    expect(url("https://h.example/a/x{{v}}y", { v: ".." })).toBe("https://h.example/a/x..y");
     expect(url("https://h.example/v{{seg}}/x", { seg: "1.2" })).toBe("https://h.example/v1.2/x");
+    expect(url("https://h.example/a/{{v}}.json", { v: "" })).toBe("https://h.example/a/.json");
+  });
+
+  it("a host or port placeholder is no path segment", () => {
+    expect(url("https://{{h}}example.com/x", { h: "" })).toBe("https://example.com/x");
+    expect(url("https://h.example:{{port}}", { port: "" })).toBe("https://h.example:");
   });
 });
 
@@ -130,12 +153,105 @@ describe("substituteRequest — bodies", () => {
     );
   });
 
-  it("a body of any other media type, or none, takes the value as is", () => {
-    expect(body("p={{p}}", "text/plain", { p: "a&b" })).toBe("p=a&b");
-    expect(
-      substituteRequest({ url: "https://h.example/", headers: {}, body: "p={{p}}" }, { p: "a&b" })
-        .body,
-    ).toBe("p=a&b");
+  it("text/plain, declared, takes the value as is", () => {
+    expect(body("p={{p}}", "text/plain; charset=utf-8", { p: "a&b" })).toBe("p=a&b");
+  });
+
+  it("refuses to substitute a body whose media type has no encoder, naming the type only", () => {
+    const hostile = '","admin":true,"z":"';
+    const render = (headers: Record<string, string>) => () =>
+      substituteRequest(
+        { url: "https://h.example/", headers, body: '{"a":"{{t}}"}' },
+        { t: hostile, ct: "application/graphql" },
+      );
+    const unencodable: Record<string, string>[] = [{}, { "Content-Type": "application/graphql" }];
+    for (const headers of unencodable) {
+      expect(render(headers)).toThrow(RequestTemplateError);
+      expect(render(headers)).not.toThrow(hostile);
+    }
+    expect(render({ "Content-Type": "application/graphql" })).toThrow("application/graphql");
+    expect(render({ "Content-Type": "{{ct}}" })).toThrow(RequestTemplateError);
+    expect(render({ "Content-Type": "{{ct}}" })).not.toThrow("graphql");
+    expect(render({ "Content-Type": "multipart/form-data" })).toThrow(RequestTemplateError);
+  });
+
+  it("leaves a body with no placeholder of its inputs untouched, whatever its media type", () => {
+    for (const template of ['{"a":"b"}', "{{other}} & <x>"]) {
+      expect(
+        substituteRequest({ url: "https://h.example/", headers: {}, body: template }, { t: "v" })
+          .body,
+      ).toBe(template);
+    }
+  });
+
+  it("application/x-ndjson is JSON, one value per line", () => {
+    const hostile = 'a"\n{"admin":true}';
+    const rendered = body('{"a":"{{a}}"}\n{"b":{{a}}}', "application/x-ndjson", { a: hostile })!;
+    expect(rendered.split("\n").map((line) => JSON.parse(line))).toEqual([
+      { a: hostile },
+      { b: hostile },
+    ]);
+  });
+
+  it("the encoder follows the rendered Content-Type header", () => {
+    const hostile = 'q","admin":true,"z":"';
+    const { body: rendered } = substituteRequest(
+      { url: "https://h.example/", headers: { "Content-Type": "{{ct}}" }, body: '{"a":"{{a}}"}' },
+      { ct: "application/json", a: hostile },
+    );
+    expect(JSON.parse(rendered)).toEqual({ a: hostile });
+  });
+
+  it("refuses headers holding one name twice in different case", () => {
+    const twice = () =>
+      substituteRequest(
+        {
+          url: "https://h.example/",
+          headers: { "Content-Type": "text/plain", "content-type": "application/json" },
+          body: undefined,
+        },
+        {},
+      );
+    expect(twice).toThrow(RequestTemplateError);
+  });
+
+  it("XML: a comment holding `<![CDATA[` opens no CDATA section", () => {
+    expect(body("<!-- <![CDATA[ --><a>{{x}}</a>", "application/xml", { x: "</a><admin/>" })).toBe(
+      "<!-- <![CDATA[ --><a>&lt;/a&gt;&lt;admin/&gt;</a>",
+    );
+    expect(body("<![CDATA[ <!-- {{x}} ]]>", "application/xml", { x: "<b/>" })).toBe(
+      "<![CDATA[ <!-- <b/> ]]>",
+    );
+  });
+
+  describe("multipart", () => {
+    const part = (template: string, x: string, type = "multipart/form-data; boundary=B") =>
+      substituteRequest(
+        { url: "https://h.example/", headers: { "Content-Type": type }, body: template },
+        { x },
+      ).body;
+    const content = '--B\r\nContent-Disposition: form-data; name="f"\r\n\r\n{{x}}\r\n--B--';
+    const header =
+      '--B\r\nContent-Disposition: form-data; name="f"; filename="{{x}}"\r\n\r\nv\r\n--B--';
+
+    it("a part's content takes a value as is", () => {
+      expect(part(content, 'a "b" \\ --C')).toContain('\r\n\r\na "b" \\ --C\r\n--B--');
+      expect(part(header, "a b.txt")).toContain('filename="a b.txt"');
+    });
+
+    it("refuses a value holding the boundary delimiter, quoted boundary included", () => {
+      expect(() => part(content, "--B--")).toThrow(UnencodableInputError);
+      expect(() => part(content, "x --B")).toThrow(UnencodableInputError);
+      expect(() => part(content, "--B", 'multipart/form-data; boundary="B"')).toThrow(
+        UnencodableInputError,
+      );
+    });
+
+    it("refuses a quote or a backslash in a value on a part-header line", () => {
+      for (const x of ['a"; name="admin', "a\\"]) {
+        expect(() => part(header, x)).toThrow(UnencodableInputError);
+      }
+    });
   });
 
   it("an unterminated CDATA section still only splits `]]>`", () => {

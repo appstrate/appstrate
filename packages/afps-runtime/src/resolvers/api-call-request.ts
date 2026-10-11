@@ -4,8 +4,12 @@
 /** The caller half of an `api_call`, prepared the same way by the platform proxy, the sidecar and the local CLI. */
 
 import { InvalidHeaderValueError, isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { substituteRequest, UnencodableInputError } from "./request-template.ts";
-import { unresolvedPlaceholders } from "./template-vars.ts";
+import {
+  RequestTemplateError,
+  substituteRequest,
+  UnencodableInputError,
+} from "./request-template.ts";
+import { substituteVars, unresolvedPlaceholders } from "./template-vars.ts";
 
 export interface PreparedApiCallRequest {
   /** Holds decrypted values: for the wire, never for a message. */
@@ -25,7 +29,7 @@ type Prepared =
   | {
       ok: false;
       refusal: {
-        kind: "unresolved_placeholder" | "invalid_header" | "credential_unusable";
+        kind: "unresolved_placeholder" | "invalid_header" | "invalid_body" | "credential_unusable";
         message: string;
       };
     };
@@ -50,12 +54,8 @@ function repairAuthScheme(headerName: string, template: string): string {
 }
 
 /**
- * Substitute `fields` into the target, the caller's headers and its text `body`, each value encoded
- * for the place it takes ({@link substituteRequest}; the body by the caller's `Content-Type`), or
- * refuse on the first defect: an unresolved placeholder in the target, then each header (value
- * invalid as written, then unresolved), then the body and `bodyParts`; last, a value its place
- * cannot carry. `bodyParts` are the strings of a structured body (JSON leaves, multipart fields)
- * the caller substitutes itself, where its serializer does the encoding.
+ * `bodyParts` are the strings of a structured body (JSON leaves, multipart fields) the caller
+ * substitutes itself, where its serializer does the encoding. Only `credential_unusable` blames a value.
  */
 export function prepareApiCallRequest(call: {
   target: string;
@@ -88,9 +88,25 @@ export function prepareApiCallRequest(call: {
   let rendered;
   try {
     rendered = substituteRequest({ url: target, headers: templates, body }, fields);
+    // A part's serializer encodes any well-formed string, and only those.
+    for (const part of bodyParts) {
+      substituteVars(part, fields, {
+        encode: (value, key) => {
+          if (value.isWellFormed()) return value;
+          throw new UnencodableInputError(key, "is not well-formed Unicode");
+        },
+      });
+    }
   } catch (err) {
-    if (!(err instanceof UnencodableInputError)) throw err;
-    return { ok: false, refusal: { kind: "credential_unusable", message: err.message } };
+    const { message } = err as Error;
+    if (err instanceof UnencodableInputError) {
+      return { ok: false, refusal: { kind: "credential_unusable", message } };
+    }
+    if (err instanceof RequestTemplateError) {
+      const kind = err.part === "headers" ? "invalid_header" : "invalid_body";
+      return { ok: false, refusal: { kind, message } };
+    }
+    throw err;
   }
   return {
     ok: true,

@@ -949,21 +949,44 @@ integration_connections WHERE shared_with_org;` tells whether the step
   query parameter, a path segment, a JSON member or a header line to the call.
   - Target: a `{{field}}` that starts it is a base URL, inserted as is
     (`{{site_url}}/wp-json/…`); every other one is percent-encoded as one
-    component, and a value that is `.` or `..` before the query is refused. A
-    field holding several path segments, a whole query string or a `host:port`
-    no longer spreads over the URL: write the `/`, `?`, `&` and `:` in the
-    target.
-  - Text body (`substituteBody`): by the call's `Content-Type`. JSON escapes a
-    value inside a string literal and renders a bare `{{field}}` as a JSON
-    string; form bodies get a form component; XML gets entities; any other
-    media type, or none, takes the value as is.
+    component. A path segment its placeholders render empty, `.` or `..` is
+    refused. A field holding several path segments, a whole query string or a
+    `host:port` no longer spreads over the URL: write the `/`, `?`, `&` and
+    `:` in the target.
+  - Text body (`substituteBody`): by the call's `Content-Type`, as rendered.
+    JSON (`+json` and `application/x-ndjson` included) escapes a value inside
+    a string literal and renders a bare `{{field}}` as a JSON string; form
+    bodies get a form component; XML gets entities; `text/plain` takes the
+    value as is. A multipart value holding a line break or the boundary
+    delimiter is refused, and so is `"` or `\` on a part-header line
+    (`filename="{{field}}"`). Under any other `Content-Type`, or none, a body
+    holding a placeholder is refused as `invalid_request` (400 on
+    `/api/credential-proxy/proxy`): declare the media type. A body with no
+    placeholder is sent untouched.
   - Headers: the value as is; a line break, another control character or a
     character above U+00FF is refused, and in a `Cookie` header any character
-    outside RFC 6265 `cookie-octet`.
+    outside RFC 6265 `cookie-octet` is refused too, never encoded. Headers
+    holding one name twice in different case are an `invalid_request`.
   - A refused value is a `credential_unusable` (502 on
-    `/api/credential-proxy/proxy`) naming the credential field, never its
-    value; nothing is sent. The rendered URL is what `authorized_uris` and the
-    egress checks judge.
+    `/api/credential-proxy/proxy`) naming the placeholder (`{{field}}`), never
+    its value; nothing is sent. The CLI resolver answers `credential_unusable`
+    too for a line break a credential puts in a header
+    (`RESOLVER_HEADER_INVALID` stays the agent's own header value). The
+    rendered URL is what `authorized_uris` and the egress checks judge.
+  - The CLI resolver (`appstrate run --integrations=local`) substitutes a
+    string body only under `substituteBody: true`, as the two other paths do;
+    it substituted every string body.
+  - On a 401, the platform proxy renders the caller's headers and text body
+    again from the refreshed credentials before the replay, as the sidecar
+    does; a refreshed set that no longer fits them is not replayed.
+  - The same rules reach `connect.login` and the requests of a `connect.tool`
+    login tool: the empty, `.` or `..` path segment, the multipart rules, and
+    the media type. A login `body` holding a `{{name}}` now needs a
+    `content_type` (or `Content-Type` header) among the above; without one
+    the connect fails as `invalid_config`, and the sidecar answers a login
+    tool's request 400.
+  - `@appstrate/connect` no longer re-exports `substituteVars`: import it from
+    `@appstrate/afps-runtime/resolvers`.
 
 - **A self-registered OAuth client no longer names the platform's pages and
   emails** (#1825). An `instance`-level client took its own `name` as the

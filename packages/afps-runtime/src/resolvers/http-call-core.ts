@@ -312,7 +312,7 @@ export const apiCallRequestSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream, each value escaped for the body's Content-Type (JSON, form, XML; as is otherwise). Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
+      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream, each value escaped for the body's Content-Type: JSON, form, XML, multipart or text/plain (as is). Under any other Content-Type, or none, a body holding a placeholder is refused. Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
     ),
   responseMode: responseModeSchema,
 });

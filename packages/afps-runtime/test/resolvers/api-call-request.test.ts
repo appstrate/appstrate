@@ -49,14 +49,14 @@ describe("prepareApiCallRequest — substitution", () => {
   it("returns every template of the call: target, headers, body, body parts", () => {
     const request = prepared({
       target: "https://api.example.com/{{tenant}}",
-      headers: { "X-Key": "{{token}}", "X-Trace": "abc" },
+      headers: { "X-Key": "{{token}}", "Content-Type": "application/json" },
       body: '{"k":"{{token}}"}',
       bodyParts: ["{{tenant}}"],
     });
     expect(request.templates).toEqual([
       "https://api.example.com/{{tenant}}",
       "{{token}}",
-      "abc",
+      "application/json",
       '{"k":"{{token}}"}',
       "{{tenant}}",
     ]);
@@ -98,12 +98,9 @@ describe("prepareApiCallRequest — a value is encoded for the place it takes", 
     expect(url).toBe("https://evil.test%2F%3F.example.com/x");
   });
 
-  it("body: by the caller's Content-Type, raw text without one", () => {
-    const body = (contentType: string | null, template: string) =>
-      prepared(
-        { headers: contentType ? { "content-type": contentType } : {}, body: template },
-        hostile,
-      ).body;
+  it("body: by the caller's Content-Type, raw only as declared text/plain", () => {
+    const body = (contentType: string, template: string) =>
+      prepared({ headers: { "content-type": contentType }, body: template }, hostile).body;
     expect(JSON.parse(body("application/json; charset=utf-8", '{"k":"{{v}}","n":1}')!)).toEqual({
       k: hostile.v,
       n: 1,
@@ -114,7 +111,6 @@ describe("prepareApiCallRequest — a value is encoded for the place it takes", 
       ["k", hostile.v],
       ["n", "1"],
     ]);
-    expect(body(null, "k={{v}}")).toBe(`k=${hostile.v}`);
     expect(body("text/plain", "k={{v}}")).toBe(`k=${hostile.v}`);
   });
 });
@@ -193,12 +189,31 @@ describe("prepareApiCallRequest — the first refusal", () => {
     ["a header", { headers: { "X-Key": "{{token}}" } }, "a\r\nX-Evil: 1"],
     ["a Cookie header", { headers: { Cookie: "sid={{token}}" } }, "a; admin=1"],
     ["a path segment", { target: "https://api.example.com/{{token}}/x" }, ".."],
-    ["anywhere, ill-formed", { body: "{{token}}" }, "\ud800"],
-  ])("a value %s cannot carry, naming the field only", (_where, call, token) => {
-    expect(refusal(call, { token })).toEqual({
-      kind: "credential_unusable",
-      message: expect.stringMatching(/^input 'token' /),
-    });
-    expect(refusal(call, { token }).message).not.toContain(token);
+    [
+      "a text body, ill-formed",
+      { headers: { "Content-Type": "text/plain" }, body: "{{token}}" },
+      "\ud800",
+    ],
+    ["a body part, ill-formed", { bodyParts: ["k={{token}}"] }, "a\ud800"],
+  ])("a value %s cannot carry, naming the placeholder only", (_where, call, token) => {
+    const { kind, message } = refusal(call, { token });
+    expect(kind).toBe("credential_unusable");
+    expect(message).toContain("{{token}}");
+    expect(message).not.toContain(token);
+  });
+
+  it.each([
+    ["no Content-Type", {}],
+    ["a media type with no encoder", { "Content-Type": "application/graphql" }],
+  ])("a body with placeholders under %s, as the request's fault", (_what, headers) => {
+    const token = '","admin":true,"z":"';
+    const { kind, message } = refusal({ headers, body: '{"a":"{{token}}"}' }, { token });
+    expect(kind).toBe("invalid_body");
+    expect(message).toContain("Content-Type");
+    expect(message).not.toContain(token);
+  });
+
+  it("headers holding one name twice in different case", () => {
+    expect(refusal({ headers: { Accept: "a/b", accept: "c/d" } }).kind).toBe("invalid_header");
   });
 });

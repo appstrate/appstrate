@@ -93,6 +93,7 @@ import {
   beyondBoundReason,
   credentialStaysWithinBound,
   HOP_BY_HOP_HEADERS,
+  RequestTemplateError,
   substituteRequest,
   UnencodableInputError,
   unresolvedPlaceholders,
@@ -760,7 +761,8 @@ export function extractSni(buf: Buffer): string | null {
 type ConnectInputSubstitutionResult =
   | { url: string; bodyText: string | null; headers: Record<string, string> }
   | { failed: string }
-  | { refused: string };
+  | { refused: string }
+  | { unsubstitutable: string };
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
@@ -769,7 +771,8 @@ type ConnectInputSubstitutionResult =
  *
  * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
  * `{ failed: <name> }` rather than forwarding a half-substituted request
- * upstream; a value the request cannot carry returns `{ refused: <name> }`.
+ * upstream; a value the request cannot carry returns `{ refused: <name> }`, a
+ * body no encoder covers `{ unsubstitutable: <why> }`.
  * A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(
@@ -788,6 +791,7 @@ export function applyConnectInputSubstitution(
     return { url, bodyText: body, headers };
   } catch (err) {
     if (err instanceof UnencodableInputError) return { refused: err.field };
+    if (err instanceof RequestTemplateError) return { unsubstitutable: err.message };
     throw err;
   }
 }
@@ -931,6 +935,10 @@ async function forwardInnerRequest(
     if ("failed" in result) {
       emit({ kind: "request-refused", url, reason: "unresolved login placeholder" });
       return new Response("MITM listener: unresolved login placeholder", { status: 400 });
+    }
+    if ("unsubstitutable" in result) {
+      emit({ kind: "request-refused", url, reason: "login request not substitutable" });
+      return new Response(`MITM listener: ${result.unsubstitutable}`, { status: 400 });
     }
     if ("refused" in result) {
       credentials.refuseActiveInput?.(result.refused, targetUrl);

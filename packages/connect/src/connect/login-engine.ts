@@ -38,6 +38,7 @@
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import {
   headerNamed,
+  RequestTemplateError,
   substituteRequest,
   UnencodableInputError,
   unresolvedPlaceholders,
@@ -493,6 +494,11 @@ function renderRequest(
       inputs,
     );
   } catch (err) {
+    if (err instanceof RequestTemplateError) {
+      throw new LoginError(`connect.login request: ${err.message}`, "invalid_config", {
+        cause: err,
+      });
+    }
     if (!(err instanceof UnencodableInputError)) throw err;
     throw new LoginError(err.message, "invalid_input", { field: err.field, cause: err });
   }

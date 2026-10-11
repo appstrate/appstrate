@@ -49,6 +49,10 @@ interface Call {
   target: string;
   headers?: Record<string, string>;
   body?: string;
+  /** A structured JSON body, which only the sidecar takes (the other two take text). */
+  json?: unknown;
+  /** Defaults to true. */
+  substituteBody?: boolean;
 }
 type Sent = { url: string; headers: Record<string, string>; body: string };
 type Outcome = Sent | { refused: string };
@@ -124,7 +128,7 @@ describe("api_call — one prepared request on the three paths", () => {
       target: call.target,
       headers: call.headers ?? {},
       body: call.body ?? null,
-      substituteBody: true,
+      substituteBody: call.substituteBody ?? true,
       fetch: fetchImpl,
       resolveHost,
     }).then(
@@ -144,14 +148,16 @@ describe("api_call — one prepared request on the three paths", () => {
         method: "POST",
         callerHeaders: call.headers ?? {},
         body:
-          call.body === undefined
-            ? { kind: "none" }
-            : {
-                kind: "buffered",
-                bytes: new TextEncoder().encode(call.body).buffer as ArrayBuffer,
-                text: call.body,
-              },
-        substituteBody: true,
+          call.json !== undefined
+            ? { kind: "json", value: call.json }
+            : call.body === undefined
+              ? { kind: "none" }
+              : {
+                  kind: "buffered",
+                  bytes: new TextEncoder().encode(call.body).buffer as ArrayBuffer,
+                  text: call.body,
+                },
+        substituteBody: call.substituteBody ?? true,
       },
       {
         config: { runToken: "rt", platformApiUrl: "http://platform" },
@@ -185,7 +191,13 @@ describe("api_call — one prepared request on the three paths", () => {
     );
     const refusal = await tool!
       .execute(
-        { method: "POST", ...call },
+        {
+          method: "POST",
+          target: call.target,
+          headers: call.headers,
+          body: call.body,
+          substituteBody: call.substituteBody ?? true,
+        },
         {
           emit: () => {},
           workspace: "/tmp",
@@ -245,14 +257,44 @@ describe("api_call — one prepared request on the three paths", () => {
       },
     ],
     [
-      "a body of no declared media type",
-      { target: "https://api.acme.com/x", body: "k={{v}}" },
-      { url: "https://api.acme.com/x", headers: {}, body: `k=${HOSTILE}` },
+      "a text/plain body, as is",
+      {
+        target: "https://api.acme.com/x",
+        headers: { "Content-Type": "text/plain" },
+        body: "k={{v}}",
+      },
+      {
+        url: "https://api.acme.com/x",
+        headers: { "Content-Type": "text/plain" },
+        body: `k=${HOSTILE}`,
+      },
+    ],
+    [
+      "a body it was not asked to substitute, untouched",
+      {
+        target: "https://api.acme.com/x",
+        headers: { "Content-Type": "application/json" },
+        body: '{"k":"{{v}}"}',
+        substituteBody: false,
+      },
+      {
+        url: "https://api.acme.com/x",
+        headers: { "Content-Type": "application/json" },
+        body: '{"k":"{{v}}"}',
+      },
     ],
   ])("sends %s encoded for its place, identically", async (_place, call, expected) => {
     expect(await platform(call, fields)).toEqual(expected);
     expect(await sidecar(call, fields)).toEqual(expected);
     expect(await cli(call, fields)).toEqual(expected);
+  });
+
+  it("the sidecar's structured JSON body puts the same bytes on the wire as the text one", async () => {
+    const target = "https://api.acme.com/x";
+    const headers = { "Content-Type": "application/json" };
+    const text = await platform({ target, headers, body: '{"k":"{{v}}","n":1}' }, fields);
+    expect(await sidecar({ target, headers, json: { k: "{{v}}", n: 1 } }, fields)).toEqual(text);
+    expect(text).toMatchObject({ body: `{"k":${JSON.stringify(HOSTILE)},"n":1}` });
   });
 
   it.each<[string, Call, string]>([
@@ -262,10 +304,36 @@ describe("api_call — one prepared request on the three paths", () => {
       "a\r\nX-Evil: 1",
     ],
     ["a dot segment in the path", { target: "https://api.acme.com/users/{{v}}/keys" }, ".."],
+    ["an empty path segment", { target: "https://api.acme.com/users/{{v}}/keys" }, ""],
+    [
+      "a multipart value holding the boundary",
+      {
+        target: "https://api.acme.com/x",
+        headers: { "Content-Type": "multipart/form-data; boundary=B" },
+        body: '--B\r\nContent-Disposition: form-data; name="k"\r\n\r\n{{v}}\r\n--B--',
+      },
+      "--B--",
+    ],
   ])("refuses %s as an unusable credential, sending nothing", async (_what, call, v) => {
     const refused = { refused: "credential_unusable" };
     expect(await platform(call, { ...fields, v })).toEqual(refused);
     expect(await sidecar(call, { ...fields, v })).toEqual(refused);
     expect(await cli(call, { ...fields, v })).toEqual(refused);
   });
+
+  it.each<[string, Record<string, string>]>([
+    ["no Content-Type", {}],
+    ["a media type with no encoder", { "Content-Type": "application/graphql" }],
+  ])(
+    "refuses to substitute a body under %s as the request's fault, sending nothing",
+    async (_what, headers) => {
+      const call = { target: "https://api.acme.com/x", headers, body: '{"k":"{{v}}"}' };
+      const onSidecar = await sidecar(call, fields);
+      if (!("refused" in onSidecar)) throw new Error("the sidecar sent the request");
+      expect(onSidecar.refused).toContain("Content-Type");
+      expect(onSidecar.refused).not.toContain(HOSTILE);
+      expect(await platform(call, fields)).toEqual({ refused: "invalid_request" });
+      expect(await cli(call, fields)).toEqual({ refused: "RESOLVER_BODY_INVALID" });
+    },
+  );
 });
