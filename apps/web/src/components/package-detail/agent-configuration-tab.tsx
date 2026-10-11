@@ -16,16 +16,14 @@ import {
 } from "@appstrate/ui/components/select";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
-import { getModelIcon } from "../icons";
-import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import {
   useModels,
   useAgentModel,
   useSetAgentModel,
   type OrgModelInfo,
 } from "../../hooks/use-models";
-import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
-import { ModelUnselectableNote } from "../model-availability-badge";
+import { isModelPinUnavailable } from "../../lib/model-selectability";
+import { ModelSelect } from "../model-select";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -244,7 +242,6 @@ function ModelSectionEditor({
   initialGeneration: ModelGenerationSettings;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const { data: registry } = useProvidersRegistry();
   const setAgentModel = useSetAgentModel(packageId);
   const [modelId, setModelId] = useState<string | null>(initialModelId);
   const [generation, setGeneration] = useState<ModelGenerationSettings>(initialGeneration);
@@ -275,10 +272,16 @@ function ModelSectionEditor({
           </>
         }
       >
-        <Select
-          value={modelId ?? "__inherit__"}
-          onValueChange={(value) => {
-            const nextModelId = value === "__inherit__" ? null : value;
+        <ModelSelect
+          models={orgModels}
+          value={modelId}
+          inherit={{
+            label: orgDefaultModel
+              ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
+              : t("models.agent.inheritNoDefault", { ns: "settings" }),
+            modelId: orgDefaultModel?.id ?? null,
+          }}
+          onChange={(nextModelId) => {
             const nextModel = nextModelId
               ? orgModels.find((model) => model.id === nextModelId)
               : orgDefaultModel;
@@ -291,33 +294,7 @@ function ModelSectionEditor({
             save(nextModelId, nextGeneration);
           }}
           disabled={setAgentModel.isPending}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__inherit__">
-              <span className="inline-flex items-center gap-1.5">
-                {orgDefaultModel
-                  ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
-                  : t("models.agent.inheritNoDefault", { ns: "settings" })}
-                {orgDefaultModel && <ModelUnselectableNote model={orgDefaultModel} />}
-              </span>
-            </SelectItem>
-            {orgModels.map((m) => {
-              const MIcon = getModelIcon(m, registry ?? []);
-              return (
-                <SelectItem key={m.id} value={m.id} disabled={!isModelSelectable(m)}>
-                  <span className="inline-flex items-center gap-1.5">
-                    {MIcon && <MIcon className="size-3.5" />}
-                    {m.label}
-                    <ModelUnselectableNote model={m} />
-                  </span>
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
+        />
       </SettingRow>
 
       <GenerationSettingRows

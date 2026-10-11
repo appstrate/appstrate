@@ -2,22 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil } from "lucide-react";
 import { Input } from "@appstrate/ui/components/input";
-import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "./spinner";
 
 /**
- * A label that turns into an inline text input on click (when editable). Saves
- * on blur or Enter, cancels on Escape, and only fires `onSave` when the trimmed
- * value actually changed.
+ * A table row's name, renamed in place. **It opens only when something drives it**: the row's
+ * « Renommer » entry sets `editing`, and a click on the name does nothing, nor does a pencil
+ * appear on hover (both made noise in a table whose « … » menu already holds the rename). Saves
+ * on blur or Enter, cancels on Escape, and only fires `onSave` when the trimmed value actually
+ * changed.
  *
  * **This is the app's ONE rename affordance**, and the reason it is one is a
  * product decision: "Direct manipulation in forms. No Edit button revealing a
- * field." A pencil that swaps a label for an input puts a click and a mode
- * change between someone and a one-word edit, and the app had both patterns
- * side by side — this on the credentials table, a pencil on the integration
- * connections.
+ * field." The rename is the menu's, and the field appears in the name's place.
  *
  * Two things it had to grow before the second caller could take it:
  *
@@ -36,7 +33,7 @@ export function InlineEditableLabel({
   allowEmpty = false,
   placeholder,
   testId,
-  editing: controlledEditing,
+  editing,
   onEditingChange,
 }: {
   value: string;
@@ -46,30 +43,24 @@ export function InlineEditableLabel({
   allowEmpty?: boolean;
   placeholder?: string;
   testId?: string;
-  /**
-   * Controlled edit mode: a menu entry (« Renommer ») starts the edit from outside. Left out, the
-   * label keeps its own state and a click on the name is the only way in.
-   */
-  editing?: boolean;
-  onEditingChange?: (editing: boolean) => void;
+  /** Edit mode, driven by the row: its « Renommer » menu entry sets it. */
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
 }) {
   const { t } = useTranslation("common");
-  const [ownEditing, setOwnEditing] = useState(false);
-  const editing = controlledEditing ?? ownEditing;
   // What was typed since the edit began; `null` reads the stored value, so an edit started from
   // outside never opens on a stale draft.
   const [typed, setTyped] = useState<string | null>(null);
   const draft = typed ?? value;
   const setEditing = (next: boolean) => {
     if (!next) setTyped(null);
-    setOwnEditing(next);
-    onEditingChange?.(next);
+    onEditingChange(next);
   };
   const inputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
 
-  // Entering edit mode, from a click or from the menu, lands in the field with its text selected.
+  // Entering edit mode, from the menu, lands in the field with its text selected.
   useEffect(() => {
     if (editable && editing) {
       inputRef.current?.focus();
@@ -102,24 +93,11 @@ export function InlineEditableLabel({
   if (!editable || !editing) {
     return (
       <span
-        className={cn(
-          "group/label flex min-w-0 items-center gap-1.5",
-          editable && "cursor-pointer",
-        )}
-        onClick={() => {
-          if (editable) setEditing(true);
-        }}
+        className="block min-w-0 truncate text-sm font-medium"
+        title={value}
+        data-testid={testId}
       >
-        <span className="truncate text-sm font-medium" title={value} data-testid={testId}>
-          {value}
-        </span>
-        {/* The only sign that the name can be changed: nothing else tells a name from a label. */}
-        {editable && (
-          <Pencil
-            className="text-muted-foreground size-3 shrink-0 opacity-0 transition-opacity group-hover/label:opacity-100"
-            aria-hidden
-          />
-        )}
+        {value}
       </span>
     );
   }

@@ -62,7 +62,6 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
@@ -70,7 +69,6 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
 import { useColumnWidths, type ColumnWidths } from "../stores/column-widths-store";
-import { useCollapsedGroups } from "../stores/collapsed-groups-store";
 
 type DataColumnWidth = `${number}px` | `minmax(${number}px,${number}fr)`;
 
@@ -119,34 +117,9 @@ type DataColumnNature =
 
 export type DataColumn<T> = DataColumnBase<T> & DataColumnNature;
 
-/**
- * A parent row that folds its child rows (a provider and its models). It has its
- * own cells, so a status or a « … » sits on it like on any row; the children are
- * ordinary rows of the table's columns, indented under it. Generic: the table
- * knows nothing of what a group is.
- */
-export interface DataTableGroup<T> {
-  /** Stable handle: the fold is remembered under it, per person. */
-  key: string;
-  /** Names the group for a screen reader (the fold button and the row's click). */
-  label: string;
-  /** What the group's own row shows in the column `columnId`; nothing for a column left out. */
-  cell: (columnId: string) => ReactNode;
-  /** The child rows, drawn with the table's columns. */
-  rows: T[];
-  /** Drawn as the one child line of a group with no rows (« Add a model »). */
-  emptyRow?: ReactNode;
-  /** Where a click on the group's row leads; without it the click folds the group. */
-  onSelect?: () => void;
-  /**
-   * The group's first cell takes the room of the cells after it (down to the row's end), for a
-   * group whose own row carries only a name and a sentence.
-   */
-  wide?: boolean;
-}
-
-interface DataTableCommonProps<T> extends CollectionState {
+interface DataTableProps<T> extends CollectionState {
   columns: DataColumn<T>[];
+  rows: T[];
   rowKey: (row: T) => string;
   /** Where the row leads. A row without one is rendered static. */
   rowHref?: (row: T) => string | undefined;
@@ -176,13 +149,6 @@ interface DataTableCommonProps<T> extends CollectionState {
   /** Compact embedded lists may keep semantic headers without drawing a header band. */
   showHeader?: boolean;
 }
-
-/** Flat `rows`, or `groups` that fold their rows: one of the two. */
-type DataTableProps<T> = DataTableCommonProps<T> & {
-  rows?: T[];
-  /** A group is drawn even with no rows; the table is empty only with no group. */
-  groups?: DataTableGroup<T>[];
-};
 
 /**
  * The column that says WHICH row this is: the first one read and always drawn.
@@ -485,7 +451,6 @@ function ResizeHandle({
 export function DataTable<T>({
   columns,
   rows,
-  groups,
   rowKey,
   rowHref,
   rowAction,
@@ -501,9 +466,7 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   // The order lives in `collection.ts`, shared with the card grid: a caller
   // hands either body the same props and gets the same answer.
-  const verdict = collectionVerdict(state, groups ? groups.length : (rows?.length ?? 0));
-  const folds = useCollapsedGroups(label);
-  const { t } = useTranslation("common");
+  const verdict = collectionVerdict(state, rows.length);
   const isLoading = verdict === "loading";
   const frameRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -591,190 +554,7 @@ export function DataTable<T>({
       ? "bg-transparent [--dt-surface:var(--color-background)]"
       : "bg-card rounded-lg border shadow-sm [--dt-surface:var(--color-card)] [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
     "[--dt-surface-hover:color-mix(in_oklab,var(--color-muted)_50%,var(--dt-surface))]",
-    // A group's own row sits a shade off the rows under it.
-    "[--dt-surface-group:color-mix(in_oklab,var(--color-muted)_45%,var(--dt-surface))]",
   );
-
-  /** One row of data. `indent` sets it under its group's row. */
-  const bodyRow = (row: T, indent: boolean) => {
-    const href = rowHref?.(row);
-    const action = rowAction && (rowActionable?.(row) ?? true) ? rowAction : undefined;
-    const interactive = Boolean(href || action);
-    return (
-      <tr
-        role="row"
-        key={rowKey(row)}
-        data-data-table-row
-        className={cn(
-          rowGrid,
-          "group/row border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
-          interactive && "hover:bg-muted/50 transition-colors",
-        )}
-      >
-        {/* The row is a target as a whole. The cover is the row's, not
-          the first cell's: a held cell is `sticky`, which makes it the
-          containing block of anything absolute inside it, so a link
-          stretched from there would cover that one cell. The real,
-          named, focusable link is the one in the first cell; this
-          one only catches the click and the middle-click. */}
-        {href ? (
-          <td role="presentation" className="absolute inset-0 block p-0">
-            <Link
-              to={href}
-              state={rowState?.(row)}
-              tabIndex={-1}
-              aria-hidden
-              className="block size-full"
-            />
-          </td>
-        ) : action ? (
-          <td role="presentation" className="absolute inset-0 block p-0">
-            <button
-              type="button"
-              aria-label={rowLabel?.(row) ?? rowKey(row)}
-              onClick={() => action(row)}
-              className="focus-visible:outline-ring absolute inset-0 cursor-pointer rounded-none bg-transparent p-0 hover:bg-transparent focus-visible:outline-2 focus-visible:-outline-offset-2"
-            />
-          </td>
-        ) : null}
-        {columns.map((col, i) => {
-          const stick = held.get(col.id);
-          return (
-            <td
-              role="cell"
-              key={col.id}
-              data-data-table-column={col.id}
-              data-data-table-tier={col.tier}
-              style={stick && stickStyle(stick)}
-              className={cn(
-                "flex min-w-0 items-center gap-1.5",
-                col.align === "end" && "justify-end",
-                columnMode === "tiered" && tierClass(col, "flex"),
-                heldClass(stick, true, interactive),
-              )}
-            >
-              {indent && i === linkColumn ? (
-                <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-6">
-                  {i === linkColumn && href ? (
-                    <Link
-                      to={href}
-                      state={rowState?.(row)}
-                      aria-label={rowLabel?.(row)}
-                      className="flex min-w-0 items-center gap-1.5"
-                    >
-                      {col.cell(row)}
-                    </Link>
-                  ) : (
-                    col.cell(row)
-                  )}
-                </div>
-              ) : i === linkColumn && href ? (
-                <Link
-                  to={href}
-                  state={rowState?.(row)}
-                  aria-label={rowLabel?.(row)}
-                  className="flex min-w-0 items-center gap-1.5"
-                >
-                  {col.cell(row)}
-                </Link>
-              ) : (
-                col.cell(row)
-              )}
-            </td>
-          );
-        })}
-      </tr>
-    );
-  };
-
-  /**
-   * A group's own row (a fold button before its first read cell, then its own cells),
-   * then its children, or the one line it shows when it has none.
-   */
-  const groupRows = (group: DataTableGroup<T>) => {
-    const folded = folds.isCollapsed(group.key);
-    const toggle = () => folds.toggle(group.key);
-    const children = folded
-      ? []
-      : group.rows.length > 0
-        ? group.rows.map((row) => bodyRow(row, true))
-        : group.emptyRow
-          ? [
-              <tr
-                role="row"
-                key={`${group.key}:empty`}
-                data-data-table-row
-                className="border-border/60 block border-b px-(--dt-space) py-1 pl-[calc(var(--dt-space)+1.5rem)]"
-              >
-                <td role="cell" className="block">
-                  {group.emptyRow}
-                </td>
-              </tr>,
-            ]
-          : [];
-    return [
-      <tr
-        role="row"
-        key={group.key}
-        data-data-table-row
-        data-data-table-group={group.key}
-        className={cn(
-          rowGrid,
-          "group/row border-border/60 relative min-h-12 border-b bg-(--dt-surface) py-2 [--dt-surface:var(--dt-surface-group)]",
-        )}
-      >
-        <td role="presentation" className="absolute inset-0 block p-0">
-          <button
-            type="button"
-            aria-label={group.label}
-            onClick={group.onSelect ?? toggle}
-            className="focus-visible:outline-ring absolute inset-0 cursor-pointer rounded-none bg-transparent p-0 hover:bg-transparent focus-visible:outline-2 focus-visible:-outline-offset-2"
-          />
-        </td>
-        {columns.map((col, i) => {
-          // A wide group's cells after the first are not drawn: the first spans their tracks.
-          if (group.wide && i !== linkColumn && !isRowEnd(col)) return null;
-          const spans = group.wide && i === linkColumn;
-          const stick = spans ? undefined : held.get(col.id);
-          return (
-            <td
-              role="cell"
-              key={col.id}
-              data-data-table-column={col.id}
-              data-data-table-tier={col.tier}
-              style={spans ? { gridColumn: `${i + 1} / -2` } : stick && stickStyle(stick)}
-              className={cn(
-                "flex min-w-0 items-center gap-1.5",
-                col.align === "end" && "justify-end",
-                columnMode === "tiered" && tierClass(col, "flex"),
-                heldClass(stick, true, false),
-              )}
-            >
-              {i === linkColumn && (
-                <button
-                  type="button"
-                  aria-expanded={!folded}
-                  aria-label={t(folded ? "table.expandGroup" : "table.collapseGroup", {
-                    group: group.label,
-                  })}
-                  onClick={toggle}
-                  className="text-muted-foreground hover:text-foreground relative z-10 -ml-1 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded bg-transparent p-0 hover:bg-transparent"
-                >
-                  {folded ? (
-                    <ChevronRight className="size-4" aria-hidden />
-                  ) : (
-                    <ChevronDown className="size-4" aria-hidden />
-                  )}
-                </button>
-              )}
-              {group.cell(col.id)}
-            </td>
-          );
-        })}
-      </tr>,
-      ...children,
-    ];
-  };
 
   // A failure always draws something, whether or not the caller wrote the
   // sentence — it used to be folded into `empty` at every call site, which is
@@ -894,9 +674,82 @@ export function DataTable<T>({
                     ))}
                   </tr>
                 ))
-              : groups
-                ? groups.flatMap((group) => groupRows(group))
-                : (rows ?? []).map((row) => bodyRow(row, false))}
+              : rows.map((row) => {
+                  const href = rowHref?.(row);
+                  const action =
+                    rowAction && (rowActionable?.(row) ?? true) ? rowAction : undefined;
+                  const interactive = Boolean(href || action);
+                  return (
+                    <tr
+                      role="row"
+                      key={rowKey(row)}
+                      data-data-table-row
+                      className={cn(
+                        rowGrid,
+                        "group/row border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
+                        interactive && "hover:bg-muted/50 transition-colors",
+                      )}
+                    >
+                      {/* The row is a target as a whole. The cover is the row's, not
+                        the first cell's: a held cell is `sticky`, which makes it the
+                        containing block of anything absolute inside it, so a link
+                        stretched from there would cover that one cell. The real,
+                        named, focusable link is the one in the first cell; this
+                        one only catches the click and the middle-click. */}
+                      {href ? (
+                        <td role="presentation" className="absolute inset-0 block p-0">
+                          <Link
+                            to={href}
+                            state={rowState?.(row)}
+                            tabIndex={-1}
+                            aria-hidden
+                            className="block size-full"
+                          />
+                        </td>
+                      ) : action ? (
+                        <td role="presentation" className="absolute inset-0 block p-0">
+                          <button
+                            type="button"
+                            aria-label={rowLabel?.(row) ?? rowKey(row)}
+                            onClick={() => action(row)}
+                            className="focus-visible:outline-ring absolute inset-0 cursor-pointer rounded-none bg-transparent p-0 hover:bg-transparent focus-visible:outline-2 focus-visible:-outline-offset-2"
+                          />
+                        </td>
+                      ) : null}
+                      {columns.map((col, i) => {
+                        const stick = held.get(col.id);
+                        return (
+                          <td
+                            role="cell"
+                            key={col.id}
+                            data-data-table-column={col.id}
+                            data-data-table-tier={col.tier}
+                            style={stick && stickStyle(stick)}
+                            className={cn(
+                              "flex min-w-0 items-center gap-1.5",
+                              col.align === "end" && "justify-end",
+                              columnMode === "tiered" && tierClass(col, "flex"),
+                              heldClass(stick, true, interactive),
+                            )}
+                          >
+                            {i === linkColumn && href ? (
+                              <Link
+                                to={href}
+                                state={rowState?.(row)}
+                                aria-label={rowLabel?.(row)}
+                                className="flex min-w-0 items-center gap-1.5"
+                              >
+                                {col.cell(row)}
+                              </Link>
+                            ) : (
+                              col.cell(row)
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
           </tbody>
         </table>
         <ScrollBar orientation="horizontal" />

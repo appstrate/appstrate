@@ -1,25 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Preferences › My providers: the caller's own keys and subscriptions, in the table of the
+ * organization's providers narrowed to them. The Models column says what each lets them use.
+ */
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { useQueryClient } from "@tanstack/react-query";
-import { ConfirmModal } from "../../components/confirm-modal";
-import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
-import { CredentialFormModal } from "../../components/credential-form-modal";
-import { CredentialsSection } from "../../components/model-credentials-section";
-import { ErrorState } from "../../components/page-states";
-import { SettingsGroup } from "../../components/settings/setting-row";
-import { Spinner } from "../../components/spinner";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { AlertTriangle, Plus } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { ConfirmModal } from "../../components/confirm-modal";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
+import { CredentialFormModal } from "../../components/credential-form-modal";
+import { ProvidersTable } from "../../components/providers-table";
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import {
   deduplicateLabel,
   useCreateModelProviderCredential,
   useDeleteModelProviderCredential,
   useModelProviderCredentials,
+  useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
@@ -31,7 +34,9 @@ import {
   ownPersonalCredentials,
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
+import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
+import { EmptyStateAction } from "../../components/page-states";
 
 export function PreferencesModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -48,6 +53,7 @@ export function PreferencesModelsPage() {
   const canAdd = canConnect && personalModelCredentialsAllowed;
   const credentialsQuery = useModelProviderCredentials();
   const modelsQuery = useModels();
+  const { data: registry } = useProvidersRegistry();
   const createCredential = useCreateModelProviderCredential();
   const updateCredential = useUpdateModelProviderCredential();
   const deleteCredential = useDeleteModelProviderCredential();
@@ -59,9 +65,11 @@ export function PreferencesModelsPage() {
   const formOpen = newParam.value !== null || editCredential !== null;
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
 
-  const paidByCaller = (modelsQuery.data ?? []).filter((m) => m.billed_to === "user");
+  const rows = providerRows(modelsQuery.data ?? [], credentials, registry ?? [], userId).filter(
+    (row) => row.credential !== null,
+  );
 
-  // A credential's add, rename, delete or pairing changes which models the caller pays for.
+  // A credential's add, rename, delete or pairing changes which models the caller can use.
   const refreshModels = () => {
     void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
   };
@@ -129,42 +137,26 @@ export function PreferencesModelsPage() {
         )}
       </div>
 
-      <CredentialsSection
-        credentials={credentials}
-        isLoading={credentialsQuery.isLoading}
-        error={credentialsQuery.error}
-        onEdit={openEdit}
-        onDelete={(credential) => setConfirmDelete(credential)}
-        onRename={renameCredential}
-        onConnectOAuth={openEdit}
+      <ProvidersTable
+        rows={rows}
+        userId={userId}
+        hideOwner
+        isLoading={credentialsQuery.isLoading || modelsQuery.isLoading}
+        error={credentialsQuery.error ?? modelsQuery.error}
         // The add deed is in the Actions menu, which is closed: the empty list repeats it.
-        onAdd={canAdd ? openCreate : undefined}
         empty={{
           message: t("modelCredentials.empty"),
           hint: t("modelCredentials.emptyHint"),
+          action: canAdd ? (
+            <EmptyStateAction label={t("credentials.add")} onClick={openCreate} />
+          ) : undefined,
         }}
+        canWriteModels={false}
+        onRename={renameCredential}
+        onChangeKey={openEdit}
+        onReconnect={openEdit}
+        onDelete={setConfirmDelete}
       />
-
-      <SettingsGroup title={t("modelCredentials.billedTitle")}>
-        {modelsQuery.isLoading ? (
-          <Spinner />
-        ) : modelsQuery.error ? (
-          <ErrorState error={modelsQuery.error} compact />
-        ) : paidByCaller.length > 0 ? (
-          <ul className="flex flex-col gap-1.5">
-            {paidByCaller.map((m) => (
-              <li key={m.id} className="text-sm">
-                {m.label}
-                {m.provider_name && (
-                  <span className="text-muted-foreground text-xs"> · {m.provider_name}</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground text-sm">{t("modelCredentials.billedNone")}</p>
-        )}
-      </SettingsGroup>
 
       <CredentialFormModal
         open={formOpen}

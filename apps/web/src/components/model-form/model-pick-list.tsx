@@ -7,23 +7,38 @@
  */
 
 import { useTranslation } from "react-i18next";
+import { Star } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
+import { cn } from "@appstrate/ui/cn";
 import { Spinner } from "../spinner";
 import type { ModelPickRow } from "@/lib/model-source";
+
+/** What a row can offer beyond its tick, once the list is told how (the provider's models dialog). */
+interface RowExtras {
+  /** The upstream id starred as the organization's default. */
+  defaultId?: string | null;
+  onDefaultChange?: (id: string) => void;
+  /** The rows already saved, whose finer settings open in the model form. */
+  advancedIds?: ReadonlySet<string>;
+  onAdvanced?: (id: string) => void;
+}
 
 function PickRow({
   id,
   row,
   checked,
   onCheckedChange,
+  extras,
 }: {
   id: string;
   row: ModelPickRow;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+  extras: RowExtras;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const sourceLabel =
@@ -52,6 +67,40 @@ function PickRow({
           {Math.round(row.contextWindow / 1000)}k
         </span>
       )}
+      {extras.onAdvanced && extras.advancedIds?.has(row.id) && (
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto shrink-0 p-0 text-xs"
+          onClick={() => extras.onAdvanced?.(row.id)}
+        >
+          {t("models.choice.advanced")}
+        </Button>
+      )}
+      {extras.onDefaultChange && checked && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0"
+          aria-pressed={extras.defaultId === row.id}
+          aria-label={
+            extras.defaultId === row.id
+              ? t("models.choice.isDefault", { name: row.label ?? row.id })
+              : t("models.choice.setDefault", { name: row.label ?? row.id })
+          }
+          title={t("models.default")}
+          onClick={() => extras.onDefaultChange?.(row.id)}
+        >
+          <Star
+            className={cn(
+              "size-4",
+              extras.defaultId === row.id ? "fill-warning text-warning" : "text-muted-foreground",
+            )}
+          />
+        </Button>
+      )}
     </div>
   );
 }
@@ -66,7 +115,8 @@ export function ModelPickList({
   loadingText,
   emptyText,
   grouped,
-}: {
+  ...extras
+}: RowExtras & {
   rows: readonly ModelPickRow[];
   selectedIds: readonly string[];
   /** The shown rows the operator just checked or unchecked. */
@@ -101,6 +151,7 @@ export function ModelPickList({
           row={row}
           checked={selectedIds.includes(row.id)}
           onCheckedChange={(checked) => onSelectionChange([row], checked)}
+          extras={extras}
         />
       ))}
     </>

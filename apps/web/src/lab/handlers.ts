@@ -75,6 +75,21 @@ const addedCredentials: f.Json200<"/api/model-provider-credentials", "get">["dat
 const deletedCredentials = new Set<string>();
 /** Models renamed or switched on/off in this lab session. */
 const patchedModels = new Map<string, { label?: string; enabled?: boolean }>();
+/** Models created, deleted or made the default through « Choose the models ». */
+const addedModels: f.Json200<"/api/models", "get">["data"] = [];
+const deletedModels = new Set<string>();
+let defaultModelId: string | null = null;
+
+/** The organization's models as this lab session has left them. */
+function currentModels(): f.Json200<"/api/models", "get">["data"] {
+  return [...f.models.data, ...addedModels]
+    .filter((m) => !deletedModels.has(m.id))
+    .map((m) => ({
+      ...m,
+      ...patchedModels.get(m.id),
+      ...(defaultModelId !== null ? { is_default: m.id === defaultModelId } : {}),
+    }));
+}
 
 type LabCredential = f.Json200<"/api/model-provider-credentials", "get">["data"][number];
 
@@ -1023,12 +1038,65 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       status: 200,
       body: {
         ...f.models,
-        data: list(
-          f.models.data.map((m) => ({ ...m, ...patchedModels.get(m.id) })),
-          s,
-        ),
+        data: list(currentModels(), s),
       },
     }),
+  },
+  {
+    // « Choose the models » creates a row per ticked model, bound to the key or to none.
+    method: "POST",
+    pattern: /^\/api\/models$/,
+    handler: (_u, _s, _h, body) => {
+      const input = (typeof body === "object" && body !== null ? body : {}) as {
+        modelId?: string;
+        label?: string;
+        credentialId?: string | null;
+        providerId?: string;
+      };
+      const credential = [...f.modelCredentials.data, ...addedCredentials].find(
+        (pk) => pk.id === input.credentialId,
+      );
+      const providerId = credential?.providerId ?? input.providerId ?? null;
+      const service = f.providerRegistry.data.find((p) => p.providerId === providerId);
+      const offered = service?.models?.find((m) => m.id === input.modelId);
+      const created = {
+        ...f.models.data[0]!,
+        id: `mdl_lab_${addedModels.length + 1}`,
+        label: input.label ?? offered?.label ?? input.modelId ?? "Nouveau modèle",
+        modelId: input.modelId ?? null,
+        providerId,
+        provider_name: service?.displayName ?? null,
+        pi_provider: providerId,
+        credentialId: input.credentialId ?? null,
+        binding: input.credentialId ? ("org" as const) : ("member" as const),
+        billed_to: input.credentialId ? ("org" as const) : null,
+        source: "custom" as const,
+        enabled: true,
+        is_default: false,
+        needs_reconnection: false,
+        cost: offered?.cost ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      addedModels.push(created);
+      return { status: 201, body: created };
+    },
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/models\/default$/,
+    handler: (_u, _s, _h, body) => {
+      defaultModelId = (body as { modelId?: string } | undefined)?.modelId ?? null;
+      return { status: 200, body: currentModels().find((m) => m.is_default) ?? null };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/models\/[^/]+$/,
+    handler: (url) => {
+      deletedModels.add(decodeURIComponent(url.pathname.split("/")[3] ?? ""));
+      return { status: 204, body: null };
+    },
   },
   {
     method: "PATCH",
@@ -1040,7 +1108,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         enabled?: boolean;
       };
       patchedModels.set(id, { ...patchedModels.get(id), ...patch });
-      const row = f.models.data.find((m) => m.id === id);
+      const row = currentModels().find((m) => m.id === id);
       return { status: 200, body: { ...row, ...patchedModels.get(id) } };
     },
   },

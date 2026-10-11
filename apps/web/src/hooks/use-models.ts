@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -37,15 +37,7 @@ function useInvalidateModels() {
   };
 }
 
-/** A saved OAuth model test may rotate or terminally flag its backing credential. */
-export async function invalidateModelConnectionTestQueries(qc: QueryClient): Promise<void> {
-  await Promise.all([
-    qc.invalidateQueries({ queryKey: ["get", "/api/models"] }),
-    qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] }),
-  ]);
-}
-
-function useCreateModel() {
+export function useCreateModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("post", "/api/models", {
     meta: { errorHandledByCaller: true },
@@ -61,12 +53,6 @@ function useUpdateModel() {
   });
 }
 
-/** A row's own quick edit (rename, switch on or off): a refusal is toasted by the mutation cache. */
-export function usePatchModel() {
-  const invalidate = useInvalidateModels();
-  return $api.useMutation("patch", "/api/models/{id}", { onSuccess: invalidate });
-}
-
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
@@ -75,14 +61,6 @@ export function useDeleteModel() {
 export function useSetDefaultModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("put", "/api/models/default", { onSuccess: invalidate });
-}
-
-export function useTestModel() {
-  const qc = useQueryClient();
-  return $api.useMutation("post", "/api/models/{id}/test", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: () => invalidateModelConnectionTestQueries(qc),
-  });
 }
 
 export interface OpenRouterModel {

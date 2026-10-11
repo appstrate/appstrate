@@ -40,7 +40,7 @@ export function pickedProviderId<T extends { providerId: string; baseUrlOverrida
 }
 
 /** Match on `apiShape` and `baseUrl` prefix; trailing slashes are ignored. */
-export function findProviderByApiShapeAndBaseUrl(
+function findProviderByApiShapeAndBaseUrl(
   apiShape: string | null,
   baseUrl: string | null | undefined,
   registry: readonly ProviderRegistryEntry[],

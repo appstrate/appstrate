@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQueryClient, type MutationMeta } from "@tanstack/react-query";
+import { useQueryClient, type MutationMeta, type QueryClient } from "@tanstack/react-query";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { $api, type components, type paths } from "../api/client";
 import { useOrgOnlyScope } from "./use-org-scope";
@@ -115,9 +115,19 @@ export function useDeleteModelProviderCredential() {
   });
 }
 
+/** A test of a subscription may rotate or terminally flag it: the credentials and the models they serve are re-read. */
+export async function invalidateCredentialTestQueries(qc: QueryClient): Promise<void> {
+  await Promise.all([
+    qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] }),
+    qc.invalidateQueries({ queryKey: ["get", "/api/models"] }),
+  ]);
+}
+
 export function useTestModelProviderCredential() {
+  const qc = useQueryClient();
   return $api.useMutation("post", "/api/model-provider-credentials/{id}/test", {
     meta: { errorHandledByCaller: true },
+    onSuccess: () => invalidateCredentialTestQueries(qc),
   });
 }
 

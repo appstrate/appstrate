@@ -34,6 +34,8 @@ const orgModelOptionSchema = z.object({
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
   billed_to: z.enum(MODEL_PAYERS).nullable().optional(),
+  binding: z.enum(["org", "member", "managed"]).optional(),
+  credentialId: z.string().nullable().optional(),
 });
 
 export interface OrgModelOption {
@@ -52,6 +54,9 @@ export interface OrgModelOption {
   provider_name?: string | null;
   /** Who pays for the caller: their own credential, the org's, or `null` (they must add one). */
   billed_to?: ModelPayer | null;
+  /** How the model is served: one organization credential, each member's own, or a hidden alias. */
+  binding?: "org" | "member" | "managed";
+  credentialId?: string | null;
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;

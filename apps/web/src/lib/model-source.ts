@@ -11,7 +11,7 @@ import type {
   DiscoveredModel,
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import type { OpenRouterModel } from "../hooks/use-models";
+import type { OpenRouterModel, OrgModelInfo } from "../hooks/use-models";
 import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 
 export type ModelSource = "catalog" | "discover" | "search";
@@ -126,6 +126,22 @@ export function searchRows(models: readonly OpenRouterModel[]): ModelPickRow[] {
       origin: "search",
     }),
   );
+}
+
+/**
+ * A model the organization already has, as a row of the pick list: ticked, so that the list
+ * can untick it, even when the provider's listing no longer offers it. It is never sent again.
+ */
+export function existingRow(m: OrgModelInfo): ModelPickRow {
+  return pickRow({
+    id: m.modelId ?? m.id,
+    label: m.label,
+    contextWindow: m.contextWindow ?? null,
+    maxTokens: m.maxTokens ?? null,
+    input: m.input ?? null,
+    reasoning: m.reasoning ?? null,
+    origin: "catalog",
+  });
 }
 
 /** Client-side search over a list. A remote search filters itself. */

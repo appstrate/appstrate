@@ -37,11 +37,7 @@ import {
 } from "../catalogue-columns.tsx";
 import { useUserSpaceColumns } from "../../pages/org-settings/user-space-columns.tsx";
 import { useSpaceColumns } from "../../pages/org-settings/space-columns.tsx";
-import {
-  useCredentialColumns,
-  useMemberProviderColumns,
-  useModelColumns,
-} from "../../pages/org-settings/model-columns.tsx";
+import { useProviderColumns } from "../../pages/org-settings/provider-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
@@ -179,49 +175,43 @@ const SETS = {
   runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
   schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
   packages: () => columnsFrom(() => usePackageColumns()),
-  models: () =>
+  // The organization's providers table, the wider of the two.
+  providers: () =>
     columnsFrom(() =>
-      useModelColumns({
+      useProviderColumns({
         registry: undefined,
+        userId: "user_1",
         testingIds: new Set(),
         testResults: {},
-        settingDefaultId: null,
-        togglingId: null,
         renamingId: null,
         onRenamingChange: () => {},
         onTest: () => {},
-        onEdit: () => {},
+        onRename: async () => {},
+        onChooseModels: () => {},
+        onChangeKey: () => {},
+        onReconnect: () => {},
         onDelete: () => {},
         onSetDefault: () => {},
-        onRename: async () => {},
-        onToggleEnabled: () => {},
-        canWrite: true,
-        canDelete: true,
+        canWriteModels: true,
       }),
     ),
-  credentials: () =>
+  // Preferences: the caller's own providers, no owner column.
+  myProviders: () =>
     columnsFrom(() =>
-      useCredentialColumns({
+      useProviderColumns({
         registry: undefined,
+        userId: "user_1",
         testingIds: new Set(),
         testResults: {},
         renamingId: null,
         onRenamingChange: () => {},
         onTest: () => {},
-        onEdit: () => {},
-        onDelete: () => {},
         onRename: async () => {},
-        onConnectOAuth: () => {},
-      }),
-    ),
-  memberProviders: () =>
-    columnsFrom(() =>
-      useMemberProviderColumns({
-        registry: undefined,
-        testingIds: new Set(),
-        testResults: {},
-        onTest: () => {},
-        userId: "user_1",
+        onChangeKey: () => {},
+        onReconnect: () => {},
+        onDelete: () => {},
+        canWriteModels: false,
+        hideOwner: true,
       }),
     ),
   proxies: () =>

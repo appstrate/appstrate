@@ -72,11 +72,11 @@ describe("unpriced badge wiring", () => {
   it("the model column set decides through isModelUnpriced, not a restated condition", () => {
     // The badge moved with the column set when the page went onto `DataTable`;
     // the rule it must not restate moved with it.
-    const source = read("../model-columns.tsx");
-    expect(source).toContain("isModelUnpriced(m)");
+    const source = read("../../../components/provider-models-cell.tsx");
+    expect(source).toContain("isModelUnpriced(model)");
     // A second copy of the rule in the JSX is exactly the drift this split
     // was made to prevent — the exclusions would only be pinned on one of them.
-    expect(source).not.toContain("m.cost == null");
+    expect(source).not.toContain("model.cost == null");
   });
 
   it("both locales define the badge keys the page renders", () => {

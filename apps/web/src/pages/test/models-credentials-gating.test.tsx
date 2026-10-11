@@ -84,18 +84,18 @@ describe("the models page for a member who can only read models", () => {
     expect(credentialFlags.filter((enabled) => enabled !== false)).toEqual([]);
   });
 
-  it("renders the one models table, with no section on the members' providers", () => {
+  it("renders the one providers table, with no personal-keys setting to change", () => {
     const { html } = renderFor(MEMBER);
-    expect(html).toContain("Modèles");
-    expect(html).not.toContain(settingsFr["models.members.title"]);
+    expect(html).toContain(`aria-label="${settingsFr["providers.tableLabel"]}"`);
+    expect(html).not.toContain(settingsFr["providers.personalTitle"]);
   });
 });
 
 describe("the models page for an admin who holds the credentials permission", () => {
-  it("offers the section on the members' providers, closed", () => {
+  it("offers the setting that opens the models to personal keys", () => {
     const { html } = renderFor(ADMIN);
-    expect(html).toContain(settingsFr["models.members.title"]);
-    expect(html).not.toContain(settingsFr["models.members.description"]);
+    expect(html).toContain(settingsFr["providers.personalTitle"]);
+    expect(html).toContain(settingsFr["orgSettings.personalModelCredentialsTitle"]);
   });
 
   it("CONTROL: registers the credentials list enabled, so the gate is the permission", () => {

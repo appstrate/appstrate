@@ -61,6 +61,7 @@ function hostWith(granted: string[]): ChatHost {
     t: (key) => key,
     can: (permission) => granted.includes(permission),
     personalModelCredentials: true,
+    modelCredentials: [],
     formatBytes: String,
   };
 }

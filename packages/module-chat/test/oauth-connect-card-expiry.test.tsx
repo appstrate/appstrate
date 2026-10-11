@@ -39,6 +39,7 @@ const host: ChatHost = {
   t: (key) => key,
   can: () => false,
   personalModelCredentials: true,
+  modelCredentials: [],
   formatBytes: String,
 };
 

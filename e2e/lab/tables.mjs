@@ -30,7 +30,7 @@ const MAIN_COLLECTIONS = [
 const SETTINGS_TABLES = [
   { path: "/org-settings/members", pageActions: ["invite"] },
   { path: "/org-settings/applications", pageActions: ["create"] },
-  { path: "/org-settings/models", pageActions: ["create-model"] },
+  { path: "/org-settings/models", pageActions: ["create-credential"] },
   { path: "/org-settings/proxies", pageActions: ["create"] },
   { path: "/org-settings/oauth", pageActions: ["create"] },
   { path: "/org-settings/cli-sessions", pageActions: [] },
@@ -190,16 +190,6 @@ for (const width of WIDTHS) {
   });
 
   await withPage(width, async (page) => {
-    const modelsPath = "/org-settings/models#credentials";
-    await open(page, "/org-settings/models", '[data-settings-content-key] table[role="table"]');
-    await page.getByTestId("models-credentials-tab").click();
-    const credentialsTable = page
-      .locator('[data-settings-content-key] table[role="table"]:visible')
-      .first();
-    await credentialsTable.waitFor({ state: "visible" });
-    assertTableSurface(await frameStyle(credentialsTable), modelsPath, width, "integrated");
-    await assertPageActions(page, modelsPath, width, ["create-credential"]);
-
     const detailPath = "/integrations/@appstrate/google-drive#connections";
     const connectionsTable = await open(page, detailPath, 'main table[role="table"]:visible');
     assertTableSurface(await frameStyle(connectionsTable), detailPath, width, "integrated");

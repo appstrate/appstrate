@@ -170,6 +170,8 @@ export interface ChatPageProps {
   can: ChatCan;
   /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
   personalModelCredentials: boolean | undefined;
+  /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
+  modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
 }
@@ -188,6 +190,7 @@ export function ChatPage({
   t,
   can,
   personalModelCredentials,
+  modelCredentials,
   formatBytes,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
@@ -282,9 +285,19 @@ export function ChatPage({
       t,
       can,
       personalModelCredentials,
+      modelCredentials,
       formatBytes,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t, can, personalModelCredentials, formatBytes],
+    [
+      onOpenFile,
+      downloadFile,
+      useFileImageSrc,
+      t,
+      can,
+      personalModelCredentials,
+      modelCredentials,
+      formatBytes,
+    ],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader

@@ -109,4 +109,22 @@ describe("a table row has one way to act", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  it("renames a name only from the menu: driven, never opened by a click on the name", () => {
+    const offenders: string[] = [];
+    for (const { path, text } of files) {
+      for (const m of text.matchAll(/<InlineEditableLabel\b/g)) {
+        const props = propNames(text, m.index + m[0].length);
+        for (const required of ["editing", "onEditingChange"]) {
+          if (!props.includes(required))
+            offenders.push(`${path}: <InlineEditableLabel> without ${required}`);
+        }
+      }
+      // Every file that draws a renamable name also draws the « Rename » entry that opens it.
+      if (text.includes("<InlineEditableLabel") && !text.includes("btn.rename")) {
+        offenders.push(`${path}: a renamable name without a « Rename » entry (btn.rename)`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });

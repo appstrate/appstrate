@@ -304,7 +304,7 @@ function describedCapabilities(
  * Search includes the billing rate; catalog rows resolve at read time.
  * Discovery pins only endpoint capabilities, never catalog display hints.
  */
-function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
+export function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
   if (row.origin === "search") {
     return {
       ...(row.label ? { label: row.label } : {}),

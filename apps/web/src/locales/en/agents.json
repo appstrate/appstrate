@@ -878,7 +878,6 @@
   "error.lockedRequiredFieldEmpty": "Parameter “{{field}}” is required: give it a value before locking it, or unlock it so it is asked at launch.",
   "run.overrides.modelInherit": "Inherit (no default)",
   "run.overrides.modelInheritWithDefault": "Inherit ({{name}})",
-  "run.overrides.modelGone": "Deleted model — pick another one or “Inherit”",
   "run.overrides.proxyInherit": "Inherit (no default)",
   "run.overrides.proxyInheritWithDefault": "Inherit ({{name}})",
   "run.overrides.proxyGone": "Deleted proxy — pick another one or “Inherit”",

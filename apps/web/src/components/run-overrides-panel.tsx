@@ -11,12 +11,9 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { useModels } from "../hooks/use-models";
-import { isMemberPaid, isModelSelectable } from "../lib/model-selectability";
-import { ModelUnselectableNote } from "./model-availability-badge";
-import { ModelBillingHint } from "./model-billing-hint";
+import { isModelSelectable } from "../lib/model-selectability";
+import { ModelSelect } from "./model-select";
 import { useProxies } from "../hooks/use-proxies";
-import { useProvidersRegistry } from "../hooks/use-model-provider-credentials";
-import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
@@ -140,7 +137,6 @@ export function RunOverridesPanel({
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgModels } = useModels();
   const { data: orgProxies } = useProxies();
-  const { data: registry } = useProvidersRegistry();
 
   // The inherited row stays visible even when the default is unavailable, so
   // users can still clear an override and see which model will be resolved.
@@ -160,10 +156,6 @@ export function RunOverridesPanel({
     (proxy) => proxy.enabled,
   );
   // A schedule keeps an override whose entry was deleted: show it, not a blank select.
-  const goneModelOverride =
-    value.model_id_override && !orgModels?.some((m) => m.id === value.model_id_override)
-      ? value.model_id_override
-      : null;
   const goneProxyOverride =
     value.proxy_id_override &&
     value.proxy_id_override !== NONE &&
@@ -171,9 +163,9 @@ export function RunOverridesPanel({
       ? value.proxy_id_override
       : null;
 
-  const setModel = (next: string) => {
+  const setModel = (next: string | null) => {
     const nextModel =
-      next === INHERIT ? inheritedModel : orgModels?.find((model) => model.id === next);
+      next === null ? inheritedModel : orgModels?.find((model) => model.id === next);
     const generation = reconcileModelGenerationSettings(
       value.generation_config_override ?? {},
       nextModel?.generation,
@@ -186,7 +178,7 @@ export function RunOverridesPanel({
       nextValue.generation_config_override = generation;
     }
 
-    if (next === INHERIT || next === persistedModelId) {
+    if (next === null || next === persistedModelId) {
       delete nextValue.model_id_override;
     } else {
       nextValue.model_id_override = next;
@@ -214,7 +206,6 @@ export function RunOverridesPanel({
     }
   };
 
-  const modelSelectValue = value.model_id_override ?? INHERIT;
   const selectedModel =
     orgModels?.find((model) => model.id === value.model_id_override) ?? inheritedModel;
   const proxySelectValue = value.proxy_id_override ?? INHERIT;
@@ -231,57 +222,23 @@ export function RunOverridesPanel({
           }
           description={t("schedule.settings.modelHint", { ns: "agents" })}
         >
-          <Select value={modelSelectValue} onValueChange={setModel}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {/* "Inherit" stays selectable even when the default is dead: it
-                  is the absence of an override, so disabling it would trap a
-                  user who wants to clear one. */}
-              <SelectItem value={INHERIT}>
-                <span className="inline-flex items-center gap-1.5">
-                  {inheritedModel
-                    ? t("run.overrides.modelInheritWithDefault", {
-                        ns: "agents",
-                        name: inheritedModel.label,
-                      })
-                    : t("run.overrides.modelInherit", { ns: "agents" })}
-                  {inheritedModel && <ModelUnselectableNote model={inheritedModel} />}
-                </span>
-              </SelectItem>
-              {goneModelOverride && (
-                <SelectItem value={goneModelOverride} disabled>
-                  {t("run.overrides.modelGone", { ns: "agents" })}
-                </SelectItem>
-              )}
-              {orgModels.map((m) => {
-                const MIcon = getModelIcon(m, registry ?? []);
-                return (
-                  <SelectItem
-                    key={m.id}
-                    value={m.id}
-                    disabled={!isModelSelectable(m) || (scheduled && isMemberPaid(m))}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      {MIcon && <MIcon className="size-3.5" />}
-                      {m.label}
-                      {scheduled ? (
-                        isMemberPaid(m) && (
-                          <span className="text-muted-foreground text-xs">
-                            {t("models.billing.notSchedulable", { ns: "settings" })}
-                          </span>
-                        )
-                      ) : (
-                        <ModelBillingHint billedTo={m.billed_to} />
-                      )}
-                      <ModelUnselectableNote model={m} />
-                    </span>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
+          <ModelSelect
+            models={orgModels}
+            value={value.model_id_override ?? null}
+            onChange={setModel}
+            scheduled={scheduled}
+            // "Inherit" stays selectable even when the default is dead: it is the absence of an
+            // override, so disabling it would trap a user who wants to clear one.
+            inherit={{
+              label: inheritedModel
+                ? t("run.overrides.modelInheritWithDefault", {
+                    ns: "agents",
+                    name: inheritedModel.label,
+                  })
+                : t("run.overrides.modelInherit", { ns: "agents" }),
+              modelId: inheritedModel?.id ?? null,
+            }}
+          />
         </OverrideRow>
       )}
 

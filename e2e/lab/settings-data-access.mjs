@@ -25,10 +25,6 @@ const SETTINGS_TABLES = [
   { path: "/workspace-settings/end-users" },
   { path: "/workspace-settings/webhooks" },
   { path: "/workspace-settings/api-keys" },
-  {
-    path: "/org-settings/models#credentials",
-    prepare: async (page) => page.getByTestId("models-credentials-tab").click(),
-  },
 ];
 
 function assertCondition(condition, message) {

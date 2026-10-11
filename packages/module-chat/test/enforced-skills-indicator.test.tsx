@@ -22,6 +22,7 @@ const host: ChatHost = {
   t: (key, options) => (options ? `${key} ${JSON.stringify(options)}` : key),
   can: () => true,
   personalModelCredentials: true,
+  modelCredentials: [],
   formatBytes: String,
 };
 

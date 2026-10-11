@@ -68,7 +68,7 @@ import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
  * Canonical payload shape submitted to `POST /api/model-provider-credentials`.
  * `baseUrlOverride` is only meaningful for a base-URL-overridable entry.
  */
-interface CredentialFormData {
+export interface CredentialFormData {
   label: string;
   providerId: string;
   apiKey?: string;
@@ -88,6 +88,10 @@ interface CredentialFormModalProps {
    * picker leaves it out and says where to connect it.
    */
   apiKeyOnly?: boolean;
+  /** The key being added comes back here from the next step with what was typed. */
+  initial?: CredentialFormData;
+  /** Replaces « Save » when the form is a step, not the whole act. */
+  submitLabel?: string;
 }
 
 interface CredentialFormFields {
@@ -130,6 +134,8 @@ function CredentialFormBody({
   onClose,
   personal,
   apiKeyOnly,
+  initial,
+  submitLabel,
 }: {
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
@@ -137,6 +143,8 @@ function CredentialFormBody({
   onClose: () => void;
   personal: boolean;
   apiKeyOnly: boolean;
+  initial?: CredentialFormData;
+  submitLabel?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
@@ -150,6 +158,7 @@ function CredentialFormBody({
   );
 
   const [selectedId, setSelectedId] = useState<string>(() => {
+    if (initial) return initial.providerId;
     if (credential?.providerId) {
       return credential.authMode === "oauth2"
         ? `oauth:${credential.providerId}`
@@ -179,9 +188,9 @@ function CredentialFormBody({
     formState: { errors },
   } = useAppForm<CredentialFormFields>({
     defaultValues: {
-      label: credential?.label ?? "",
-      apiKey: "",
-      baseUrlOverride: credential?.base_url ?? "",
+      label: credential?.label ?? initial?.label ?? "",
+      apiKey: initial?.apiKey ?? "",
+      baseUrlOverride: credential?.base_url ?? initial?.baseUrlOverride ?? "",
     },
   });
 
@@ -378,7 +387,7 @@ function CredentialFormBody({
             {t("btn.cancel")}
           </Button>
           <Button type="submit" form="pk-form" disabled={isPending || !selectedProvider}>
-            {isPending ? <Spinner /> : t("btn.save")}
+            {isPending ? <Spinner /> : (submitLabel ?? t("btn.save"))}
           </Button>
         </>
       }
@@ -497,6 +506,8 @@ export function CredentialFormModal({
   onSubmit,
   personal = false,
   apiKeyOnly = false,
+  initial,
+  submitLabel,
 }: CredentialFormModalProps) {
   if (!open) return null;
   // Re-mount on every (re)open so internal state (selected provider,
@@ -511,6 +522,8 @@ export function CredentialFormModal({
       onClose={onClose}
       personal={personal}
       apiKeyOnly={apiKeyOnly}
+      initial={initial}
+      submitLabel={submitLabel}
     />
   );
 }

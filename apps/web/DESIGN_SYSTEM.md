@@ -134,10 +134,13 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   select, switch or toggle on change; a text on blur or Enter, Escape reverts
   (`InlineTextSetting`, `components/settings/inline-text-setting.tsx`); typing or
   a slider after a 650 ms pause. A rename in a table is `InlineEditableLabel`
-  (`components/inline-editable-label.tsx`), the one rename affordance: it shows a
-  pencil on hover, and the row's « Edit » (in its « … » menu) never renames, it
-  edits what the name does not (a provider's key), in a modal with no name field;
-  « Rename » is its own menu entry that starts this inline edit.
+  (`components/inline-editable-label.tsx`), the one rename affordance, and it is
+  **opened by the row's menu only**: a click on the name does nothing and no pencil
+  appears on hover (both were noise next to the « … »). The row's « Edit » never
+  renames, it edits what the name does not (a provider's key), in a modal with no
+  name field; « Rename » is its own menu entry that puts the name in edit. A name
+  outside a table (a page title) is renamed in its own settings, as a text
+  setting (`InlineTextSetting`, « Général »), never in the header.
 - **Several values valid only together** are assembled in a modal that commits
   once (model, proxy, OAuth client, webhook). **A list of independently valid
   values** commits each entry on its own.
@@ -204,20 +207,37 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 
 ## 5. Choosing a value
 
-| Need                                                                 | Component                                                                                                                                                                                                          |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A handful of options                                                 | `Select`                                                                                                                                                                                                           |
-| Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                                                                                    |
-| Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                             |
-| On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                 |
-| Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                 |
-| Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                             |
-| A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's |
-| A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                            |
-| A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                     |
-| A secret shown once                                                  | `RevealedSecret` / `SecretRevealModal`                                                                                                                                                                             |
+| Need                                                                 | Component                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A handful of options                                                 | `Select`                                                                                                                                                                                                                                                                                                                                                                                    |
+| Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                                                                                                                                                                                                                                                             |
+| Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                                                                                                                                                                                                      |
+| On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                                                                                                                                                                                          |
+| Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
+| A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
+| Which connections of one integration                                 | `ConnectionChoiceMenu` / `ConnectionSetPicker` (`integration-connect/connection-choice-menu.tsx`): the one component, section 4 lists where it serves. Never a bare list of checkboxes                                                                                                                                                                                                      |
+| A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's                                                                                                                                                                          |
+| A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                                                                                                                                                                                                     |
+| A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                                                                                                                                                                                              |
+| A secret shown once                                                  | `RevealedSecret` / `SecretRevealModal`                                                                                                                                                                                                                                                                                                                                                      |
 
 A `Select` never holds hundreds of entries.
+
+**The model picker** shows only what the PERSON can use, grouped by who pays, in this
+order: « <credential> · Clé org » (the organization's credentials, named after the credential
+or, for someone who cannot read it, its provider), « <credential> · Clé perso » or
+« … · Abonnement perso » (the models their own credential serves), « Système » (the instance's
+own models). The first row is « Hériter (<model>) » where the usage has an inheritance. The default
+model wears a `Par défaut` badge; a search field appears from eight models. A model the person
+cannot use stays in the list, greyed, with its reason underneath (« Clé org indisponible »,
+« Désactivé », « Clé perso requise », « Clé perso à reconnecter », « Clés perso désactivées par
+l'organisation »), and when the fix is theirs, one link under its group (« Ajouter votre clé
+Anthropic → », to Préférences › Mes fournisseurs). In a schedule every model a personal key or
+subscription serves is greyed with « Une planification ne peut pas encore utiliser une clé perso »
+(the server refuses it: `model_scheduled`). The groups come from what `GET /api/models` already
+says for the caller (`binding`, `billed_to`, `credentialId`, `needs_reconnection`) plus their own
+credentials (`lib/model-picker.ts`); a new surface that picks a model uses this component, with
+its fixtures.
 
 ## 6. Forms
 
@@ -293,17 +313,37 @@ A `Select` never holds hundreds of entries.
   (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
   truncated with a tooltip. Déclencheur names who or what launched it, and a dash
   when nothing is recorded: no column is left blank.
-- **A table with groups** (`groups` instead of `rows` on `DataTable`: Settings › Models, a
-  provider and its models): a group is a parent row with its own cells (`group.cell(columnId)`:
-  a name, a status, a « … »), a fold button before its first read cell (`aria-expanded`, named
-  « Replier / Déplier <group> »), and its rows indented under it, drawn with the table's columns.
-  A group with no rows shows `emptyRow` (the next step, e.g. « Ajouter un modèle »); a group
-  whose own row is only a name and a sentence is `wide` (its first cell spans the others). A
-  click on the group's row folds it, or goes where `onSelect` says (the group's own « Modifier »).
-  The fold is the reader's, kept per person and per table (its `label`) in `localStorage`
-  (`stores/collapsed-groups-store.ts`, absent storage costs only the fold). Columns, tiers,
-  held columns and resizing work as in a flat table; the table is empty only with no group.
-  Build the groups in a pure function under `lib/` (`lib/model-groups.ts`), not in the cell code.
+- **The providers table** (`components/providers-table.tsx`, columns in
+  `pages/org-settings/provider-columns.tsx`, rows from `lib/model-providers.ts`: Settings › Models
+  and Preferences › Mes fournisseurs). The rule that reads the whole page: **a connected provider
+  makes its models available.** One flat table, no tab, no fold: a row is a provider, never a model.
+  Vocabulary, everywhere: **Clé org**, **Clé perso**, **Abonnement perso**, **Système** (the
+  instance); « Appartient à » says Organisation, a person (« Olivier Tarbès (vous) ») or Instance.
+  Columns: Fournisseur (name; a badge only when something is wrong, `Indisponible`), Type, Service,
+  Appartient à, Modèles (the models this provider makes usable, a short list, `Par défaut` on the
+  default, « Aucun » otherwise), « … ». An organization key serves the models bound to it
+  (`credentialId`); a personal key or subscription serves the models left to personal keys
+  (`binding: "member"`) that its holder can use with it; the instance row serves the built-in
+  models. A key the caller cannot read stays a row, named by its service, with no menu. Filters
+  (Type, Service, Appartient à) are a `ListToolbar` over the URL (`useListParams`). Preferences
+  shows the same table narrowed to the caller's own providers, without the owner column. The
+  menu: an organization key, Renommer, Choisir les modèles, Changer la clé, Tester, Supprimer; the
+  holder's own, Renommer, Changer la clé (or Reconnecter), Tester, Supprimer; another person's, Tester;
+  the instance, Choisir le modèle par défaut. A click on an organization key's row chooses its models.
+  - **Choose the models** (`?models=<credentialId>`, `components/model-choice-dialog.tsx`,
+    state in `hooks/use-model-choice-state.ts`, the plan in `lib/model-choice.ts`): the checklist of
+    the service's models, the ones already created ticked, a star on the default. « Enregistrer »
+    creates the ticked models bound to the key, deletes the unticked (the footer says how many),
+    sets the default. A saved model's finer settings (name, capabilities, prices) are the
+    « Réglages avancés » link on its line: the model form, `?editModel=<id>`, which replaces the
+    list. « Add a provider » is the same list as its second step (service and key first, every model
+    ticked, nothing written until the last button, « Retour » keeps what was typed). The personal
+    keys' models are the same list per service (`?personalModels=<providerId>`, no star).
+  - **Below the table, the personal setting**: the organization's `personal_model_credentials`
+    switch (`components/settings/personal-credentials-setting.tsx`, the same write as in General),
+    the summary row « Modèles utilisables avec une clé perso » (« Anthropic : Claude Fable 5.1 ·
+    Mistral : aucun ») with its « Modifier », then the link to Mes fournisseurs. Switched off, the
+    summary row is not shown.
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
@@ -315,10 +355,11 @@ A `Select` never holds hundreds of entries.
   did: its detail through `rowHref` (a row link is never replaced), else its
   edit modal through `rowAction` (`rowActionable` leaves the rows it does not
   apply to static: a built-in proxy, a space you are not a member of). **Rename**
-  of a name that is an `InlineEditableLabel` is a menu entry too (`btn.rename`):
-  it puts the name in edit, focused and selected (`editing` / `onEditingChange`,
-  and `renaming` on `TableRowActions` so the menu does not take focus back); a
-  click on the name stays a shortcut. A row with nothing to offer has no menu
+  of a name that is an `InlineEditableLabel` is a menu entry (`btn.rename`) and the
+  only way in: it puts the name in edit, focused and selected (`editing` /
+  `onEditingChange`, both required, and `renaming` on `TableRowActions` so the menu
+  does not take focus back). A click on the name does nothing, no pencil shows on
+  hover, and every renamable name has its « Rename » entry in the same row's menu. A row with nothing to offer has no menu
   (no `menuLabel`), and a row whose only deed is the click (an integration that
   opens its page) has none either: no empty menu for one deed. A control that
   IS the setting (role select, switch, tick, share editor, default) stays in its
@@ -394,7 +435,7 @@ A `Select` never holds hundreds of entries.
   value names what is open (a card's stable key, `<integrationId>:<tool>`), and
   never a position.
   - **Naming**: the param is named by the act and the object, in camelCase.
-    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows. A
+    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows, `?models=<credentialId>` chooses the models of a provider. A
     value is `1` when there is no object, the object's id otherwise (a composite
     value when a page holds several of them: `?editOauthClient=<authKey>:<ref>`).
     A param read by several components of one page must differ per component.
@@ -556,7 +597,7 @@ on assistant-ui) inside the shared shell (`modules/chat/chat-shell.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a
-`ChatRunProgressCard`, the model picker `model-select.tsx`. The thread sits on the
+`ChatRunProgressCard`, the model picker `model-select.tsx`, whose list is the shared `ModelPickerList` (section 5). The thread sits on the
 canvas, surfaces on it are white cards, and heights hold across states (no jump).
 
 ## 14. Modules and feature gating

@@ -9,7 +9,7 @@
 // (`chat-shell.tsx`, the only other importer of the module's UI — it mounts the
 // two pieces that belong to the shell rather than to the thread).
 
-import { useCallback, useEffect, useLayoutEffect, useReducer } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
@@ -32,6 +32,11 @@ import { ChatAccessChip } from "./chat-access-chip";
 import { readChatComposerDraft } from "../../lib/creation-handoff";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useOrgSettings } from "../../hooks/use-org-settings";
+import {
+  useModelProviderCredentials,
+  useProvidersRegistry,
+} from "../../hooks/use-model-provider-credentials";
+import { pickerCredentials } from "../../lib/model-picker";
 
 // One element for the page's lifetime: it sits in the composer slot, which the
 // chat memoizes, and the chip keeps itself current through its own hooks.
@@ -80,6 +85,13 @@ export function ChatModulePage() {
   // Absent means allowed (the setting is opt-out): the chat only drops its
   // "add my credential" link once the organization has turned them off.
   const { data: orgSettings } = useOrgSettings();
+  // The credentials that name the model picker's groups, as in the dashboard's pickers.
+  const { data: credentials } = useModelProviderCredentials();
+  const { data: registry } = useProvidersRegistry();
+  const modelCredentials = useMemo(
+    () => pickerCredentials(credentials ?? [], registry ?? [], userId ?? undefined),
+    [credentials, registry, userId],
+  );
   // Persona and space are threaded through so this callback's identity moves
   // with either: the module's streams read their URL once, and would otherwise
   // keep tailing under the replaced authority or miss a space resolved late.
@@ -154,6 +166,7 @@ export function ChatModulePage() {
             t={translate}
             can={can}
             personalModelCredentials={orgSettings?.personal_model_credentials}
+            modelCredentials={modelCredentials}
             formatBytes={formatBytes}
           />
         </div>

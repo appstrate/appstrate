@@ -106,6 +106,9 @@ function renderFor(permissions: string[], settingsLoaded = true): string {
     ["get", "/api/model-provider-credentials", { params: { header: { "X-Org-Id": ORG_ID } } }],
     { data: [ORG_KEY, MY_KEY, MY_SUBSCRIPTION, ALICE_KEY] },
   );
+  queryClient.setQueryData(["get", "/api/models", { params: { header: { "X-Org-Id": ORG_ID } } }], {
+    data: [],
+  });
   if (settingsLoaded) {
     queryClient.setQueryData(
       ["get", "/api/orgs/{orgId}/settings", { params: { path: { orgId: ORG_ID } } }],
@@ -136,7 +139,7 @@ function rowOf(html: string, text: string): string {
   return html.slice(html.lastIndexOf("<tr", at), next === -1 ? undefined : next);
 }
 
-/** What a cell shows when its label can be renamed in place. */
+/** What a name shows when a click on it would rename it: it never does, the menu renames. */
 const RENAMABLE = "cursor-pointer";
 
 describe("the Preferences models page, for a member who holds connect", () => {
@@ -151,17 +154,17 @@ describe("the Preferences models page, for a member who holds connect", () => {
   });
 
   it("drops the owner column, since every row is the caller's own", () => {
-    expect(html).not.toContain(settingsFr["credentials.col.owner"]);
+    expect(html).not.toContain(settingsFr["providers.col.owner"]);
   });
 
   const menu = (credential: ModelProviderCredentialInfo) =>
-    `aria-label="${settingsFr["credentials.moreActions"].replace("{{name}}", credential.label)}"`;
+    `aria-label="${settingsFr["providers.moreActions"].replace("{{name}}", credential.label)}"`;
 
-  it("lets the caller rename an own key and an own subscription, from the name or the menu", () => {
-    expect(row(MY_KEY)).toContain(RENAMABLE);
+  it("lets the caller rename an own key and an own subscription, from the menu only", () => {
     expect(row(MY_KEY)).toContain(menu(MY_KEY));
-    expect(row(MY_SUBSCRIPTION)).toContain(RENAMABLE);
+    expect(row(MY_KEY)).not.toContain(RENAMABLE);
     expect(row(MY_SUBSCRIPTION)).toContain(menu(MY_SUBSCRIPTION));
+    expect(row(MY_SUBSCRIPTION)).not.toContain(RENAMABLE);
   });
 
   it("keeps every deed in the menu: no pencil on the row", () => {

@@ -166,6 +166,13 @@ describe("a pre-selection is always a live model", () => {
     expect(getSelectedModel()).toBe("default-model");
   });
 
+  it("never pre-selects a model nothing pays for, the caller having no key of their own", () => {
+    setModelCatalog([...catalog, { id: "unpaid-model", billed_to: null }]);
+    attachConversation("chs_a", "unpaid-model");
+
+    expect(getSelectedModel()).toBe("default-model");
+  });
+
   it("drops a pre-selection the next catalog no longer serves live", () => {
     setModelCatalog([...catalog, { id: "model-a" }]);
     attachConversation("chs_a", "model-a");

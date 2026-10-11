@@ -37,6 +37,8 @@
     "./components/sidebar-context": "./src/components/sidebar-context.ts",
     "./components/ui-labels": "./src/components/ui-labels.ts",
     "./components/model-generation-labels": "./src/components/model-generation-labels.ts",
+    "./components/model-picker-groups": "./src/components/model-picker-groups.ts",
+    "./components/model-picker-labels": "./src/components/model-picker-labels.ts",
     "./components/*": "./src/components/*.tsx",
     "./cn": "./src/cn.ts",
     "./use-mobile": "./src/use-mobile.ts"

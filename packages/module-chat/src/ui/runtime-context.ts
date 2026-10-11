@@ -29,6 +29,7 @@
  */
 
 import { createContext, useContext } from "react";
+import type { PickerCredential } from "@appstrate/ui/components/model-picker-groups";
 
 export type GetHeaders = () => Record<string, string>;
 
@@ -130,6 +131,12 @@ export interface ChatHost {
    * settings load: such a refusal then names neither the link nor the policy.
    */
   personalModelCredentials: boolean | undefined;
+  /**
+   * The credentials that name the model picker's groups: the organization's (when the caller
+   * may read them) and the caller's own, with the upstream models each serves. The shell
+   * builds them from its provider registry; empty until they load.
+   */
+  modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
 }

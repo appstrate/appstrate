@@ -127,19 +127,21 @@ function notifyModel(): void {
   for (const l of generationListeners) l();
 }
 
-/** Runs on every catalog change; a dead model is listed but never kept selected. */
+/** Runs on every catalog change; a dead or unpaid model is listed but never kept selected. */
 export function setModelCatalog(
   models: ReadonlyArray<{
     id: string;
     is_default?: boolean;
     needs_reconnection?: boolean;
+    /** `null`: nothing pays for the caller, a spend is refused until they add a key of their own. */
+    billed_to?: string | null;
     generation?: ModelGenerationCapabilities | null;
   }>,
 ): void {
   generationCapabilities = new Map(
     models.flatMap((model) => (model.generation ? [[model.id, model.generation] as const] : [])),
   );
-  const live = models.filter(isModelLive);
+  const live = models.filter((model) => isModelLive(model) && model.billed_to !== null);
   liveModelIds = new Set(live.map((m) => m.id));
 
   orgDefaultModelId = (live.find((m) => m.is_default) ?? live[0])?.id ?? null;
