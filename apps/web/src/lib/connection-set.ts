@@ -82,7 +82,7 @@ export function keepAvailable(ids: string[], availableIds: string[]): string[] {
 
 /**
  * "Valider" writes a non-empty set that differs from the stored pick. Untouched, that is
- * only a stored pick naming an id no longer a candidate — never the cascade's fallback.
+ * only a stored pick naming an id that is not a candidate — never the set an unset pick shows.
  */
 export function canApplyConnectionSet(
   checked: readonly { id: string }[],
@@ -98,31 +98,33 @@ export function canApplyConnectionSet(
 }
 
 /**
- * The set a picker holds, kept to the candidates: the uncommitted `draft`, else the stored pick,
- * else what the cascade binds. Without a draft it is the set displayed as bound; with one, the
- * ticked set "Valider" writes — a tick the user cannot see is one they cannot remove.
+ * The pick a picker shows: the explicit one, else the stored set of the layer an unset pick
+ * falls to — the member's pin (under an override), then a soft space default — else the set the
+ * fallback binds. `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
  */
-export function checkedConnectionIds(input: {
-  draft: string[] | null;
+export function shownConnectionPick(input: {
   explicitIds: ConnectionSet;
+  memberPinIds: ConnectionSet;
+  softDefaultIds: string[];
   resolvedIds: string[];
-  candidateIds: string[];
-}): string[] {
-  const base = input.draft ?? input.explicitIds ?? input.resolvedIds;
-  return keepAvailable(base, input.candidateIds);
+}): ConnectionSet {
+  const chosen = input.explicitIds ?? input.memberPinIds;
+  if (chosen !== null) return chosen;
+  const bound = input.softDefaultIds.length > 0 ? input.softDefaultIds : input.resolvedIds;
+  return bound.length > 0 ? bound : null;
 }
 
 /**
  * Stored members that are no candidate for this agent. The resolver refuses such a set rather
  * than bind what is left, so the picker names them and "Valider" visibly drops them.
  */
-export function unavailableConnectionIds(explicitIds: string[], candidateIds: string[]): string[] {
-  return explicitIds.filter((id) => !candidateIds.includes(id));
+export function unavailableConnectionIds(storedIds: string[], candidateIds: string[]): string[] {
+  return storedIds.filter((id) => !candidateIds.includes(id));
 }
 
 /**
- * The set a picker persists once a connection was created from it: `boundIds` (what the picker
- * binds, the cascade's fallback included) plus `createdId`. A connection created to replace a
+ * The set a picker persists once a connection was created from it: `boundIds` (the pick the
+ * picker shows, kept to the candidates) plus `createdId`. A connection created to replace a
  * member (`replacing`) takes its place 1-for-1. At the cap `boundIds` comes back unchanged.
  */
 export function placeCreatedConnection(input: {

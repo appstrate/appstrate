@@ -26,9 +26,10 @@ import {
 } from "@appstrate/core/integration";
 import {
   canApplyConnectionSet,
-  checkedConnectionIds,
   type ConnectionSet,
+  keepAvailable,
   placeCreatedConnection,
+  shownConnectionPick,
   toggleCapped,
   unavailableConnectionIds,
 } from "../../lib/connection-set";
@@ -43,10 +44,11 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `pin`      — writes a member `integration_pin` (agent page), the
  *                 agent-wide default for this member across every run.
  *  - `override` — controlled form value (schedule editor, per-run modal);
- *                 nothing is persisted until the form is. `null` = inherit.
+ *                 nothing is persisted until the form is. `null` = unset.
  *
- * In both, an unset pick displays what the cascade binds, and `[]` is "no connection", offered
- * only when the agent does not require the integration.
+ * In both, an explicit pick displays itself and an unset pick displays what the layer below
+ * binds, marked as the default; `[]` at either layer is "no connection", offered only when the
+ * agent does not require the integration.
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
@@ -136,8 +138,7 @@ export function useConnectionPicker(
   const overrideMode = persistence.mode === "override";
   const auths = manifest.auths ?? {};
   // Only auths the actor can actually connect: oauth2 needs an admin OAuth
-  // client (else the connect 403s); api_key/basic/custom always can. Without
-  // this the "add connection" entries offered a flow doomed to 403.
+  // client (else the connect 403s); api_key/basic/custom always can.
   const connectable = connectableAuthKeys(manifest, authStatuses);
   // When the actor's connections sit on another auth, only the agent's own auth fixes it.
   const requiredAuthKey = entry?.resolution.warning?.required_auth_key ?? null;
@@ -185,32 +186,44 @@ export function useConnectionPicker(
         )}`
       : ids.map((id) => byId(id)!.label).join(" · ");
 
+  // The explicit layer: what `persist` and the reset entry act on.
   const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
-  const pickedNone = explicitIds?.length === 0;
-  // The stored set in play, named whole: the pick, else the layer an unset pick falls to — the
-  // member's pin under an override, then a soft space default. A member of it that is no
-  // candidate blocks the run.
+  // The one pick everything shown derives from, the trigger and the menu alike.
+  const shownPick = shownConnectionPick({
+    explicitIds,
+    memberPinIds: memberPinnedConnectionIds,
+    softDefaultIds,
+    resolvedIds: resolvedConnectionIds,
+  });
+  const shownIds = shownPick ?? [];
+  // An unset pick shows the layer below, marked as the default.
+  const shownAsDefault = explicitIds === null && shownPick !== null;
   const fromDefault = explicitIds === null && softDefaultIds.length > 0;
-  const storedIds = explicitIds ?? memberPinnedConnectionIds ?? softDefaultIds;
-  const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
-  const dirty = draft !== null;
-  // One rule in both modes: an unset pick holds what the cascade binds.
-  const pick = { explicitIds, resolvedIds: resolvedConnectionIds };
-  const checkedIds = checkedConnectionIds({ ...pick, draft, candidateIds });
+  // A shown member that is no candidate blocks the run: the set is named whole.
+  const unavailableIds = unavailableConnectionIds(shownIds, candidateIds);
+  // A set kept to the candidates (a tick the user cannot see is one they cannot remove), with
+  // what gates a run on it.
+  const judge = (ids: string[]) => {
+    const conns = keepAvailable(ids, candidateIds).map((id) => byId(id)!);
+    return {
+      conns,
+      underScoped: conns.filter((c) => c.missing_scopes.length > 0),
+      dead: conns.filter((c) => c.needs_reconnection),
+    };
+  };
+  // The trigger shows, and is judged on, the shown pick — never the uncommitted draft.
+  const shown = judge(shownIds);
+  const shownUnusable = shown.underScoped.length > 0 || shown.dead.length > 0;
+  // The ticked rows and the warnings under the picker follow the set "Valider" would write: the
+  // same one until a tick moves it.
+  const checked = draft === null ? shown : judge(draft);
+  const checkedIds = checked.conns.map((c) => c.id);
   const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
   const oneClick = candidates.length === 1;
-
-  const toConns = (ids: string[]) => ids.map(byId).filter((c): c is IntegrationCandidate => !!c);
-  // The trigger reflects the bound set, never the uncommitted draft.
-  const displayConns = toConns(checkedConnectionIds({ ...pick, draft: null, candidateIds }));
-  const checkedConns = toConns(checkedIds);
-  // Warnings judge the set "Valider" would write: the bound one until a tick moves it.
-  const underScopedConns = checkedConns.filter((c) => c.missing_scopes.length > 0);
-  const deadConns = checkedConns.filter((c) => c.needs_reconnection);
   const hasCandidates = candidates.length > 0;
   // Every entry that writes waits for the write in flight.
   const busy = upsertPin.isPending || deletePin.isPending;
-  const canApply = canApplyConnectionSet(checkedConns, explicitIds, dirty) && !busy;
+  const canApply = canApplyConnectionSet(checked.conns, explicitIds, draft !== null) && !busy;
 
   // `null` clears the pick, `[]` stores "no connection". False = refused; the mutation toasted why.
   const persist = async (connectionIds: ConnectionSet): Promise<boolean> => {
@@ -235,7 +248,7 @@ export function useConnectionPicker(
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
   /**
-   * Connects a NEW connection with the agent's scopes, then writes the bound set with it added —
+   * Connects a NEW connection with the agent's scopes, then writes the shown pick with it added —
    * in the place of `replacing` (an under-scoped member) when given. Never sends a
    * `connection_id`: the server would union the scopes into that connection, widening every
    * agent bound to it.
@@ -265,9 +278,9 @@ export function useConnectionPicker(
     const createdId = refetchedIds.find((id) => !before.has(id));
     if (!createdId) return;
     const placed = placeCreatedConnection({
-      // What the picker bound when the connect started (the refetched cascade may already count
-      // the created connection), without the draft, kept to the ids the refetch still offers.
-      boundIds: checkedConnectionIds({ ...pick, draft: null, candidateIds: refetchedIds }),
+      // The pick shown when the connect started (the refetched cascade may already count the
+      // created connection), without the draft, kept to the ids the refetch still offers.
+      boundIds: keepAvailable(shownIds, refetchedIds),
       createdId,
       ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
@@ -299,11 +312,9 @@ export function useConnectionPicker(
     required,
     candidates,
     candidateIds,
-    resolvedConnectionIds,
     canAddConnection,
     lockedConnectionIds,
     lockedBy,
-    softDefaultIds,
     emptyPickerPrompt,
     // Actor
     canConnect,
@@ -315,16 +326,17 @@ export function useConnectionPicker(
     hasCandidates,
     // Sets
     explicitIds,
-    pickedNone,
+    shownPick,
+    shownAsDefault,
     fromDefault,
-    storedIds,
     unavailableIds,
     checkedIds,
     atCap,
     oneClick,
-    displayConns,
-    underScopedConns,
-    deadConns,
+    displayConns: shown.conns,
+    shownUnusable,
+    underScopedConns: checked.underScoped,
+    deadConns: checked.dead,
     busy,
     canApply,
     // Labels shared by several components

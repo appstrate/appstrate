@@ -37,10 +37,9 @@ type TriggerKind = "unavailable" | "none" | "one" | "many" | "choose" | "connect
 
 function triggerKind(p: ConnectionPicker): TriggerKind {
   if (p.unavailableIds.length > 0) return "unavailable";
-  if (p.pickedNone) return "none";
-  if (p.displayConns.length === 1) return "one";
-  if (p.displayConns.length > 1) return "many";
-  return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
+  if (p.shownPick === null) return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
+  if (p.shownPick.length === 0) return "none";
+  return p.shownPick.length === 1 ? "one" : "many";
 }
 
 const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
@@ -66,9 +65,7 @@ export function PickerMenu({
   const {
     runBlocking,
     candidates,
-    resolvedConnectionIds,
     canAddConnection,
-    softDefaultIds,
     canConnect,
     integrationPath,
     canOpenIntegration,
@@ -77,16 +74,15 @@ export function PickerMenu({
     authKeys,
     hasCandidates,
     explicitIds,
-    pickedNone,
+    shownPick,
+    shownAsDefault,
     required,
-    storedIds,
     unavailableIds,
     checkedIds,
     atCap,
     oneClick,
     displayConns,
-    underScopedConns,
-    deadConns,
+    shownUnusable,
     busy,
     canApply,
     ownerLabel,
@@ -130,27 +126,28 @@ export function PickerMenu({
       ? t("detail.integrationMemberPicker.addVia", { label: tl })
       : t("detail.integrationMemberPicker.addConnection");
   };
+  const shownIds = shownPick ?? [];
+  const showsNone = shownPick?.length === 0;
+  // The radio states the explicit layer: an unset pick showing the default's "no connection"
+  // leaves it unchecked and selectable, which is how that choice is made explicit.
+  const pickedNone = explicitIds?.length === 0;
   const trigger = triggerKind(picker);
   const triggerLabel = {
-    unavailable: () => setLabel(storedIds, unavailableIds),
+    unavailable: () => setLabel(shownIds, unavailableIds),
     none: () => t("detail.integrationMemberPicker.none"),
     one: () => displayConns[0]!.label,
     many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
     choose: () => t("detail.integrationMemberPicker.chooseLabel"),
     connect: () => t("detail.integrationMemberPicker.connectLabel"),
   }[trigger]();
-  // An unset pick shows a set the cascade binds: nobody chose it here.
-  const inherited = explicitIds === null && trigger !== "choose" && trigger !== "connect";
   // Amber on exactly the states that gate a run. The server's `run_blocking` (same verdict as
   // the launch badge and the kickoff 409) judges the cascade: a member pin, and what an unset
-  // override inherits. It does not know a set override, judged here: an under-scoped,
-  // unavailable or dead member, or "no connection" for an integration the agent requires.
+  // override shows. It does not know a set override, judged here on the pick the trigger names:
+  // an under-scoped, unavailable or dead member, or "no connection" for an integration the
+  // agent requires.
   const triggerWarn =
     overrideMode && explicitIds !== null
-      ? underScopedConns.length > 0 ||
-        unavailableIds.length > 0 ||
-        deadConns.length > 0 ||
-        (pickedNone && required)
+      ? shownUnusable || unavailableIds.length > 0 || (showsNone && required)
       : runBlocking;
   const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
 
@@ -165,7 +162,7 @@ export function PickerMenu({
         >
           <TriggerIcon className="size-3" />
           <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-          {inherited && (
+          {shownAsDefault && (
             <span className="text-muted-foreground/70">
               {t("detail.integrationMemberPicker.defaultBadge")}
             </span>
@@ -182,9 +179,7 @@ export function PickerMenu({
           const fit = c.scope_fit;
           const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
-          const isDefault =
-            explicitIds === null &&
-            (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
+          const isDefault = shownAsDefault && shownIds.includes(c.id);
           // Only the connection owner can renew via OAuth — a foreign
           // shared connection's tokens belong to someone else. We still
           // let the actor pin a foreign needs_reconnection row (their
@@ -347,6 +342,11 @@ export function PickerMenu({
           >
             <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
             <NoConnectionLabel />
+            {shownAsDefault && showsNone && (
+              <span className="text-muted-foreground/70 text-[0.6rem]">
+                {t("detail.integrationMemberPicker.defaultBadge")}
+              </span>
+            )}
           </DropdownMenuItem>
         )}
         {explicitIds !== null && (
@@ -357,9 +357,7 @@ export function PickerMenu({
           >
             <Check className="size-3.5 opacity-0" />
             <span className="text-muted-foreground">
-              {overrideMode
-                ? t("detail.integrationMemberPicker.inherit")
-                : t("detail.integrationMemberPicker.resetToAuto")}
+              {t("detail.integrationMemberPicker.resetToAuto")}
             </span>
           </DropdownMenuItem>
         )}

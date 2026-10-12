@@ -12,8 +12,8 @@ import {
   toggleCapped,
   keepAvailable,
   canApplyConnectionSet,
-  checkedConnectionIds,
   placeCreatedConnection,
+  shownConnectionPick,
   unavailableConnectionIds,
   withConnectionOverride,
   withDeclaredConnections,
@@ -42,7 +42,7 @@ describe("toggleCapped", () => {
 });
 
 describe("keepAvailable", () => {
-  it("drops an id that is no longer available, keeping order", () => {
+  it("drops an id that is not available, keeping order", () => {
     expect(keepAvailable(["b", "gone", "a"], ["a", "b"])).toEqual(["b", "a"]);
   });
 });
@@ -50,8 +50,6 @@ describe("keepAvailable", () => {
 describe("canApplyConnectionSet", () => {
   const a = { id: "conn_a" };
   const b = { id: "conn_b" };
-  const candidateIds = ["conn_a", "conn_b"];
-  const conns = (ids: string[]) => [a, b].filter((c) => ids.includes(c.id));
 
   it("refuses the empty set and the stored pick, in any order", () => {
     // Control: a touched set that differs from the stored pick is writable.
@@ -64,38 +62,20 @@ describe("canApplyConnectionSet", () => {
     expect(canApplyConnectionSet([], [], true)).toBe(false);
     expect(canApplyConnectionSet([a], [], true)).toBe(true);
     // Untouched over a stored "none", nothing is ticked: nothing to write.
-    const untouched = checkedConnectionIds({
-      draft: null,
-      explicitIds: [],
-      resolvedIds: candidateIds,
-      candidateIds,
-    });
-    expect(untouched).toEqual([]);
-    expect(canApplyConnectionSet(conns(untouched), [], false)).toBe(false);
+    expect(canApplyConnectionSet([], [], false)).toBe(false);
   });
 
-  it("refuses an untouched menu ticked from the cascade's resolved default", () => {
+  it("refuses an untouched menu ticked from the default an unset pick shows", () => {
     // Writing it would pin {a, b} and detach the member from later org-default
     // changes. Control: the same ticks after an actual edit are writable.
-    const input = { explicitIds: null, resolvedIds: candidateIds, candidateIds };
-    const untouched = checkedConnectionIds({ ...input, draft: null });
-    expect(untouched).toEqual(candidateIds);
-    expect(canApplyConnectionSet(conns(untouched), null, false)).toBe(false);
-    expect(canApplyConnectionSet(conns(untouched), null, true)).toBe(true);
+    expect(canApplyConnectionSet([a, b], null, false)).toBe(false);
+    expect(canApplyConnectionSet([a, b], null, true)).toBe(true);
   });
 
   it("lets the actor rewrite a stored pick naming an unavailable connection, while a member survives", () => {
     // Nothing was ticked or unticked, yet the stored set differs from what a
     // write would send: without this the ghost id could never be dropped.
-    const explicitIds = ["conn_a", "conn_unshared"];
-    const cleaned = checkedConnectionIds({
-      draft: null,
-      explicitIds,
-      resolvedIds: [],
-      candidateIds,
-    });
-    expect(cleaned).toEqual(["conn_a"]);
-    expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
+    expect(canApplyConnectionSet([a], ["conn_a", "conn_unshared"], false)).toBe(true);
     // Control: an untouched pick with no ghost has nothing to rewrite.
     expect(canApplyConnectionSet([a], ["conn_a"], false)).toBe(false);
     // No member survives: the set left to write is empty, which "Valider" never writes.
@@ -103,50 +83,43 @@ describe("canApplyConnectionSet", () => {
   });
 });
 
-describe("checkedConnectionIds", () => {
-  const candidateIds = ["conn_a", "conn_b"];
+describe("shownConnectionPick", () => {
+  const below = { memberPinIds: null, softDefaultIds: [], resolvedIds: [] };
 
-  it("never ticks a pinned id that is no longer a candidate", () => {
-    // Kept, it would read "Valider (2)" over one visible tick, could not be
-    // unticked, and would send a PUT the server refuses.
-    expect(
-      checkedConnectionIds({
-        draft: null,
-        explicitIds: ["conn_a", "conn_unshared"],
-        resolvedIds: [],
-        candidateIds,
-      }),
-    ).toEqual(["conn_a"]);
+  it("shows the explicit pick, whatever the layers below hold", () => {
+    const layers = { memberPinIds: ["pin"], softDefaultIds: ["soft"], resolvedIds: ["pin"] };
+    expect(shownConnectionPick({ ...layers, explicitIds: ["a"] })).toEqual(["a"]);
+    // An explicit "no connection" is a pick too, never the layers below.
+    expect(shownConnectionPick({ ...layers, explicitIds: [] })).toEqual([]);
   });
 
-  it("prefers the draft, then the explicit pick, then the cascade", () => {
-    const base = { explicitIds: ["conn_a"], resolvedIds: ["conn_b"], candidateIds };
-    expect(checkedConnectionIds({ ...base, draft: ["conn_b"] })).toEqual(["conn_b"]);
-    expect(checkedConnectionIds({ ...base, draft: null })).toEqual(["conn_a"]);
-    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: null })).toEqual(["conn_b"]);
-    // A stored "no connection" ticks nothing, rather than the cascade.
-    expect(checkedConnectionIds({ ...base, draft: null, explicitIds: [] })).toEqual([]);
+  it("shows the member's pin under an unset pick, whole even when the server binds none of it", () => {
+    // A pin with a member gone resolves to nothing; the stored set is still what is shown.
+    const brokenPin = { ...below, explicitIds: null, memberPinIds: ["a", "gone"] };
+    expect(shownConnectionPick(brokenPin)).toEqual(["a", "gone"]);
+    // The member's own "no connection" is shown as such, not as nothing bound.
+    expect(shownConnectionPick({ ...below, explicitIds: null, memberPinIds: [] })).toEqual([]);
+  });
+
+  it("shows a soft space default whole, then the set the fallback binds", () => {
+    const unset = { explicitIds: null, memberPinIds: null };
+    expect(
+      shownConnectionPick({ ...unset, softDefaultIds: ["a", "gone"], resolvedIds: [] }),
+    ).toEqual(["a", "gone"]);
+    expect(shownConnectionPick({ ...unset, softDefaultIds: [], resolvedIds: ["own"] })).toEqual([
+      "own",
+    ]);
+  });
+
+  it("shows nothing when no layer chose and nothing binds", () => {
+    expect(shownConnectionPick({ ...below, explicitIds: null })).toBeNull();
   });
 });
 
 describe("placeCreatedConnection", () => {
   const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) => `c${i}`);
 
-  it("joins the set the cascade's fallback binds", () => {
-    // The picker's base for an actor with no pick of their own: the resolved set.
-    const boundIds = checkedConnectionIds({
-      draft: null,
-      explicitIds: null,
-      resolvedIds: ["conn_fallback"],
-      candidateIds: ["conn_fallback", "conn_new"],
-    });
-    expect(placeCreatedConnection({ boundIds, createdId: "conn_new" })).toEqual([
-      "conn_fallback",
-      "conn_new",
-    ]);
-  });
-
-  it("joins an explicit pick, after its members", () => {
+  it("joins the shown pick, after its members", () => {
     expect(
       placeCreatedConnection({ boundIds: ["conn_a", "conn_b"], createdId: "conn_new" }),
     ).toEqual(["conn_a", "conn_b", "conn_new"]);
@@ -203,7 +176,7 @@ describe("placeCreatedConnection", () => {
 });
 
 describe("unavailableConnectionIds", () => {
-  it("names the stored members the actor can no longer reach, in stored order", () => {
+  it("names the stored members that are no candidate, in stored order", () => {
     expect(unavailableConnectionIds(["gone-2", "a", "gone-1"], ["a", "b"])).toEqual([
       "gone-2",
       "gone-1",
@@ -255,7 +228,7 @@ describe("withDeclaredConnections", () => {
     connection_overrides: { "@acme/a": ["1"], "@acme/gone": ["2"] },
   };
 
-  it("drops a key the definition no longer declares, keeping the declared ones as they are", () => {
+  it("drops a key the definition does not declare, keeping the declared ones as they are", () => {
     expect(withDeclaredConnections(overrides, ["@acme/a", "@acme/b"])).toEqual({
       model_id_override: "m",
       connection_overrides: { "@acme/a": ["1"] },
