@@ -1196,28 +1196,42 @@ back), `--apply` to commit; each refuses an empty `DATABASE_URL`.
 
 Rollback: see the table above.
 
-## Detail — A member's connection of a space pinned for the agents they run there (script `0045`)
+## Detail — The connection a member made in a space pinned for the agents binding it there (script `0045`)
 
 **Not a runbook.** With no pin, default or override, a run binds the actor's one own connection of
 an integration and answers `must_choose_connection` when they own several (#1929). `0041` and
 `0043` widen user-owned connections to org scope, so a member who connected one integration from
 two spaces owns two connections in each. `0045` stores "in this space, this member's connection is
-the one made here" in the one form the model has for it, a member pin: for each (space, member,
-integration) where the member owns several connections usable in the space (`usableInSpace`) and
-exactly one made there (`coalesce(space_id, origin_space_id)`), one pin per agent that a run of
-theirs in that space bound to that connection by `fallback_auto`. It writes none where a layer
-above the fallback names a set (a pin of theirs or an admin pin on the agent, a space default on
-the integration), nor for a deleted agent or an inline run's shadow package. Each pin is audited
-`integration.member_pin.upserted` by the `system` actor (`reason: migrated`). End users are out of
-its reach: their connections stay in their space (`integration_connections_end_user_is_space`), so
-every one usable in a space was made there.
+the one made here" in the one form the model has for it, a member pin, where the data shows the
+space bound that connection by default while the other existed.
 
-It prints the pins to write, then per organization (one transaction each) every pin and, without
-writing, the enabled schedules of those members on those agents whose `connection_overrides` names
-no set for the integration: their next fire binds through the pin. With `--apply`, the pins left to
-write must then be 0. Run it after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first:
-`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-space-connection.ts` is the dry
-run; `--apply` commits. It refuses an empty `DATABASE_URL`.
+A (space, member, integration) qualifies when the member owns several connections usable in the
+space (`usableInSpace`), exactly one made there (`coalesce(space_id, origin_space_id)`), none of
+the others shared into it (`sharedInto`: a shared row reached the space whatever its scope), and no
+org default names a set for the integration there. For a qualifying tuple, an agent gets the pin
+when the member's most recent run of it in that space recording the integration
+(`runs.resolved_connections`, a schedule's fire included) bound exactly that connection by
+`fallback_auto` and started (`runs.started_at`) after each of the others was created. A later
+binding of another source, or a connection made since, is the member's own word: no pin. Nor where
+they or an admin pinned the agent, nor on a deleted agent or an inline run's shadow package. Each
+pin is audited `integration.member_pin.upserted` by the `system` actor (`reason: migrated`).
+
+It also lists, without writing, each enabled schedule running as the member in the space of a
+qualifying tuple whose agent declares the integration (draft manifest only), whose
+`connection_overrides` names no set for it and whose agent no admin pin governs:
+`binds through the pin` (a pin of theirs, existing or written here) or `no pin: name the set` (its
+next fire answers `must_choose_connection`: name a set on the schedule, or have the member pin the
+agent). End users are out of its reach: their connections stay in their space
+(`integration_connections_end_user_is_space`), so every one usable in a space was made there.
+
+It prints the pins to write and the schedules with no pin, then per organization (one transaction
+each) every pin and every listed schedule with its verdict; `grep 'no pin: name the set'` is the
+list to act on. With `--apply`, the pins left to write must then be 0. Rows: UNMEASURED, the state
+it repairs exists only after `0041 --apply`, which no reachable database has run: rehearse on a
+restored dump, after `0041` and `0043` there. Run it after `0041 --apply` and `0043 --apply`, app
+up, `pg_dump` first:
+`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-connection-made-in-space.ts` is the
+dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
 
 Rollback: see the table above.
 
@@ -1268,4 +1282,4 @@ Rollback: see the table above.
 | 0042 | not applied         | subscriptions (`oauth` model credentials, recognised by decrypting the blob, never through the provider registry) made personal (#1875): a subscription whose creator is still a member becomes theirs (`owner_user_id`); an orphan (no creator, or a creator who left) and its pairings deleted; non-aliased organization models bound to any subscription unbound (`credential_id` NULL, `provider_id` kept) — **`pg_dump` before the deploy carrying drizzle `0087`, then run it after the deploy, app up, while no run is active**; `.ts`, dry run by default, `--apply` to commit                                    | subscriptions to migrate, then per organization (one transaction each, rolled back on a dry run) the owned, orphan, pairing and unbound counts with each row, and the members who ran on a subscription they do not own; a blob that does not decrypt is listed and kept; on `--apply`, the subscriptions and the unreadable credentials left org-owned, which must be 0 (exit 1 otherwise); `--apply` also refuses an organization with an aliased model or a pending/running run bound to one of its subscriptions                                                                                                                                                                                         |
 | 0043 | not applied         | space-tier auto-provisioned (DCR/CIMD) OAuth clients moved to their org tier: per (integration, auth, issuer) the client of either tier with the most connections, a tie going to the org tier, is the winner; the others are merged into it and a space-tier winner promoted (connections re-pointed and flagged `needs_reconnection`, client deleted) and the key's user-owned rows widened to org scope, each audited `scope_widened` by the `system` actor (#1910) — **run after the deploy carrying drizzle `0089`, app up, after `0044` and `0041`**; `.ts`, dry run by default, `--apply` to commit                | per organization (one transaction each, rolled back on a dry run) the promoted, merged, re-pointed and widened counts; on `--apply`, the space-tier auto clients left, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to promote                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 0044 | not applied         | `integration_connections.shared_space_ids` copied into `integration_connection_shares` (`ON CONFLICT DO NOTHING`, each audited `share_added` with `reason: migrated`) and emptied, a missing or other-organization target space skipped and printed, then the shares whose owner no longer reaches their space withdrawn as a live access loss does (#1910) — **run after the migrate service (`appstrate-migrate`) applies drizzle `0089` and BEFORE the app starts**: an app serving `0089` before it runs sees no existing share; `.ts`, dry run by default, `--apply` to commit                                       | rows copied, targets skipped (each printed), columns emptied, shares withdrawn and schedules disabled, in one transaction rolled back on a dry run; a second `--apply` inserts nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 0045 | not applied         | member pins naming the connection a member made in a space, for each agent one of their runs there bound to it by `fallback_auto`, where they own several connections usable in that space and exactly one made there, and no pin of theirs, admin pin or space default names a set (#1929); each audited `integration.member_pin.upserted` by the `system` actor — **run after `0041` and `0043`, app up**; `.ts`, dry run by default, `--apply` to commit                                                                                                                                                               | pins to write, then per organization (one transaction each, rolled back on a dry run) each pin and the enabled schedules whose next fire binds through one (listed, not written); on `--apply`, the pins left to write, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to pin                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 0045 | not applied         | member pins naming the connection a member made in a space, where they own several connections usable there, exactly one made there, none of the others shared into it and no org default on the integration: one per agent whose last run by them there recording the integration bound exactly that connection by `fallback_auto` after the others were created, no pin of theirs or admin pin on it (#1929); each audited `integration.member_pin.upserted` by the `system` actor — **run after `0041` and `0043`, app up**; `.ts`, dry run by default, `--apply` to commit                                            | UNMEASURED — the state it repairs exists only after `0041 --apply`, which no reachable database has run. Prints the pins to write and the schedules with no pin, then per organization (one transaction each, rolled back on a dry run) each pin and each enabled schedule naming no set, `binds through the pin` or `no pin: name the set` (listed, not written); on `--apply`, the pins left to write, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to pin                                                                                                                                                                                                                   |
