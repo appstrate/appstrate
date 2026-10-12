@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { MissingIntegrationConnectionCode } from "@appstrate/core/integration";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
 import { ApiError } from "../api/errors";
@@ -88,40 +87,23 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
   };
 }
 
-/** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
-const OWN_PICK_REFUSALS: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
-  "override_outranked",
-  "override_connection_unavailable",
-]);
-
 /**
  * The replay of a launch a `409 missing_integration_connection` refused.
  * Everything the user chose rides along — the input typed in the run modal
- * above all. The launch's own pick for an integration is dropped only when the
- * 409 refuses that pick itself (`OWN_PICK_REFUSALS`, or
- * `auth_serves_no_selected_tool` naming a connection of it). Under any other
- * code — a connection to repair, above all — the pick is kept: dropping it
- * could let the retry bind another account.
+ * above all — except the launch's own connection pick for each integration the
+ * 409 refused: that integration then resolves as the recovery modal's row shows
+ * it, so what the user answers there is what runs. A pick for an integration
+ * the 409 does not name is kept.
  */
 export function retryLaunch(
   launch: RunLaunch,
   errors: readonly MissingIntegrationFieldError[],
 ): RunLaunch {
-  const own = launch.connectionOverrides;
+  const { connectionOverrides: own, ...rest } = launch;
   if (!own) return launch;
-  const refused = new Set(
-    errors.flatMap((e) => {
-      const id = integrationIdOfField(e.field);
-      const refusesPick =
-        OWN_PICK_REFUSALS.has(e.code) ||
-        (e.code === "auth_serves_no_selected_tool" &&
-          e.connection_id !== undefined &&
-          (own[id] ?? []).includes(e.connection_id));
-      return refusesPick ? [id] : [];
-    }),
-  );
+  const refused = new Set(errors.map((e) => integrationIdOfField(e.field)));
   const kept = Object.entries(own).filter(([id]) => !refused.has(id));
-  return { ...launch, connectionOverrides: Object.fromEntries(kept) };
+  return kept.length > 0 ? { ...rest, connectionOverrides: Object.fromEntries(kept) } : rest;
 }
 
 /** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */

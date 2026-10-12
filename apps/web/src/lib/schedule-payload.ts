@@ -57,16 +57,21 @@ export interface ScheduleEditOverrides {
 }
 
 /**
- * What a schedule save stores: the fallback's binding named, then the declared keys only.
- * `readiness` is the caller's when the schedule runs as them, none for another actor;
- * `declared` is the fired version's integrations, `undefined` (not loaded) keeping every pick.
+ * What a schedule save stores. For a schedule running as the viewer, the connection the
+ * fallback binds is named from `viewerReadiness`; for any other actor that verdict speaks for
+ * nobody and names nothing. Then only the keys of `declared` — the fired version's
+ * integrations — are kept; `undefined` (not loaded) keeps every pick.
  */
-export function savedScheduleOverrides(
-  overrides: RunOverridesValue,
-  readiness: readonly FallbackBindingEntry[] | undefined,
-  declared: readonly string[] | undefined,
-): RunOverridesValue {
-  return withDeclaredConnections(withFallbackConnections(overrides, readiness), declared);
+export function savedScheduleOverrides(args: {
+  overrides: RunOverridesValue;
+  runsAsViewer: boolean;
+  viewerReadiness: readonly FallbackBindingEntry[] | undefined;
+  declared: readonly string[] | undefined;
+}): RunOverridesValue {
+  return withDeclaredConnections(
+    withFallbackConnections(args.overrides, args.runsAsViewer ? args.viewerReadiness : undefined),
+    args.declared,
+  );
 }
 
 interface ScheduleOverrideArgs {

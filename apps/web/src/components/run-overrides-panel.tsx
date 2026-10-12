@@ -77,7 +77,7 @@ interface RunOverridesPanelProps {
 /**
  * Override editor for the agent's resolution defaults — model, proxy and
  * integration connections. Shared by the schedule editor and the run launcher,
- * where these three carry identical semantics ("inherit" = the agent default).
+ * where these three carry identical semantics (no pick = the agent default).
  * Emits a delta payload (`onChange`): each field is present only when it
  * differs from the persisted default, so the caller never re-implements diff
  * detection.
@@ -311,7 +311,7 @@ export function RunOverridesPanel({
  * Per-integration picker section that drives `value.connection_overrides`.
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
  * integration) in `override` mode: validating a set writes it into the
- * `connection_overrides` map, "inherit" clears the key, "No connection"
+ * `connection_overrides` map, the reset entry clears the key, "No connection"
  * writes `[]`. The map is the launch override (below admin pins, above member
  * pins) of the form that holds it: one run's, or a schedule's on every fire.
  *
@@ -337,7 +337,7 @@ function ConnectionOverridesSection({
   const { t } = useTranslation(["agents"]);
   return (
     <div className="space-y-2">
-      <Label>{t("schedule.connectionOverrides.label")}</Label>
+      <Label>{t("connectionOverrides.label")}</Label>
       <p className="text-muted-foreground text-xs">
         {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
       </p>
@@ -367,7 +367,7 @@ function IntegrationOverrideRow({
   agentPackageId: string;
   integration: AgentIntegrationRef;
   version?: string;
-  /** Currently-picked connection set; `null` = inherit, `[]` = none. */
+  /** This form's pick: `null` = none (the row shows what the agent binds), `[]` = no connection. */
   value: ConnectionSet;
   onChange: (next: ConnectionSet) => void;
 }) {

@@ -59,7 +59,7 @@ function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (params?: RunLaunch) => {
+    mutationFn: async (launch: RunLaunch) => {
       const {
         input,
         rerun_from,
@@ -69,7 +69,7 @@ function useRunAgent(packageId: string) {
         proxyId,
         generation,
         dependencyOverrides,
-      } = params ?? {};
+      } = launch;
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
@@ -113,9 +113,9 @@ function useRunAgent(packageId: string) {
  * The one way the SPA launches a run. A `409 missing_integration_connection`
  * is a question, not a failure: the launcher keeps the refused launch and the
  * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
- * `retry` replays that launch: what the user answers in the modal is a pin,
- * which the server reads. The retried launch becomes the kept one, so a second
- * 409 builds on it: a pick one 409 dropped stays dropped.
+ * `retry` replays that launch without its own connection pick for the refused
+ * integrations (`retryLaunch`), so each one binds what its row of the modal
+ * shows. The retried launch becomes the kept one: a second 409 builds on it.
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);

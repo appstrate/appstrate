@@ -36,7 +36,7 @@ export function ScheduleActorConnectionChoice({
   const others = [...new Set([...Object.keys(value), ...optional])].filter((id) => !refused(id));
   return (
     <div className="space-y-2" data-testid="schedule-actor-connections">
-      <Label>{t("schedule.connectionOverrides.label")}</Label>
+      <Label>{t("connectionOverrides.label")}</Label>
       <p className="text-muted-foreground text-xs">
         {t("schedule.connectionOverrides.otherActor")}
       </p>

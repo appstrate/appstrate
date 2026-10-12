@@ -3,11 +3,12 @@
 /**
  * The launches the SPA builds before `useRunAgent` puts them on the wire.
  *
- * The retry of a launch refused with `409 missing_integration_connection` only
- * touches the launch's own connection picks (drops one the 409 refuses); dropping
- * anything else changes the run — or gets it refused, as the input did (#1539).
- * A second 409 retries the first retry, not the original launch. "Lancer avec options…" sends an option
- * only when set, so an untouched modal launches what plain "Lancer" does.
+ * The replay of a launch refused with `409 missing_integration_connection` only
+ * drops the launch's own connection pick for the integrations the 409 refused:
+ * dropping anything else changes the run, or gets it refused (an agent with a
+ * required input refuses a replay without it). A second 409 replays the first
+ * replay, not the original launch. "Lancer avec options…" sends an option only
+ * when set, so an untouched modal launches what plain "Lancer" does.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -162,61 +163,46 @@ describe("retryLaunch", () => {
     expect(retryLaunch(launch, [])).toEqual(launch);
   });
 
-  it("drops the launch's own pick the 409 refuses: replayed, it would be refused again", () => {
+  it("drops the launch's own pick of each refused integration, whatever the code", () => {
+    const codes = [
+      "override_outranked",
+      "override_connection_unavailable",
+      "auth_serves_no_selected_tool",
+      "needs_reconnection",
+      "insufficient_scopes",
+      "must_choose_connection",
+      "required_integration_unbound",
+    ] as const;
+    const launch = { input: { prompt: "bonjour" }, connectionOverrides: { "@acme/crm": ["c1"] } };
+    for (const code of codes) {
+      expect(
+        retryLaunch(launch, [
+          { field: "integrations.@acme/crm", code, message: code, connection_id: "c1" },
+        ]),
+      ).toEqual({ input: { prompt: "bonjour" } });
+    }
+  });
+
+  it("keeps the own pick of an integration the 409 does not name", () => {
     expect(
       retryLaunch(
-        {
-          connectionOverrides: {
-            "@acme/crm": ["conn_outside"],
-            "@acme/notion": ["conn_gone"],
-            "@acme/drive": ["conn_no_tool"],
-            "@acme/mail": ["conn_mail"],
-          },
-        },
-        [
-          { field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" },
-          {
-            field: "integrations.@acme/notion",
-            code: "override_connection_unavailable",
-            message: "unavailable",
-          },
-          {
-            field: "integrations.@acme/drive",
-            code: "auth_serves_no_selected_tool",
-            message: "no tool",
-            connection_id: "conn_no_tool",
-          },
-        ],
-      ).connectionOverrides,
-    ).toEqual({ "@acme/mail": ["conn_mail"] });
+        { connectionOverrides: { "@acme/crm": ["conn_expired"], "@acme/mail": ["conn_mail"] } },
+        [{ field: "integrations.@acme/crm", code: "needs_reconnection", message: "reconnect" }],
+      ),
+    ).toEqual({ connectionOverrides: { "@acme/mail": ["conn_mail"] } });
   });
 
-  it("keeps the launch's own pick under any other code: the retry never switches account", () => {
-    const connectionOverrides = {
-      "@acme/crm": ["conn_expired"],
-      "@acme/drive": ["conn_drive"],
-    };
+  it("replays a launch without picks unchanged", () => {
+    const launch = { input: { prompt: "bonjour" }, version: "draft" };
     expect(
-      retryLaunch({ connectionOverrides }, [
-        {
-          field: "integrations.@acme/crm",
-          code: "needs_reconnection",
-          message: "reconnect",
-          connection_id: "conn_expired",
-        },
-        {
-          // Names the pin's connection, not the launch's pick.
-          field: "integrations.@acme/drive",
-          code: "auth_serves_no_selected_tool",
-          message: "no tool",
-          connection_id: "conn_pinned",
-        },
-      ]).connectionOverrides,
-    ).toEqual(connectionOverrides);
+      retryLaunch(launch, [
+        { field: "integrations.@acme/crm", code: "not_connected", message: "connect" },
+      ]),
+    ).toEqual(launch);
   });
 
-  it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
-    // The launcher keeps each retried launch, so the next retry starts from it.
+  it("a second 409 builds on the first replay: a dropped pick stays dropped", () => {
+    // The launcher keeps each replayed launch, so the next replay starts from it.
     const first = retryLaunch(
       { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
       [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],

@@ -228,6 +228,11 @@ function resolutionOf(data: AgentConnectionReadiness, integrationId: string | un
   );
 }
 
+/** The declared integrations whose connection refuses a launch (the server's `run_blocking`). */
+export function blockingIntegrationIds(data: AgentConnectionReadiness): string[] {
+  return data.integrations.filter((i) => i.run_blocking).map((i) => i.integration_package_id);
+}
+
 /**
  * Reader of the {@link useIntegrationReadinessEntry} verdict as the cache holds
  * it NOW, for a handler running after something already awaited the readiness

@@ -96,9 +96,12 @@ describe("pendingConnectionChoices", () => {
     expect(ids({})).toEqual(["@acme/gmail"]);
   });
 
-  it("brings it back when the pick is undone", () => {
-    // Undoing a pick removes the key: back to what the refused save sent.
-    expect(ids({ "@acme/notion": ["gone"] })).toEqual(["@acme/gmail", "@acme/notion"]);
+  it("brings it back when the sent set is picked again, in any order", () => {
+    const sent = { "@acme/notion": ["a", "b"] };
+    const pending = (current: Record<string, string[]>) =>
+      pendingConnectionChoices(choices, sent, current).map((c) => c.integrationId);
+    expect(pending({ "@acme/notion": ["a"] })).toEqual(["@acme/gmail"]);
+    expect(pending({ "@acme/notion": ["b", "a"] })).toEqual(["@acme/gmail", "@acme/notion"]);
   });
 
   it("takes 'no connection' as an answer — `[]` is not the absent pick the save sent", () => {

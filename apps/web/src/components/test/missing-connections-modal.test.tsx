@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The recovery modal of a refused launch (#1830). Its dialog chrome is a Radix
+ * The recovery modal of a refused launch. Its dialog chrome is a Radix
  * portal, which renders nothing without a DOM, so a row is rendered through
  * `MissingRow`; the Re-run button's state is `retryDecision`, tested with its module.
  */

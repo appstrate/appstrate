@@ -282,8 +282,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
   const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
     ?.dependencies.integrations;
 
-  // The verdict judges the viewer: it is read for a schedule running as them only, whose save
-  // names what the fallback binds.
+  // The verdict judges the viewer, so it is asked only for a schedule running as them.
   const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
     actorIsViewer ? packageId : undefined,
     firedVersion,
@@ -291,11 +290,12 @@ export function ScheduleForm(props: ScheduleFormProps) {
   // What a save sends, and what a refusal is judged against. It replaces the stored map: a key
   // the fired version does not declare is dropped (the server refuses it), whichever picker —
   // or none — the form shows.
-  const savedOverrides = savedScheduleOverrides(
+  const savedOverrides = savedScheduleOverrides({
     overrides,
-    readiness?.integrations,
-    firedIntegrations?.map((i) => i.id),
-  );
+    runsAsViewer: actorIsViewer,
+    viewerReadiness: readiness?.integrations,
+    declared: firedIntegrations?.map((i) => i.id),
+  });
 
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
@@ -554,7 +554,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
                   value={versionSelectValue}
                   onChange={setVersion}
                   leadingOptions={[
-                    { value: VERSION_INHERIT, label: t("run.overrides.versionInheritLatest") },
+                    { value: VERSION_INHERIT, label: t("run.overrides.versionPublished") },
                     // The working copy belongs to whoever can write the
                     // package; for everybody else the schedule would be
                     // refused at every fire, so the option is not offered.

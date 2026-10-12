@@ -847,8 +847,9 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   launch recovery modal is added to the set the agent binds for the member and
   written to their pin at once; one created from the integration page or the
   settings binds nothing. The recovery modal pins like the tab: a choice made
-  there is the member's pin, Re-run replays the launch and waits until every
-  row is answered. With no connection to bind, the picker reads "Connect" or
+  there is the member's pin, and Re-run waits until every row is answered,
+  then replays the launch without its own connection pick for each refused
+  integration, so what the row shows is what runs. With no connection to bind, the picker reads "Connect" or
   "Choose" instead of "Inherit", and the refusal shows whole.
 - **An unset connection pick shows what the agent would bind** (#1929). In the
   dashboard's schedule form and "Run with options" modal, an integration with

@@ -97,24 +97,42 @@ describe("scheduleOverridePayload — create", () => {
 });
 
 describe("savedScheduleOverrides", () => {
-  const fallback: FallbackBindingEntry[] = [
+  const viewerReadiness: FallbackBindingEntry[] = [
     {
       integration_package_id: GMAIL,
       inert: false,
       resolution: { source: "fallback_auto", resolved_connection_ids: ["conn_own"] },
     },
   ];
+  const declared = [GMAIL, "@acme/slack"];
 
-  it("names the connection the fallback binds, beside the declared picks", () => {
-    const stored = { connection_overrides: { "@acme/slack": ["conn_2"] }, model_id_override: "m1" };
-    expect(savedScheduleOverrides(stored, fallback, [GMAIL, "@acme/slack"])).toEqual({
+  it("names the connection the viewer's fallback binds, beside the declared picks", () => {
+    const overrides = {
+      connection_overrides: { "@acme/slack": ["conn_2"] },
+      model_id_override: "m1",
+    };
+    expect(
+      savedScheduleOverrides({ overrides, runsAsViewer: true, viewerReadiness, declared }),
+    ).toEqual({
       connection_overrides: { "@acme/slack": ["conn_2"], [GMAIL]: ["conn_own"] },
       model_id_override: "m1",
     });
   });
 
+  it("never names the viewer's connection on a schedule running as someone else", () => {
+    expect(
+      savedScheduleOverrides({ overrides: {}, runsAsViewer: false, viewerReadiness, declared }),
+    ).toEqual({});
+    const picks = { connection_overrides: { "@acme/slack": ["conn_2"] } };
+    expect(
+      savedScheduleOverrides({ overrides: picks, runsAsViewer: false, viewerReadiness, declared }),
+    ).toEqual(picks);
+  });
+
   it("narrows after naming: nothing for an integration the fired version does not declare", () => {
-    expect(savedScheduleOverrides({}, fallback, [])).toEqual({});
+    expect(
+      savedScheduleOverrides({ overrides: {}, runsAsViewer: true, viewerReadiness, declared: [] }),
+    ).toEqual({});
   });
 });
 

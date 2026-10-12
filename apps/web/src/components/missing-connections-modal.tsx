@@ -9,6 +9,7 @@ import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
 import {
+  blockingIntegrationIds,
   useAgentConnectionReadiness,
   useIntegrationDetail,
   useIntegrationReadinessEntry,
@@ -40,9 +41,11 @@ interface MissingConnectionsModalProps {
 
 /**
  * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
- * `errors[]` entry. An actionable row embeds `IntegrationConnectionPicker`, which writes the
- * member's pin for this agent as the Connexions tab does; "Re-run" replays the launch, which
- * reads that pin. Structural failures keep a plain message: no pick fixes them.
+ * `errors[]` entry. An actionable row embeds `IntegrationConnectionPicker`, which shows the
+ * connection the agent's resolution binds and writes the member's pin for this agent, as the
+ * Connexions tab does. "Re-run" replays the launch without its own pick for the refused
+ * integrations (`retryLaunch`), so a row shows exactly what the replay binds. Structural
+ * failures keep a plain message: no pick fixes them.
  * Mounted only while a refusal stands, so it is always open.
  */
 export function MissingConnectionsModal({
@@ -57,9 +60,7 @@ export function MissingConnectionsModal({
   const { t } = useTranslation(["agents"]);
   // The live verdict of the launched version: a row it still blocks holds the re-run.
   const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
-  const stillBlocking = readiness?.integrations
-    .filter((i) => i.run_blocking)
-    .map((i) => i.integration_package_id);
+  const stillBlocking = readiness && blockingIntegrationIds(readiness);
 
   const { showRetry, canRetry } = retryDecision(errors, retrying, stillBlocking);
 
@@ -134,7 +135,8 @@ export function MissingRow({
   );
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would let it through; no verdict is not "ready".
+  // Resolved = the run-kickoff gate lets this resolution through, and the replay binds this
+  // same resolution (`retryLaunch` drops the launch's own pick). No verdict is not "ready".
   const resolved = !!verdict && !verdict.run_blocking;
   const unbound = unboundLabel(verdict?.resolution.warning ?? null);
   // The picker needs the manifest + first verdict to render fully wired; a
