@@ -28,6 +28,7 @@
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./launch-warnings.ts";
 
 export type ReportMode = "auto" | "true" | "false";
@@ -38,6 +39,8 @@ interface ReportOptions {
   fallback: ReportFallback;
   /** Requested sink TTL in seconds. Clamped by the server. */
   ttlSeconds?: number;
+  /** `--connection` picks, sent as the body's `connection_overrides`. */
+  connectionOverrides?: ConnectionOverrides | undefined;
 }
 
 export interface ReportContext {
@@ -158,6 +161,7 @@ export async function startReportSession(
     input: {},
     contextSnapshot: truncateSnapshot(contextSnapshot),
     ...sink,
+    ...(opts.connectionOverrides ? { connection_overrides: opts.connectionOverrides } : {}),
   };
 
   let body: Record<string, unknown>;

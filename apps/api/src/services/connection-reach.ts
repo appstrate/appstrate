@@ -10,7 +10,7 @@
  * Every predicate is over the unaliased `integration_connections` table.
  */
 
-import { and, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, asc, eq, isNull, not, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import type { ConnectionAction } from "@appstrate/shared-types";
 import type { OrgRole } from "@appstrate/core/permissions";
 import {
@@ -93,6 +93,9 @@ export function sharedInSpace(spaceId: string): SQL {
 export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
 }
+
+/** The order candidates of equal standing keep, wherever the usable rows are listed. */
+export const OLDEST_FIRST = [asc(c.createdAt), asc(c.id)] as const;
 
 /** In the SQL, so a delegated credential only ever SELECTs rows inside its org (and space). */
 export function meConnectionAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {

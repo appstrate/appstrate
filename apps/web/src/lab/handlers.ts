@@ -78,6 +78,65 @@ const patchedModels = new Map<string, { label?: string; enabled?: boolean }>();
 /** Models created, deleted or made the default through « Choose the models ». */
 const addedModels: f.Json200<"/api/models", "get">["data"] = [];
 const deletedModels = new Set<string>();
+/** The member pins written in this lab session, by integration: a `PUT` sets one, a `DELETE` clears it. */
+const memberPins = new Map<string, string[]>();
+
+/** The agent's connection readiness: each integration the member pinned resolves to its pin. */
+function connectionReadiness(): typeof f.agentConnectionReadiness {
+  return {
+    ...f.agentConnectionReadiness,
+    integrations: f.agentConnectionReadiness.integrations.map((entry) => {
+      const pinned = memberPins.get(entry.integration_package_id);
+      if (!pinned) return entry;
+      return {
+        ...entry,
+        run_blocking: false,
+        resolution: {
+          ...entry.resolution,
+          source: "member_pin",
+          error_code: null,
+          warning: null,
+          member_pinned_connection_ids: pinned,
+          resolved_connection_ids: pinned,
+        },
+      };
+    }),
+  };
+}
+
+/**
+ * The `409 missing_integration_connection` of a launch: one item per integration the readiness
+ * says blocks a run, with the candidates the member may choose among. `null` when none does.
+ */
+function missingConnectionRefusal(): LabResponse | null {
+  const errors = connectionReadiness()
+    .integrations.filter((entry) => entry.run_blocking)
+    .map((entry) => ({
+      field: `integrations.${entry.integration_package_id}`,
+      code: entry.resolution.error_code ?? "must_choose_connection",
+      message: "A connection must be chosen for this integration.",
+      candidate_connections: entry.resolution.candidates.map((c) => ({
+        id: c.id,
+        label: c.label,
+        account_id: c.account_id,
+        owned_by_actor: c.is_own,
+        needs_reconnection: c.needs_reconnection,
+        scopes_granted: c.scopes_granted,
+        missing_scopes: c.missing_scopes,
+      })),
+    }));
+  if (errors.length === 0) return null;
+  return {
+    status: 409,
+    body: {
+      title: "Connection required",
+      status: 409,
+      code: "missing_integration_connection",
+      errors,
+      version_ref: "draft",
+    },
+  };
+}
 let defaultModelId: string | null = null;
 
 /** The organization's models as this lab session has left them. */
@@ -2079,14 +2138,39 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     },
   },
   {
+    // The member's pin for an agent's integration: the pickers write it, the readiness reads it.
+    method: "PUT",
+    pattern: /^\/api\/me\/integration-pins\/.+\/integrations\/.+$/,
+    handler: (url, scenario, _headers, body) => {
+      if (scenario === "error") return { status: 500, body: { title: "Pin unavailable" } };
+      const ids = (body as { connection_ids?: string[] } | undefined)?.connection_ids ?? [];
+      memberPins.set(decodeURIComponent(url.pathname.split("/integrations/")[1] ?? ""), ids);
+      return { status: 200, body: { connection_ids: ids } };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/me\/integration-pins\/.+\/integrations\/.+$/,
+    handler: (url) => {
+      memberPins.delete(decodeURIComponent(url.pathname.split("/integrations/")[1] ?? ""));
+      return { status: 204, body: undefined };
+    },
+  },
+  {
     // Launching: the run that answers is the first one, with the launch's warnings.
     method: "POST",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/run$/,
-    handler: (_url, scenario, _headers, body) => {
+    handler: (url, scenario, _headers, body) => {
       if (scenario === "error") return { status: 500, body: { title: "Launch unavailable" } };
       const { connection_overrides } = (typeof body === "object" && body !== null ? body : {}) as {
         connection_overrides?: unknown;
       };
+      // The heavy scenario launches into the recovery modal, as the server answers a run whose
+      // connections nothing chose: the member picks there, and the row follows.
+      if (scenario === "heavy" && agentPackageId(url) === f.agentDetail.id) {
+        const refusal = missingConnectionRefusal();
+        if (refusal) return refusal;
+      }
       return {
         status: 201,
         body: { ...f.runs[0]!, warnings: unboundWarnings(connection_overrides, "run_override") },
@@ -2096,7 +2180,7 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/connection-readiness$/,
-    handler: () => ({ status: 200, body: f.agentConnectionReadiness }),
+    handler: () => ({ status: 200, body: connectionReadiness() }),
   },
   {
     method: "GET",

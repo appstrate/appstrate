@@ -206,6 +206,18 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   - Usages over a plain list go through `ConnectionSetPicker` (same file, a controlled value:
     `null` no choice, `[]` none, each tick handed to `onChange`).
 
+  What turns a trigger amber is `gatesRun` (`use-connection-picker.ts`): the server's `run_blocking`
+  while nothing is chosen (an unset override included, which inherits the cascade), the pick itself
+  once a set is chosen (an under-scoped, dead or unavailable member, or « Aucune connexion » for a
+  required integration). An override reaching outside an admin lock says so under the locked
+  picker (`override_outranked`). **A schedule takes no fallback**: the server refuses to arm one
+  whose connections nobody named, even when the actor holds a single connection. So the creation
+  modal, and every write from a schedule's Paramètres while it runs as the viewer, name the
+  connection the viewer's fallback binds (`savedScheduleOverrides`, from the readiness verdict of
+  the version the schedule fires, never for another actor); a launch that is refused is replayed
+  without its own pick for the refused integrations, and « Relancer » waits for the live verdict
+  of each of them (`retryDecision`).
+
 ## 5. Choosing a value
 
 | Need                                                                 | Component                                                                                                                                                                                                                                                                                                                                                                                   |

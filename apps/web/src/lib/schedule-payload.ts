@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  withDeclaredConnections,
+  withFallbackConnections,
+  type FallbackBindingEntry,
+} from "./connection-set";
 
 /**
  * An execution identity. Exactly one field is set; `undefined` means no
@@ -28,5 +33,31 @@ export interface RunOverridesValue {
 export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined): boolean {
   return (
     (a?.userId ?? null) === (b?.userId ?? null) && (a?.endUserId ?? null) === (b?.endUserId ?? null)
+  );
+}
+
+/** The overrides a schedule is written with, and what a write derives the stored ones from. */
+interface ScheduleOverridesState {
+  overrides: RunOverridesValue;
+  runsAsViewer: boolean;
+  /** The viewer's readiness entries for the fired version. */
+  viewerReadiness: readonly FallbackBindingEntry[] | undefined;
+  /** The integrations the fired version declares; `undefined` while it loads. */
+  declared: readonly string[] | undefined;
+}
+
+/**
+ * What a schedule write stores. For a schedule running as the viewer, the connection the
+ * fallback binds is named from `viewerReadiness` (the server takes no fallback for a schedule);
+ * for any other actor that verdict speaks for nobody and names nothing. Then only the keys of
+ * `declared` are kept; `undefined` keeps every pick.
+ */
+export function savedScheduleOverrides(state: ScheduleOverridesState): RunOverridesValue {
+  return withDeclaredConnections(
+    withFallbackConnections(
+      state.overrides,
+      state.runsAsViewer ? state.viewerReadiness : undefined,
+    ),
+    state.declared,
   );
 }

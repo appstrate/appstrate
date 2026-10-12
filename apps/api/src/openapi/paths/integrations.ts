@@ -219,7 +219,7 @@ export const sharedSpaceIdsSchema = {
 export const originSpaceIdSchema = {
   type: ["string", "null"],
   description:
-    "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else.",
+    "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else.",
 } as const;
 
 /** A space by id and name. */

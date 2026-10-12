@@ -28,6 +28,7 @@ import { extractRunAgentDenorm, freezeRunSpawnDependencies } from "./run-pipelin
 import {
   missingIntegrationConnection,
   resolveRunConnectionsOrError,
+  type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
@@ -60,6 +61,8 @@ interface CreateRunInput {
    * `freezeRunSpawnDependencies` — an unsatisfiable pin aborts the run.
    */
   dependencyOverrides?: Record<string, string> | null;
+  /** Cascade layer 3; its ids persist on `runs.connection_overrides`. */
+  launchOverrides?: LaunchOverrides | null;
   /** Client-requested sink TTL. */
   sink?: SinkRequest;
   /** CLI-provided execution environment metadata (os, cli version, git sha, ...). */
@@ -108,12 +111,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // caller — `POST /api/runs/remote` — already validates the
   // (agent, input, spaceId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
-  // branch runs it inside `runInlinePreflight`. Neither passes
-  // `launchOverrides`, and neither can: `CreateRemoteRunBodySchema` is
-  // `.strict()` and declares no `connection_overrides` field, so a remote run
-  // carries no per-run connection picks at all (a platform-run feature).
-  // Running it again here would repeat that work; the connection cascade
-  // below still re-resolves, which catches a change in between.
+  // branch runs it inside `runInlinePreflight`. Running it again would repeat
+  // that work; the connection cascade below still re-resolves, which catches a
+  // change in between.
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
@@ -161,12 +161,12 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   });
 
   // --- Snapshot the connection cascade (remote-path mirror of
-  //     run-pipeline). `launchOverrides` is null here and in the readiness pass
-  //     the route already ran — the remote body accepts no per-run connection
-  //     picks — so the two resolve the same cascade. A failure at this point is
-  //     therefore a between-readiness-and-now race (connection deleted, new
-  //     admin pin), and it answers the same 409 `missing_integration_connection`
-  //     the readiness check does.
+  //     run-pipeline). `launchOverrides` is the value the route's readiness
+  //     pass resolved with — the remote body's `connection_overrides` — so the
+  //     two resolve the same cascade. A failure at this point is therefore a
+  //     between-readiness-and-now race (connection deleted, new admin pin), and
+  //     it answers the same 409 `missing_integration_connection` the readiness
+  //     check does.
   const versionRef = versionRefOf(overrideVersionLabel);
   let resolvedConnections: ResolvedConnectionMap | null = null;
   let integrationsUnbound: RunIntegrationUnbound[] | undefined;
@@ -177,7 +177,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
         packageId: agent.id,
         actor,
         scope: { orgId, spaceId },
-        launchOverrides: null,
+        launchOverrides: input.launchOverrides ?? null,
         // Reads the pinned manifests frozen just above (auth keys / scopes match
         // what the spawn will use).
         manifestCache,
@@ -200,8 +200,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
           message:
             `Remote runs bind one connection per integration, but this run's connection choice binds ` +
             `several to '${integrationId}' — the remote runner's api_call tool cannot say which one ` +
-            `to use. Pick one with a member pin (a set an admin pin or an enforced org default ` +
-            `imposes is narrowed by an admin), or run the agent on the platform.`,
+            `to use. Name one in connection_overrides or pick one with a member pin (a set an admin ` +
+            `pin or an enforced org default imposes is narrowed by an admin), or run the agent on ` +
+            `the platform.`,
         })),
         versionRef,
       );
@@ -250,8 +251,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       inferenceRoute: null,
       sinkSecretEncrypted: encrypt(credentials.secret),
       sinkExpiresAt: new Date(credentials.expiresAt),
-      // Always null on this path — see the readiness comment above.
-      connectionOverrides: null,
+      connectionOverrides: input.launchOverrides?.ids ?? null,
       resolvedConnections,
       integrationsUnbound,
       dependencyOverrides: input.dependencyOverrides ?? null,

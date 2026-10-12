@@ -135,7 +135,7 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(team).toContain(i18n.t("agents:schedule.connectionOverrides.needsReconnection"));
     // No candidates travel with an unreachable pick: the way out is clearing it.
     expect(renderChoice({ [NOTION]: ["gone"] })).toContain(
-      i18n.t("agents:schedule.connectionOverrides.clearChoice"),
+      i18n.t("agents:connectionOverrides.clearChoice"),
     );
   });
 
@@ -169,7 +169,7 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).toContain("schedule-actor-stored-@acme/slack");
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.privateConnection"));
     expect(html).not.toContain("c_private");
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 
   it("with nothing the viewer may name, offers no connection to tick", () => {
@@ -213,6 +213,6 @@ describe("ScheduleActorConnectionChoice", () => {
       />,
     );
     expect(html).not.toContain(`sched-choice-pick-none-${GMAIL}`);
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 });

@@ -98,7 +98,7 @@ describe("MCP server instructions — connect bullet", () => {
       // Rebound by the launch override, which beats a member pin and works inline too.
       expect(part).toContain("`connection_overrides`");
       // …and the caller is told where the new connection's id comes from.
-      expect(part).toMatch(/`listIntegrationConnections`|only when `source` is `fallback_auto`/);
+      expect(part).toMatch(/`listIntegrationConnections`|`candidate_connections` list the new one/);
       // The item's own `remedy` decides, every value named.
       for (const remedy of INSUFFICIENT_SCOPES_REMEDIES) {
         expect(part).toContain(`\`${remedy}\``);
@@ -166,6 +166,14 @@ describe("MCP server instructions — connect bullet", () => {
       /start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`/,
     );
     expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
+  });
+
+  it("says a schedule write wants the user's one connection named too", () => {
+    const bullet = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- The exception — code `must_choose_connection`"));
+    expect(bullet).toContain("An enabled schedule write answers this code for the user's one");
+    expect(bullet).toContain("in the schedule's own `connection_overrides`");
   });
 
   it("names the layers a `required_integration_unbound` comes from and what clears it", () => {

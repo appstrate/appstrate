@@ -82,12 +82,13 @@ the root `CHANGELOG.md` (Operators).
 3. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
 4. Start the app.
 5. `0041` dry run, then `--apply`: connections widened to org scope.
-6. `0042` dry run, then `--apply`: model subscriptions made personal. It refuses four cases per
+6. `0043` dry run, then `--apply`: space-tier auto-provisioned OAuth clients moved to their org.
+7. `0045` dry run, then `--apply`: the connection a member made in a space pinned for the agents that bound it there by default. It lists the enabled schedules left naming no set; it refuses to run while `0041` or `0043` has work left.
+8. `0042` dry run, then `--apply`: model subscriptions made personal. It refuses four cases per
    organization (an aliased model bound to a subscription, a `pending` or `running` run pinned to
    one, a schedule whose model override it would unbind, two models it would unbind onto one pair),
    committing nothing for that organization, and fails at the end, after the others have committed,
    on an unreadable org-owned blob. Fix the case and re-run it: committed organizations are a no-op.
-7. `0043` dry run, then `--apply`: space-tier auto-provisioned OAuth clients moved to their org.
 
 ## The split
 
@@ -1162,6 +1163,7 @@ Rollback:
 | `0042` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run finds nothing. Reverting it would bind models to subscriptions again and restore deleted orphans; no script does, restore the dump. |
 | `0043` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run finds nothing to promote. Merged clients are deleted; no script restores them, restore the dump.                                    |
 | `0044` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run inserts nothing. Revert: restore the `pg_dump`; the emptied `shared_space_ids` is not rebuilt from the table.                       |
+| `0045` | n/a — it is a script, not a migration.                                                                                                                               | Re-runnable: a second run finds nothing to pin. Revert: delete the member pins its `reason: migrated` audit rows name, or restore the dump.                   |
 
 ## Detail — Model subscriptions made personal (script `0042`, drizzle `0087`)
 
@@ -1227,6 +1229,48 @@ back), `--apply` to commit; each refuses an empty `DATABASE_URL`.
 
 Rollback: see the table above.
 
+## Detail — The connection a member made in a space pinned for the agents binding it there (script `0045`)
+
+**Not a runbook.** With no pin, default or override, a run binds the actor's one own connection of
+an integration and answers `must_choose_connection` when they own several (#1929). `0041` and
+`0043` widen user-owned connections to org scope, so a member who connected one integration from
+two spaces owns two connections in every space. `0045` stores "in this space, this member's
+connection is the one made here" in the one form the model has for it, a member pin, where the data
+shows the space bound that connection by default while the other existed.
+
+A (space, member, integration) qualifies when the member, still one of the organization, owns
+several connections usable in the space (`usableInSpace`), exactly one made there
+(`coalesce(space_id, origin_space_id)`) and none of the others shared into it (`sharedInto`: a
+shared row reached the space whatever its scope). For a qualifying tuple, an agent gets the pin
+when the member's most recent run of it in that space recording the integration
+(`runs.resolved_connections`, a schedule's fire included) bound exactly that connection by
+`fallback_auto` and started (`runs.started_at`, set when the run row is inserted, never NULL) after each of the others was created. A later
+binding of another source, or a connection made since, is the member's own word: no pin. Nor where
+an org default names a set for the integration there, where they or an admin pinned the agent, nor
+on a deleted agent or an inline run's shadow package. Each pin is audited
+`integration.member_pin.upserted` by the `system` actor (`reason: migrated`).
+
+It also lists, without writing, every enabled schedule running as a member of the organization in
+a space, for each integration its agent declares (its draft or any published version) of which that member owns
+several connections usable there, wherever they were made (a space they never connected from
+included), when the schedule's `connection_overrides` names no set for it, no admin pin governs the
+agent and no org default the integration: `binds through the pin` (the member's pin on that agent,
+existing or written here) or `no pin: name the set` (its next fire answers
+`must_choose_connection`: name a set on the schedule, or have the member pin the agent). End
+users' schedules are not listed: their connections stay in their space
+(`integration_connections_end_user_is_space`), so the widening changes nothing for them.
+
+It prints what `0041` and `0043` have left and refuses to run unless both are 0, then per
+organization (one transaction each) every pin and every listed schedule with its space, member and
+verdict, then the two totals: the pins (`pins:`) and the schedules with no pin;
+`grep 'no pin: name the set'` is the list to act on. With `--apply`, the pins left to write must
+then be 0. Rehearse on a restored dump, after `0041` and `0043` there. Run it
+after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first:
+`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-connection-made-in-space.ts` is the
+dry run; `--apply` commits. It refuses an empty `DATABASE_URL`.
+
+Rollback: see the table above.
+
 ## Log
 
 | #    | date                | what                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -1274,3 +1318,4 @@ Rollback: see the table above.
 | 0042 | not applied         | subscriptions (`oauth` model credentials, recognised by decrypting the blob, never through the provider registry) made personal (#1875): a subscription whose creator is still a member becomes theirs (`owner_user_id`); an orphan (no creator, or a creator who left) and its pairings deleted; non-aliased organization models bound to any subscription unbound (`credential_id` NULL, `provider_id` kept) — **`pg_dump` before the deploy carrying drizzle `0087`, then run it after the deploy, app up; an organization with a `pending` or `running` run pinned to one of its subscriptions is refused until that run finishes**; `.ts`, dry run by default, `--apply` to commit | subscriptions to migrate, then per organization (one transaction each, rolled back on a dry run) the owned, orphan, pairing and unbound counts with each row, and the members who ran on a subscription they do not own; a blob that does not decrypt is listed and kept; on `--apply`, the subscriptions and the unreadable credentials left org-owned, which must be 0 (exit 1 otherwise); `--apply` also refuses an organization with an aliased model or a pending/running run bound to one of its subscriptions                                                                                                                                                                                         |
 | 0043 | not applied         | space-tier auto-provisioned (DCR/CIMD) OAuth clients moved to their org tier: per (integration, auth, issuer) the client of either tier with the most connections, a tie going to the org tier, is the winner; the others are merged into it and a space-tier winner promoted (connections re-pointed and flagged `needs_reconnection`, client deleted) and the key's user-owned rows widened to org scope, each audited `scope_widened` by the `system` actor (#1910) — **run after the deploy carrying drizzle `0089`, app up, after `0044` and `0041`**; `.ts`, dry run by default, `--apply` to commit                                                                              | per organization (one transaction each, rolled back on a dry run) the promoted, merged, re-pointed and widened counts; on `--apply`, the space-tier auto clients left, which must be 0 (exit 1 otherwise); idempotent, a second run finds nothing to promote                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 0044 | not applied         | `integration_connections.shared_space_ids` copied into `integration_connection_shares` (`ON CONFLICT DO NOTHING`, each audited `share_added` with `reason: migrated`) and emptied, a missing or other-organization target space skipped and printed, then the shares whose owner no longer reaches their space withdrawn as a live access loss does (#1910) — **run after the migrate service (`appstrate-migrate`) applies drizzle `0089` and BEFORE the app starts**: an app serving `0089` before it runs sees no existing share; `.ts`, dry run by default, `--apply` to commit                                                                                                     | rows copied, targets skipped (each printed), columns emptied, shares withdrawn and schedules disabled, in one transaction rolled back on a dry run; a second `--apply` inserts nothing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 0045 | not applied         | member pins naming the connection a member of the organization made in a space, where they own several connections usable there, exactly one made there and none of the others shared into it: one per agent whose last run by them there recording the integration bound exactly that connection by `fallback_auto` after the others were created, no org default on the integration, no pin of theirs or admin pin on the agent (#1929); each audited `integration.member_pin.upserted` by the `system` actor — **run after `0041` and `0043`, app up**; `.ts`, dry run by default, `--apply` to commit                                                                               | UNMEASURED — the state it repairs exists only after `0041 --apply`, which no reachable database has run. Refuses to run while `0041` or `0043` has work left; prints the pins to write and the schedules with no pin, then per organization (one transaction each, rolled back on a dry run) each pin and, listed and not written, each enabled schedule naming no set for an integration its member owns several usable connections of: `binds through the pin` or `no pin: name the set`; on `--apply`, the pins left to write, which must be 0 (exit 1 otherwise); idempotent                                                                                                                             |

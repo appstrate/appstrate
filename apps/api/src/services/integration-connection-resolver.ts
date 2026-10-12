@@ -10,15 +10,13 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own usable connection on an auth serving the selection;
- *      several → those OF this space (`space_id`, else `origin_space_id`) when any; of those,
- *      several oauth2 rows of one known account, auth and instance → the least-privileged
- *      covering the agent (never without an agent selection); otherwise several →
- *      `must_choose_connection`; none → as below.
+ *      several (one too under `noFallback`) → `must_choose_connection`; none → as below.
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
  * naming anything outside it is `override_outranked`. A shared connection is never bound
- * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
+ * implicitly. A `must_choose_connection` item lists every serving connection, least privilege
+ * first. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
  * bind (or switched off in the space), a `required` integration is an error, any other binds
  * none with a warning carrying the same code — `integration_unbound` (a layer's `[]`) aside.
  * Equal labels in a bound set (two owners') get ` (n)` in set order: the snapshot and the
@@ -72,7 +70,7 @@ import {
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
 import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
 import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
-import { usableInSpace, userConnectionsBlocked } from "./connection-reach.ts";
+import { OLDEST_FIRST, usableInSpace, userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import {
@@ -84,11 +82,6 @@ import {
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
 import { listActiveIntegrationIds } from "./integration-connections.ts";
-import {
-  connectionVariablesOf,
-  displayAccountId,
-  sameConnectionVariables,
-} from "../lib/connection-identity.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
@@ -106,8 +99,6 @@ export function toLaunchOverrides(
 }
 
 export interface IntegrationRequirement {
-  /** `proxy`: a credential-proxy call, built by {@link proxyRequirement} alone. */
-  kind: "agent" | "proxy";
   integrationId: string;
   manifest: IntegrationManifest;
   /** The EFFECTIVE selection (below) is non-empty or `"*"` — what the spawn resolver starts. */
@@ -128,14 +119,13 @@ export interface IntegrationRequirement {
 
 /**
  * The requirement of a credential-proxy call. No agent selects anything: every declared auth
- * serves, no scope is required or tells own rows apart, and the call needs a connection.
+ * serves, no scope is required, and the call needs a connection.
  */
 export function proxyRequirement(
   integrationId: string,
   manifest: IntegrationManifest,
 ): IntegrationRequirement {
   return {
-    kind: "proxy",
     integrationId,
     manifest,
     hasSelectedTools: true,
@@ -146,9 +136,8 @@ export function proxyRequirement(
 }
 
 interface ResolveConnectionsInput {
-  /** The space resolved in: the fallback prefers the actor's rows of this space. */
-  spaceId: string;
   requirements: IntegrationRequirement[];
+  /** Oldest first, as readiness lists them: the order candidates of equal standing keep. */
   accessibleConnections: ConnectionRow[];
   /** Admin pins (`userId` null) and the actor's member pins for (space, agent). */
   pins: PinRow[];
@@ -161,6 +150,8 @@ interface ResolveConnectionsInput {
   includeInert?: boolean;
   /** Declared integrations switched off in the space: never walked through the cascade. */
   inactiveIntegrationIds?: ReadonlySet<string>;
+  /** Layer 6 binds nothing: the actor's own serving connections are a choice, one included. */
+  noFallback?: boolean;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
@@ -262,12 +253,11 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       candidates,
       candidateIndex: new Map(candidates.map((c) => [c.id, c])),
       accessibleIndex,
-      spaceId: input.spaceId,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
+      noFallback: input.noFallback,
       auth,
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
-      kind: req.kind,
     });
 
     record(req.integrationId, result);
@@ -301,14 +291,13 @@ interface ResolveOneArgs {
   candidateIndex: ReadonlyMap<string, ConnectionRow>;
   /** Before the auth filters: tells a row they dropped from one the actor cannot reach. */
   accessibleIndex: ReadonlyMap<string, ConnectionRow>;
-  spaceId: string;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  noFallback?: boolean;
   /** Already applied to the candidates; kept to name the connect target on `not_connected`. */
   auth: AuthFilter;
   /** Set when the dep's `auth_key` filtered out every live row: the auths those rows use. */
   availableAuthKeys?: string[];
-  kind: IntegrationRequirement["kind"];
 }
 
 type ResolveOneResult =
@@ -486,45 +475,22 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   const serving = args.candidates.filter((c) => servesSelection(args.auth, c.authKey));
   // Health never switches the pick: a dead own row is still bound and answers needs_reconnection.
   const own = serving.filter((c) => isOwnedByActor(args, c));
-  const here = own.filter((c) => (c.spaceId ?? c.originSpaceId) === args.spaceId);
-  const mine = here.length > 0 ? here : own;
-  if (mine.length === 1) return bindSet(args, [mine[0]!], "fallback_auto");
-  const sameAccount = mine.length > 1 ? leastPrivilegedOfOneAccount(args, mine) : null;
-  if (sameAccount) return bindSet(args, [sameAccount], "fallback_auto");
-  if (own.length > 1) {
+  if (own.length === 1 && !args.noFallback) return bindSet(args, own, "fallback_auto");
+  if (own.length > 0) {
     return errorOf(args, {
       code: "must_choose_connection",
-      message: `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
-      candidateConnections: serving.map((c) => candidateOf(args, c, missingScopesOf(args, c))),
+      message: `Integration '${args.integrationId}' needs a connection choice — pick one.`,
+      candidateConnections: rankedCandidates(args, serving),
     });
   }
   return gapOf(args, nothingOwnServes(args, serving));
 }
 
-/**
- * Own `oauth2` connections of ONE known account, auth and instance (variables) differ only by
- * scopes, so no account is chosen: the least-privileged one ({@link rankByLeastPrivilege}), the
- * oldest on a tie. `null` otherwise, and for a proxy call, which selects nothing.
- */
-function leastPrivilegedOfOneAccount(
-  args: ResolveOneArgs,
-  own: ConnectionRow[],
-): ConnectionRow | null {
-  if (args.kind === "proxy") return null;
-  const [first] = own;
-  const auth = args.manifest.auths?.[first!.authKey];
-  const account = displayAccountId(first!.accountId);
-  const variables = connectionVariablesOf(first!.variables);
-  if (auth?.type !== "oauth2" || account === null) return null;
-  const sameUpstream = (c: ConnectionRow) =>
-    c.authKey === first!.authKey &&
-    c.accountId === account &&
-    sameConnectionVariables(connectionVariablesOf(c.variables), variables);
-  if (!own.every(sameUpstream)) return null;
-  const oldestFirst = [...own].sort(
-    (a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id),
+/** `serving` as a `must_choose_connection` item lists it: readiness's `candidates[]` order. */
+function rankedCandidates(args: ResolveOneArgs, serving: ConnectionRow[]): ConnectionCandidate[] {
+  return rankByLeastPrivilege(args, serving).map(({ row, missingScopes }) =>
+    candidateOf(args, row, missingScopes),
   );
-  return rankByLeastPrivilege(args, oldestFirst)[0]!.row;
 }
 
 type ScopeSelection = Pick<ResolveOneArgs, "manifest" | "agentTools" | "agentScopes">;
@@ -534,7 +500,7 @@ type ScopedRow = Pick<ConnectionRow, "authKey" | "scopesGranted" | "needsReconne
  * `rows` least privilege first, each with its fit and the scopes the selection misses on it.
  * Ordered by fit (`CONNECTION_SCOPE_FITS`), then what the agent misses, what the row grants
  * beyond the agent's scopes and `default_scopes`, what the defaults miss, breadth, then health:
- * a narrow row (dead, or short of a newer default) is never traded for a broader one. Ties keep
+ * a narrow row (dead, or short of a newer default) stays ahead of a broader one. Ties keep
  * the given order. Breadth counts catalog scopes only (IdP echoes aside), `implies` expanded:
  * an umbrella is never narrower.
  */
@@ -659,7 +625,7 @@ function nothingOwnServes(args: ResolveOneArgs, serving: ConnectionRow[]): Gap {
   if (serving.length > 0) {
     return {
       code: "must_choose_connection",
-      candidateConnections: serving.map((c) => candidateOf(args, c, missingScopesOf(args, c))),
+      candidateConnections: rankedCandidates(args, serving),
       message: `Integration '${args.integrationId}' has only connections shared by other members — choose one explicitly (member pin or run override), or connect your own`,
     };
   }
@@ -873,6 +839,7 @@ interface ResolveConnectionsForRunInput {
   scope: SpaceScope;
   launchOverrides?: LaunchOverrides | null;
   includeInert?: boolean;
+  noFallback?: boolean;
   manifestCache?: IntegrationManifestCache;
 }
 
@@ -898,7 +865,6 @@ export async function resolveConnectionsForRun(
   ]);
 
   return resolveConnections({
-    spaceId: input.scope.spaceId,
     requirements: validReqs,
     accessibleConnections,
     pins,
@@ -907,6 +873,7 @@ export async function resolveConnectionsForRun(
     actorUserId,
     actorEndUserId,
     includeInert: input.includeInert ?? false,
+    noFallback: input.noFallback,
     inactiveIntegrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
   });
 }
@@ -1035,7 +1002,7 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   override_outranked: "Override Outranked By Governance",
-  must_choose_connection: "Multiple Connections Available — Pick One",
+  must_choose_connection: "Connection Choice Required",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
@@ -1066,7 +1033,6 @@ export function requirementOf(
   const hasSelectedTools =
     isToolsWildcard(effectiveTools) || (Array.isArray(effectiveTools) && effectiveTools.length > 0);
   return {
-    kind: "agent",
     integrationId: entry.id,
     manifest,
     hasSelectedTools,
@@ -1095,7 +1061,8 @@ async function loadAccessibleConnections(
         inArray(integrationConnections.integrationId, integrationIds),
         usableInSpace(spaceId, actor),
       ),
-    );
+    )
+    .orderBy(...OLDEST_FIRST);
 }
 
 async function loadPins(

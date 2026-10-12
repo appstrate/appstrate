@@ -1103,7 +1103,7 @@
   "integration.popup.blocked": "The connection window was blocked — allow popups for this site and try again.",
   "integration.popup.timeout": "Connection timed out. Please try again.",
   "integration.popup.failed": "Couldn't start the connection. Please try again.",
-  "integration.popup.scopesDenied": "The connection was created, but these permissions were not granted: {{scopes}}.",
+  "integration.popup.scopesDenied": "These permissions were not granted to the connection: {{scopes}}.",
   "agentEditor.integrations.authKey.label": "Auth method",
   "agentEditor.integrations.authKey.default": "Default (per integration)",
   "agentEditor.integrations.required.label": "Required to run the agent",

@@ -1613,6 +1613,17 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 12 October afternoon merge of main (#1932, 20 conflicted files)**
+
+The fallback binds one own connection and schedules name their sets: the
+redesign's `ConnectionChoiceMenu` keeps its reading (what is ticked is what is
+chosen, « Hériter (nom) »), and takes main's `gatesRun`, `shownConnectionPick`
+and `savedScheduleOverrides`. The schedule form main changed is gone in the
+redesign: its rule (name the viewer's fallback when a schedule runs as the
+viewer) lives in `new-schedule-modal.tsx` and in `schedule-settings.tsx`
+(`useScheduleWrite`). `use-agent-integrations-readiness.ts` had no reader left.
+Check 43/43, web tests and the full Playwright suite green.
+
 **The 12 October merge of main (3 commits, 25 conflicted files)**
 
 Typed refusals (#1926 to #1928): every refusal of main lands as its own

@@ -40,6 +40,7 @@ import { useAuth } from "../hooks/use-auth";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
+import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
 import {
   changedInputValues,
@@ -56,7 +57,12 @@ import {
   withConnectionOverride,
   withDeclaredConnections,
 } from "../lib/connection-set";
-import { type ActorValue, type RunOverridesValue, sameActor } from "../lib/schedule-payload";
+import {
+  type ActorValue,
+  type RunOverridesValue,
+  sameActor,
+  savedScheduleOverrides,
+} from "../lib/schedule-payload";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 import {
   SCHEDULE_SETTINGS_SECTIONS as SECTIONS,
@@ -97,6 +103,40 @@ function useFiredIntegrations(schedule: Schedule) {
   return { version, integrations };
 }
 
+/**
+ * `useUpdateSchedule` for this schedule. The server takes no fallback for an enabled schedule: a
+ * write by someone who can name the actor's connections is refused until a set names them. So,
+ * for a schedule running as the viewer, a write that carries no connection picks of its own
+ * names the connection their fallback binds, from the readiness verdict for the fired version.
+ */
+function useScheduleWrite(schedule: Schedule): Save {
+  const update = useUpdateSchedule();
+  const { user } = useAuth();
+  const { version, integrations } = useFiredIntegrations(schedule);
+  const runsAsViewer =
+    !!user && sameActor({ userId: schedule.userId ?? undefined }, { userId: user.id });
+  const { data: readiness } = useAgentConnectionReadiness(
+    runsAsViewer ? schedule.packageId : undefined,
+    version,
+  );
+  const { connection_overrides: named } = savedScheduleOverrides({
+    overrides: schedule.connection_overrides
+      ? { connection_overrides: schedule.connection_overrides }
+      : {},
+    runsAsViewer,
+    viewerReadiness: readiness?.integrations,
+    declared: integrations?.map((i) => i.id),
+  });
+  const mutate: Save["mutate"] = (variables, options) =>
+    update.mutate(
+      schedule.enabled && named && !("connection_overrides" in variables) && !("actor" in variables)
+        ? { ...variables, connection_overrides: named }
+        : variables,
+      options,
+    );
+  return { ...update, mutate };
+}
+
 export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const { t } = useTranslation(["agents", "common"]);
   const location = useLocation();
@@ -105,7 +145,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const mayWrite = can("schedules:write") && governs;
   const requested = new URLSearchParams(location.search).get("scheduleSettings");
   const active = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
-  const update = useUpdateSchedule();
+  const update = useScheduleWrite(schedule);
 
   return (
     <AgentDetailSplit
@@ -486,7 +526,7 @@ function ExecutionSection({
             }
           }}
           leadingOptions={[
-            { value: VERSION_INHERIT, label: t("run.overrides.versionInheritLatest") },
+            { value: VERSION_INHERIT, label: t("run.overrides.versionPublished") },
             ...(deps.homeWritable || version === "draft"
               ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
               : []),

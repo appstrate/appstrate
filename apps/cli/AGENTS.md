@@ -120,6 +120,23 @@ appstrate openapi show POST /api/runs/inline --json    # required fields
 appstrate api POST /api/runs/inline -d @manifest.json
 ```
 
+**Name the connection a run uses (answer to `409 missing_integration_connection` / `must_choose_connection`):**
+
+```sh
+# `appstrate run` prints each candidate under the refused integration — label,
+# account, yours or shared, needs reconnection — with the flag that names it.
+# Which account to use is the human's call: show them the list, then pass
+# their choice. Repeat --connection for another integration. Several values for
+# one integration form its set under --remote; a run executed locally binds one
+# connection per integration.
+appstrate run @acme/email-sorter --connection @acme/gmail=<connection-id>
+
+# Through the API the same choice is `connection_overrides` on the launch body
+# (always an array), and the 409's `errors[].candidate_connections` is the list.
+echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
+  | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
+```
+
 **List runs for a space, filter by status:**
 
 ```sh

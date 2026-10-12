@@ -35,12 +35,14 @@ import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choic
 import { ErrorState, LoadingState } from "./page-states";
 import { useModalParam } from "../hooks/use-modal-param";
 import { usePermissions } from "../hooks/use-permissions";
+import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { changedInputValues, hasInputFields, initialInputValues } from "../lib/agent-input";
 import { scheduleConnectionChoices } from "../lib/connection-choice";
 import { withConnectionOverride } from "../lib/connection-set";
 import { browserTimezone } from "../lib/cron-frequency";
+import { savedScheduleOverrides } from "../lib/schedule-payload";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 
 /** The URL parameter that opens the modal; its value is the agent to preselect, or `1`. */
@@ -170,16 +172,28 @@ function ScheduleFieldsReady({
   // flags tell which integrations may run with "Aucune connexion".
   const firedIntegrations = usePackageDetail("agent", agentId, { version: VERSION_PUBLISHED }).data
     ?.dependencies.integrations;
+  // A new schedule runs as its creator. The server takes no fallback for an enabled schedule, so
+  // the connection their fallback binds is named in the write, from the verdict for that version.
+  const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
+    agentId,
+    VERSION_PUBLISHED,
+  );
 
   const submit = () => {
     if (!cron) return;
+    const { connection_overrides } = savedScheduleOverrides({
+      overrides: { connection_overrides: picks },
+      runsAsViewer: true,
+      viewerReadiness: readiness?.integrations,
+      declared: firedIntegrations?.map((i) => i.id),
+    });
     create.mutate(
       {
         ...(name.trim() ? { name: name.trim() } : {}),
         cron_expression: cron,
         timezone,
         input: changedInputValues(wrapper, wrapper, values),
-        ...(Object.keys(picks).length > 0 ? { connection_overrides: picks } : {}),
+        ...(connection_overrides ? { connection_overrides } : {}),
       },
       { onSuccess: onCreated },
     );
@@ -243,7 +257,7 @@ function ScheduleFieldsReady({
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={!cron || create.isPending}>
+        <Button type="submit" disabled={!cron || create.isPending || readinessLoading}>
           {t("btn.create")}
         </Button>
       </div>

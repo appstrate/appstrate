@@ -87,9 +87,6 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
   }
 }
 
-/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
-export type ConnectionOverridesMap = Record<string, string[]>;
-
 /** Verdicts raised before any account is looked at: no pick fixes them. */
 const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
@@ -101,18 +98,20 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
-/** Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), others don't. */
+/**
+ * Re-run state of a refused launch: offered when a row can be answered, held while the launch is
+ * in flight or `stillBlocking` names a refused integration (undefined = verdict not loaded,
+ * nothing gated: the server stays the authority).
+ */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
-  picks: ConnectionOverridesMap,
-  retrying = false,
-): { mustChoose: boolean; showRetry: boolean; canRetry: boolean } {
-  const mustChooseIds = errors
-    .filter((e) => e.code === "must_choose_connection")
-    .map((e) => integrationIdOfField(e.field));
+  retrying: boolean,
+  stillBlocking: readonly string[] | undefined,
+): { showRetry: boolean; canRetry: boolean } {
+  const blocked = (e: MissingIntegrationFieldError) =>
+    stillBlocking?.includes(integrationIdOfField(e.field)) === true;
   return {
-    mustChoose: mustChooseIds.length > 0,
     showRetry: errors.some((e) => !isStructuralCode(e.code)),
-    canRetry: !retrying && mustChooseIds.every((id) => picks[id] !== undefined),
+    canRetry: !retrying && !errors.some(blocked),
   };
 }

@@ -2388,6 +2388,8 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
       },
       // Optional: unbound, the run starts without it and says why.
       { id: "@appstrate/clickup", version: "0.9.0", tools: ["clickup_list_tasks"] },
+      // One own connection and nothing choosing it: the fallback binds it.
+      { id: "@tractr/quickbooks-online", version: "1.0.0", tools: ["qbo_query"] },
     ],
   },
   last_run: { id: "run_01", status: "running", started_at: ago(2), duration: null },
@@ -2779,6 +2781,7 @@ export const agentConnectionReadiness: Json200<
       required: false,
       // Two own accounts and nothing choosing: the run is refused (409), so the launch is blocked.
       run_blocking: true,
+      inert: false,
       resolution: {
         // Two usable accounts and nothing naming one: the member has to pick.
         source: null,
@@ -2844,6 +2847,7 @@ export const agentConnectionReadiness: Json200<
       integration_package_id: "@appstrate/gmail",
       required: true,
       run_blocking: true,
+      inert: false,
       resolution: {
         source: "admin_pin",
         error_code: "required_integration_unbound",
@@ -2863,6 +2867,7 @@ export const agentConnectionReadiness: Json200<
       integration_package_id: "@appstrate/clickup",
       required: false,
       run_blocking: false,
+      inert: false,
       resolution: {
         source: null,
         error_code: null,
@@ -2879,6 +2884,47 @@ export const agentConnectionReadiness: Json200<
         org_default_enforced: false,
         can_add_connection: true,
         candidates: [],
+      },
+    },
+    {
+      // The member holds ONE connection and nothing names it: the fallback binds it. A schedule
+      // takes no fallback, so creating one names this connection in the write.
+      integration_package_id: "@tractr/quickbooks-online",
+      required: false,
+      run_blocking: false,
+      inert: false,
+      resolution: {
+        source: "fallback_auto",
+        error_code: null,
+        warning: null,
+        resolved_connection_ids: ["conn_lab_qbo"],
+        resolved_missing_scopes: [],
+        admin_pinned_connection_ids: null,
+        member_pinned_connection_ids: null,
+        org_default_connection_ids: null,
+        org_default_enforced: false,
+        can_add_connection: true,
+        candidates: [
+          {
+            id: "conn_lab_qbo",
+            auth_key: "drive",
+            account_id: "9341452981",
+            label: "TRACTR QC",
+            owner_user_id: USER_ID,
+            owner_end_user_id: null,
+            owner_name: "Olivier Tarbès",
+            scopes_granted: ["https://www.googleapis.com/auth/drive.readonly"],
+            scope: "org",
+            spaceId: null,
+            shared_here: false,
+            shared_space_ids: [],
+            origin_space_id: null,
+            needs_reconnection: false,
+            missing_scopes: [],
+            scope_fit: "exact",
+            is_own: true,
+          },
+        ],
       },
     },
   ],

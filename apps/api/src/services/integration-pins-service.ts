@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
@@ -54,7 +54,7 @@ import {
   connectionViewOf,
   loadConnectionShares,
 } from "./integration-connections.ts";
-import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
+import { OLDEST_FIRST, sharedInSpace, usableInSpace } from "./connection-reach.ts";
 import {
   resolveConnectionsForRun,
   translateResolutionError,
@@ -484,7 +484,7 @@ export async function listAccessibleConnections(
         usableInSpace(scope.spaceId, actor),
       ),
     )
-    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
+    .orderBy(...OLDEST_FIRST);
   const ownerName = await resolveConnectionOwnerNames(rows);
   const shares = await loadConnectionShares(
     db,
@@ -657,6 +657,8 @@ interface AgentConnectionReadiness {
     /** The agent's `integrations_configuration.<id>.required`. */
     required: boolean;
     run_blocking: boolean;
+    /** Declared, with nothing a run would start: the run cascade skips it. */
+    inert: boolean;
     resolution: IntegrationAgentResolution;
   }>;
 }
@@ -767,6 +769,11 @@ export async function resolveAgentConnectionReadiness(args: {
       : Promise.resolve([] as MemberPinSummary[]),
   ]);
   const blockingIds = new Set(runResolution.errors.map((e) => e.integrationId));
+  // Judged with `includeInert` and by no run: an unloadable manifest is judged by neither.
+  const inert = (id: string) =>
+    !(id in runResolution.resolved) &&
+    !blockingIds.has(id) &&
+    (id in pickResolution.resolved || pickResolution.errors.some((e) => e.integrationId === id));
 
   const resolutions = await Promise.all(
     declared.map((e) =>
@@ -806,6 +813,7 @@ export async function resolveAgentConnectionReadiness(args: {
       integration_package_id: e.id,
       required: e.required === true,
       run_blocking: blockingIds.has(e.id),
+      inert: inert(e.id),
       resolution: resolutions[i]!,
     })),
   };

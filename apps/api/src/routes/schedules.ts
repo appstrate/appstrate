@@ -783,7 +783,7 @@ export function createSchedulesRouter() {
       connectionOverrides: nextOverrides,
       storedOverrides: actorChanged ? null : existing.connection_overrides,
     });
-    // Armed: re-judged on every write, since a new connection can make the choice ambiguous.
+    // Armed: re-judged on every write, since a connection made after the last can open the choice.
     // `warnings` stays `null` unless this write moves what a fire resolves with: a disabled
     // schedule fires nothing, and an unrelated edit has no news to report.
     const resolutionMoved =

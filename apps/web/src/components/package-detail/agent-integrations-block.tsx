@@ -35,14 +35,10 @@ import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 
 interface AgentIntegrationsBlockProps {
+  /** The agent's declared integrations; the Connexions tab renders its own empty state. */
   entries: AgentIntegrationEntry[];
-  /**
-   * Agent package id — keys per-agent admin pins. Optional so callers
-   * that don't surface the admin pin row (e.g. read-only previews) can
-   * omit it; when present, an admin can pin a specific shared connection
-   * for THIS agent on each (integration, authKey).
-   */
-  agentPackageId?: string;
+  /** The agent whose resolution each row reads and whose member pin its picker writes. */
+  agentPackageId: string;
   /**
    * The table for a schedule rather than the agent: "Compte utilisé" picks the
    * connections frozen on the schedule (`connection_overrides`, the launch
@@ -72,9 +68,9 @@ const isNotPlaced = (error: unknown) => error instanceof ApiError && error.statu
 
 /**
  * Connection-status table for every integration declared in the agent
- * manifest. A row with a per-agent context (`agentPackageId`) renders the
- * per-integration connection picker — list, pick, disambiguate, connect,
- * reconnect, add-another — driven by the server-authoritative
+ * manifest. An active integration's row renders the per-integration
+ * connection picker — list, pick, disambiguate, connect, reconnect,
+ * add-another — driven by the server-authoritative
  * `IntegrationAgentResolution`, selected from the bulk
  * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
  * the launch-button readiness badge and the run-kickoff 409 consume, so the
@@ -98,7 +94,6 @@ export function AgentIntegrationsBlock({
   const [search, setSearch] = useState("");
   const [states, setStates] = useState<string[]>([]);
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
-  if (entries.length === 0) return null;
 
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const rows = entries
@@ -159,7 +154,7 @@ export function AgentIntegrationsBlock({
           agentTools={entry.tools}
           agentScopes={entry.scopes}
           required={entry.required === true}
-          {...(agentPackageId ? { agentPackageId } : {})}
+          agentPackageId={agentPackageId}
           {...(scheduleOverrides ? { scheduleOverrides } : {})}
         />
       ),
@@ -239,7 +234,7 @@ function IntegrationConnectionCell({
   agentScopes: string[] | undefined;
   /** The agent's `required` flag: an inactive required integration refuses the run. */
   required: boolean;
-  agentPackageId?: string;
+  agentPackageId: string;
   scheduleOverrides?: ScheduleOverrides;
 }) {
   const { detail, isLoading, error } = state;
@@ -261,12 +256,6 @@ function IntegrationConnectionCell({
   // connection is possible. Show a disabled, explanatory control rather than a
   // picker the run-time gate would reject with `integration_not_active`.
   if (!detail.active) return <InactiveIntegration packageId={packageId} required={required} />;
-
-  // Read-only preview (no per-agent context) — no picker/CTA.
-  // Matches the prior behaviour for library/marketplace previews.
-  if (!agentPackageId) {
-    return <span className="text-muted-foreground text-sm">—</span>;
-  }
 
   if (scheduleOverrides) {
     return (
@@ -300,10 +289,9 @@ function IntegrationConnectionCell({
 }
 
 /**
- * Connection-management surface for an active integration on a specific agent.
- * Split from the parent so its data fetches (resolution + consuming-agents) run
- * only once the parent's loading / not-active / read-only guards have passed —
- * i.e. only when the picker actually renders.
+ * Connection-management surface for an active integration on the agent. Split
+ * from the parent so its reads (resolution + consuming agents) run only once
+ * the parent's loading / not-active guards have passed — when the picker renders.
  */
 function ManagedIntegration({
   packageId,
@@ -331,10 +319,9 @@ function ManagedIntegration({
     return <InactiveIntegration packageId={packageId} required={false} />;
   }
 
-  // R5 — reuse hint: the resolved connections are shared across every agent in
-  // the space that consumes this integration, killing the "do I need one
-  // connection per agent?" confusion. Only when resolved AND not blocking — a
-  // blocking state is the picker's warning foreground, not a reassuring line.
+  // Reuse hint: the resolved connections serve every agent of the space that
+  // consumes this integration — one connection, not one per agent. Only when
+  // resolved: a blocking state is the picker's warning, not a reassuring line.
   const resolvedConnections =
     resolution?.resolved_connection_ids
       .map((id) => resolution.candidates.find((c) => c.id === id))
@@ -494,14 +481,14 @@ function IntegrationStatusCell({
 }: {
   packageId: string;
   appActive: boolean;
-  agentPackageId?: string;
+  agentPackageId: string;
 }) {
   const { t } = useTranslation("agents");
   const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
   if (!appActive) {
     return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
   }
-  if (!agentPackageId || isPending || !entry) {
+  if (isPending || !entry) {
     return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
   }
   if (describeResolution(entry.resolution).resolved) {

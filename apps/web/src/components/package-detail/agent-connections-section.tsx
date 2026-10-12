@@ -11,11 +11,7 @@ interface AgentConnectionsSectionProps {
   detail: AgentDetail;
 }
 
-/**
- * Agent "Connexions" tab — lists the integrations the agent declares and
- * gates `Run` via the same `validateAgentReadiness` pipeline on the
- * backend.
- */
+/** Agent "Connexions" tab: the integrations the agent declares, each with its connection picker. */
 export function AgentConnectionsSection({ packageId, detail }: AgentConnectionsSectionProps) {
   const { t } = useTranslation(["agents"]);
 
@@ -33,11 +29,5 @@ export function AgentConnectionsSection({ packageId, detail }: AgentConnectionsS
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <section className="space-y-2">
-        <AgentIntegrationsBlock entries={integrations} agentPackageId={packageId} />
-      </section>
-    </div>
-  );
+  return <AgentIntegrationsBlock entries={integrations} agentPackageId={packageId} />;
 }

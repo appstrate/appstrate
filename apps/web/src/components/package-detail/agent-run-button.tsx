@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { RunAgentButton } from "../run-agent-button";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useAgentRunBlocker } from "../../hooks/use-agent-readiness";
-import { useAgentConnectionReadiness } from "../../hooks/use-integrations";
+import { blockingIntegrationIds, useAgentConnectionReadiness } from "../../hooks/use-integrations";
 
 /** The launch control of the agent page: header and empty runs list render this one. */
 export function AgentRunButton({
@@ -22,7 +22,7 @@ export function AgentRunButton({
   // The same server resolver as the launch's 409. Each integration says whether
   // it blocks the run, so a switched-off agent is not read as a connection gap.
   const { data: connections } = useAgentConnectionReadiness(packageId);
-  const connectionGap = connections?.integrations.some((entry) => entry.run_blocking) ?? false;
+  const connectionGap = connections ? blockingIntegrationIds(connections).length > 0 : false;
 
   if (!detail) return null;
 

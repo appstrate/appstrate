@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { MissingIntegrationConnectionCode } from "@appstrate/core/integration";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
 import { ApiError } from "../api/errors";
+import { withDeclaredConnections } from "./connection-set";
 import {
   integrationIdOfField,
   missingConnectionErrors,
@@ -26,8 +26,7 @@ export interface RunLaunch {
   version?: string;
   /**
    * Per-integration connection sets for THIS run (cascade layer 3), validated in
-   * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal
-   * and, on a retry, by the connection-recovery modal (`retryLaunch`).
+   * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal.
    */
   connectionOverrides?: Record<string, string[]>;
   /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
@@ -88,40 +87,23 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
   };
 }
 
-/** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
-const OWN_PICK_REFUSALS: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
-  "override_outranked",
-  "override_connection_unavailable",
-]);
-
 /**
- * The launch a `409 missing_integration_connection` refused, replayed with the
- * recovery modal's picks. Everything else the user chose rides along — the
- * input typed in the run modal above all. The launch's own pick for an
- * integration is dropped only when the 409 refuses that pick itself
- * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
- * of it). Under any other code — a connection to repair, above all — the pick
- * is kept: dropping it could let the retry bind another account.
+ * The replay of a launch a `409 missing_integration_connection` refused.
+ * Everything the user chose rides along — the input typed in the run modal
+ * above all — except the launch's own connection pick for each integration the
+ * 409 refused: that integration then resolves as the recovery modal's row shows
+ * it, so what the user answers there is what runs. A pick for an integration
+ * the 409 does not name is kept.
  */
 export function retryLaunch(
   launch: RunLaunch,
-  picks: Record<string, string[]>,
   errors: readonly MissingIntegrationFieldError[],
 ): RunLaunch {
-  const own = launch.connectionOverrides ?? {};
-  const refused = new Set(
-    errors.flatMap((e) => {
-      const id = integrationIdOfField(e.field);
-      const refusesPick =
-        OWN_PICK_REFUSALS.has(e.code) ||
-        (e.code === "auth_serves_no_selected_tool" &&
-          e.connection_id !== undefined &&
-          (own[id] ?? []).includes(e.connection_id));
-      return refusesPick ? [id] : [];
-    }),
-  );
+  const { connectionOverrides: own, ...rest } = launch;
+  if (!own) return launch;
+  const refused = new Set(errors.map((e) => integrationIdOfField(e.field)));
   const kept = Object.entries(own).filter(([id]) => !refused.has(id));
-  return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
+  return kept.length > 0 ? { ...rest, connectionOverrides: Object.fromEntries(kept) } : rest;
 }
 
 /** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */
@@ -144,12 +126,16 @@ export function launchRefusal(err: unknown): LaunchRefusal | null {
  * empty input or dependency map and an unset override are left out, so the
  * server applies what plain "Lancer" gets. `version` is always an explicit pick
  * (the modal seeds it with that same default). Overrides are already wire
- * values (a proxy pick of "none" means no proxy) and pass through as-is.
+ * values (a proxy pick of "none" means no proxy) and pass through as-is, the
+ * connection picks narrowed to `declaredIntegrations`. While those are unknown
+ * every pick rides: dropped, the run could bind another account, whereas the
+ * server refuses an undeclared key out loud (400).
  */
 export function launchFromOptions({
   input,
   version,
   overrides,
+  declaredIntegrations,
   dependencyOverrides,
 }: RunWithOptionsSubmit): RunLaunch {
   const {
@@ -157,7 +143,7 @@ export function launchFromOptions({
     generation_config_override: generation,
     proxy_id_override: proxyId,
     connection_overrides: connectionOverrides,
-  } = overrides;
+  } = withDeclaredConnections(overrides, declaredIntegrations);
   return {
     ...(Object.keys(input).length > 0 ? { input } : {}),
     version,

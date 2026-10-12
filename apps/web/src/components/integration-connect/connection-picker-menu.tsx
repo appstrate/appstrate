@@ -58,26 +58,24 @@ export function PickerMenu({
   const navigate = useNavigate();
   const { data: spaces } = useSpaces();
   const {
-    runBlocking,
+    gatesRun,
     candidates,
     canAddConnection,
     canConnect,
     integrationPath,
     canOpenIntegration,
-    overrideMode,
     auths,
     authKeys,
     hasCandidates,
+    overrideMode,
     explicitIds,
     pickedNone,
+    shownIds,
     required,
-    storedIds,
     unavailableIds,
     checkedIds,
     oneClick,
     displayConns,
-    underScopedConns,
-    deadConns,
     busy,
     canApply,
     ownerLabel,
@@ -89,7 +87,6 @@ export function PickerMenu({
     inheritedSource,
     inheritedUnbound,
     open,
-    setOpen,
     onOpenChange,
     oauthPending,
     persist,
@@ -165,7 +162,7 @@ export function PickerMenu({
   })();
   const trigger = triggerKind(picker);
   const triggerLabel = {
-    unavailable: () => setLabel(storedIds, unavailableIds),
+    unavailable: () => setLabel(shownIds, unavailableIds),
     none: () => t("detail.integrationMemberPicker.none"),
     one: () => displayConns[0]!.label,
     many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
@@ -176,16 +173,6 @@ export function PickerMenu({
     choose: () => t("detail.integrationMemberPicker.chooseLabel"),
     connect: () => t("detail.integrationMemberPicker.connectLabel"),
   }[trigger]();
-  // Amber on exactly the states that gate a run: pin mode reads the server's
-  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
-  // warns — or a stored "no connection" for an integration the agent now requires.
-  const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 ||
-      unavailableIds.length > 0 ||
-      deadConns.length > 0 ||
-      (pickedNone && required)
-    : runBlocking;
   const rows: ChoiceRow[] = candidates.map((c) => {
     const fit = c.scope_fit;
     const missing = missingScopeLabels(c).join(", ");
@@ -255,8 +242,8 @@ export function PickerMenu({
       compact
       trigger={{
         label: triggerLabel,
-        icon: triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger],
-        warn: triggerWarn,
+        icon: gatesRun ? AlertTriangle : TRIGGER_ICONS[trigger],
+        warn: gatesRun,
       }}
       storedMode={explicitIds === null ? "inherit" : pickedNone ? "none" : "choose"}
       inherit={{ description: inheritDescription }}
@@ -277,7 +264,7 @@ export function PickerMenu({
         // One connection to pick from: ticking it writes at once, unticking it goes back to the
         // cascade, the only other answer that is not « none ».
         void persist(checkedIds.includes(id) ? null : [id]).then((ok) => {
-          if (ok) setOpen(false);
+          if (ok) onOpenChange(false);
         });
       }}
       onInherit={() => void persist(null)}
@@ -288,7 +275,7 @@ export function PickerMenu({
               enabled: canApply,
               onApply: () =>
                 void persist(checkedIds).then((ok) => {
-                  if (ok) setOpen(false);
+                  if (ok) onOpenChange(false);
                 }),
             },
           }
