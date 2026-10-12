@@ -472,7 +472,6 @@ export async function selectAccessibleConnection(
     pins: [],
     orgDefaults,
     launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
-    spaceId: context.spaceId,
     ...identity,
   });
   const error = errors[0];

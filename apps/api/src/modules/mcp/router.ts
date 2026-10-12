@@ -259,7 +259,7 @@ export function buildServerInstructions(
   const stick = pins ? " For a stored agent, `upsertMyIntegrationPin` makes it stick." : "";
   const newId = granted("listIntegrationConnections")
     ? " Once the user finished the link, its id is the newest connection of that integration and account in `listIntegrationConnections`."
-    : " Once the user finished the link, retrying without overrides works only when `source` is `fallback_auto` (the fallback picks a connection of the same account); for a `member_pin` or `org_default`, the new connection must be named in a pin or an override.";
+    : " Once the user finished the link, a retry without overrides answers `must_choose_connection` when `source` is `fallback_auto`: its `candidate_connections` list the new one. For a `member_pin` or `org_default`, it must be named in a pin or an override.";
   const insufficientScopes = connects
     ? ` An \`insufficient_scopes\` item carries no \`connect_url\`: act on its \`remedy\`. \`rebind_by_admin\` or \`rebind_by_schedule_owner\`: create nothing, tell the user an admin (or the schedule's owner) must switch that binding. \`new_connection\` or \`upgrade_or_new\`: create a NEW connection (as above, WITHOUT \`connection_id\`, \`scopes\` = its \`required_scopes\`) and retry with \`connection_overrides\` naming it.${newId}${stick} Under \`upgrade_or_new\` only, you may pass \`connection_id\` instead, upgrading the connection in place, when the user explicitly chose it after you told them it widens every agent using that connection.`
     : ` An \`insufficient_scopes\` item carries no \`connect_url\`: tell the user to create a connection with its \`required_scopes\` (or have the existing one upgraded) in Appstrate and bind it to this run.`;

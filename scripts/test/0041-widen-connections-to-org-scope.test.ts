@@ -5,7 +5,8 @@
  * or of none, becomes org-scoped with its origin space and shares kept; an end user's row and a
  * space client's row (a space-tier auto client's included) stay in their space; a label the owner
  * already holds at org scope is renamed; every resolution layer (pins, defaults, overrides, fallback)
- * binds the same connection in the origin space.
+ * binds the same connection in the origin space, the fallback of an owner who connected in two
+ * spaces aside: both rows reach each space, and it asks.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -353,7 +354,12 @@ describe("0041 — connections widened to org scope", () => {
       ).toEqual([chosen]);
     });
 
-    it("the fallback, in each space an owner connected the same account from", async () => {
+    it("the fallback, for an owner's one connection", async () => {
+      const only = await seedConnection({ spaceId: ctx.defaultSpaceId });
+      expect(await boundAcrossWidening(ctx.user.id)).toEqual([only]);
+    });
+
+    it("not the fallback of an owner who connected in two spaces: widened, it asks in each", async () => {
       const other = await seedSpace({ orgId: ctx.orgId });
       for (const id of [AGENT, INTEGRATION]) {
         await activatePackage({ orgId: ctx.orgId, spaceId: other.id }, id, {
@@ -362,10 +368,23 @@ describe("0041 — connections widened to org scope", () => {
       }
       const here = await seedConnection({ spaceId: ctx.defaultSpaceId, accountId: "same" });
       const there = await seedConnection({ spaceId: other.id, accountId: "same" });
-      const inEach = async () => [await bound(ctx.user.id), await bound(ctx.user.id, other.id)];
-      expect(await inEach()).toEqual([[here], [there]]);
+      expect([await bound(ctx.user.id), await bound(ctx.user.id, other.id)]).toEqual([
+        [here],
+        [there],
+      ]);
       await run(true);
-      expect(await inEach()).toEqual([[here], [there]]);
+      for (const spaceId of [ctx.defaultSpaceId, other.id]) {
+        const { errors } = await resolveConnectionsForRun({
+          agentManifest,
+          packageId: AGENT,
+          actor: { type: "user", id: ctx.user.id },
+          scope: { orgId: ctx.orgId, spaceId },
+        });
+        expect(errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
+        expect(errors[0]!.candidateConnections!.map((c) => c.id).sort()).toEqual(
+          [here, there].sort(),
+        );
+      }
     });
   });
 

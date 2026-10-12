@@ -98,7 +98,7 @@ describe("MCP server instructions — connect bullet", () => {
       // Rebound by the launch override, which beats a member pin and works inline too.
       expect(part).toContain("`connection_overrides`");
       // …and the caller is told where the new connection's id comes from.
-      expect(part).toMatch(/`listIntegrationConnections`|only when `source` is `fallback_auto`/);
+      expect(part).toMatch(/`listIntegrationConnections`|`candidate_connections` list the new one/);
       // The item's own `remedy` decides, every value named.
       for (const remedy of INSUFFICIENT_SCOPES_REMEDIES) {
         expect(part).toContain(`\`${remedy}\``);

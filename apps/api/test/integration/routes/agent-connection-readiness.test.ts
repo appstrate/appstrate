@@ -595,7 +595,7 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
     expect((await launch()).status).toBe(409);
   });
 
-  it("ranks the picker's candidates least privilege first, the one the fallback binds leading", async () => {
+  it("ranks the picker's candidates least privilege first, the order the launch's 409 lists them in", async () => {
     // Listed oldest first, the broad one would lead.
     await seedWildcardGmailAgent([...GOOGLE_GRANT, "https://www.googleapis.com/auth/gmail.modify"]);
     await seedGmailConnection("Lecture", GOOGLE_GRANT);
@@ -607,6 +607,19 @@ describe("connection-readiness — Google-echoed `email` scope (#1131)", () => {
       ["Lecture", "exact"],
       ["Connexion 1", "broader"],
     ]);
-    expect(resolution.resolved_connection_ids).toEqual([resolution.candidates[0]!.id]);
+    // Two own connections of one account: their scopes order them, the caller picks.
+    expect(resolution.error_code).toBe("must_choose_connection");
+    expect(resolution.resolved_connection_ids).toEqual([]);
+
+    const res = await launch();
+    expect(res.status).toBe(409);
+    const problem = (await res.json()) as {
+      errors: { field: string; code: string; candidate_connections?: { id: string }[] }[];
+    };
+    const item = problem.errors.find((e) => e.field === `integrations.${GMAIL}`)!;
+    expect(item.code).toBe("must_choose_connection");
+    expect(item.candidate_connections!.map((c) => c.id)).toEqual(
+      resolution.candidates.map((c) => c.id),
+    );
   });
 });
