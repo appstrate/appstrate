@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2025-2026 Appstrate
 
+import { PLACEHOLDER, placeholderKeys } from "@appstrate/afps-shared/request-template";
+
 /**
  * Canonical `{{var}}` substitution for the AGENT-facing grammar: an `api_call`'s
  * `{{field}}` placeholders (credential proxy, sidecar MITM, CLI resolver) and the
@@ -30,7 +32,7 @@ export function substituteVars(
 ): string {
   const keep = opts?.keepUnresolved === true;
   const encode = opts?.encode;
-  return input.replace(VAR_PLACEHOLDER, (match, key: string, offset: number) => {
+  return input.replace(PLACEHOLDER, (match, key: string, offset: number) => {
     // Own properties only: `{{constructor}}` must not resolve to Object.prototype's.
     if (Object.hasOwn(fields, key)) {
       return encode ? encode(fields[key]!, key, offset) : fields[key]!;
@@ -43,14 +45,6 @@ export function substituteVars(
 export type PlaceholderEncoder = (value: string, key: string, offset: number) => string;
 
 /**
- * Canonical `{{ key }}` placeholder grammar — single source for every scanner
- * and substituter in this module. `String.replace` and `String.matchAll` are
- * both safe with a shared `g`-flag regex (`replace` ignores `lastIndex`;
- * `matchAll` clones the regex), so the constant carries no statefulness.
- */
-const VAR_PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}/g;
-
-/**
  * The keys of `template`'s `{{key}}` placeholders that `fields` does not own: what a proxy refuses
  * to send. Read on the template, never the substituted string, where a `{{word}}` inside a
  * credential value is no placeholder (and naming it would echo the secret).
@@ -59,9 +53,7 @@ export function unresolvedPlaceholders(
   template: string,
   fields: Readonly<Record<string, unknown>>,
 ): string[] {
-  return [...template.matchAll(VAR_PLACEHOLDER)]
-    .map((match) => match[1]!)
-    .filter((key) => !Object.hasOwn(fields, key));
+  return placeholderKeys(template).filter((key) => !Object.hasOwn(fields, key));
 }
 
 /**
@@ -71,7 +63,7 @@ export function unresolvedPlaceholders(
  * credential field into an agent-controlled URL / header / body.
  */
 export function referencesField(input: string, fields: Readonly<Record<string, unknown>>): boolean {
-  for (const match of input.matchAll(VAR_PLACEHOLDER)) {
+  for (const match of input.matchAll(PLACEHOLDER)) {
     if (Object.hasOwn(fields, match[1]!)) return true;
   }
   return false;
@@ -86,7 +78,7 @@ export function referencesField(input: string, fields: Readonly<Record<string, u
  */
 export function templateHost(template: string): string {
   const keys: string[] = [];
-  const marked = template.replace(VAR_PLACEHOLDER, (_match, key: string) => {
+  const marked = template.replace(PLACEHOLDER, (_match, key: string) => {
     keys.push(key);
     return `xph${keys.length - 1}x`;
   });

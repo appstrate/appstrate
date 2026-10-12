@@ -1330,13 +1330,13 @@ describe("POST /api/credential-proxy/proxy — a credential no header can carry"
     });
 
   /** The problem the proxy answered, asserted to quote no value anywhere it can reach. */
-  async function expectUnusable(res: Response, header: string): Promise<void> {
+  async function expectUnusable(res: Response, header?: string): Promise<void> {
     const text = await res.text();
     expect(res.status).toBe(502);
     expect(res.headers.get("proxy-status")).toBe("appstrate; error=proxy_configuration_error");
     const body = JSON.parse(text) as { code: string; detail: string };
     expect(body.code).toBe("credential_unusable");
-    expect(body.detail.toLowerCase()).toContain(`"${header.toLowerCase()}"`);
+    if (header) expect(body.detail.toLowerCase()).toContain(`"${header.toLowerCase()}"`);
     expect(text).not.toContain(SECRET);
     expect(JSON.stringify(logged)).not.toContain(SECRET);
     expect(upstreamCalls).toBe(0);
@@ -1351,7 +1351,7 @@ describe("POST /api/credential-proxy/proxy — a credential no header can carry"
 
     it(`refuses a caller template rendering ${JSON.stringify(value.slice(SECRET.length))}`, async () => {
       await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok", password: value });
-      await expectUnusable(await call({ "X-Pass": "{{password}}" }), "X-Pass");
+      await expectUnusable(await call({ "X-Pass": "{{password}}" }));
     });
   }
 

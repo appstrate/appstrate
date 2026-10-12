@@ -21,23 +21,9 @@
 import {
   HOP_BY_HOP_HEADERS,
   planHttpDeliveryInjection,
-  substituteVars as substituteVarsCore,
   type HttpDeliveryInjectionDecision,
 } from "@appstrate/afps-runtime/resolvers";
 import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-
-/**
- * Substitute `{{field}}` placeholders in `input` using `credentials`.
- *
- * Whitespace inside the `{{…}}` is tolerated so hand-written templates
- * can keep `{{ field }}`. Unknown placeholders are **left intact**
- * (`keepUnresolved`): callers fail closed on the template with
- * `unresolvedPlaceholders` before sending. Delegates to the single
- * canonical implementation in `@appstrate/afps-runtime`.
- */
-export function substituteVars(input: string, credentials: Record<string, string>): string {
-  return substituteVarsCore(input, credentials, { keepUnresolved: true });
-}
 
 /**
  * Payload produced by the platform's DB-backed integration credential

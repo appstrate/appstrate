@@ -23,7 +23,7 @@
  * (spaceId, integrationId) and focuses purely on the mechanics.
  */
 
-import { substituteVars, applyInjectedCredentialHeaderToHeaders } from "@appstrate/connect";
+import { applyInjectedCredentialHeaderToHeaders } from "@appstrate/connect";
 import {
   buildInjectedCredentialHeader,
   credentialCarryingHeader,
@@ -31,19 +31,18 @@ import {
 import {
   classifyApiCallFailure,
   cookieScope,
+  credentialUnusableMessage,
   credentialUrlPolicy,
   fetchApiCall,
   prepareApiCallRequest,
+  type PreparedApiCallRequest,
   redactionFields,
   templateHost,
   URL_POLICY_REFUSAL_CODE,
   urlPolicyRefusalMessage,
   type CookieJar,
 } from "@appstrate/afps-runtime/resolvers";
-import {
-  assertHttpFieldValue,
-  InvalidHeaderValueError,
-} from "@appstrate/afps-shared/delivery-http";
+import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
 import type { HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import type { Actor } from "../../lib/actor.ts";
@@ -97,14 +96,15 @@ interface ProxyCallInput {
   /** Upstream URL — validated against the integration's `authorizedUris`. */
   target: string;
   /**
-   * Headers forwarded to upstream. Placeholder substitution (`{{field}}`)
-   * runs against the credential fields; the proxy adds the credential
-   * header (e.g. `Authorization`) server-side.
+   * Headers forwarded to upstream. Each `{{field}}` takes its credential field,
+   * encoded for its place; the proxy adds the credential header (e.g.
+   * `Authorization`) server-side.
    */
   headers?: Record<string, string>;
   /**
    * Optional request body. String bodies have `{{field}}` placeholders
-   * substituted when `substituteBody` is true. A `ReadableStream` is
+   * substituted when `substituteBody` is true, each value encoded for the
+   * body's `Content-Type`. A `ReadableStream` is
    * forwarded verbatim (streaming upload path — no substitution possible,
    * no 401-retry). When a `ReadableStream` body is provided and the
    * upstream returns 401 after using the platform credential, the result
@@ -234,16 +234,18 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   const fields = resolved.credentials;
-  const bodyTemplate = typeof input.body === "string" && input.substituteBody ? input.body : null;
-  const prepared = prepareApiCallRequest({
-    target: input.target,
-    headers: input.headers ?? {},
-    bodyTemplates: bodyTemplate !== null ? [bodyTemplate] : [],
-    fields,
-  });
+  const prepareFor = (credentials: Record<string, string>) =>
+    prepareApiCallRequest({
+      target: input.target,
+      headers: input.headers ?? {},
+      body: typeof input.body === "string" && input.substituteBody ? input.body : null,
+      fields: credentials,
+    });
+  const prepared = prepareFor(fields);
   if (!prepared.ok) {
     const { kind, message } = prepared.refusal;
-    throw new ProxyCallError(kind === "invalid_header" ? "invalid_request" : kind, message);
+    if (kind === "credential_unusable") throw unusableCredential(message, input.integrationId);
+    throw new ProxyCallError(kind === "unresolved_placeholder" ? kind : "invalid_request", message);
   }
   const { url: target, templates } = prepared.request;
 
@@ -264,43 +266,29 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     );
   }
   // `target` carries decrypted values and goes on the wire only; messages name `redactedHost`.
-  const redactFields = redactionFields(policy, fields);
+  let redactFields = redactionFields(policy, fields);
   const redactedHost = templateHost(input.target);
 
-  // Every header carrying a decrypted credential (a caller `{{field}}`, or the one injected below
-  // under any vendor name): a redirect leaving the allowlist strips them.
-  const sensitiveHeaderNames = new Set<string>(prepared.request.credentialHeaders);
-  const headers = new Headers();
-  let credentialInjection;
+  // Every header carrying a decrypted credential: a redirect leaving the allowlist strips them.
+  const sensitiveHeaderNames = new Set<string>();
+  const outbound = (request: PreparedApiCallRequest, payload: typeof resolved) => {
+    const headers = new Headers(request.headers);
+    const injection = applyInjectedCredentialHeaderToHeaders(headers, payload);
+    const carrier = credentialCarryingHeader(injection);
+    for (const name of request.credentialHeaders) sensitiveHeaderNames.add(name);
+    if (carrier) sensitiveHeaderNames.add(carrier);
+    return { headers, injection, body: request.body ?? input.body ?? undefined };
+  };
+  let first;
   try {
-    for (const [k, value] of Object.entries(prepared.request.headers)) {
-      // The caller's own value was checked as written; one the credential spoils is unusable.
-      assertHttpFieldValue(k, value);
-      headers.set(k, value);
-    }
-    credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, resolved);
+    first = outbound(prepared.request, resolved);
   } catch (err) {
     throw err instanceof InvalidHeaderValueError
       ? unusableCredential(err.message, input.integrationId)
       : err;
   }
-  const carrier = credentialCarryingHeader(credentialInjection);
-  if (carrier) sensitiveHeaderNames.add(carrier);
-
-  // Body substitution (opt-in; body may be bytes). Bun's global fetch
-  // accepts string / Uint8Array / ReadableStream directly.
-  // ReadableStream bodies bypass substitution — they are forwarded as-is.
-  let body: string | Uint8Array | ReadableStream<Uint8Array> | undefined;
+  let credentialInjection = first.injection;
   const isStreamBody = input.body instanceof ReadableStream;
-  if (input.body !== undefined && input.body !== null) {
-    if (isStreamBody) {
-      body = input.body as ReadableStream<Uint8Array>;
-    } else if (bodyTemplate !== null) {
-      body = substituteVars(bodyTemplate, fields);
-    } else {
-      body = input.body as string | Uint8Array;
-    }
-  }
 
   const jarStore = input.cookieJar;
   const jarSessionId = input.jarSessionId;
@@ -327,7 +315,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     },
   };
 
-  const fetchInit: RequestInit & { duplex?: string } = { method: input.method, headers, body };
+  const fetchInit: RequestInit & { duplex?: string } = {
+    method: input.method,
+    headers: first.headers,
+    body: first.body,
+  };
   // fetch spec: streaming body requires `duplex: "half"`.
   if (isStreamBody) {
     fetchInit.duplex = "half";
@@ -390,19 +382,23 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
           refreshSelection,
           credentialRevision,
         );
-        if (refreshed) {
-          // Rebuild the credential header from the rotated token. Drop the
-          // previous platform-injected value first so the refreshed delivery
-          // plan can install its current header name and value cleanly.
-          headers.delete(credentialInjection.header.name);
-          credentialInjection = applyInjectedCredentialHeaderToHeaders(headers, refreshed);
-          // Keep the strip set in sync — the refreshed payload may name a
-          // different header than the original resolution.
-          const refreshedCarrier = credentialCarryingHeader(credentialInjection);
-          if (refreshedCarrier) sensitiveHeaderNames.add(refreshedCarrier);
+        // A refreshed set that no longer fills the call is not replayed: the 401 stands.
+        const again = refreshed ? prepareFor(refreshed.credentials) : null;
+        if (again && !again.ok) {
+          logger.warn("credential-proxy: refreshed credential does not fit the call, 401 relayed", {
+            integrationId: input.integrationId,
+            connectionId,
+            reason: again.refusal.message,
+          });
+        }
+        if (refreshed && again?.ok) {
+          const next = outbound(again.request, refreshed);
+          credentialInjection = next.injection;
+          redactFields = redactionFields(policy, refreshed.credentials);
           res = await performFetch({
             ...fetchInit,
-            headers,
+            headers: next.headers,
+            body: next.body,
           } as RequestInit);
         }
       } catch (err) {
@@ -482,15 +478,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   };
 }
 
-/** A header the connection's credential makes invalid (`message` names the header, no value). */
 function unusableCredential(
-  message: string,
+  problem: string,
   integrationId: string,
   connectionId?: string,
 ): ProxyCallError {
   return new ProxyCallError(
     "credential_unusable",
-    `Integration ${integrationId}: the connection's credential is unusable (${message} once substituted or injected); reconnect it with a valid value.`,
+    credentialUnusableMessage(integrationId, problem),
     connectionId,
   );
 }

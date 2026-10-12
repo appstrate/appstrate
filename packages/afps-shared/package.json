@@ -57,6 +57,7 @@
     "./mime": "./src/mime.ts",
     "./jsonpath": "./src/jsonpath.ts",
     "./runtime-expression": "./src/runtime-expression.ts",
+    "./request-template": "./src/request-template.ts",
     "./json-text": "./src/json-text.ts"
   },
   "dependencies": {

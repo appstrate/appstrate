@@ -73,6 +73,7 @@ import { prepareApiCallRequest } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
+  credentialUnusableMessage,
   urlPolicyRefusalMessage,
 } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
@@ -461,16 +462,25 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         }
         callerHeaders[key] = value;
       }
-      // A string body is the only one substituted (never multipart).
+      // A string body is the only one substituted (never multipart), on the caller's opt-in.
       const prepared = prepareApiCallRequest({
         target: req.target,
         headers: callerHeaders,
-        bodyTemplates: typeof req.body === "string" ? [req.body] : [],
+        body: typeof req.body === "string" && req.substituteBody ? req.body : null,
         fields,
       });
       if (!prepared.ok) {
         const { kind, message } = prepared.refusal;
         if (kind === "invalid_header") throw headerInvalid(meta.name, message);
+        if (kind === "credential_unusable") {
+          throw apiCallFailure(
+            kind,
+            credentialUnusableMessage(meta.name, message),
+            meta,
+            req.target,
+            { redirect: false },
+          );
+        }
         throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
           integration: meta.name,
         });
@@ -502,10 +512,9 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       }
       const redactFields = redactionFields(policy, fields);
 
-      const resolvedBody = await resolveBodyForFetch(req.body, {
+      const resolvedBody = await resolveBodyForFetch(prepared.request.body ?? req.body, {
         allowFromFile: true,
         workspace: ctx.workspace,
-        transformString: (input) => substituteVars(input, fields),
       });
 
       if (resolvedBody.kind === "bytes" && resolvedBody.contentType) {
