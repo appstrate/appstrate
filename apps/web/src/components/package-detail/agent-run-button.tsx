@@ -29,7 +29,7 @@ export function AgentRunButton({
       disabled={blocker !== null}
       disabledTitle={blocker ? t(blocker) : undefined}
       // A connection gap warns, it does not block: the launch answers it (409 modal).
-      connectionWarning={blocker === null && !integrationsReady.ready}
+      connectionWarning={blocker === null && !integrationsReady}
       showLabel
     />
   );

@@ -25,7 +25,12 @@ import {
   type ReportSource,
 } from "../src/commands/run/report.ts";
 import { announceLaunch } from "../src/commands/run/launch-warnings.ts";
+import {
+  _resolveReportSessionForTesting as resolveReportSession,
+  type RunCommandOptions,
+} from "../src/commands/run.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import type { LocalResolverInputs } from "../src/commands/run/resolver.ts";
 
 const REPORT_CTX = {
   instance: "https://app.example.com",
@@ -170,6 +175,26 @@ describe("startReportSession — source discrimination", () => {
     // — that's the whole point of declaring by id.
     expect(src.manifest).toBeUndefined();
     expect(src.prompt).toBeUndefined();
+  });
+
+  it("sends --connection picks as connection_overrides, and no key without them", async () => {
+    const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
+    const connectionOverrides = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
+    await startReportSession(
+      reportSource,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort", connectionOverrides },
+      SNAPSHOT,
+    );
+    await startReportSession(
+      reportSource,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+
+    expect(stub.calls[0]!.body.connection_overrides).toEqual(connectionOverrides);
+    expect("connection_overrides" in stub.calls[1]!.body).toBe(false);
   });
 
   it("omits spec on draft registry sources", async () => {
@@ -368,5 +393,116 @@ describe("startReportSession — integration readiness", () => {
     stub = installStubFetch(() => new Response("x".repeat(600), { status: 500 }));
     const err = await session().catch((e: unknown) => e);
     expect((err as ReportStartError).responseSnippet).toBe(`${"x".repeat(512)}…`);
+  });
+});
+
+// `--connection` names a connection for the run the instance registers. Unregistered, the
+// run's credential-proxy calls bind the caller's own connection by default: refused instead.
+describe("resolveReportSession — --connection needs a registered run", () => {
+  const CONNECTION = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
+  const REFUSAL =
+    "--connection names a connection for the run registered on the instance, and no run is registered";
+  let stub: ReturnType<typeof installStubFetch>;
+
+  afterEach(() => stub.restore());
+
+  /** `--json` keeps the fallback warnings off the test's stderr. */
+  function resolve(
+    over: Partial<RunCommandOptions>,
+    context: typeof REPORT_CTX | LocalResolverInputs | null,
+  ) {
+    return resolveReportSession(
+      { bundle: "./agent.afps", json: true, ...over },
+      makeBundle(),
+      { kind: "path", path: "./agent.afps", label: "./agent.afps" },
+      context,
+    );
+  }
+
+  it("refuses it with --report=false", async () => {
+    stub = installStubFetch(() => ok());
+    await expect(
+      resolve({ report: "false", connectionOverrides: CONNECTION }, REPORT_CTX),
+    ).rejects.toThrow(REFUSAL);
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("refuses it when no profile or API key gives a run to register (auto)", async () => {
+    stub = installStubFetch(() => ok());
+    await expect(resolve({ connectionOverrides: CONNECTION }, null)).rejects.toThrow(REFUSAL);
+  });
+
+  it("refuses it when --report=true has no profile and falls back to console, with the cause", async () => {
+    stub = installStubFetch(() => ok());
+    const err = await resolve(
+      { report: "true", reportFallback: "console", connectionOverrides: CONNECTION },
+      null,
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(REFUSAL);
+    expect((err as Error & { hint: string }).hint).toBe(
+      "Cause: --report=true requires an Appstrate profile or API key",
+    );
+  });
+
+  // `--json` prints no fallback warning: the refusal is where the caller reads why.
+  it("refuses it when the registration fails and falls back to console, with the failure", async () => {
+    stub = installStubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            code: "missing_integration_connection",
+            errors: [
+              {
+                field: "integrations.@appstrate/clickup",
+                code: "override_connection_unavailable",
+                message: "Connection named for '@appstrate/clickup' is not available",
+              },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/problem+json" } },
+        ),
+    );
+    const err = await resolve(
+      { reportFallback: "console", connectionOverrides: CONNECTION },
+      REPORT_CTX,
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(REFUSAL);
+    expect((err as Error & { hint: string }).hint).toBe(
+      "Cause: POST /api/runs/remote failed with HTTP 409" +
+        "\n    @appstrate/clickup: Connection named for '@appstrate/clickup' is not available (override_connection_unavailable)",
+    );
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  // `--integrations none|local` resolves no connection on the instance, so the caller's
+  // profile is no cause: the refusal names the integrations mode instead.
+  for (const [mode, context] of [
+    ["none", null],
+    ["local", { credsFilePath: "./creds.json" }],
+  ] as const) {
+    it(`names --integrations ${mode} as the cause, not the reporting hint`, async () => {
+      stub = installStubFetch(() => ok());
+      const err = await resolve(
+        { integrations: mode, connectionOverrides: CONNECTION },
+        context,
+      ).catch((e: unknown) => e);
+      expect((err as Error).message).toBe(REFUSAL);
+      expect((err as Error & { hint: string }).hint).toBe(
+        `Cause: --integrations ${mode} resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.`,
+      );
+      expect(stub.calls).toHaveLength(0);
+    });
+  }
+
+  it("registers the run with the connection it names", async () => {
+    stub = installStubFetch(() => ok());
+    const session = await resolve({ connectionOverrides: CONNECTION }, REPORT_CTX);
+    expect(session?.runId).toBe(SUCCESS_BODY.id);
+    expect(stub.calls[0]!.body.connection_overrides).toEqual(CONNECTION);
+  });
+
+  it("still falls back to a console-only run when no connection is named", async () => {
+    stub = installStubFetch(() => new Response("upstream down", { status: 503 }));
+    expect(await resolve({ reportFallback: "console" }, REPORT_CTX)).toBeNull();
   });
 });

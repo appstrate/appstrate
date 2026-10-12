@@ -35,6 +35,8 @@ interface AgentReadinessParams {
   actor: Actor;
   /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
+  /** The resolver's `noFallback`. */
+  noFallback?: boolean;
   /**
    * Per-call-graph memo for integration manifest fetches. The run kickoff
    * path threads one Map so this readiness pass, the resolver snapshot pass,
@@ -166,6 +168,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     actor,
     scope: { orgId, spaceId },
     ...(launchOverrides ? { launchOverrides } : {}),
+    noFallback: params.noFallback,
     ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
   for (const e of resolution.errors) {

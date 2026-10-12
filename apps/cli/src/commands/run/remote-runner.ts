@@ -48,6 +48,7 @@ import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types";
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { createConsoleSink } from "./sink.ts";
 import {
   announceLaunch,
@@ -190,6 +191,8 @@ export interface RunRemoteOptions {
   modelId?: string | null;
   /** Proxy id override (or `"none"` to disable). */
   proxyId?: string | null;
+  /** `--connection` picks, sent as the trigger body's `connection_overrides`. */
+  connectionOverrides?: ConnectionOverrides | undefined;
 
   /** `Idempotency-Key` for the trigger POST. */
   idempotencyKey?: string | undefined;
@@ -578,6 +581,7 @@ async function triggerRun(
   };
   if (opts.modelId != null) body.modelId = opts.modelId;
   if (opts.proxyId != null) body.proxyId = opts.proxyId;
+  if (opts.connectionOverrides) body.connection_overrides = opts.connectionOverrides;
 
   const headers = platformHeaders(opts, { "Content-Type": "application/json" });
   // ALWAYS attach an Idempotency-Key before the retry loop. Prefer the

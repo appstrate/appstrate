@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An armed schedule must fire without asking which connection to use: a write
- * that leaves a `must_choose_connection` open for the schedule's actor, or
- * freezes a pick that actor cannot reach (`override_connection_unavailable`) or
+ * An armed schedule must fire without asking which connection to use, and without
+ * taking a default a later connection would turn into that question: a write
+ * that leaves a `must_choose_connection` open for the schedule's actor (their one
+ * own connection that no pin, org default or `connection_overrides` names
+ * included, unless the write is for another member), or freezes a pick that actor cannot reach (`override_connection_unavailable`) or
  * that an admin pin or enforced org default outranks (`override_outranked`), is a `409 missing_integration_connection` carrying only those items. Every
  * other connection verdict is accepted — it is repaired without editing the
  * schedule — and a non-required integration a fire would start without is
@@ -13,12 +15,13 @@
  * judged with nothing to report.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOrgDefaults,
   integrationPins,
+  runs,
   schedules,
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
@@ -30,18 +33,35 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedEndUser, seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedEndUser,
+  seedPackage,
+  seedPackageVersion,
+  seedSchedule,
+} from "../../helpers/seed.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 import {
+  createFakeOrchestrator,
   seedConnectionTestIntegration,
+  seedDefaultOrgModel,
   seedIntegrationConnection,
+  waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { twoAuthApiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import { getSchedule, updateSchedule } from "../../../src/services/scheduler.ts";
+import {
+  getSchedule,
+  triggerScheduledRun,
+  updateSchedule,
+} from "../../../src/services/scheduler.ts";
+import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
+// `invoke_operation` dispatches in-process to the registered app.
+await registerTestPlatformApp();
 
 const AGENT = "@schedchoice/agent";
 const INTEGRATION = "@schedchoice/svc";
@@ -133,6 +153,28 @@ describe("schedule writes — the connection choice is made up front", () => {
     });
   }
 
+  type Layer = "admin pin" | "enforced org default" | "member pin" | "soft org default";
+
+  /** Names `connectionId` as the integration's set in one layer under the launch override. */
+  async function nameSet(layer: Layer, connectionId: string): Promise<void> {
+    if (layer === "admin pin" || layer === "member pin") {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: INTEGRATION,
+        userId: layer === "admin pin" ? null : ctx.user.id,
+        connectionIds: [connectionId],
+      });
+    } else {
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        connectionIds: [connectionId],
+        enforce: layer === "enforced org default",
+      });
+    }
+  }
+
   it("refuses a create whose actor holds two connections and names none", async () => {
     await seedAgentWithIntegration();
     const a = await seedIntegrationConnection(ctx, INTEGRATION);
@@ -157,6 +199,27 @@ describe("schedule writes — the connection choice is made up front", () => {
     const res = await create({ connection_overrides: { [INTEGRATION]: [picked] } });
     expect(res.status).toBe(201);
   });
+
+  it("refuses a create whose actor holds one connection that nothing names, listing it", async () => {
+    await seedAgentWithIntegration();
+    const only = await seedIntegrationConnection(ctx, INTEGRATION);
+
+    const body = await expectRefusal(await create({}), ["must_choose_connection"]);
+    expect(body.errors[0]!.field).toBe(`integrations.${INTEGRATION}`);
+    expect(body.errors[0]!.candidate_connections!.map((c) => c.id)).toEqual([only]);
+    expect(await db.select().from(schedules)).toHaveLength(0);
+  });
+
+  for (const layer of ["member pin", "soft org default"] as const) {
+    it(`accepts that create once the set is named (${layer})`, async () => {
+      await seedAgentWithIntegration();
+      await nameSet(layer, await seedIntegrationConnection(ctx, INTEGRATION));
+
+      const res = await create({});
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as WriteBody).warnings).toEqual([]);
+    });
+  }
 
   it("accepts a create whose integration is not connected at all, warning that fires start without it", async () => {
     // Connecting later fixes it without editing the schedule.
@@ -189,15 +252,15 @@ describe("schedule writes — the connection choice is made up front", () => {
     expect(codes(await warningsOf(none))).toEqual(["integration_unbound"]);
     expect(await warningsOf(none)).toBeNull();
 
-    await seedIntegrationConnection(ctx, INTEGRATION);
-    expect(await warningsOf({ connection_overrides: null })).toEqual([]);
+    const bound = await seedIntegrationConnection(ctx, INTEGRATION);
+    expect(await warningsOf({ connection_overrides: { [INTEGRATION]: [bound] } })).toEqual([]);
   });
 
   it("warns of nothing once a connection binds", async () => {
     await seedAgentWithIntegration();
-    await seedIntegrationConnection(ctx, INTEGRATION);
+    const bound = await seedIntegrationConnection(ctx, INTEGRATION);
 
-    const res = await create({});
+    const res = await create({ connection_overrides: { [INTEGRATION]: [bound] } });
     expect(res.status).toBe(201);
     expect(((await res.json()) as WriteBody).warnings).toEqual([]);
   });
@@ -227,26 +290,25 @@ describe("schedule writes — the connection choice is made up front", () => {
     await expectRefusal(await patch(schedule.id, { enabled: true }), ["must_choose_connection"]);
   });
 
-  it("refuses any patch of an armed schedule whose resolution became ambiguous", async () => {
+  it("refuses any patch of an armed schedule stored without the set its fire binds by default", async () => {
     await seedAgentWithIntegration();
-    const first = await seedIntegrationConnection(ctx, INTEGRATION);
-    const created = await create({});
-    expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
+    const only = await seedIntegrationConnection(ctx, INTEGRATION);
+    const [armed, paused] = [await seedArmedSchedule(), await seedArmedSchedule()];
 
-    // A second connection since the last save: the fallback no longer decides.
-    await seedIntegrationConnection(ctx, INTEGRATION);
-
-    const refused = await patch(id, { name: "renamed" });
-    expect(refused.status).toBe(409);
-    const body = (await refused.json()) as ProblemBody;
-    expect(body.errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
-
-    const repaired = await patch(id, {
+    const body = await expectRefusal(await patch(armed.id, { name: "renamed" }), [
+      "must_choose_connection",
+    ]);
+    expect(body.errors[0]!.candidate_connections!.map((c) => c.id)).toEqual([only]);
+    const repaired = await patch(armed.id, {
       name: "renamed",
-      connection_overrides: { [INTEGRATION]: [first] },
+      connection_overrides: { [INTEGRATION]: [only] },
     });
     expect(repaired.status).toBe(200);
+
+    // Disabling is not judged, and neither is a disabled schedule.
+    expect((await patch(paused.id, { enabled: false })).status).toBe(200);
+    expect((await patch(paused.id, { name: "renamed" })).status).toBe(200);
+    await expectRefusal(await patch(paused.id, { enabled: true }), ["must_choose_connection"]);
   });
 
   it("refuses a create whose connection_overrides names a connection the actor cannot reach", async () => {
@@ -309,22 +371,7 @@ describe("schedule writes — the connection choice is made up front", () => {
       await seedAgentWithIntegration();
       const governed = await seedIntegrationConnection(ctx, INTEGRATION);
       const outside = await seedIntegrationConnection(ctx, INTEGRATION);
-      if (governance === "admin pin") {
-        await db.insert(integrationPins).values({
-          spaceId: ctx.defaultSpaceId,
-          packageId: AGENT,
-          integrationId: INTEGRATION,
-          userId: null,
-          connectionIds: [governed],
-        });
-      } else {
-        await db.insert(integrationOrgDefaults).values({
-          spaceId: ctx.defaultSpaceId,
-          integrationId: INTEGRATION,
-          connectionIds: [governed],
-          enforce: true,
-        });
-      }
+      await nameSet(governance, governed);
 
       const res = await create({ connection_overrides: { [INTEGRATION]: [outside] } });
       const body = await expectRefusal(res, ["override_outranked"]);
@@ -837,5 +884,118 @@ describe("schedule writes for an end user — the caller picks among its connect
     expect((await createForEndUser({ connection_overrides: { [INTEGRATION]: [a] } })).status).toBe(
       201,
     );
+  });
+
+  it("asks for the end user's one connection too, in connection_overrides", async () => {
+    const only = await seedEndUserConnection("only");
+
+    const body = await expectRefusal(await createForEndUser(), ["must_choose_connection"]);
+    expect(body.errors[0]!.candidate_connections!.map((c) => c.id)).toEqual([only]);
+    expect(body.errors[0]!.message).toContain("connection_overrides");
+    expect(await db.select().from(schedules)).toHaveLength(0);
+
+    const named = await createForEndUser({ connection_overrides: { [INTEGRATION]: [only] } });
+    expect(named.status).toBe(201);
+  });
+});
+
+describe("schedule writes — one rule whatever the door", () => {
+  let ctx: TestContext;
+  let only: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "schedchoice" });
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(true),
+    });
+    only = await seedIntegrationConnection(ctx, INTEGRATION);
+  });
+
+  it("asks an API key of the member to name the actor's one connection, and stores the schedule once named", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["schedules:read", "schedules:write"],
+    });
+    const create = (body: Record<string, unknown>) =>
+      app.request(`/api/agents/${AGENT}/schedules`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const refused = await create({ cron_expression: "0 9 * * *" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "missing_integration_connection",
+      errors: [{ code: "must_choose_connection", candidate_connections: [{ id: only }] }],
+    });
+    expect(await db.select().from(schedules)).toHaveLength(0);
+
+    const named = await create({
+      cron_expression: "0 9 * * *",
+      connection_overrides: { [INTEGRATION]: [only] },
+    });
+    expect(named.status).toBe(201);
+    expect(await db.select().from(schedules)).toHaveLength(1);
+  });
+});
+
+describe("schedule fires — a named set binds, an unnamed one takes the fallback", () => {
+  let ctx: TestContext;
+
+  beforeAll(() => {
+    _setOrchestratorForTesting(createFakeOrchestrator());
+  });
+
+  afterAll(() => {
+    _setOrchestratorForTesting(null);
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "schedchoice" });
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedDefaultOrgModel(ctx);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(true),
+    });
+  });
+
+  it("fires a schedule stored without a set on its actor's one connection, and fails on two", async () => {
+    const schedule = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      enabled: true,
+    });
+    const only = await seedIntegrationConnection(ctx, INTEGRATION);
+
+    await triggerScheduledRun(schedule.id);
+    const [bound] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    expect(bound!.status).not.toBe("failed");
+    expect(bound!.resolvedConnections).toMatchObject({
+      [INTEGRATION]: [{ connectionId: only, source: "fallback_auto" }],
+    });
+    await waitForRunPipelineSettled();
+
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await triggerScheduledRun(schedule.id);
+    const fires = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    const refused = fires.find((run) => run.id !== bound!.id)!;
+    expect(refused).toMatchObject({ status: "failed", resolvedConnections: null });
+    expect(refused.error).toContain(`Integration '${INTEGRATION}' needs a connection choice`);
   });
 });

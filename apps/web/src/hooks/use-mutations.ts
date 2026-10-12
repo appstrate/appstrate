@@ -59,7 +59,7 @@ function useRunAgent(packageId: string) {
   const navigate = useNavigate();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (params?: RunLaunch) => {
+    mutationFn: async (launch: RunLaunch) => {
       const {
         input,
         rerun_from,
@@ -69,7 +69,7 @@ function useRunAgent(packageId: string) {
         proxyId,
         generation,
         dependencyOverrides,
-      } = params ?? {};
+      } = launch;
       const { data } = await client.POST("/api/agents/{scope}/{name}/run", {
         params: {
           path: splitPackageRef(packageId),
@@ -113,35 +113,32 @@ function useRunAgent(packageId: string) {
  * The one way the SPA launches a run. A `409 missing_integration_connection`
  * is a question, not a failure: the launcher keeps the refused launch and the
  * server's errors, `RunLaunchRecovery` renders them as the recovery modal, and
- * `retry` replays that launch with the user's picks. The retried launch becomes
- * the kept one, so a second 409 builds on it: a pick one 409 dropped stays
- * dropped.
+ * `retry` replays that launch without its own connection pick for the refused
+ * integrations (`retryLaunch`), so each one binds what its row of the modal
+ * shows. A replay refused in turn is replayed the same way, from what it sent.
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
   const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
-  const lastLaunch = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+  // What `retry` sends: the refused launch, as `retryLaunch` replays it.
+  const replay = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
 
   const send = (launch: RunLaunch, onSuccess?: () => void) => {
-    flight.run(
-      () => {
-        lastLaunch.current = { launch, onSuccess };
-        return runAgent.mutateAsync(launch);
+    flight.run(() => runAgent.mutateAsync(launch), {
+      onSuccess: () => {
+        setRefusal(null);
+        onSuccess?.();
       },
-      {
-        onSuccess: () => {
-          setRefusal(null);
-          onSuccess?.();
-        },
-        // The mutation cache reports every failure; this picks up the 409.
-        onError: (err) => {
-          const refused = launchRefusal(err);
-          if (refused) setRefusal(refused);
-        },
+      // The mutation cache reports every failure; this picks up the 409.
+      onError: (err) => {
+        const refused = launchRefusal(err);
+        if (!refused) return;
+        setRefusal(refused);
+        replay.current = { launch: retryLaunch(launch, refused.errors), onSuccess };
       },
-    );
+    });
   };
 
   return {
@@ -150,15 +147,11 @@ export function useRunLauncher(packageId: string) {
     missingVersion: refusal?.version,
     /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
     launch: send,
-    retry: (picks: Record<string, string[]>) => {
-      const { launch, onSuccess } = lastLaunch.current;
-      send(retryLaunch(launch, picks, refusal?.errors ?? []), onSuccess);
-    },
+    retry: () => send(replay.current.launch, replay.current.onSuccess),
     dismiss: () => {
       // A retry still in flight must not reopen the modal.
       flight.forget();
       setRefusal(null);
-      runAgent.reset();
     },
   };
 }

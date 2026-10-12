@@ -236,15 +236,23 @@ describe("org-scope connections across spaces", () => {
     expect(await verdictIn(b)).toEqual([bySession.id]);
   });
 
-  it("several own rows: each space binds the one connected from it", async () => {
+  it("several own rows are a choice in every space, wherever each was connected from", async () => {
     const fromA = await seedConnection({ owner: me, from: a });
     const fromB = await seedConnection({ owner: me, from: b });
-    const c = (await seedSpace({ orgId: ctx.orgId, name: "C" })).id;
-    await activatePackage({ orgId: ctx.orgId, spaceId: c }, INTEGRATION, { shareBy: ctx.user.id });
 
-    expect(await verdictIn(a)).toEqual([fromA]);
-    expect(await verdictIn(b)).toEqual([fromB]);
-    expect(await verdictIn(c)).toBe("must_choose_connection");
+    for (const spaceId of [a, b]) {
+      const { resolved, errors } = await resolveIn(spaceId);
+      expect(resolved[INTEGRATION]).toBeUndefined();
+      expect(errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
+      expect(errors[0]!.candidateConnections!.map((c) => c.id).sort()).toEqual(
+        [fromA, fromB].sort(),
+      );
+      await expect(proxySelects(spaceId)).rejects.toMatchObject({
+        status: 409,
+        code: "must_choose_connection",
+      });
+      expect(await proxySelects(spaceId, fromA)).toBe(fromA);
+    }
   });
 
   describe("block_user_connections", () => {

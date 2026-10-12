@@ -109,6 +109,7 @@ import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.
 import {
   connectionActions,
   meConnectionAuthorityFilter,
+  OLDEST_FIRST,
   ownRowInSpace,
   sharedInto,
   usableInSpace,
@@ -472,7 +473,6 @@ export async function selectAccessibleConnection(
     pins: [],
     orgDefaults,
     launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
-    spaceId: context.spaceId,
     ...identity,
   });
   const error = errors[0];
@@ -514,7 +514,7 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
         usableInSpace(context.spaceId, context.actor),
       ),
     )
-    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
+    .orderBy(...OLDEST_FIRST);
 }
 
 type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];

@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The schedule form feeds the other-actor connection section from the agent detail of the
- * version the fires run: an integration that version marks `required` is never offered
- * "No connection", whose save the server would refuse.
+ * The schedule form against who the schedule runs as. Another actor's connection section is fed
+ * from the agent detail of the version the fires run: an integration that version marks
+ * `required` is never offered "No connection", whose save the server would refuse. The viewer's
+ * readiness verdict is asked only for a schedule running as the viewer — a save names what the
+ * fallback binds from it (`savedScheduleOverrides`), which must never be the viewer's connection
+ * on someone else's schedule.
  */
 
 import { afterAll, describe, expect, it, spyOn } from "bun:test";
@@ -43,8 +46,10 @@ const GMAIL = "@acme/gmail";
 const SLACK = "@acme/slack";
 const VERSION = "1.0.0";
 
-function renderForm(integrations: { id: string; required?: boolean }[]): string {
-  const qc = new QueryClient();
+function renderForm(
+  integrations: { id: string; required?: boolean }[],
+  qc = new QueryClient(),
+): string {
   // Org and space ids are `null` under a static render; the key carries them verbatim.
   qc.setQueryData(packageKeys.detail("agents", null, null, AGENT, VERSION), {
     id: AGENT,
@@ -82,5 +87,46 @@ describe("ScheduleForm — another member's schedule", () => {
   it("offers it for an integration once the agent stops requiring it", () => {
     const html = renderForm([{ id: GMAIL, required: false }]);
     expect(html).toContain(`sched-choice-${GMAIL}-none`);
+  });
+});
+
+describe("ScheduleForm — whose readiness verdict is asked", () => {
+  const VIEWER = "usr_bob";
+  /** Whether the form mounted the agent's readiness query (the fired version's). */
+  function asksReadiness(qc: QueryClient): boolean {
+    return qc
+      .getQueryCache()
+      .getAll()
+      .some(({ queryKey: [, path, init] }) => {
+        const params = (init as { params?: { path?: { name?: string }; query?: unknown } })?.params;
+        return (
+          path === "/api/agents/{scope}/{name}/connection-readiness" &&
+          params?.path?.name === "mailer" &&
+          Bun.deepEquals(params.query, { version: VERSION })
+        );
+      });
+  }
+  /** Renders the schedule of `usr_bob` as seen by `viewerId`. */
+  function renderAs(viewerId: string): QueryClient {
+    const qc = new QueryClient();
+    // `renderToStaticMarkup` reads zustand's server snapshot, not its live state.
+    const snapshot = spyOn(authStore, "getInitialState").mockReturnValue({
+      ...authStore.getInitialState(),
+      user: { id: viewerId, email: "viewer@acme.test", emailVerified: true },
+    });
+    try {
+      renderForm([{ id: GMAIL }], qc);
+    } finally {
+      snapshot.mockRestore();
+    }
+    return qc;
+  }
+
+  it("does not ask the viewer's verdict for a schedule running as someone else", () => {
+    expect(asksReadiness(renderAs("usr_alice"))).toBe(false);
+  });
+
+  it("asks it for a schedule running as the viewer", () => {
+    expect(asksReadiness(renderAs(VIEWER))).toBe(true);
   });
 });

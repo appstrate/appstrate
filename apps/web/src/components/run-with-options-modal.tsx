@@ -10,8 +10,8 @@ import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { storedInputValues } from "../lib/agent-input";
 import { RunOverridesPanel } from "./run-overrides-panel";
+import { withConnectionOverride } from "../lib/connection-set";
 import type { RunOverridesValue } from "../lib/schedule-payload";
-import { withDeclaredConnections } from "../lib/connection-set";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
 import { useScheduleFormDeps } from "../hooks/use-schedules";
@@ -28,6 +28,12 @@ export interface RunWithOptionsSubmit {
   input: Record<string, unknown>;
   version: string;
   overrides: RunOverridesValue;
+  /**
+   * The integrations `version` declares, which the connection picks are narrowed to: one made
+   * under another version may name an integration this one lacks. `undefined` while that
+   * version's detail loads.
+   */
+  declaredIntegrations: readonly string[] | undefined;
   dependencyOverrides: Record<string, string>;
 }
 
@@ -127,15 +133,12 @@ function RunWithOptionsForm({
       ...(s.name ? { name: s.name } : {}),
     }));
 
-  // Picks made under another version may name an integration this one does not declare.
   const fire = (input: Record<string, unknown>) =>
     onSubmit({
       input,
       version,
-      overrides: withDeclaredConnections(
-        overrides,
-        (deps?.agentIntegrations ?? []).map((i) => i.id),
-      ),
+      overrides,
+      declaredIntegrations: deps?.agentIntegrations.map((i) => i.id),
       dependencyOverrides,
     });
 
@@ -176,6 +179,9 @@ function RunWithOptionsForm({
           agentIntegrations={deps.agentIntegrations}
           value={overrides}
           onChange={setOverrides}
+          onConnectionPick={(integrationId, connectionIds) =>
+            setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds))
+          }
           version={version}
         />
       )}

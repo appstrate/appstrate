@@ -83,7 +83,6 @@ export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
       // The integration index is keyed `["packages","integrations",…]` and lists
       // the ACTIVE set, which is exactly what activation changes — so a row that
       // just got switched on (or off) has to stop being served from cache.
-      // Without this, activating left every index still omitting it.
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||
@@ -176,9 +175,8 @@ export function useIntegrationConnections(packageId: string | undefined) {
 }
 
 /**
- * Query options for an (integration, agent) resolution verdict, shared by the
- * picker ({@link useIntegrationReadinessEntry}) and the launch-badge readiness
- * hook: one key, so the badge and the Connexions tab cannot disagree.
+ * Query options of an agent's connection readiness, shared by every reader of it: two readers
+ * of the same version share one key, so they cannot disagree.
  */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();
@@ -209,13 +207,13 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
 
 /**
  * Bulk connection readiness for an agent — ONE call that drives the launch
- * badge, the Connexions tab pickers, and the pre-run check. `blocks_run` /
+ * badge and the connection pickers. `blocks_run` /
  * `errors` mirror the run-kickoff 409 (run semantics); `integrations[]` carries
  * every declared integration's management verdict (includeInert) + a
- * `run_blocking` flag. Replaces the former N per-integration round-trips.
+ * `run_blocking` flag, so no surface reads one integration at a time.
  */
-export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
-  return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
+export function useAgentConnectionReadiness(agentPackageId: string | undefined, version?: string) {
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version));
 }
 
 type AgentConnectionReadiness =
@@ -226,6 +224,11 @@ function resolutionOf(data: AgentConnectionReadiness, integrationId: string | un
   return (
     data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null
   );
+}
+
+/** The declared integrations whose connection refuses a launch (the server's `run_blocking`). */
+export function blockingIntegrationIds(data: AgentConnectionReadiness): string[] {
+  return data.integrations.filter((i) => i.run_blocking).map((i) => i.integration_package_id);
 }
 
 /**
@@ -250,7 +253,7 @@ export function useReadIntegrationResolution(
 
 /**
  * One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected
- * out of the single bulk readiness query so the picker, badge, and modal share one cache entry.
+ * out of the bulk readiness query of `version`: its readers share that version's cache entry.
  */
 export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
@@ -491,7 +494,7 @@ export function useIntegrationPins(packageId: string | undefined) {
 }
 
 /**
- * R2 — the space's agents that declare this integration as a dependency. Used
+ * The space's agents that declare this integration as a dependency. Used
  * by the centralised pin management table to populate the "pin a new agent"
  * picker.
  */

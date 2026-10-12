@@ -5,8 +5,10 @@
  * the inline run (+ validate), the remote run and schedule create/update. A
  * surface that accepts a map imports its rule from here.
  *
- *   - `connection_overrides`: agent run, inline and schedules. The remote
- *     surface declares none (`run-creation.ts` resolves the cascade without).
+ *   - `connection_overrides`: all four take {@link connectionOverridesSchema}
+ *     and refuse an undeclared key through {@link connectionOverrideRefusals}.
+ *     The remote surface adds a rule of its own in `run-creation.ts`: a remote
+ *     run binds one connection per integration (`remote_binds_one_connection`).
  *   - `dependency_overrides`: remote and schedules take
  *     {@link dependencyOverridesSchema}; inline declares none; the agent run
  *     declares a bare record and leaves the VALUE gate to `input-parser.ts`,

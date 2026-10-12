@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  withDeclaredConnections,
+  withFallbackConnections,
+  type FallbackBindingEntry,
+} from "./connection-set";
 
 /**
  * An execution identity. Exactly one field is set; `undefined` means no
@@ -32,7 +37,7 @@ export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined):
 }
 
 /** The override half of a schedule create: an empty override is omitted, never `null`. */
-export interface ScheduleCreateOverrides {
+interface ScheduleCreateOverrides {
   model_id_override?: string;
   generation_config_override?: ModelGenerationSettings;
   proxy_id_override?: string;
@@ -42,7 +47,7 @@ export interface ScheduleCreateOverrides {
 }
 
 /** The override half of a schedule edit: `null` clears an override, an absent key keeps it. */
-export interface ScheduleEditOverrides {
+interface ScheduleEditOverrides {
   model_id_override: string | null;
   generation_config_override: ModelGenerationSettings | null;
   proxy_id_override: string | null;
@@ -51,27 +56,74 @@ export interface ScheduleEditOverrides {
   actor?: ActorValue;
 }
 
-interface ScheduleOverrideArgs {
+/** The fields both writes send; only the override half differs. */
+interface ScheduleSaveFields {
+  name?: string;
+  cron_expression: string;
+  timezone?: string;
+  input?: Record<string, unknown>;
+}
+
+export type ScheduleCreateData = ScheduleSaveFields & ScheduleCreateOverrides;
+export type ScheduleEditData = ScheduleSaveFields & { enabled?: boolean } & ScheduleEditOverrides;
+
+/** The overrides a schedule form holds, and what a save derives the stored ones from. */
+interface ScheduleOverridesState {
   overrides: RunOverridesValue;
+  runsAsViewer: boolean;
+  /** The viewer's readiness entries for the fired version. */
+  viewerReadiness: readonly FallbackBindingEntry[] | undefined;
+  /** The integrations the fired version declares; `undefined` while it loads. */
+  declared: readonly string[] | undefined;
+}
+
+/**
+ * What a schedule save stores. For a schedule running as the viewer, the connection the
+ * fallback binds is named from `viewerReadiness`; for any other actor that verdict speaks for
+ * nobody and names nothing. Then only the keys of `declared` are kept; `undefined` keeps every
+ * pick.
+ */
+export function savedScheduleOverrides(state: ScheduleOverridesState): RunOverridesValue {
+  return withDeclaredConnections(
+    withFallbackConnections(
+      state.overrides,
+      state.runsAsViewer ? state.viewerReadiness : undefined,
+    ),
+    state.declared,
+  );
+}
+
+interface ScheduleSaveArgs extends ScheduleOverridesState {
+  fields: { name: string; cron_expression: string; timezone: string; enabled: boolean };
+  /** What this schedule itself decides. Always sent: on edit `{}` releases the frozen values. */
+  input: Record<string, unknown>;
   versionOverride: string | undefined;
   versionOverrideChanged: boolean;
   actor: ActorValue | undefined;
   currentActor: ActorValue | undefined;
 }
 
-/** The override half of a schedule write; an edit sends the version and actor only if changed. */
-export function scheduleOverridePayload(
-  args: ScheduleOverrideArgs & { isEdit: true },
-): ScheduleEditOverrides;
-export function scheduleOverridePayload(
-  args: ScheduleOverrideArgs & { isEdit: false },
-): ScheduleCreateOverrides;
-export function scheduleOverridePayload(
-  args: ScheduleOverrideArgs & { isEdit: boolean },
-): ScheduleEditOverrides | ScheduleCreateOverrides {
-  const { overrides, versionOverride, actor } = args;
+/**
+ * The body of a schedule write, from the form's state: the overrides as
+ * {@link savedScheduleOverrides} stores them, and on an edit the version and actor only if changed.
+ */
+export function scheduleSavePayload(args: ScheduleSaveArgs & { isEdit: true }): ScheduleEditData;
+export function scheduleSavePayload(args: ScheduleSaveArgs & { isEdit: false }): ScheduleCreateData;
+export function scheduleSavePayload(
+  args: ScheduleSaveArgs & { isEdit: boolean },
+): ScheduleEditData | ScheduleCreateData {
+  const { fields, versionOverride, actor } = args;
+  const overrides = savedScheduleOverrides(args);
+  const common = {
+    name: fields.name || undefined,
+    cron_expression: fields.cron_expression,
+    timezone: fields.timezone,
+    input: args.input,
+  };
   if (args.isEdit) {
     return {
+      ...common,
+      enabled: fields.enabled,
       model_id_override: overrides.model_id_override ?? null,
       generation_config_override: overrides.generation_config_override ?? null,
       proxy_id_override: overrides.proxy_id_override ?? null,
@@ -81,6 +133,7 @@ export function scheduleOverridePayload(
     };
   }
   return {
+    ...common,
     ...(overrides.model_id_override ? { model_id_override: overrides.model_id_override } : {}),
     ...(overrides.generation_config_override
       ? { generation_config_override: overrides.generation_config_override }

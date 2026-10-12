@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import type { components } from "../api/schema";
 import type { IntegrationConnection } from "../hooks/use-integrations";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
@@ -15,26 +16,19 @@ export function toggleCapped(ids: string[], id: string): string[] {
 /** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
 export type ConnectionSet = string[] | null;
 
-/** `picks` (integration id → set) with one integration's set replaced; `null` removes the key. */
-export function withConnectionPick(
-  picks: Readonly<Record<string, string[]>>,
-  integrationId: string,
-  connectionIds: ConnectionSet,
-): Record<string, string[]> {
-  const next = { ...picks };
-  if (connectionIds !== null) next[integrationId] = connectionIds;
-  else delete next[integrationId];
-  return next;
-}
-
-/** {@link withConnectionPick} on `overrides.connection_overrides`; an empty map drops the key. */
+/**
+ * `overrides` with one integration's set replaced; `null` removes its key, and an emptied map
+ * drops `connection_overrides`.
+ */
 export function withConnectionOverride(
   overrides: RunOverridesValue,
   integrationId: string,
   connectionIds: ConnectionSet,
 ): RunOverridesValue {
   const { connection_overrides: picks, ...rest } = overrides;
-  const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
+  const next = { ...picks };
+  if (connectionIds !== null) next[integrationId] = connectionIds;
+  else delete next[integrationId];
   return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
 }
 
@@ -52,13 +46,43 @@ export function withDeclaredConnections(
   return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
 }
 
+/** What {@link withFallbackConnections} reads of one integration's readiness entry. */
+export interface FallbackBindingEntry {
+  integration_package_id: string;
+  inert: boolean;
+  resolution: Pick<
+    components["schemas"]["IntegrationAgentResolution"],
+    "source" | "resolved_connection_ids"
+  >;
+}
+
+/**
+ * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
+ * the fallback binds in that actor's `readiness` (`fallback_auto`), whatever its health.
+ */
+export function withFallbackConnections(
+  overrides: RunOverridesValue,
+  readiness: readonly FallbackBindingEntry[] | undefined,
+): RunOverridesValue {
+  let next = overrides;
+  for (const entry of readiness ?? []) {
+    const id = entry.integration_package_id;
+    const { source, resolved_connection_ids: bound } = entry.resolution;
+    const binds = !entry.inert && source === "fallback_auto" && bound.length > 0;
+    if (binds && next.connection_overrides?.[id] === undefined) {
+      next = withConnectionOverride(next, id, bound);
+    }
+  }
+  return next;
+}
+
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
   return ids.filter((id) => availableIds.includes(id));
 }
 
 /**
  * "Valider" writes a non-empty set that differs from the stored pick. Untouched, that is
- * only a stored pick naming an id no longer a candidate — never the cascade's fallback.
+ * only a stored pick naming an id that is not a candidate — never the set an unset pick shows.
  */
 export function canApplyConnectionSet(
   checked: readonly { id: string }[],
@@ -73,60 +97,46 @@ export function canApplyConnectionSet(
   );
 }
 
-/** Bound as displayed: an unpinned member still sees the cascade; an unpicked override inherits. */
-export function displayedConnectionIds(input: {
-  overrideMode: boolean;
+/**
+ * The pick a picker shows: the explicit one, else the stored set of the layer an unset pick
+ * falls to — the member's pin (under an override), then a soft space default — else the set the
+ * fallback binds. `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
+ */
+export function shownConnectionPick(input: {
   explicitIds: ConnectionSet;
+  memberPinIds: ConnectionSet;
+  softDefaultIds: string[];
   resolvedIds: string[];
-}): string[] {
-  if (input.explicitIds !== null) return input.explicitIds;
-  return input.overrideMode ? [] : input.resolvedIds;
-}
-
-/** The ticked set "Valider" writes. A tick the user cannot see is one they cannot remove. */
-export function checkedConnectionIds(input: {
-  draft: string[] | null;
-  explicitIds: ConnectionSet;
-  resolvedIds: string[];
-  candidateIds: string[];
-}): string[] {
-  const base = input.draft ?? input.explicitIds ?? input.resolvedIds;
-  return keepAvailable(base, input.candidateIds);
+}): ConnectionSet {
+  const chosen = input.explicitIds ?? input.memberPinIds;
+  if (chosen !== null) return chosen;
+  const bound = input.softDefaultIds.length > 0 ? input.softDefaultIds : input.resolvedIds;
+  return bound.length > 0 ? bound : null;
 }
 
 /**
  * Stored members that are no candidate for this agent. The resolver refuses such a set rather
  * than bind what is left, so the picker names them and "Valider" visibly drops them.
  */
-export function unavailableConnectionIds(explicitIds: string[], candidateIds: string[]): string[] {
-  return explicitIds.filter((id) => !candidateIds.includes(id));
+export function unavailableConnectionIds(storedIds: string[], candidateIds: string[]): string[] {
+  return storedIds.filter((id) => !candidateIds.includes(id));
 }
 
 /**
- * Where a connection created from the picker goes. With no pick of the actor's own (or a pick of
- * none) it becomes the pick — never joined onto the cascade's fallback, which would freeze an org
- * default into a member pin. Beside an explicit pick it is only ticked: binding several
- * connections is always the actor's explicit "Valider". A connection created to replace a stored
- * member (`replacing`) takes its place 1-for-1, which never grows the set.
+ * The set a picker persists once a connection was created from it: `boundIds` (the pick the
+ * picker shows, kept to the candidates) plus `createdId`. A connection created to replace a
+ * member (`replacing`) takes its place 1-for-1. At the cap `boundIds` comes back unchanged.
  */
 export function placeCreatedConnection(input: {
-  explicitIds: ConnectionSet;
-  checkedIds: string[];
+  boundIds: string[];
   createdId: string;
   replacing?: string;
-}): { persist: string[] } | { draft: string[] } {
-  const { explicitIds, createdId, replacing } = input;
-  if (replacing && explicitIds?.includes(replacing)) {
-    return { persist: explicitIds.map((id) => (id === replacing ? createdId : id)) };
+}): string[] {
+  const { boundIds, createdId, replacing } = input;
+  if (replacing !== undefined && boundIds.includes(replacing)) {
+    return boundIds.map((id) => (id === replacing ? createdId : id));
   }
-  if (!explicitIds?.length) return { persist: [createdId] };
-  const checkedIds = input.checkedIds.filter((id) => id !== replacing);
-  return {
-    draft:
-      checkedIds.includes(createdId) || checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION
-        ? checkedIds
-        : [...checkedIds, createdId],
-  };
+  return boundIds.length >= MAX_CONNECTIONS_PER_INTEGRATION ? boundIds : [...boundIds, createdId];
 }
 
 /**

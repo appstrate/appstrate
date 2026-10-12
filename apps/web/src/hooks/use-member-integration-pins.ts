@@ -2,10 +2,8 @@
 
 /**
  * React Query hooks for the caller's member-scope integration pins
- * (`/api/me/integration-pins`). Replaces the previous `localStorage`-based
- * `use-agent-connection-picks` — the picker on the agent page now writes
- * a persisted DB row that the resolver sees on every run (cascade layer 4),
- * not an ephemeral browser-local value.
+ * (`/api/me/integration-pins`): the picker on the agent page writes a
+ * persisted row that the resolver sees on every run (cascade layer 4).
  *
  * One pin per (agent, integration, member-scope), holding the WHOLE bound
  * SET: `PUT` replaces it, `DELETE` clears it. Each connection carries its own

@@ -19,7 +19,7 @@ import { getModelIcon } from "./icons";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { connectableAuthKeysForAgent } from "@appstrate/core/integration";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
-import { withConnectionOverride, type ConnectionSet } from "../lib/connection-set";
+import type { ConnectionSet } from "../lib/connection-set";
 import { inheritedEntry } from "../lib/run-launch";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { ModelGenerationFields } from "./model-generation-fields";
@@ -48,27 +48,34 @@ interface RunOverridesPanelProps {
   /** Persisted model id (or null = inherit org default). */
   persistedModelId: string | null;
   /** Persisted generation defaults shown as the inherit baseline. */
-  persistedGenerationConfig?: ModelGenerationSettings | null;
+  persistedGenerationConfig: ModelGenerationSettings | null;
   /** Persisted proxy id (or null = inherit org default). */
   persistedProxyId: string | null;
   /**
    * Agent's declared integration dependencies — drives the
-   * connectionOverrides picker. Pass an empty array to hide the section
+   * connection-overrides pickers. Pass an empty array to hide the section
    * (e.g. for agents without integrations). The caller is responsible
    * for reading `dependencies.integrations` off the agent manifest.
    */
   agentIntegrations?: AgentIntegrationRef[];
   /** Current value (controlled). */
   value: RunOverridesValue;
+  /** A model, generation or proxy change: the whole next value. */
   onChange: (next: RunOverridesValue) => void;
+  /**
+   * One integration's connection pick. A picker calls it once its connect popup settles, long
+   * after the render that built it: the parent applies it to the value it holds then.
+   */
+  onConnectionPick: (integrationId: string, connectionIds: ConnectionSet) => void;
   /**
    * Version selector forwarded to the integration connection pickers so
    * their per-integration readiness verdict judges the definition that runs.
    */
-  version?: string;
+  version: string;
   /**
    * For a schedule: it spends organization credentials only, so a model each
    * member pays for themselves cannot be picked, and nobody's credential is named.
+   * The connection hint then speaks of every fire instead of this run.
    */
   scheduled?: boolean;
 }
@@ -76,10 +83,9 @@ interface RunOverridesPanelProps {
 /**
  * Override editor for the agent's resolution defaults — model, proxy and
  * integration connections. Shared by the schedule editor and the run launcher,
- * where these three carry identical semantics ("inherit" = the agent default).
- * Emits a delta payload (`onChange`): each field is present only when it
- * differs from the persisted default, so the caller never re-implements diff
- * detection.
+ * where these three carry identical semantics (no pick = the agent default).
+ * The value is a delta: each field is present only when it differs from the
+ * persisted default, so the caller never re-implements diff detection.
  *
  * Agent parameters are deliberately NOT here — they are the agent's single
  * `input` schema, rendered by {@link AgentInputForm} at the top of every launch
@@ -97,6 +103,7 @@ export function RunOverridesPanel({
   agentIntegrations,
   value,
   onChange,
+  onConnectionPick,
   version,
   scheduled = false,
 }: RunOverridesPanelProps) {
@@ -291,14 +298,13 @@ export function RunOverridesPanel({
       )}
 
       {agentIntegrations && agentIntegrations.length > 0 && (
-        <ScheduleConnectionOverridesSection
+        <ConnectionOverridesSection
           agentPackageId={packageId}
           integrations={agentIntegrations}
           version={version}
+          scheduled={scheduled}
           value={value.connection_overrides ?? {}}
-          onChange={(integrationId, connectionIds) =>
-            onChange(withConnectionOverride(value, integrationId, connectionIds))
-          }
+          onChange={onConnectionPick}
         />
       )}
     </div>
@@ -309,32 +315,36 @@ export function RunOverridesPanel({
  * Per-integration picker section that drives `value.connection_overrides`.
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
  * integration) in `override` mode: validating a set writes it into the
- * `connection_overrides` map, "inherit" clears the key. The pick freezes
- * into the schedule row on save (the launch override — below admin pins, above member pins).
- * "No connection" writes `[]`.
+ * `connection_overrides` map, the reset entry clears the key, "No connection"
+ * writes `[]`. The map is the launch override (below admin pins, above member
+ * pins) of the form that holds it: one run's, or a schedule's on every fire.
  *
  * Identical UX to the agent page's connection picker — same candidate
  * list, scope/lock verdicts and inline connect flow — only the
  * persistence target differs (transient form value vs. member pin).
  */
-function ScheduleConnectionOverridesSection({
+function ConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,
+  scheduled,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
-  version?: string;
+  version: string;
+  scheduled: boolean;
   value: Record<string, string[]>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   return (
     <div className="space-y-2">
-      <Label>{t("schedule.connectionOverrides.label")}</Label>
-      <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
+      <Label>{t("connectionOverrides.label")}</Label>
+      <p className="text-muted-foreground text-xs">
+        {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
+      </p>
       <div className="border-border bg-card space-y-3 rounded-md border p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
@@ -360,8 +370,8 @@ function IntegrationOverrideRow({
 }: {
   agentPackageId: string;
   integration: AgentIntegrationRef;
-  version?: string;
-  /** Currently-picked connection set; `null` = inherit, `[]` = none. */
+  version: string;
+  /** This form's pick: `null` = none (the row shows what the agent binds), `[]` = no connection. */
   value: ConnectionSet;
   onChange: (next: ConnectionSet) => void;
 }) {
@@ -370,13 +380,13 @@ function IntegrationOverrideRow({
 
   // Gate the row on whether the agent can connect this integration at all
   // (declared auth the actor can start a flow on, given its tool selection).
-  // Mirrors the run-time `integration_not_active`/no-auth gates so the
-  // schedule editor never offers an override for an unconnectable integration.
+  // Mirrors the run-time `integration_not_active`/no-auth gates so neither
+  // form offers an override for an unconnectable integration.
   if (!detail) return null;
   if (connectableAuthKeysForAgent(detail.manifest, integration.tools).length === 0) return null;
 
   return (
-    <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
+    <div className="space-y-1.5" data-testid={`conn-override-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
       <IntegrationConnectionPicker
         integrationId={integration.id}

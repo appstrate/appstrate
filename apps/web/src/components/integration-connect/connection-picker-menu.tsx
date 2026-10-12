@@ -33,15 +33,13 @@ import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
 
 /** What the closed trigger shows, first match wins. */
-type TriggerKind = "unavailable" | "none" | "one" | "many" | "inherit" | "choose" | "connect";
+type TriggerKind = "unavailable" | "none" | "one" | "many" | "choose" | "connect";
 
 function triggerKind(p: ConnectionPicker): TriggerKind {
   if (p.unavailableIds.length > 0) return "unavailable";
-  if (p.pickedNone) return "none";
-  if (p.displayConns.length === 1) return "one";
-  if (p.displayConns.length > 1) return "many";
-  if (p.overrideMode) return "inherit";
-  return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
+  if (p.shownPick === null) return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
+  if (p.shownPick.length === 0) return "none";
+  return p.shownPick.length === 1 ? "one" : "many";
 }
 
 const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
@@ -49,7 +47,6 @@ const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
   none: Ban,
   one: Users,
   many: Users,
-  inherit: Plus,
   choose: Plus,
   connect: Plus,
 };
@@ -66,30 +63,25 @@ export function PickerMenu({
   const navigate = useNavigate();
   const { data: spaces } = useSpaces();
   const {
-    runBlocking,
+    gatesRun,
     candidates,
-    resolvedConnectionIds,
     canAddConnection,
-    byDefault,
-    softDefaultIds,
     canConnect,
     integrationPath,
     canOpenIntegration,
-    overrideMode,
     auths,
     authKeys,
     hasCandidates,
     explicitIds,
-    pickedNone,
+    shownPick,
+    shownIds,
+    shownAsDefault,
     required,
-    storedIds,
     unavailableIds,
     checkedIds,
     atCap,
     oneClick,
     displayConns,
-    underScopedConns,
-    deadConns,
     busy,
     canApply,
     ownerLabel,
@@ -98,7 +90,6 @@ export function PickerMenu({
     missingScopeLabels,
     connectsWithAgentScopes,
     open,
-    setOpen,
     onOpenChange,
     oauthPending,
     persist,
@@ -133,27 +124,20 @@ export function PickerMenu({
       ? t("detail.integrationMemberPicker.addVia", { label: tl })
       : t("detail.integrationMemberPicker.addConnection");
   };
+  const showsNone = shownPick?.length === 0;
+  // The radio states the explicit layer: an unset pick showing the default's "no connection"
+  // leaves it unchecked and selectable, which is how that choice is made explicit.
+  const pickedNone = explicitIds?.length === 0;
   const trigger = triggerKind(picker);
   const triggerLabel = {
-    unavailable: () => setLabel(storedIds, unavailableIds),
+    unavailable: () => setLabel(shownIds, unavailableIds),
     none: () => t("detail.integrationMemberPicker.none"),
     one: () => displayConns[0]!.label,
     many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
-    inherit: () => t("detail.integrationMemberPicker.inherit"),
     choose: () => t("detail.integrationMemberPicker.chooseLabel"),
     connect: () => t("detail.integrationMemberPicker.connectLabel"),
   }[trigger]();
-  // Amber on exactly the states that gate a run: pin mode reads the server's
-  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
-  // warns — or a stored "no connection" for an integration the agent now requires.
-  const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 ||
-      unavailableIds.length > 0 ||
-      deadConns.length > 0 ||
-      (pickedNone && required)
-    : runBlocking;
-  const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
+  const TriggerIcon = gatesRun ? AlertTriangle : TRIGGER_ICONS[trigger];
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -161,12 +145,12 @@ export function PickerMenu({
         <Button
           variant="outline"
           size="sm"
-          className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? AMBER_TEXT : ""}`}
+          className={`h-7 justify-start gap-1.5 text-xs ${gatesRun ? AMBER_TEXT : ""}`}
           data-testid={`member-pick-${integrationId}`}
         >
           <TriggerIcon className="size-3" />
           <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-          {!overrideMode && byDefault && (
+          {shownAsDefault && (
             <span className="text-muted-foreground/70">
               {t("detail.integrationMemberPicker.defaultBadge")}
             </span>
@@ -183,9 +167,7 @@ export function PickerMenu({
           const fit = c.scope_fit;
           const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
-          const isDefault =
-            explicitIds === null &&
-            (resolvedConnectionIds.includes(c.id) || softDefaultIds.includes(c.id));
+          const isDefault = shownAsDefault && shownIds.includes(c.id);
           // Only the connection owner can renew via OAuth — a foreign
           // shared connection's tokens belong to someone else. We still
           // let the actor pin a foreign needs_reconnection row (their
@@ -319,7 +301,7 @@ export function PickerMenu({
               // Stays open on a refused write, so the ticks stay editable.
               e.preventDefault();
               void persist(checkedIds).then((ok) => {
-                if (ok) setOpen(false);
+                if (ok) onOpenChange(false);
               });
             }}
             data-testid={`member-pick-apply-${integrationId}`}
@@ -348,6 +330,11 @@ export function PickerMenu({
           >
             <Check className={`size-3.5 ${pickedNone ? "" : "opacity-0"}`} />
             <NoConnectionLabel />
+            {shownAsDefault && showsNone && (
+              <span className="text-muted-foreground/70 text-[0.6rem]">
+                {t("detail.integrationMemberPicker.defaultBadge")}
+              </span>
+            )}
           </DropdownMenuItem>
         )}
         {explicitIds !== null && (
@@ -358,9 +345,7 @@ export function PickerMenu({
           >
             <Check className="size-3.5 opacity-0" />
             <span className="text-muted-foreground">
-              {overrideMode
-                ? t("detail.integrationMemberPicker.inherit")
-                : t("detail.integrationMemberPicker.resetToAuto")}
+              {t("detail.integrationMemberPicker.resetToAuto")}
             </span>
           </DropdownMenuItem>
         )}

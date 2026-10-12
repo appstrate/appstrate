@@ -29,44 +29,39 @@ import {
 import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
 
 interface AgentIntegrationsBlockProps {
+  /** The agent's declared integrations; the Connexions tab renders its own empty state. */
   entries: AgentIntegrationEntry[];
-  /**
-   * Agent package id — keys per-agent admin pins. Optional so callers
-   * that don't surface the admin pin row (e.g. read-only previews) can
-   * omit it; when present, an admin can pin a specific shared connection
-   * for THIS agent on each (integration, authKey).
-   */
-  agentPackageId?: string;
+  /** The agent whose resolution each card reads and whose member pin its picker writes. */
+  agentPackageId: string;
 }
 
 /**
- * Connection-status block for every integration declared in the agent
- * manifest. One card per dependency. A card with a per-agent context
- * (`agentPackageId`) renders the per-integration connection picker — list,
- * pick, disambiguate, connect, reconnect, upgrade, add-another — driven by the
- * server-authoritative `IntegrationAgentResolution`, selected from the bulk
- * `GET /api/agents/:scope/:name/connection-readiness` query — the same verdict
- * the launch-button readiness badge and the run-kickoff 409 consume, so the
- * three can never disagree.
+ * One card per integration the agent declares. An integration active in the
+ * space gets the connection picker — list, pick, disambiguate, connect,
+ * reconnect, upgrade, add-another — driven by the server-authoritative
+ * `IntegrationAgentResolution`, selected from the bulk
+ * `GET /api/agents/:scope/:name/connection-readiness` query: the verdict the
+ * launch-button badge and the run-kickoff 409 consume, so the three can never
+ * disagree. An integration switched off in the space gets the reason and its
+ * activation button instead.
  *
- * The picker renders for EVERY declared integration, independent of whether the
- * agent selected tools/scopes: connection management applies even to an inert
- * integration. Whether an integration BLOCKS the run (run semantics) is the
- * server's `run_blocking` flag on the same bulk query, not a client predicate.
+ * The picker renders for EVERY active declared integration, independent of
+ * whether the agent selected tools/scopes: connection management applies even
+ * to an inert integration. Whether an integration BLOCKS the run (run
+ * semantics) is the server's `run_blocking` flag on the same bulk query, not a
+ * client predicate.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
-  if (entries.length === 0) return null;
-
   return (
     <div className="space-y-2">
       {entries.map((entry) => (
         <IntegrationConnectionCard
           key={entry.id}
           packageId={entry.id}
+          agentPackageId={agentPackageId}
           agentTools={entry.tools}
           agentScopes={entry.scopes}
           required={entry.required === true}
-          {...(agentPackageId ? { agentPackageId } : {})}
         />
       ))}
     </div>
@@ -75,19 +70,19 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
 
 interface IntegrationConnectionCardProps {
   packageId: string;
+  agentPackageId: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
   /** The agent's `required` flag: an inactive required integration refuses the run. */
   required: boolean;
-  agentPackageId?: string;
 }
 
 function IntegrationConnectionCard({
   packageId,
+  agentPackageId,
   agentTools,
   agentScopes,
   required,
-  agentPackageId,
 }: IntegrationConnectionCardProps) {
   const { data: detail, isLoading, error } = useIntegrationDetail(packageId);
   const displayName = detail?.manifest.display_name ?? packageId;
@@ -137,12 +132,6 @@ function IntegrationConnectionCard({
     );
   }
 
-  // Read-only preview (no per-agent context) — just the shell, no picker/CTA.
-  // Matches the prior behaviour for library/marketplace previews.
-  if (!agentPackageId) {
-    return <CardShell title={displayName} subtitle={packageId} />;
-  }
-
   return (
     <ManagedIntegrationCard
       packageId={packageId}
@@ -157,10 +146,9 @@ function IntegrationConnectionCard({
 }
 
 /**
- * Connection-management surface for an active integration on a specific agent.
- * Split from the parent so its data fetches (resolution + consuming-agents) run
- * only once the parent's loading / not-active / read-only guards have passed —
- * i.e. only when the picker actually renders.
+ * Connection-management surface for an active integration on the agent. Split
+ * from the parent so its reads (resolution + consuming agents) run only once
+ * the parent's loading / not-active guards have passed — when the picker renders.
  */
 function ManagedIntegrationCard({
   packageId,
@@ -184,10 +172,9 @@ function ManagedIntegrationCard({
   const resolution = entry?.resolution;
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
-  // R5 — reuse hint: the resolved connections are shared across every agent in
-  // the space that consumes this integration, killing the "do I need one
-  // connection per agent?" confusion. Only when resolved AND not blocking — a
-  // blocking state is the picker's warning foreground, not a reassuring line.
+  // Reuse hint: the resolved connections serve every agent of the space that
+  // consumes this integration — one connection, not one per agent. Only when
+  // resolved: a blocking state is the picker's warning, not a reassuring line.
   const resolvedConnections =
     resolution?.resolved_connection_ids
       .map((id) => resolution.candidates.find((c) => c.id === id))
@@ -257,10 +244,9 @@ function InactiveIntegrationCard({
         >
           {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
         </span>
-        {/* The sentence asks for an activation; without this the reader had to
-            go find the integration page to perform it. Somebody the route
-            would refuse gets the button DEAD with the reason on it, rather
-            than a click that ends in a toast. */}
+        {/* The sentence asks for an activation, so the button sits beside it.
+            A reader the route would refuse gets it disabled with the reason as
+            its title, not a click that ends in a toast. */}
         <Button
           variant="outline"
           size="sm"

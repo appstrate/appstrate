@@ -5,7 +5,8 @@
  * or of none, becomes org-scoped with its origin space and shares kept; an end user's row and a
  * space client's row (a space-tier auto client's included) stay in their space; a label the owner
  * already holds at org scope is renamed; every resolution layer (pins, defaults, overrides, fallback)
- * binds the same connection in the origin space.
+ * binds the same connection in the origin space, the fallback of an owner who connected in two
+ * spaces aside: both rows reach each space, and it asks.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -84,14 +85,13 @@ async function seedConnection(opts: {
   clientRef?: string | null;
   label?: string;
   shared?: boolean;
-  accountId?: string;
 }): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
       integrationId: INTEGRATION,
       authKey: "primary",
-      accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
+      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
       orgId: opts.orgId ?? ctx.orgId,
       spaceId: opts.spaceId,
       userId: opts.endUserId ? null : (opts.userId ?? ctx.user.id),
@@ -353,19 +353,9 @@ describe("0041 — connections widened to org scope", () => {
       ).toEqual([chosen]);
     });
 
-    it("the fallback, in each space an owner connected the same account from", async () => {
-      const other = await seedSpace({ orgId: ctx.orgId });
-      for (const id of [AGENT, INTEGRATION]) {
-        await activatePackage({ orgId: ctx.orgId, spaceId: other.id }, id, {
-          shareBy: ctx.user.id,
-        });
-      }
-      const here = await seedConnection({ spaceId: ctx.defaultSpaceId, accountId: "same" });
-      const there = await seedConnection({ spaceId: other.id, accountId: "same" });
-      const inEach = async () => [await bound(ctx.user.id), await bound(ctx.user.id, other.id)];
-      expect(await inEach()).toEqual([[here], [there]]);
-      await run(true);
-      expect(await inEach()).toEqual([[here], [there]]);
+    it("the fallback, for an owner's one connection", async () => {
+      const only = await seedConnection({ spaceId: ctx.defaultSpaceId });
+      expect(await boundAcrossWidening(ctx.user.id)).toEqual([only]);
     });
   });
 
