@@ -137,7 +137,7 @@ describe("scheduleOverridePayload — the fallback's binding", () => {
     {
       integration_package_id: GMAIL,
       inert: false,
-      resolution: { source, error_code: null, resolved_connection_ids: ["conn_own"] },
+      resolution: { source, resolved_connection_ids: ["conn_own"] },
     },
   ];
   const rest = {
@@ -179,6 +179,15 @@ describe("scheduleOverridePayload — the fallback's binding", () => {
   it("no verdict (the schedule runs as someone else): no entry", () => {
     expect("connection_overrides" in create(undefined)).toBe(false);
     expect(edit(undefined).connection_overrides).toBeNull();
+  });
+
+  it("a fallback binding failing its health check: named all the same", () => {
+    const underScoped = verdict("fallback_auto").map((entry) => ({
+      ...entry,
+      resolution: { ...entry.resolution, error_code: "insufficient_scopes" },
+    }));
+    expect(create(underScoped).connection_overrides).toEqual(NAMED);
+    expect(edit(underScoped).connection_overrides).toEqual(NAMED);
   });
 
   it("an inert integration: no entry", () => {

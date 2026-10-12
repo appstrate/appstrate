@@ -372,7 +372,6 @@ describe("withFallbackConnections", () => {
     inert: false,
     resolution: {
       source: "fallback_auto",
-      error_code: null,
       resolved_connection_ids: ["c_own"],
       ...resolution,
     },
@@ -392,18 +391,16 @@ describe("withFallbackConnections", () => {
       entry("@acme/slack", { source: "org_default" }),
       entry("@acme/notion", { source: "org_default_enforced" }),
       entry("@acme/ssh", { source: "admin_pin" }),
-      entry("@acme/crm", {
-        source: null,
-        error_code: "must_choose_connection",
-        resolved_connection_ids: [],
-      }),
+      entry("@acme/crm", { source: null, resolved_connection_ids: [] }),
     ];
     expect(picksOf(undefined, readiness)).toBeUndefined();
   });
 
-  it("leaves a fallback binding that fails its health check unnamed", () => {
-    const failing = [entry(GMAIL, { error_code: "insufficient_scopes" })];
-    expect(picksOf(undefined, failing)).toBeUndefined();
+  it("names the fallback's set whatever its health", () => {
+    // Readiness keeps the bound ids beside a health `error_code`.
+    const { resolution, ...rest } = entry(GMAIL);
+    const dead = { ...rest, resolution: { ...resolution, error_code: "needs_reconnection" } };
+    expect(picksOf(undefined, [dead])).toEqual({ [GMAIL]: ["c_own"] });
   });
 
   it("names nothing for an inert integration: no run binds it", () => {

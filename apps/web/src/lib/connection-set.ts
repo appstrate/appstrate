@@ -60,13 +60,13 @@ export interface FallbackBindingEntry {
   inert: boolean;
   resolution: Pick<
     components["schemas"]["IntegrationAgentResolution"],
-    "source" | "error_code" | "resolved_connection_ids"
+    "source" | "resolved_connection_ids"
   >;
 }
 
 /**
  * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
- * the fallback binds (`fallback_auto`: the actor's one own connection) in that actor's `readiness`.
+ * the fallback binds in that actor's `readiness` (`fallback_auto`), whatever its health.
  */
 export function withFallbackConnections(
   overrides: RunOverridesValue,
@@ -74,8 +74,8 @@ export function withFallbackConnections(
 ): RunOverridesValue {
   let next = overrides;
   for (const { integration_package_id: id, inert, resolution } of readiness ?? []) {
-    const { source, error_code: code, resolved_connection_ids: bound } = resolution;
-    if (inert || source !== "fallback_auto" || code !== null || bound.length === 0) continue;
+    const { source, resolved_connection_ids: bound } = resolution;
+    if (inert || source !== "fallback_auto" || bound.length === 0) continue;
     if (next.connection_overrides?.[id] !== undefined) continue;
     next = withConnectionOverride(next, id, bound);
   }
