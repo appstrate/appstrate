@@ -109,6 +109,7 @@ function renderCard(
           integration_package_id: GMAIL,
           required: entry.required ?? false,
           run_blocking: entry.blocking ?? false,
+          inert: false,
           resolution,
         },
       ],

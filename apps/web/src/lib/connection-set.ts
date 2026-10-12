@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import type { components } from "../api/schema";
 import type { IntegrationConnection } from "../hooks/use-integrations";
 import type { RunOverridesValue } from "./schedule-payload";
 import { sameSet } from "./strings";
@@ -50,6 +51,35 @@ export function withDeclaredConnections(
   if (!picks || !declared) return overrides;
   const kept = Object.entries(picks).filter(([id]) => declared.includes(id));
   return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
+}
+
+/** What {@link withFallbackConnections} reads of one integration's readiness entry. */
+export interface FallbackBindingEntry {
+  integration_package_id: string;
+  /** Nothing a run would start: it resolves no connection, whatever `resolution` reports. */
+  inert: boolean;
+  resolution: Pick<
+    components["schemas"]["IntegrationAgentResolution"],
+    "source" | "error_code" | "resolved_connection_ids"
+  >;
+}
+
+/**
+ * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
+ * the fallback binds (`fallback_auto`: the actor's one own connection) in that actor's `readiness`.
+ */
+export function withFallbackConnections(
+  overrides: RunOverridesValue,
+  readiness: readonly FallbackBindingEntry[] | undefined,
+): RunOverridesValue {
+  let next = overrides;
+  for (const { integration_package_id: id, inert, resolution } of readiness ?? []) {
+    const { source, error_code: code, resolved_connection_ids: bound } = resolution;
+    if (inert || source !== "fallback_auto" || code !== null || bound.length === 0) continue;
+    if (next.connection_overrides?.[id] !== undefined) continue;
+    next = withConnectionOverride(next, id, bound);
+  }
+  return next;
 }
 
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {

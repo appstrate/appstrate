@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { sameActor, scheduleOverridePayload } from "../schedule-payload.ts";
-import { withDeclaredConnections } from "../connection-set.ts";
+import type { FallbackBindingEntry } from "../connection-set.ts";
 
 const ALICE = { userId: "usr_alice" };
 const BOB = { userId: "usr_bob" };
@@ -21,6 +21,8 @@ function edit(args: {
   return scheduleOverridePayload({
     isEdit: true,
     overrides: args.picks ? { connection_overrides: args.picks } : {},
+    readiness: undefined,
+    declared: undefined,
     versionOverride: undefined,
     versionOverrideChanged: false,
     actor: args.actor,
@@ -59,6 +61,8 @@ describe("scheduleOverridePayload — edit", () => {
     const moved = scheduleOverridePayload({
       isEdit: true,
       overrides: {},
+      readiness: undefined,
+      declared: undefined,
       versionOverride: undefined,
       versionOverrideChanged: true,
       actor: ALICE,
@@ -74,7 +78,9 @@ describe("scheduleOverridePayload — edit after the agent dropped an integratio
   const save = (declared: string[]) =>
     scheduleOverridePayload({
       isEdit: true,
-      overrides: withDeclaredConnections({ connection_overrides: stored }, declared),
+      overrides: { connection_overrides: stored },
+      readiness: undefined,
+      declared,
       versionOverride: undefined,
       versionOverrideChanged: false,
       actor: ALICE,
@@ -96,6 +102,8 @@ describe("scheduleOverridePayload — create", () => {
       scheduleOverridePayload({
         isEdit: false,
         overrides: {},
+        readiness: undefined,
+        declared: undefined,
         versionOverride: undefined,
         versionOverrideChanged: false,
         actor: undefined,
@@ -109,12 +117,91 @@ describe("scheduleOverridePayload — create", () => {
       scheduleOverridePayload({
         isEdit: false,
         overrides: { connection_overrides: PICKS },
+        readiness: undefined,
+        declared: undefined,
         versionOverride: "1.2.0",
         versionOverrideChanged: true,
         actor: BOB,
         currentActor: undefined,
       }),
     ).toEqual({ connection_overrides: PICKS, version_override: "1.2.0", actor: BOB });
+  });
+});
+
+describe("scheduleOverridePayload — the fallback's binding", () => {
+  const GMAIL = "@acme/gmail";
+  const NAMED = { [GMAIL]: ["conn_own"] };
+  type Verdict = FallbackBindingEntry[] | undefined;
+  type Source = FallbackBindingEntry["resolution"]["source"];
+  const verdict = (source: Source): FallbackBindingEntry[] => [
+    {
+      integration_package_id: GMAIL,
+      inert: false,
+      resolution: { source, error_code: null, resolved_connection_ids: ["conn_own"] },
+    },
+  ];
+  const rest = {
+    declared: [GMAIL],
+    versionOverride: undefined,
+    versionOverrideChanged: false,
+    actor: undefined,
+  };
+  const create = (readiness: Verdict) =>
+    scheduleOverridePayload({
+      isEdit: false,
+      overrides: {},
+      readiness,
+      currentActor: undefined,
+      ...rest,
+    });
+  const edit = (readiness: Verdict, stored?: Record<string, string[]>) =>
+    scheduleOverridePayload({
+      isEdit: true,
+      overrides: stored ? { connection_overrides: stored } : {},
+      readiness,
+      currentActor: ALICE,
+      ...rest,
+    });
+
+  it("create for oneself: names the connection the fallback binds", () => {
+    expect(create(verdict("fallback_auto")).connection_overrides).toEqual(NAMED);
+  });
+
+  it("edit of a stored schedule naming none: names it", () => {
+    expect(edit(verdict("fallback_auto")).connection_overrides).toEqual(NAMED);
+  });
+
+  it("a member pin names the set: no entry", () => {
+    expect("connection_overrides" in create(verdict("member_pin"))).toBe(false);
+    expect(edit(verdict("member_pin")).connection_overrides).toBeNull();
+  });
+
+  it("no verdict (the schedule runs as someone else): no entry", () => {
+    expect("connection_overrides" in create(undefined)).toBe(false);
+    expect(edit(undefined).connection_overrides).toBeNull();
+  });
+
+  it("an inert integration: no entry", () => {
+    const inert = verdict("fallback_auto").map((entry) => ({ ...entry, inert: true }));
+    expect("connection_overrides" in create(inert)).toBe(false);
+    expect(edit(inert).connection_overrides).toBeNull();
+  });
+
+  it("a stored pick is sent as it stands", () => {
+    const stored = { [GMAIL]: ["conn_other"] };
+    expect(edit(verdict("fallback_auto"), stored).connection_overrides).toEqual(stored);
+  });
+
+  it("names nothing for an integration the fired version does not declare", () => {
+    const payload = scheduleOverridePayload({
+      isEdit: false,
+      overrides: {},
+      readiness: verdict("fallback_auto"),
+      currentActor: undefined,
+      ...rest,
+      declared: [],
+    });
+    expect("connection_overrides" in payload).toBe(false);
   });
 });
 

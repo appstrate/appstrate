@@ -67,6 +67,7 @@ const readiness = (res: Resolution, runBlocking: boolean) => ({
       integration_package_id: INTEGRATION,
       required: false,
       run_blocking: runBlocking,
+      inert: false,
       resolution: res,
     },
   ],

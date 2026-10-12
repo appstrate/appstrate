@@ -107,7 +107,13 @@ function readiness(res: Resolution, runBlocking = false, required = false) {
     blocks_run: runBlocking,
     errors: [],
     integrations: [
-      { integration_package_id: INTEGRATION, required, run_blocking: runBlocking, resolution: res },
+      {
+        integration_package_id: INTEGRATION,
+        required,
+        run_blocking: runBlocking,
+        inert: false,
+        resolution: res,
+      },
     ],
   };
 }

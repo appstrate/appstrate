@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import {
+  withDeclaredConnections,
+  withFallbackConnections,
+  type FallbackBindingEntry,
+} from "./connection-set";
 
 /**
  * An execution identity. Exactly one field is set; `undefined` means no
@@ -52,11 +57,26 @@ export interface ScheduleEditOverrides {
 }
 
 interface ScheduleOverrideArgs {
+  /** The overrides the form holds. */
   overrides: RunOverridesValue;
+  /** The caller's readiness entries when the schedule runs as them; none for another actor. */
+  readiness: readonly FallbackBindingEntry[] | undefined;
+  /** The integrations the fired version declares; `undefined` (not loaded) keeps every pick. */
+  declared: readonly string[] | undefined;
   versionOverride: string | undefined;
   versionOverrideChanged: boolean;
   actor: ActorValue | undefined;
   currentActor: ActorValue | undefined;
+}
+
+/** What a schedule save stores: the fallback's binding named, then the declared keys only. */
+export function savedScheduleOverrides(
+  args: Pick<ScheduleOverrideArgs, "overrides" | "readiness" | "declared">,
+): RunOverridesValue {
+  return withDeclaredConnections(
+    withFallbackConnections(args.overrides, args.readiness),
+    args.declared,
+  );
 }
 
 /** The override half of a schedule write; an edit sends the version and actor only if changed. */
@@ -69,7 +89,8 @@ export function scheduleOverridePayload(
 export function scheduleOverridePayload(
   args: ScheduleOverrideArgs & { isEdit: boolean },
 ): ScheduleEditOverrides | ScheduleCreateOverrides {
-  const { overrides, versionOverride, actor } = args;
+  const { versionOverride, actor } = args;
+  const overrides = savedScheduleOverrides(args);
   if (args.isEdit) {
     return {
       model_id_override: overrides.model_id_override ?? null,

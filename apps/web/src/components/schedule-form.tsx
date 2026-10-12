@@ -38,11 +38,10 @@ import {
   pendingConnectionChoices,
   picksAfterActorChange,
   refusalForActor,
-  withDefaultConnections,
 } from "../lib/connection-choice";
 import {
   withConnectionOverride,
-  withDeclaredConnections,
+  withFallbackConnections,
   type ConnectionSet,
 } from "../lib/connection-set";
 import {
@@ -51,6 +50,7 @@ import {
   type ScheduleCreateOverrides,
   type ScheduleEditOverrides,
   sameActor,
+  savedScheduleOverrides,
   scheduleOverridePayload,
 } from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
@@ -286,16 +286,20 @@ export function ScheduleForm(props: ScheduleFormProps) {
   const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
     ?.dependencies.integrations;
 
-  // Derived, not seeded: the viewer's default binding stands as a pick, so the save names it.
-  // The verdict judges the viewer, so it is read for a schedule running as them only.
+  // The verdict judges the viewer: it is read for a schedule running as them only, whose save
+  // names what the fallback binds. Derived, not seeded.
   const { data: readiness } = useAgentConnectionReadiness(
     actorIsViewer ? packageId : undefined,
     firedVersion,
   );
-  const shownOverrides = withDefaultConnections(overrides, {
-    actorIsViewer,
+  // The saved map replaces the stored one: a key the fired version no longer declares is
+  // dropped (the server refuses it), whichever picker — or none — the form shows.
+  const held = {
+    overrides,
     readiness: readiness?.integrations,
-  });
+    declared: firedIntegrations?.map((i) => i.id),
+  };
+  const savedOverrides = savedScheduleOverrides(held);
 
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
@@ -303,22 +307,16 @@ export function ScheduleForm(props: ScheduleFormProps) {
   const pending = pendingConnectionChoices(
     refused,
     submitted?.picks,
-    shownOverrides.connection_overrides,
+    savedOverrides.connection_overrides,
   );
   // Open while a refusal speaks for this actor, so answering it does not fold the pick away.
   const overridesShown = overridesOpen || refused.length > 0;
 
-  // The saved map replaces the stored one: a key the fired version no longer declares is
-  // dropped (the server refuses it), whichever picker — or none — the form shows.
-  const declaredOverrides = withDeclaredConnections(
-    shownOverrides,
-    firedIntegrations?.map((i) => i.id),
-  );
   const showActorChoice =
     !actorIsViewer &&
     ((firedIntegrations?.length ?? 0) > 0 ||
       refused.length > 0 ||
-      Object.keys(declaredOverrides.connection_overrides ?? {}).length > 0);
+      Object.keys(savedOverrides.connection_overrides ?? {}).length > 0);
 
   const {
     register,
@@ -359,7 +357,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
     // anyway, so the two paths agree.
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
-    setSubmitted({ runsAs, picks: declaredOverrides.connection_overrides ?? {} });
+    setSubmitted({ runsAs, picks: savedOverrides.connection_overrides ?? {} });
     const fields = {
       name: data.name || undefined,
       cron_expression: data.cron_expression,
@@ -367,7 +365,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
       input,
     };
     const overrideArgs = {
-      overrides: declaredOverrides,
+      ...held,
       versionOverride,
       versionOverrideChanged,
       actor,
@@ -580,7 +578,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
                   {...(actorIsViewer && firedIntegrations
                     ? { agentIntegrations: firedIntegrations }
                     : {})}
-                  value={shownOverrides}
+                  value={withFallbackConnections(overrides, held.readiness)}
                   onChange={setOverrides}
                   version={firedVersion}
                   scheduled
@@ -589,7 +587,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
                   <ScheduleActorConnectionChoice
                     choices={refused}
                     integrations={firedIntegrations ?? []}
-                    value={declaredOverrides.connection_overrides ?? {}}
+                    value={savedOverrides.connection_overrides ?? {}}
                     onChange={setConnectionPick}
                   />
                 )}

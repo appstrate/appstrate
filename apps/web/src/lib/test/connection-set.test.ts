@@ -19,6 +19,8 @@ import {
   withConnectionOverride,
   withConnectionPick,
   withDeclaredConnections,
+  withFallbackConnections,
+  type FallbackBindingEntry,
 } from "../connection-set";
 
 describe("toggleCapped", () => {
@@ -357,5 +359,70 @@ describe("withDeclaredConnections", () => {
 
   it("keeps every key while the declared set is unknown", () => {
     expect(withDeclaredConnections(overrides, undefined)).toBe(overrides);
+  });
+});
+
+describe("withFallbackConnections", () => {
+  const GMAIL = "@acme/gmail";
+  const entry = (
+    id: string,
+    resolution: Partial<FallbackBindingEntry["resolution"]> = {},
+  ): FallbackBindingEntry => ({
+    integration_package_id: id,
+    inert: false,
+    resolution: {
+      source: "fallback_auto",
+      error_code: null,
+      resolved_connection_ids: ["c_own"],
+      ...resolution,
+    },
+  });
+  const picksOf = (picks: Record<string, string[]> | undefined, readiness = [entry(GMAIL)]) => {
+    const overrides = picks ? { connection_overrides: picks } : {};
+    return withFallbackConnections(overrides, readiness).connection_overrides;
+  };
+
+  it("names the set the fallback binds", () => {
+    expect(picksOf(undefined)).toEqual({ [GMAIL]: ["c_own"] });
+  });
+
+  it("names nothing a layer already names, nor an integration nothing binds", () => {
+    const readiness = [
+      entry(GMAIL, { source: "member_pin" }),
+      entry("@acme/slack", { source: "org_default" }),
+      entry("@acme/notion", { source: "org_default_enforced" }),
+      entry("@acme/ssh", { source: "admin_pin" }),
+      entry("@acme/crm", {
+        source: null,
+        error_code: "must_choose_connection",
+        resolved_connection_ids: [],
+      }),
+    ];
+    expect(picksOf(undefined, readiness)).toBeUndefined();
+  });
+
+  it("leaves a fallback binding that fails its health check unnamed", () => {
+    const failing = [entry(GMAIL, { error_code: "insufficient_scopes" })];
+    expect(picksOf(undefined, failing)).toBeUndefined();
+  });
+
+  it("names nothing for an inert integration: no run binds it", () => {
+    expect(picksOf(undefined, [{ ...entry(GMAIL), inert: true }])).toBeUndefined();
+  });
+
+  it("gives way to a pick, 'no connection' included", () => {
+    expect(picksOf({ [GMAIL]: ["c_other"] })).toEqual({ [GMAIL]: ["c_other"] });
+    expect(picksOf({ [GMAIL]: [] })).toEqual({ [GMAIL]: [] });
+    const slack = { "@acme/slack": ["c_slack"] };
+    expect(picksOf(slack)).toEqual({ ...slack, [GMAIL]: ["c_own"] });
+  });
+
+  it("keeps the other overrides, and the value itself without a verdict", () => {
+    const overrides = { model_id_override: "m1" };
+    expect(withFallbackConnections(overrides, [entry(GMAIL)])).toEqual({
+      model_id_override: "m1",
+      connection_overrides: { [GMAIL]: ["c_own"] },
+    });
+    expect(withFallbackConnections(overrides, undefined)).toBe(overrides);
   });
 });
