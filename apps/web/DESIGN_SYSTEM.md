@@ -382,6 +382,14 @@ its fixtures.
     ticked, nothing written until the last button, « Retour » keeps what was typed). The personal
     keys' models are the same list per provider (`?personalModels=<providerId>`, no star, but the
     organization's default keeps its lock when it is one of them).
+    **A service that does not publish every id it serves** (an endpoint without `/models`, a live
+    search; never a catalog, which binds only its own ids) ends its list with a line,
+    « Ajouter un identifiant de modèle » (`components/model-form/manual-model-entry.tsx`, the
+    model form's own `ManualModelFields`: id, name, « Définir moi-même les limites et capacités »).
+    The id typed joins the list, ticked, and ships with the rest on the footer's button (the row is
+    `manualRow`, `lib/model-form-payload.ts`): there is no second save. A retry after a partly
+    refused batch asks only for what failed: the dialog keeps the models its own submission created
+    (`knownModels`, `lib/model-choice.ts`).
   - **Delete a key** (`components/delete-org-key-confirm.tsx`, the plan in `lib/key-deletion.ts`,
     the writes in `hooks/use-delete-org-key.ts`): one confirmation, one gesture. The server
     refuses a key that model rows still reference (`credential_in_use`, `ON DELETE RESTRICT`), so

@@ -35,6 +35,8 @@ interface ModelChoiceOutcome {
   refusal: string | null;
   /** The key minted, to bind a retry to instead of minting a second one. */
   credentialId: string | null;
+  /** The models created, so a retry knows them (a new key's models are not in the dialog's list). */
+  createdModels: OrgModelInfo[];
 }
 
 /**
@@ -91,6 +93,8 @@ export function useApplyModelChoice() {
         }
       };
       const idByModelId = new Map(existing.map((m) => [m.modelId, m.id]));
+      const createdModels: OrgModelInfo[] = [];
+      let defaulted: string | undefined;
       for (const row of plan.add) {
         try {
           const created = await createModel.mutateAsync({
@@ -101,6 +105,7 @@ export function useApplyModelChoice() {
             },
           });
           idByModelId.set(row.id, created.id);
+          createdModels.push(created);
         } catch (err) {
           fail(row.id, err);
         }
@@ -110,12 +115,21 @@ export function useApplyModelChoice() {
       if (defaultId) {
         try {
           await setDefault.mutateAsync({ body: { modelId: defaultId } });
+          defaulted = defaultId;
         } catch (err) {
           fail(plan.defaultModelId!, err);
         }
       }
       for (const model of plan.withdraw) await setEnabled(model, false);
-      return { failedModelIds, refusal, credentialId: minted?.id ?? null };
+      return {
+        failedModelIds,
+        refusal,
+        credentialId: minted?.id ?? null,
+        // The rows as the server holds them now: the one starred is the default.
+        createdModels: createdModels.map((m) =>
+          m.id === defaulted ? { ...m, is_default: true } : m,
+        ),
+      };
     } finally {
       setPending(false);
     }

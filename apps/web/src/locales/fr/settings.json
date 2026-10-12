@@ -1713,5 +1713,7 @@
   "models.choice.withdrawing_one": "L'accès sera retiré pour {{count}} modèle.",
   "models.choice.withdrawing_other": "L'accès sera retiré pour {{count}} modèles.",
   "models.choice.defaultLocked": "Choisissez d'abord un autre modèle par défaut",
-  "models.choice.failed": "Impossible de terminer pour : {{ids}}"
+  "models.choice.failed": "Impossible de terminer pour : {{ids}}",
+  "models.choice.manualAdd": "Ajouter un identifiant de modèle",
+  "models.choice.manualConfirm": "Ajouter à la liste"
 }

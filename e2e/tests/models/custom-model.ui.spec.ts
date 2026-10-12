@@ -134,6 +134,27 @@ function discoveredRow(dialog: Locator, modelId: string): Locator {
   return modelRow(dialog, modelId);
 }
 
+/**
+ * « Ajouter un identifiant de modèle »: type an id on the list's last line, optionally set the
+ * limits the endpoint cannot publish, and add it to the list.
+ */
+async function addTypedModel(
+  dialog: Locator,
+  modelId: string,
+  capabilities?: { contextWindow: string; image: boolean },
+): Promise<void> {
+  await dialog.getByRole("button", { name: "Ajouter un identifiant de modèle" }).click();
+  await dialog.getByLabel("Modèle", { exact: true }).fill(modelId);
+  if (capabilities) {
+    await dialog
+      .getByRole("checkbox", { name: "Définir moi-même les limites et capacités" })
+      .click();
+    await dialog.getByLabel("Fenêtre de contexte").fill(capabilities.contextWindow);
+    if (capabilities.image) await dialog.getByRole("checkbox", { name: "Image" }).click();
+  }
+  await dialog.getByRole("button", { name: "Ajouter à la liste" }).click();
+}
+
 async function detect(dialog: Locator, count: number): Promise<void> {
   await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
   await expect(
@@ -264,12 +285,9 @@ test.describe("Custom endpoint model — UI", () => {
     expect(models.find((m) => m.modelId === REFUSED_MODEL)).toBeUndefined();
   });
 
-  // Known application defect (partial batch, retry): the dialog's list does not
-  // learn which models the first attempt saved, so the retry asks for them again
-  // (the server answers 409 `model_already_added`) and reports the saved model
-  // as one it could not complete. `test.fail` flips to a red test the day it is fixed.
+  // The retry asks only for what failed: the model the first attempt saved is not posted again
+  // (the server would answer 409 `model_already_added`) and is not reported as failed.
   test("re-offers only what failed after a partly refused batch", async ({ authedPage: page }) => {
-    test.fail(true, "retry re-posts the model the first attempt saved and reports it as failed");
     const dialog = await submitPartlyRefusedBatch(page);
 
     const retried: string[] = [];
@@ -325,16 +343,58 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(dialog.getByText("Clé refusée par le endpoint.")).toBeVisible();
   });
 
-  // Known application gap: Settings › Models no longer offers a way to type a
-  // model id by hand. The key flow's second step lists only what a catalog or a
-  // detection returns, and the model form (with its « Configurer manuellement »
-  // path, name and limits) opens only on a model that already exists. An
-  // endpoint that publishes no listing therefore cannot get a model there. The
-  // spec, as it ran before the redesign: pick the custom endpoint, choose
-  // « Configurer manuellement », type `llama3`, take the limits and the Image
-  // modality, set the context window to 32768, save, and expect a row named
-  // `llama3` with input `["text", "image"]` and that context window.
-  test.fixme("saves a manually typed model id and lets the server name the row", () => {});
+  // An endpoint that publishes no listing gets its models by typing their ids: the last line of
+  // the list, « Ajouter un identifiant de modèle », opens the model form's manual fields, and the
+  // id typed joins the list, ticked. Nothing is detected here: the endpoint is never asked.
+  test("saves a manually typed model id and lets the server name the row", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    const dialog = await openCustomEndpointForm(page, {
+      baseUrl: `${mockOrigin}/v1`,
+      apiKey: GOOD_KEY,
+      apiType: OPENAI_TYPE,
+    });
+
+    await addTypedModel(dialog, "llama3", { contextWindow: "32768", image: true });
+    await expect(discoveredRow(dialog, "llama3")).toBeChecked();
+    await submitAddKey(dialog).click();
+
+    await expect(dialog).toBeHidden();
+    const created = (await listModels(apiClient)).find((m) => m.modelId === "llama3");
+    // No name typed: the server names the row after the id. The limits are the operator's own.
+    expect(created).toMatchObject({
+      label: "llama3",
+      modelId: "llama3",
+      input: ["text", "image"],
+      contextWindow: 32768,
+    });
+  });
+
+  test("adds a typed model id to a key the org already saved", async ({
+    authedPage: page,
+    apiClient,
+  }) => {
+    const seeded = await apiClient.post("/model-provider-credentials", {
+      providerId: OPENAI_PROVIDER_ID,
+      api_key: GOOD_KEY,
+      base_url_override: `${mockOrigin}/v1`,
+    });
+    expect(seeded.status()).toBe(201);
+    const credential = (await seeded.json()) as { id: string; label: string };
+
+    await page.goto("/org-settings/models");
+    await openRowMenuItem(page, credential.label, "Choisir les modèles");
+    const dialog = page.getByRole("dialog", { name: /^Modèles disponibles avec/ });
+    await expect(dialog).toBeVisible();
+
+    await addTypedModel(dialog, "mistral-local");
+    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+
+    await expect(dialog).toBeHidden();
+    const created = (await listModels(apiClient)).find((m) => m.modelId === "mistral-local");
+    expect(created).toMatchObject({ credentialId: credential.id, label: "mistral-local" });
+  });
 
   test("discovers an Anthropic-shaped endpoint's models", async ({
     authedPage: page,

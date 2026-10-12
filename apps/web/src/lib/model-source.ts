@@ -51,8 +51,8 @@ export interface ModelPickRow {
     Pick<ModelPickRow, "input" | "contextWindow" | "maxTokens" | "reasoning">
   >;
   cost: ModelCost | null;
-  /** The listing it came from: what the batch is allowed to send. */
-  origin: ModelSource;
+  /** The listing it came from (or `manual`, an id typed by hand): what the batch is allowed to send. */
+  origin: ModelSource | "manual";
   /** Catalog-only: the curated group. */
   featured: boolean;
 }

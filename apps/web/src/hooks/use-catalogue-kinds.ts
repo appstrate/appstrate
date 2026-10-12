@@ -5,15 +5,13 @@
  *
  * The navigation entry, the route and the panel's rail all ask this same
  * question, and an entry that opens a panel with an empty rail is worse than no
- * entry at all.
+ * entry at all. The answer is `catalogueKinds`, which reads the same verdict as
+ * every activation control (`maySetPackageActive`).
  */
 import type { PackageType } from "@appstrate/core/validation";
-import { spacePackagePermission } from "@appstrate/core/permissions";
-import { usePermissions } from "./use-permissions";
-
-const CATALOGUE_KINDS: PackageType[] = ["agent", "skill", "mcp-server", "integration"];
+import { catalogueKinds } from "../lib/package-permissions";
+import { useCurrentSpaceGrant } from "./use-permissions";
 
 export function useCatalogueKinds(): PackageType[] {
-  const { can } = usePermissions();
-  return CATALOGUE_KINDS.filter((type) => can(spacePackagePermission(type, "activate")));
+  return catalogueKinds(useCurrentSpaceGrant());
 }

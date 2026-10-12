@@ -13,7 +13,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 
 export const MODELS_SETTINGS_PATH = "/org-settings/models";
 /** The dialog's title and its last button (`credentials.add`). */
-export const ADD_KEY = "Ajouter une clé org";
+const ADD_KEY = "Ajouter une clé org";
 /** The first step's button (`credentials.form.next`). */
 export const NEXT = "Suivant";
 

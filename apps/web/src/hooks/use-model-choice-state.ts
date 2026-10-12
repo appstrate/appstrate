@@ -50,13 +50,22 @@ export function useModelChoice({
   const discoveryKey = JSON.stringify(discoverWith);
   const freshDiscovery = discovery?.key === discoveryKey ? discovery : null;
 
+  // Ids typed by hand: a catalog binds only the ids it offers, anything else may name one.
+  const offersManual = source !== "catalog";
+  const [typed, setTyped] = useState<ModelPickRow[]>([]);
+
   const listed = useMemo((): ModelPickRow[] => {
-    if (source === "search") return searchRows(search.models);
-    if (source === "discover") {
-      return freshDiscovery?.outcome === "ok" ? discoveredRows(freshDiscovery.models) : [];
-    }
-    return catalogRows(provider.models);
-  }, [source, search.models, freshDiscovery, provider.models]);
+    const offered =
+      source === "search"
+        ? searchRows(search.models)
+        : source === "discover"
+          ? freshDiscovery?.outcome === "ok"
+            ? discoveredRows(freshDiscovery.models)
+            : []
+          : catalogRows(provider.models);
+    const ids = new Set(offered.map((r) => r.id));
+    return [...offered, ...typed.filter((r) => !ids.has(r.id))];
+  }, [source, search.models, freshDiscovery, provider.models, typed]);
 
   // A model the organization has but the listing no longer offers stays in the list (ticked while
   // it has access, unticked once withdrawn).
@@ -114,6 +123,13 @@ export function useModelChoice({
     setTouched(next);
   };
 
+  /** An id typed by hand joins the list, ticked; an id the list already has is just ticked. */
+  const addManual = (row: ModelPickRow) => {
+    const known = allRows.find((r) => r.id === row.id);
+    if (!known) setTyped((rows) => [...rows, row]);
+    change([known ?? row], true);
+  };
+
   const detect = () => {
     if (!discoverWith) return;
     const key = discoveryKey;
@@ -156,6 +172,8 @@ export function useModelChoice({
     plan,
     canSave,
     lockedId,
+    offersManual,
+    addManual,
     discovery: freshDiscovery,
     detecting: discover.isPending,
     detect,

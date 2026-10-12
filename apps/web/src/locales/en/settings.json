@@ -1713,5 +1713,7 @@
   "models.choice.withdrawing_one": "Access will be removed for {{count}} model.",
   "models.choice.withdrawing_other": "Access will be removed for {{count}} models.",
   "models.choice.defaultLocked": "Choose another default model first",
-  "models.choice.failed": "Could not finish for: {{ids}}"
+  "models.choice.failed": "Could not finish for: {{ids}}",
+  "models.choice.manualAdd": "Add a model id",
+  "models.choice.manualConfirm": "Add to the list"
 }

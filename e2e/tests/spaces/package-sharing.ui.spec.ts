@@ -158,8 +158,8 @@ test("an admin shares an agent with a guest, who adds it to their space and may 
     // THE door is `POST /api/spaces/{spaceId}/packages`, the same route the
     // catalogue's switches call for a team space. A guest holds no
     // `agents:configure` anywhere; owning the space is the authorization (RBAC
-    // spec §3.6). The catalogue itself does not open for a guest (see the
-    // `test.fail` further down), so the door is driven over the API here.
+    // spec §3.6). The door is driven over the API here; the guest test further
+    // down takes the same offer up from the catalogue.
     const activated = await guestClient.post(`/spaces/${guestSpaceId}/packages`, {
       packageId: `${scope}/${name}`,
     });
@@ -321,14 +321,10 @@ test("an offer is taken up from the catalogue and lands on an already visited in
   }
 });
 
-// Known application defect: a GUEST in their own personal space holds no
-// `<type>:activate` grant there, and `useCatalogueKinds`
-// (`hooks/use-catalogue-kinds.ts`) reads only those grants, so the sidebar's
-// Catalogue entry is hidden and `/catalogue` answers « Vous n'avez pas accès ».
-// The server and `maySetPackageActive` both let the owner of a personal space
-// activate (RBAC spec §3.6, and the API test above): the offer a guest is sent
-// cannot be taken up from the interface. Members, who hold the grant, can (the
-// test before). `test.fail` flips to red the day it is fixed.
+// A GUEST in their own personal space holds no `<type>:activate` grant there, yet the server lets
+// the owner of a personal space activate (RBAC spec §3.6, and the API test above). The catalogue
+// (`catalogueKinds`) reads the same verdict as every activation control, so its entry is there and
+// the offer a guest is sent can be taken up. Members hold the grant (the test before).
 test("a guest finds an offer in the catalogue and switches it on", async ({
   request,
   browser,
@@ -336,7 +332,6 @@ test("a guest finds an offer in the catalogue and switches it on", async ({
   apiClient,
   orgOnlyClient,
 }) => {
-  test.fail(true, "the catalogue is hidden from a guest in their personal space");
   const orgId = browserCtx.org.orgId;
   const scope = `@${browserCtx.org.orgSlug}`;
   const name = `guest-offer-${Date.now().toString(36)}`;

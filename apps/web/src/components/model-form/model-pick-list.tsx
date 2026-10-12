@@ -6,6 +6,7 @@
  * described it.
  */
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Star } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -112,6 +113,7 @@ export function ModelPickList({
   loadingText,
   emptyText,
   grouped,
+  footer,
   ...extras
 }: RowExtras & {
   rows: readonly ModelPickRow[];
@@ -125,6 +127,8 @@ export function ModelPickList({
   emptyText: string;
   /** Split into the provider's curated group and the rest — catalog only. */
   grouped?: boolean;
+  /** The last line of the list, inside its frame (« Ajouter un identifiant de modèle »). */
+  footer?: ReactNode;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   // `mdl-pick-N` names the Nth row currently shown: grouping cannot renumber
@@ -173,21 +177,24 @@ export function ModelPickList({
           {t("models.form.discoverSelectAll")}
         </Label>
       </div>
-      <div className="max-h-64 divide-y overflow-y-auto rounded-md border">
-        {isLoading ? (
-          <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-            <Spinner className="size-3" />
-            {loadingText}
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="text-muted-foreground px-3 py-6 text-center text-sm">{emptyText}</div>
-        ) : (
-          <>
-            {featured.length > 0 && section(featured, t("models.form.modelGroupFeatured"))}
-            {rest.length > 0 &&
-              section(rest, featured.length > 0 ? t("models.form.modelGroupAll") : null)}
-          </>
-        )}
+      <div className="divide-y rounded-md border">
+        <div className="max-h-64 divide-y overflow-y-auto">
+          {isLoading ? (
+            <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
+              <Spinner className="size-3" />
+              {loadingText}
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="text-muted-foreground px-3 py-6 text-center text-sm">{emptyText}</div>
+          ) : (
+            <>
+              {featured.length > 0 && section(featured, t("models.form.modelGroupFeatured"))}
+              {rest.length > 0 &&
+                section(rest, featured.length > 0 ? t("models.form.modelGroupAll") : null)}
+            </>
+          )}
+        </div>
+        {footer}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { ManualModelEntry } from "./model-form/manual-model-entry";
 import { ModelPickList } from "./model-form/model-pick-list";
 import type { ModelChoice } from "../hooks/use-model-choice-state";
 import { discoveryErrorKey } from "@/lib/model-discovery";
@@ -72,6 +73,7 @@ export function ModelChoiceList({
         lockedId={choice.lockedId}
         advancedIds={advanced?.ids}
         onAdvanced={advanced?.onOpen}
+        footer={choice.offersManual ? <ManualModelEntry onAdd={choice.addManual} /> : undefined}
       />
       {choice.plan.withdraw.length > 0 && (
         <p className="text-muted-foreground text-sm">

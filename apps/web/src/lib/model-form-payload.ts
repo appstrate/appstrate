@@ -238,8 +238,16 @@ export function modelFormRefusals(input: {
   return { credentialId, modelId: outsideOffer ? "settings:models.form.modelNotOffered" : null };
 }
 
+/** The fields {@link capabilityOverrides} reads. */
+type CapabilityFields = Pick<
+  ModelFormFields,
+  "inputText" | "inputImage" | "contextWindow" | "maxTokens" | "reasoning"
+>;
+
 function capabilityOverrides(
-  input: Pick<ModelFormPayloadInput, "fields" | "capabilities" | "isEdit" | "catalogEntry">,
+  input: Pick<ModelFormPayloadInput, "capabilities" | "isEdit" | "catalogEntry"> & {
+    fields: CapabilityFields;
+  },
 ): Pick<ModelFormData, "input" | "contextWindow" | "maxTokens" | "reasoning"> {
   const { fields } = input;
   if (input.capabilities === "auto") {
@@ -302,12 +310,38 @@ function describedCapabilities(
   };
 }
 
+/** What the list asks of a model id typed by hand: its name and, if wanted, its own capabilities. */
+export type ManualRowFields = Pick<ModelFormFields, "label" | "modelId" | "capabilitiesExplicit"> &
+  CapabilityFields;
+
+/** An id typed by hand, as a row of the pick list; the capabilities are the operator's own answers. */
+export function manualRow(fields: ManualRowFields): ModelPickRow {
+  const answered = capabilityOverrides({
+    fields,
+    capabilities: fields.capabilitiesExplicit ? "explicit" : "auto",
+    isEdit: false,
+  });
+  return {
+    id: fields.modelId.trim(),
+    label: fields.label.trim() || null,
+    contextWindow: answered.contextWindow ?? null,
+    maxTokens: answered.maxTokens ?? null,
+    input: answered.input ?? null,
+    reasoning: answered.reasoning ?? null,
+    source: null,
+    endpointCapabilities: {},
+    cost: null,
+    origin: "manual",
+    featured: false,
+  };
+}
+
 /**
- * Search includes the billing rate; catalog rows resolve at read time.
+ * Search includes the billing rate, a typed id its own answers; catalog rows resolve at read time.
  * Discovery pins only endpoint capabilities, never catalog display hints.
  */
 export function rowToEntry(row: ModelPickRow): ModelFormModelEntry {
-  if (row.origin === "search") {
+  if (row.origin === "search" || row.origin === "manual") {
     return {
       ...(row.label ? { label: row.label } : {}),
       modelId: row.id,

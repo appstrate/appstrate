@@ -30,6 +30,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useModels, type OrgModelInfo } from "../hooks/use-models";
 import { errorMessage } from "../lib/mutation-error";
+import { knownModels } from "@/lib/model-choice";
 import { isSystemModel, memberModels } from "@/lib/model-providers";
 import { resolveProviderEntry } from "@/lib/provider-registry-helpers";
 
@@ -60,7 +61,7 @@ function ChoiceDialog({
   title,
   intro,
   provider,
-  existing,
+  existing: given,
   credentialId,
   newCredential,
   onBack,
@@ -74,6 +75,9 @@ function ChoiceDialog({
   header,
 }: ChoiceDialogProps) {
   const { t } = useTranslation(["settings", "common"]);
+  // What a refused submission already created is known to the retry, which asks only for the rest.
+  const [created, setCreated] = useState<OrgModelInfo[]>([]);
+  const existing = knownModels(given, created);
   const choice = useModelChoice({
     provider,
     existing,
@@ -99,6 +103,7 @@ function ChoiceDialog({
         newCredential: minted ? undefined : newCredential,
       });
       if (outcome.credentialId) setMinted(outcome.credentialId);
+      setCreated((models) => [...models, ...outcome.createdModels]);
       if (outcome.failedModelIds.length === 0) onClose();
       else setFailed({ ids: outcome.failedModelIds, refusal: outcome.refusal });
     } catch (err) {
