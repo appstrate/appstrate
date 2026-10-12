@@ -30,6 +30,7 @@ import {
   type RunCommandOptions,
 } from "../src/commands/run.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
+import type { LocalResolverInputs } from "../src/commands/run/resolver.ts";
 
 const REPORT_CTX = {
   instance: "https://app.example.com",
@@ -439,7 +440,10 @@ describe("resolveReportSession — --connection needs a registered run", () => {
   afterEach(() => stub.restore());
 
   /** `--json` keeps the fallback warnings off the test's stderr. */
-  function resolve(over: Partial<RunCommandOptions>, context: typeof REPORT_CTX | null) {
+  function resolve(
+    over: Partial<RunCommandOptions>,
+    context: typeof REPORT_CTX | LocalResolverInputs | null,
+  ) {
     return resolveReportSession(
       { bundle: "./agent.afps", json: true, ...over },
       makeBundle(),
@@ -501,6 +505,34 @@ describe("resolveReportSession — --connection needs a registered run", () => {
         "\n    @appstrate/clickup: Connection named for '@appstrate/clickup' is not available (override_connection_unavailable)",
     );
     expect(stub.calls).toHaveLength(1);
+  });
+
+  // `--integrations none|local` resolves no connection on the instance, so the caller's
+  // profile is no cause: the refusal names the integrations mode instead.
+  it("names --integrations none as the cause, not the reporting hint", async () => {
+    stub = installStubFetch(() => ok());
+    const err = await resolve(
+      { integrations: "none", connectionOverrides: CONNECTION },
+      null,
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(REFUSAL);
+    expect((err as Error & { hint: string }).hint).toBe(
+      "Cause: --integrations none resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.",
+    );
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("names --integrations local as the cause, not the reporting hint", async () => {
+    stub = installStubFetch(() => ok());
+    const err = await resolve(
+      { integrations: "local", connectionOverrides: CONNECTION },
+      { credsFilePath: "./creds.json" },
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(REFUSAL);
+    expect((err as Error & { hint: string }).hint).toBe(
+      "Cause: --integrations local resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.",
+    );
+    expect(stub.calls).toHaveLength(0);
   });
 
   it("registers the run with the connection it names", async () => {

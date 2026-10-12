@@ -1030,11 +1030,14 @@ async function resolveReportSession(
     failure = err;
   }
   if (!session && opts.connectionOverrides) {
+    const integrations = parseIntegrationMode(opts.integrations);
     throw new ReportConfigError(
       "--connection names a connection for the run registered on the instance, and no run is registered",
       failure
         ? `Cause: ${failure.message}`
-        : "Run with reporting on (a profile or API key, no --report=false), or drop --connection.",
+        : integrations === "remote"
+          ? "Run with reporting on (a profile or API key, no --report=false), or drop --connection."
+          : `Cause: --integrations ${integrations} resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.`,
     );
   }
   if (failure && !opts.json) {

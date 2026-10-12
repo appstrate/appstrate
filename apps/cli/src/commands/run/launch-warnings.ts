@@ -36,11 +36,14 @@ function isCandidate(value: unknown): value is LaunchCandidate {
   );
 }
 
-/** A launch response's `warnings` / `errors`; items without a code are dropped. */
+/**
+ * A launch response's `warnings` / `errors`; items without a code are dropped, and a candidate
+ * outside the contract is dropped alone, its item kept.
+ */
 export function parseLaunchItems(items: unknown): LaunchItem[] {
   if (!Array.isArray(items)) return [];
-  return items.filter((item): item is LaunchItem => {
-    if (item === null || typeof item !== "object") return false;
+  return items.flatMap((item): LaunchItem[] => {
+    if (item === null || typeof item !== "object") return [];
     const {
       field,
       code,
@@ -48,13 +51,17 @@ export function parseLaunchItems(items: unknown): LaunchItem[] {
       source,
       candidate_connections: candidates,
     } = item as Record<string, unknown>;
-    return (
-      typeof code === "string" &&
-      optionalString(field) &&
-      optionalString(message) &&
-      optionalString(source) &&
-      (candidates === undefined || (Array.isArray(candidates) && candidates.every(isCandidate)))
-    );
+    if (
+      typeof code !== "string" ||
+      !optionalString(field) ||
+      !optionalString(message) ||
+      !optionalString(source)
+    ) {
+      return [];
+    }
+    if (candidates === undefined) return [item as LaunchItem];
+    const valid = Array.isArray(candidates) ? candidates.filter(isCandidate) : [];
+    return [{ ...(item as LaunchItem), candidate_connections: valid }];
   });
 }
 
@@ -69,7 +76,7 @@ function launchItemLine({ field, code, message, source }: LaunchItem): string {
   return `${subject}: ${text} (${code}${source ? ` via ${source}` : ""})`;
 }
 
-/** One indented line per candidate: label, account, owner, state, then the flag that names it. */
+/** One indented line per candidate: label, account, owner, state, then the flag that names it. Shared by refusals and warnings. */
 function candidateLines(item: LaunchItem): string[] {
   const integration = integrationOf(item.field);
   if (!integration) return [];
@@ -95,7 +102,7 @@ export interface LaunchAnnouncement {
   writeStderr: (chunk: string) => void;
 }
 
-/** `→ running …` and a `⚠` line per warning on stderr, or under `--json` the envelope on stdout. */
+/** `→ running …` and a `⚠` line per warning, its candidates under it, on stderr; under `--json` the envelope on stdout. */
 export function announceLaunch(a: LaunchAnnouncement): void {
   if (a.json) {
     if (!a.run) return;
@@ -107,7 +114,10 @@ export function announceLaunch(a: LaunchAnnouncement): void {
   }
   const reportNote = a.run ? ` (reporting to ${a.instance} as ${a.run.runId})` : "";
   a.writeStderr(`→ running ${a.bundleLabel}${reportNote}\n`);
-  for (const item of a.run?.warnings ?? []) a.writeStderr(`⚠ ${launchItemLine(item)}\n`);
+  for (const item of a.run?.warnings ?? []) {
+    a.writeStderr(`⚠ ${launchItemLine(item)}\n`);
+    for (const line of candidateLines(item)) a.writeStderr(`${line}\n`);
+  }
 }
 
 /** A 409 `missing_integration_connection`'s items, each above its candidates; else null. */
