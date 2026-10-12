@@ -842,12 +842,14 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   `--integrations none` or `local`, or a registration that failed under
   `--report-fallback console`. A `must_choose_connection` refusal or launch
   warning prints each candidate on its own line with the flag naming it.
-- **The dashboard's launch recovery modal remembers a connection choice**
-  (#1929): a `must_choose_connection` refusal of a stored agent offers
-  "Remember this choice for this agent", on by default, which writes the
-  member pin beside the run's override. With no connection to bind, its picker
-  reads "Connect" or "Choose" instead of "Inherit", the refusal shows whole,
-  and Re-run waits until every row is answered.
+- **A connection added from an agent joins that agent's pin** (#1929). In the
+  dashboard, a connection created from an agent's Connections tab or from the
+  launch recovery modal is added to the set the agent binds for the member and
+  written to their pin at once; one created from the integration page or the
+  settings binds nothing. The recovery modal pins like the tab: a choice made
+  there is the member's pin, Re-run replays the launch and waits until every
+  row is answered. With no connection to bind, the picker reads "Connect" or
+  "Choose" instead of "Inherit", and the refusal shows whole.
 - **Connection readiness says which integrations are inert** (#1929): each
   integration of `GET /api/agents/{scope}/{name}/connection-readiness`
   carries a required boolean `inert`, true when the agent declares it with

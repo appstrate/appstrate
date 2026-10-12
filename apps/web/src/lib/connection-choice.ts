@@ -133,9 +133,6 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
   }
 }
 
-/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
-export type ConnectionOverridesMap = Record<string, string[]>;
-
 /** Verdicts raised before any account is looked at: no pick fixes them. */
 const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
@@ -148,58 +145,19 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
 }
 
 /**
- * Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), and so does a row
- * `stillBlocking` names (undefined = verdict not loaded, nothing gated).
+ * Re-run state of a refused launch: offered when a row can be answered, held while the launch is
+ * in flight or `stillBlocking` names a refused integration (undefined = verdict not loaded,
+ * nothing gated: the server stays the authority).
  */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
-  picks: ConnectionOverridesMap,
   retrying = false,
   stillBlocking?: readonly string[],
-): { mustChoose: boolean; showRetry: boolean; canRetry: boolean } {
-  const mustChooseIds = errors
-    .filter((e) => e.code === "must_choose_connection")
-    .map((e) => integrationIdOfField(e.field));
-  const awaitsPick = (id: string) =>
-    stillBlocking?.includes(id) === true && picks[id] === undefined;
+): { showRetry: boolean; canRetry: boolean } {
+  const blocked = (e: MissingIntegrationFieldError) =>
+    stillBlocking?.includes(integrationIdOfField(e.field)) === true;
   return {
-    mustChoose: mustChooseIds.length > 0,
     showRetry: errors.some((e) => !isStructuralCode(e.code)),
-    canRetry:
-      !retrying &&
-      mustChooseIds.every((id) => picks[id] !== undefined) &&
-      !errors.some((e) => awaitsPick(integrationIdOfField(e.field))),
+    canRetry: !retrying && !errors.some(blocked),
   };
-}
-
-/**
- * Writes the pins to remember, then re-runs with the picks. A failed write does not hold the
- * re-run back: the override still carries the choice for this run.
- */
-export async function retryRememberingPicks(args: {
-  errors: MissingIntegrationFieldError[];
-  picks: ConnectionOverridesMap;
-  agentPackageId: string | undefined;
-  remember: boolean;
-  writePin: (pin: {
-    agentPackageId: string;
-    integrationId: string;
-    connectionIds: string[];
-  }) => Promise<unknown>;
-  onRetry: (picks: ConnectionOverridesMap) => void;
-}): Promise<void> {
-  const { agentPackageId } = args;
-  if (args.remember && agentPackageId !== undefined) {
-    // The member pins to remember: each must-choose pick that names at least one connection.
-    const pins = args.errors
-      .filter((e) => e.code === "must_choose_connection")
-      .flatMap((e) => {
-        const integrationId = integrationIdOfField(e.field);
-        const connectionIds = args.picks[integrationId];
-        return connectionIds && connectionIds.length > 0 ? [{ integrationId, connectionIds }] : [];
-      });
-    const writes = pins.map((pin) => args.writePin({ agentPackageId, ...pin }));
-    await Promise.all(writes).catch(() => undefined);
-  }
-  args.onRetry(args.picks);
 }

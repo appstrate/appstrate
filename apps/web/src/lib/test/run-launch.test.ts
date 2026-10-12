@@ -4,7 +4,7 @@
  * The launches the SPA builds before `useRunAgent` puts them on the wire.
  *
  * The retry of a launch refused with `409 missing_integration_connection` only
- * touches connection picks (adds the modal's, drops one the 409 refuses); dropping
+ * touches the launch's own connection picks (drops one the 409 refuses); dropping
  * anything else changes the run — or gets it refused, as the input did (#1539).
  * A second 409 retries the first retry, not the original launch. "Lancer avec options…" sends an option
  * only when set, so an untouched modal launches what plain "Lancer" does.
@@ -130,8 +130,11 @@ describe("retryLaunch", () => {
   it("replays the input typed in the run modal", () => {
     expect(
       retryLaunch(
-        { input: { prompt: "bonjour" }, version: "draft" },
-        { "@acme/crm": ["conn_1"] },
+        {
+          input: { prompt: "bonjour" },
+          version: "draft",
+          connectionOverrides: { "@acme/crm": ["conn_1"] },
+        },
         [],
       ),
     ).toEqual({
@@ -142,7 +145,7 @@ describe("retryLaunch", () => {
   });
 
   it("replays a rerun_from launch without inventing an input", () => {
-    expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, {}, [])).toEqual({
+    expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, [])).toEqual({
       rerun_from: "run_1",
       version: "1.0.0",
       connectionOverrides: {},
@@ -157,17 +160,7 @@ describe("retryLaunch", () => {
       generation: { temperature: 0.2 },
       dependencyOverrides: { "@acme/skill": "draft" },
     };
-    expect(retryLaunch(launch, {}, [])).toEqual({ ...launch, connectionOverrides: {} });
-  });
-
-  it("merges the picks over the launch's own connection picks", () => {
-    expect(
-      retryLaunch(
-        { connectionOverrides: { "@acme/crm": ["conn_old"], "@acme/mail": ["conn_mail"] } },
-        { "@acme/crm": ["conn_new"] },
-        [],
-      ).connectionOverrides,
-    ).toEqual({ "@acme/crm": ["conn_new"], "@acme/mail": ["conn_mail"] });
+    expect(retryLaunch(launch, [])).toEqual({ ...launch, connectionOverrides: {} });
   });
 
   it("drops the launch's own pick the 409 refuses: replayed, it would be refused again", () => {
@@ -181,7 +174,6 @@ describe("retryLaunch", () => {
             "@acme/mail": ["conn_mail"],
           },
         },
-        {},
         [
           { field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" },
           {
@@ -206,7 +198,7 @@ describe("retryLaunch", () => {
       "@acme/drive": ["conn_drive"],
     };
     expect(
-      retryLaunch({ connectionOverrides }, {}, [
+      retryLaunch({ connectionOverrides }, [
         {
           field: "integrations.@acme/crm",
           code: "needs_reconnection",
@@ -224,22 +216,15 @@ describe("retryLaunch", () => {
     ).toEqual(connectionOverrides);
   });
 
-  it("carries a recovery pick of 'no connection' as `[]`", () => {
-    expect(retryLaunch({}, { "@acme/crm": [] }, []).connectionOverrides).toEqual({
-      "@acme/crm": [],
-    });
-  });
-
   it("a second 409 builds on the first retry: a dropped pick stays dropped", () => {
     // The launcher keeps each retried launch, so the next retry starts from it.
     const first = retryLaunch(
       { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
-      {},
       [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
     );
-    // The second 409 names another integration, with nothing to pick: crm must not come back.
+    // The second 409 names another integration: crm must not come back.
     expect(
-      retryLaunch(first, {}, [
+      retryLaunch(first, [
         { field: "integrations.@acme/drive", code: "not_connected", message: "connect" },
       ]).connectionOverrides,
     ).toEqual({ "@acme/mail": ["conn_mail"] });

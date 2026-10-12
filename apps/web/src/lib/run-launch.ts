@@ -26,8 +26,7 @@ export interface RunLaunch {
   version?: string;
   /**
    * Per-integration connection sets for THIS run (cascade layer 3), validated in
-   * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal
-   * and, on a retry, by the connection-recovery modal (`retryLaunch`).
+   * `apps/api/src/lib/launch-schemas.ts`. Set by the run-with-options modal.
    */
   connectionOverrides?: Record<string, string[]>;
   /** Per-run model id override (wire `modelId`). From the run-with-options modal. */
@@ -95,17 +94,16 @@ const OWN_PICK_REFUSALS: ReadonlySet<MissingIntegrationConnectionCode> = new Set
 ]);
 
 /**
- * The launch a `409 missing_integration_connection` refused, replayed with the
- * recovery modal's picks. Everything else the user chose rides along — the
- * input typed in the run modal above all. The launch's own pick for an
- * integration is dropped only when the 409 refuses that pick itself
- * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
- * of it). Under any other code — a connection to repair, above all — the pick
- * is kept: dropping it could let the retry bind another account.
+ * The replay of a launch a `409 missing_integration_connection` refused.
+ * Everything the user chose rides along — the input typed in the run modal
+ * above all. The launch's own pick for an integration is dropped only when the
+ * 409 refuses that pick itself (`OWN_PICK_REFUSALS`, or
+ * `auth_serves_no_selected_tool` naming a connection of it). Under any other
+ * code — a connection to repair, above all — the pick is kept: dropping it
+ * could let the retry bind another account.
  */
 export function retryLaunch(
   launch: RunLaunch,
-  picks: Record<string, string[]>,
   errors: readonly MissingIntegrationFieldError[],
 ): RunLaunch {
   const own = launch.connectionOverrides ?? {};
@@ -121,7 +119,7 @@ export function retryLaunch(
     }),
   );
   const kept = Object.entries(own).filter(([id]) => !refused.has(id));
-  return { ...launch, connectionOverrides: { ...Object.fromEntries(kept), ...picks } };
+  return { ...launch, connectionOverrides: Object.fromEntries(kept) };
 }
 
 /** A launch's 409 and the version it judged: the recovery modal reads that version's readiness. */

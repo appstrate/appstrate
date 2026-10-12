@@ -6,16 +6,17 @@
  * `MissingRow` and the Re-run button's state is asserted on `retryDecision`.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
 import { MissingRow } from "../missing-connections-modal.tsx";
-import { retryDecision, retryRememberingPicks } from "../../lib/connection-choice.ts";
+import { retryDecision } from "../../lib/connection-choice.ts";
 import type { MissingIntegrationFieldError } from "../../lib/connection-choice.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
+import { spaceStore } from "../../stores/space-store.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -52,12 +53,12 @@ function resolution(overrides: Partial<Resolution>): Resolution {
   };
 }
 
-const readinessKey = (version?: string) =>
+const readinessKey = (version?: string, spaceId?: string) =>
   $api.queryOptions("get", "/api/agents/{scope}/{name}/connection-readiness", {
     params: {
       path: { scope: "@acme", name: "ops" },
       ...(version ? { query: { version } } : {}),
-      header: { "X-Org-Id": undefined, "X-Space-Id": undefined },
+      header: { "X-Org-Id": undefined, "X-Space-Id": spaceId },
     },
   }).queryKey;
 
@@ -92,16 +93,9 @@ function renderRow(
   version?: string,
   code: Code = "must_choose_connection",
 ): string {
-  return render(
-    <MissingRow
-      err={fieldError(code)}
-      agentPackageId={AGENT}
-      version={version}
-      pick={null}
-      onPick={() => {}}
-    />,
-    { queryClient: qc },
-  );
+  return render(<MissingRow err={fieldError(code)} agentPackageId={AGENT} version={version} />, {
+    queryClient: qc,
+  });
 }
 
 describe("MissingRow", () => {
@@ -148,91 +142,116 @@ describe("MissingRow", () => {
     );
     expect(renderRow(qc)).toContain(label("missingConnections.resolved"));
   });
+
+  it("embeds the picker of the member's pin, as the Connexions tab does", () => {
+    const SPACE = "spc_1";
+    const scope = { "X-Org-Id": undefined, "X-Space-Id": SPACE };
+    const qc = new QueryClient();
+    // The row's reads gate on `integrations:read`, granted here in the current space.
+    const spacesKey = $api.queryOptions("get", "/api/spaces", {
+      params: { header: { "X-Org-Id": undefined } },
+    }).queryKey;
+    qc.setQueryData(spacesKey, {
+      object: "list",
+      data: [{ id: SPACE, permissions: ["integrations:read"] }],
+      hasMore: false,
+    });
+    const detailKey = $api.queryOptions("get", "/api/integrations/{packageId}", {
+      params: { path: { packageId: INTEGRATION }, header: scope },
+    }).queryKey;
+    qc.setQueryData(detailKey, {
+      manifest: { display_name: "Slack", auths: { primary: { type: "custom" } } },
+      auths: [],
+    });
+    qc.setQueryData(
+      readinessKey(undefined, SPACE),
+      readiness(
+        resolution({
+          source: "member_pin",
+          resolved_connection_ids: [WEB],
+          member_pinned_connection_ids: [WEB],
+          candidates: [
+            {
+              id: WEB,
+              auth_key: "primary",
+              account_id: "root@web",
+              label: "compte-web",
+              owner_user_id: "usr_me",
+              owner_end_user_id: null,
+              owner_name: "Moi",
+              scopes_granted: [],
+              scope: "org",
+              spaceId: null,
+              shared_here: false,
+              shared_space_ids: [],
+              origin_space_id: null,
+              needs_reconnection: false,
+              missing_scopes: [],
+              scope_fit: "unjudged",
+              is_own: true,
+            },
+          ],
+        }),
+        false,
+      ),
+    );
+    // `renderToStaticMarkup` reads zustand's server snapshot, not its live state.
+    const snapshot = spyOn(spaceStore, "getInitialState").mockReturnValue({
+      ...spaceStore.getInitialState(),
+      id: SPACE,
+    });
+    try {
+      const html = renderRow(qc);
+      expect(html).toContain(`data-testid="member-picker-${INTEGRATION}"`);
+      // The trigger names the stored pin; a per-run override picker, unset, reads "inherit".
+      expect(html).toContain("compte-web");
+      expect(html).not.toContain(label("detail.integrationMemberPicker.inherit"));
+    } finally {
+      snapshot.mockRestore();
+    }
+  });
 });
 
 describe("retryDecision", () => {
-  const mustChoose = [fieldError("must_choose_connection")];
+  const fixable = [fieldError("not_connected")];
+  const structural: MissingIntegrationFieldError = {
+    field: "integrations.@acme/gmail",
+    code: "integration_not_active",
+    message: "inactive",
+  };
 
-  it("waits for every must-choose row, and takes 'no connection' (`[]`) as a pick", () => {
-    expect(retryDecision(mustChoose, {})).toEqual({
-      mustChoose: true,
+  it("offers the re-run, enabled, once no refused row still blocks", () => {
+    expect(retryDecision(fixable, false, [])).toEqual({ showRetry: true, canRetry: true });
+    // A blocking integration the 409 did not name is not this modal's to answer.
+    expect(retryDecision(fixable, false, ["@acme/drive"]).canRetry).toBe(true);
+  });
+
+  it("holds the re-run while the live readiness still blocks a refused row", () => {
+    expect(retryDecision(fixable, false, [INTEGRATION])).toEqual({
       showRetry: true,
       canRetry: false,
     });
-    expect(retryDecision(mustChoose, { [INTEGRATION]: [] }).canRetry).toBe(true);
-    expect(retryDecision(mustChoose, { [INTEGRATION]: [WEB] }).canRetry).toBe(true);
-    expect(retryDecision(mustChoose, { [INTEGRATION]: [] }, true).canRetry).toBe(false);
   });
 
-  it("re-runs freely for other actionable codes, and offers no re-run when no pick can help", () => {
-    expect(retryDecision([fieldError("not_connected")], {})).toEqual({
-      mustChoose: false,
+  it("does not gate on a verdict that has not loaded: the server stays the authority", () => {
+    expect(retryDecision(fixable, false, undefined).canRetry).toBe(true);
+  });
+
+  it("holds the re-run while the launch is in flight", () => {
+    expect(retryDecision(fixable, true, []).canRetry).toBe(false);
+  });
+
+  it("offers no re-run when every row is structural: nothing in the modal answers them", () => {
+    expect(retryDecision([structural], false, []).showRetry).toBe(false);
+  });
+
+  it("holds the re-run beside a structural row still blocking, and frees it once it clears", () => {
+    const mixed = [...fixable, structural];
+    // The fixable row is answered; the structural one is not the modal's to fix.
+    expect(retryDecision(mixed, false, ["@acme/gmail"])).toEqual({
       showRetry: true,
-      canRetry: true,
+      canRetry: false,
     });
-    expect(retryDecision([fieldError("integration_not_active")], {}).showRetry).toBe(false);
-  });
-
-  it("holds the retry while a row the live readiness still blocks has no pick", () => {
-    const errors = [fieldError("not_connected")];
-    expect(retryDecision(errors, {}, false, [INTEGRATION]).canRetry).toBe(false);
-    // A pick in the modal answers the row, so the re-run can succeed.
-    expect(retryDecision(errors, { [INTEGRATION]: [] }, false, [INTEGRATION]).canRetry).toBe(true);
-    // A blocked row the live readiness does not name is not gated.
-    expect(retryDecision(errors, {}, false, ["@acme/gmail"]).canRetry).toBe(true);
-  });
-});
-
-describe("remembering a must-choose pick", () => {
-  const WEB_IDS = [WEB];
-  const mustChoose = [fieldError("must_choose_connection")];
-
-  it("writes the pin for each picked integration, then re-runs with the picks", async () => {
-    const writes: unknown[] = [];
-    const retried: unknown[] = [];
-    await retryRememberingPicks({
-      errors: mustChoose,
-      picks: { [INTEGRATION]: WEB_IDS },
-      agentPackageId: AGENT,
-      remember: true,
-      writePin: async (pin) => {
-        writes.push(pin);
-      },
-      onRetry: (overrides) => retried.push(overrides),
-    });
-    expect(writes).toEqual([
-      { agentPackageId: AGENT, integrationId: INTEGRATION, connectionIds: WEB_IDS },
-    ]);
-    expect(retried).toEqual([{ [INTEGRATION]: WEB_IDS }]);
-  });
-
-  it("writes no pin when unchecked, and still re-runs with the override", async () => {
-    const writes: unknown[] = [];
-    const retried: unknown[] = [];
-    await retryRememberingPicks({
-      errors: mustChoose,
-      picks: { [INTEGRATION]: WEB_IDS },
-      agentPackageId: AGENT,
-      remember: false,
-      writePin: async (pin) => {
-        writes.push(pin);
-      },
-      onRetry: (overrides) => retried.push(overrides),
-    });
-    expect(writes).toEqual([]);
-    expect(retried).toEqual([{ [INTEGRATION]: WEB_IDS }]);
-  });
-
-  it("still re-runs when a pin write rejects, since the override carries the choice", async () => {
-    const retried: unknown[] = [];
-    await retryRememberingPicks({
-      errors: mustChoose,
-      picks: { [INTEGRATION]: WEB_IDS },
-      agentPackageId: AGENT,
-      remember: true,
-      writePin: () => Promise.reject(new Error("refused")),
-      onRetry: (overrides) => retried.push(overrides),
-    });
-    expect(retried).toEqual([{ [INTEGRATION]: WEB_IDS }]);
+    expect(retryDecision(mixed, false, []).canRetry).toBe(true);
   });
 });

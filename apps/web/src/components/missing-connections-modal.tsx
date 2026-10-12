@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
@@ -16,17 +13,13 @@ import {
   useIntegrationDetail,
   useIntegrationReadinessEntry,
 } from "../hooks/use-integrations";
-import { useUpsertMemberIntegrationPin } from "../hooks/use-member-integration-pins";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   integrationIdOfField,
   isStructuralCode,
   retryDecision,
-  retryRememberingPicks,
-  type ConnectionOverridesMap,
   type MissingIntegrationFieldError,
 } from "../lib/connection-choice";
-import { withConnectionPick, type ConnectionSet } from "../lib/connection-set";
 import { refusalMessage } from "../lib/mutation-error";
 
 interface MissingConnectionsModalProps {
@@ -39,17 +32,17 @@ interface MissingConnectionsModalProps {
   version?: string;
   /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
   integrationEntries?: AgentIntegrationEntry[];
-  /** Re-run with the picked overrides. */
-  onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
+  /** Replays the refused launch. */
+  onRetry: () => void;
   /** Disables the retry button while the new run is in flight. */
   retrying?: boolean;
 }
 
 /**
  * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
- * `errors[]` entry. Actionable rows embed `IntegrationConnectionPicker` in `override` mode;
- * validated sets accumulate into the `connection_overrides` "Re-run" hands to
- * `onRetryWithOverrides`. Structural failures keep a plain message: no pick fixes them.
+ * `errors[]` entry. An actionable row embeds `IntegrationConnectionPicker`, which writes the
+ * member's pin for this agent as the Connexions tab does; "Re-run" replays the launch, which
+ * reads that pin. Structural failures keep a plain message: no pick fixes them.
  */
 export function MissingConnectionsModal({
   open,
@@ -58,41 +51,18 @@ export function MissingConnectionsModal({
   agentPackageId,
   version,
   integrationEntries,
-  onRetryWithOverrides,
+  onRetry,
   retrying,
 }: MissingConnectionsModalProps) {
   const { t } = useTranslation(["agents"]);
-  const [picks, setPicks] = useState<ConnectionOverridesMap>({});
-  const [rememberChoice, setRememberChoice] = useState(true);
-  const upsertPin = useUpsertMemberIntegrationPin();
-  // The live verdict of the launched version: a row it still blocks waits for a pick.
+  // The live verdict of the launched version: a row it still blocks holds the re-run.
   const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
   const stillBlocking = readiness?.integrations
     .filter((i) => i.run_blocking)
     .map((i) => i.integration_package_id);
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
-  const { mustChoose, showRetry, canRetry } = retryDecision(
-    integrationErrors,
-    picks,
-    retrying,
-    stillBlocking,
-  );
-  const showRememberChoice = mustChoose && agentPackageId !== undefined;
-
-  // A `null` pick drops the key: the re-run falls back to the cascade.
-  const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
-    setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
-
-  const retry = () =>
-    retryRememberingPicks({
-      errors: integrationErrors,
-      picks,
-      agentPackageId,
-      remember: showRememberChoice && rememberChoice,
-      writePin: (pin) => upsertPin.mutateAsync(pin),
-      onRetry: onRetryWithOverrides,
-    });
+  const { showRetry, canRetry } = retryDecision(integrationErrors, retrying, stillBlocking);
 
   return (
     <Modal
@@ -105,15 +75,9 @@ export function MissingConnectionsModal({
             {t("missingConnections.close")}
           </Button>
           {showRetry && (
-            <Button
-              onClick={() => void retry()}
-              disabled={!canRetry || upsertPin.isPending}
-              data-testid="must-choose-retry"
-            >
+            <Button onClick={onRetry} disabled={!canRetry} data-testid="missing-connections-retry">
               {retrying && <Spinner />}
-              {mustChoose
-                ? t("missingConnections.mustChoose.retry")
-                : t("missingConnections.retry")}
+              {t("missingConnections.retry")}
             </Button>
           )}
         </div>
@@ -131,23 +95,9 @@ export function MissingConnectionsModal({
             agentPackageId={agentPackageId}
             version={version}
             integrationEntries={integrationEntries}
-            pick={picks[integrationIdOfField(err.field)] ?? null}
-            onPick={setPick}
           />
         ))}
       </div>
-      {showRememberChoice && (
-        <div className="mt-3 flex items-center gap-2">
-          <Checkbox
-            id="missing-connections-remember"
-            checked={rememberChoice}
-            onCheckedChange={(checked) => setRememberChoice(checked === true)}
-          />
-          <Label htmlFor="missing-connections-remember">
-            {t("missingConnections.rememberChoice")}
-          </Label>
-        </div>
-      )}
     </Modal>
   );
 }
@@ -158,16 +108,11 @@ export function MissingRow({
   agentPackageId,
   version,
   integrationEntries,
-  pick,
-  onPick,
 }: {
   err: MissingIntegrationFieldError;
   agentPackageId?: string;
   version?: string;
   integrationEntries?: AgentIntegrationEntry[];
-  /** Current per-run pick set for this integration; `null` = no override. */
-  pick: ConnectionSet;
-  onPick: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
@@ -241,11 +186,6 @@ export function MissingRow({
             agentTools={entry?.tools}
             agentScopes={entry?.scopes}
             version={version}
-            persistence={{
-              mode: "override",
-              value: pick,
-              onChange: (connectionIds) => onPick(packageId, connectionIds),
-            }}
           />
         </div>
       )}
