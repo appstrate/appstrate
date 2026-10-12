@@ -813,7 +813,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     for (const kind of Object.keys(sources) as Source[]) {
       describe(`connection_overrides on a ${kind} source`, () => {
-        it("answers must_choose_connection when no set is named, candidates oldest first", async () => {
+        it("answers must_choose_connection when no set is named, candidates least privilege first, the oldest ahead on a tie", async () => {
           await db
             .update(integrationConnections)
             .set({ createdAt: new Date(Date.now() + 60_000) })

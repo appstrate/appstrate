@@ -1260,9 +1260,9 @@ existing or written here) or `no pin: name the set` (its next fire answers
 users' schedules are not listed: their connections stay in their space
 (`integration_connections_end_user_is_space`), so the widening changes nothing for them.
 
-It prints what `0041` and `0043` have left and refuses to run unless both are 0, then the pins to
-write and the schedules with no pin, then per organization (one transaction
-each) every pin and every listed schedule with its space, member and verdict;
+It prints what `0041` and `0043` have left and refuses to run unless both are 0, then per
+organization (one transaction each) every pin and every listed schedule with its space, member and
+verdict, then the two totals: the pins (`pins:`) and the schedules with no pin;
 `grep 'no pin: name the set'` is the list to act on. With `--apply`, the pins left to write must
 then be 0. Rehearse on a restored dump, after `0041` and `0043` there. Run it
 after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first:

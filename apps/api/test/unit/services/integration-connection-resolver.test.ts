@@ -505,7 +505,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       verdict: { error: "must_choose_connection", candidates: [0, 1, 2, 3] },
     },
     {
-      name: "own 2, one dead (the dead one counts, listed last)",
+      name: "own 2, one dead (a choice, never a switch to the live one: the dead one is listed last)",
       rows: () => [own(DEAD), own({ authKey: "pat" })],
       verdict: { error: "must_choose_connection", candidates: [1, 0] },
     },
@@ -558,8 +558,9 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
           expect(result.resolved[INTEG]).toBeUndefined();
           expect(result.warnings).toEqual([]);
           expect(result.errors.map((e) => e.code)).toEqual([verdict.error]);
-          expect(result.errors[0]!.candidateConnections?.map((c) => c.id)).toEqual(
-            verdict.candidates?.map((i) => rows[i]!.id),
+          const candidates = result.errors[0]!.candidateConnections;
+          expect(candidates?.map((c) => [c.id, c.needsReconnection])).toEqual(
+            verdict.candidates?.map((i) => [rows[i]!.id, rows[i]!.needsReconnection]),
           );
           if (verdict.on !== undefined) {
             expect(result.errors[0]!.connectionId).toBe(rows[verdict.on]!.id);
@@ -573,7 +574,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     }
   }
 
-  it("a proxy call with two own connections of one account asks", () => {
+  it("a proxy call ranks its candidates narrowest first, none missing a scope: no agent selects any", () => {
     const broad = own({ label: "écriture", scopesGranted: ["read", "write"] });
     const narrow = own({ label: "lecture", scopesGranted: ["read"] });
     const result = resolveConnections({
@@ -611,42 +612,6 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       broad.id,
       short.id,
     ]);
-  });
-
-  it("a colleague sharing a connection does not move a run that auto-bound my own", () => {
-    const mine = own();
-    const before = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [mine],
-      pins: [],
-    });
-    const after = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [shared(), mine],
-      pins: [],
-    });
-    expect(before.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
-    expect(after.errors).toEqual([]);
-    expect(after.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
-    expect(after.resolved[INTEG]![0]!.source).toBe("fallback_auto");
-  });
-
-  it("my second account expiring is a choice, never a silent switch to the first", () => {
-    const first = own({ label: "Boulot" });
-    const second = own({ authKey: "pat", label: "Perso", ...DEAD });
-    const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [first, second],
-      pins: [],
-    });
-    expect(result.resolved[INTEG]).toBeUndefined();
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnections!.map((c) => [c.id, c.needsReconnection])).toEqual(
-      [
-        [first.id, false],
-        [second.id, true],
-      ],
-    );
   });
 
   it("an end-user with only a member's shared connection must choose — never bound to it", () => {

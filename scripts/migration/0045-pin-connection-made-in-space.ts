@@ -289,27 +289,15 @@ export async function runPinConnectionMadeInSpace(options: {
     throw new Error("0041 or 0043 has work left — run them with --apply first");
   }
 
-  const planned = async () => {
-    const orgs = await db
-      .selectDistinct({ orgId: c.orgId })
-      .from(c)
-      .where(isNotNull(c.userId))
-      .orderBy(c.orgId);
-    const perOrg: { orgId: string; pins: number; unpinned: number }[] = [];
-    for (const { orgId } of orgs) {
-      const plan = await planOrg(db, orgId);
-      if (plan.pins.length + plan.schedules.length === 0) continue;
-      const unpinned = plan.schedules.filter((schedule) => schedule.verdict === NO_PIN).length;
-      perOrg.push({ orgId, pins: plan.pins.length, unpinned });
-    }
-    return perOrg;
-  };
-  const perOrg = await planned();
-  out(`to pin: ${perOrg.reduce((sum, row) => sum + row.pins, 0)}`);
-  out(`schedules with no pin: ${perOrg.reduce((sum, row) => sum + row.unpinned, 0)}`);
+  // The organizations owning a user connection: no other is owed a pin or lists a schedule.
+  const orgs = await db
+    .selectDistinct({ orgId: c.orgId })
+    .from(c)
+    .where(isNotNull(c.userId))
+    .orderBy(c.orgId);
 
   const result: Plan = { pins: [], schedules: [] };
-  for (const { orgId } of perOrg) {
+  for (const { orgId } of orgs) {
     const batch: Plan = { pins: [], schedules: [] };
     const lines: string[] = [];
     try {
@@ -360,6 +348,7 @@ export async function runPinConnectionMadeInSpace(options: {
         throw new Error(`org ${orgId}: ${getErrorMessage(error)}`, { cause: error });
       }
     }
+    if (lines.length === 0) continue;
     result.pins.push(...batch.pins);
     result.schedules.push(...batch.schedules);
     out(
@@ -367,11 +356,15 @@ export async function runPinConnectionMadeInSpace(options: {
     );
     for (const line of lines) out(line);
   }
+  const unpinned = result.schedules.filter((schedule) => schedule.verdict === NO_PIN);
+  out(`pins: ${result.pins.length}`);
+  out(`schedules with no pin: ${unpinned.length}`);
   if (!apply) {
     out("0045: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
     return result;
   }
-  const left = (await planned()).reduce((sum, row) => sum + row.pins, 0);
+  let left = 0;
+  for (const { orgId } of orgs) left += (await planOrg(db, orgId)).pins.length;
   out(`left to pin: ${left}`);
   if (left !== 0) throw new Error("pins are left to write after --apply");
   out("0045: APPLIED — committed.");

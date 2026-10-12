@@ -476,31 +476,23 @@ describe("resolveReportSession — --connection needs a registered run", () => {
 
   // `--integrations none|local` resolves no connection on the instance, so the caller's
   // profile is no cause: the refusal names the integrations mode instead.
-  it("names --integrations none as the cause, not the reporting hint", async () => {
-    stub = installStubFetch(() => ok());
-    const err = await resolve(
-      { integrations: "none", connectionOverrides: CONNECTION },
-      null,
-    ).catch((e: unknown) => e);
-    expect((err as Error).message).toBe(REFUSAL);
-    expect((err as Error & { hint: string }).hint).toBe(
-      "Cause: --integrations none resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.",
-    );
-    expect(stub.calls).toHaveLength(0);
-  });
-
-  it("names --integrations local as the cause, not the reporting hint", async () => {
-    stub = installStubFetch(() => ok());
-    const err = await resolve(
-      { integrations: "local", connectionOverrides: CONNECTION },
-      { credsFilePath: "./creds.json" },
-    ).catch((e: unknown) => e);
-    expect((err as Error).message).toBe(REFUSAL);
-    expect((err as Error & { hint: string }).hint).toBe(
-      "Cause: --integrations local resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.",
-    );
-    expect(stub.calls).toHaveLength(0);
-  });
+  for (const [mode, context] of [
+    ["none", null],
+    ["local", { credsFilePath: "./creds.json" }],
+  ] as const) {
+    it(`names --integrations ${mode} as the cause, not the reporting hint`, async () => {
+      stub = installStubFetch(() => ok());
+      const err = await resolve(
+        { integrations: mode, connectionOverrides: CONNECTION },
+        context,
+      ).catch((e: unknown) => e);
+      expect((err as Error).message).toBe(REFUSAL);
+      expect((err as Error & { hint: string }).hint).toBe(
+        `Cause: --integrations ${mode} resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.`,
+      );
+      expect(stub.calls).toHaveLength(0);
+    });
+  }
 
   it("registers the run with the connection it names", async () => {
     stub = installStubFetch(() => ok());

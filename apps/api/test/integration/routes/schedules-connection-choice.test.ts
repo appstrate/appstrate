@@ -917,48 +917,35 @@ describe("schedule writes — one rule whatever the door", () => {
     only = await seedIntegrationConnection(ctx, INTEGRATION);
   });
 
-  /** `createSchedule` through one door: the HTTP status and the JSON body. */
-  type Create = (body: Record<string, unknown>) => Promise<{ status: number; body: unknown }>;
-
-  const doors: Record<string, () => Promise<Create>> = {
-    "an API key of the member": async () => {
-      const key = await seedApiKey({
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        createdBy: ctx.user.id,
-        scopes: ["schedules:read", "schedules:write"],
-      });
-      return async (body) => {
-        const res = await app.request(`/api/agents/${AGENT}/schedules`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        return { status: res.status, body: await res.json() };
-      };
-    },
-  };
-
-  for (const [door, open] of Object.entries(doors)) {
-    it(`asks ${door} to name the actor's one connection, and stores the schedule once named`, async () => {
-      const create = await open();
-
-      const refused = await create({ cron_expression: "0 9 * * *" });
-      expect(refused.status).toBe(409);
-      expect(refused.body).toMatchObject({
-        code: "missing_integration_connection",
-        errors: [{ code: "must_choose_connection", candidate_connections: [{ id: only }] }],
-      });
-      expect(await db.select().from(schedules)).toHaveLength(0);
-
-      const named = await create({
-        cron_expression: "0 9 * * *",
-        connection_overrides: { [INTEGRATION]: [only] },
-      });
-      expect(named.status).toBe(201);
-      expect(await db.select().from(schedules)).toHaveLength(1);
+  it("asks an API key of the member to name the actor's one connection, and stores the schedule once named", async () => {
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["schedules:read", "schedules:write"],
     });
-  }
+    const create = (body: Record<string, unknown>) =>
+      app.request(`/api/agents/${AGENT}/schedules`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const refused = await create({ cron_expression: "0 9 * * *" });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "missing_integration_connection",
+      errors: [{ code: "must_choose_connection", candidate_connections: [{ id: only }] }],
+    });
+    expect(await db.select().from(schedules)).toHaveLength(0);
+
+    const named = await create({
+      cron_expression: "0 9 * * *",
+      connection_overrides: { [INTEGRATION]: [only] },
+    });
+    expect(named.status).toBe(201);
+    expect(await db.select().from(schedules)).toHaveLength(1);
+  });
 });
 
 describe("schedule fires — a named set binds, an unnamed one takes the fallback", () => {

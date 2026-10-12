@@ -115,8 +115,14 @@ async function seedConnection(
   return row!.id;
 }
 
-/** A space-tier client of the integration: the connections it mints serve that space only. */
-async function seedSpaceClient(spaceId: string): Promise<string> {
+/**
+ * A space-tier client of the integration: the connections it mints serve that space only.
+ * `autoProvisioned`: one `0043` still has to promote.
+ */
+async function seedSpaceClient(
+  spaceId: string,
+  opts: { autoProvisioned?: boolean } = {},
+): Promise<string> {
   const [row] = await db
     .insert(integrationOauthClients)
     .values({
@@ -126,6 +132,7 @@ async function seedSpaceClient(spaceId: string): Promise<string> {
       authKey: "primary",
       clientId: `cid-${crypto.randomUUID().slice(0, 8)}`,
       clientSecretEncrypted: "x",
+      autoProvisioned: opts.autoProvisioned ?? false,
     })
     .returning({ id: integrationOauthClients.id });
   return row!.id;
@@ -246,7 +253,7 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     expect(lines[0]).toStartWith("database: ");
     expect(lines[1]).toBe("left to widen (0041): 0");
     expect(lines[2]).toBe("space-tier auto clients left (0043): 0");
-    expect(lines).toContain("to pin: 1");
+    expect(lines).toContain("pins: 1");
     expect(lines).toContain("schedules with no pin: 0");
     expect(lines.at(-1)).toContain("DRY RUN");
     expect(await pinRows()).toEqual([]);
@@ -254,7 +261,9 @@ describe("0045 — the connection made in a space pinned for the agents binding 
 
     lines.length = 0;
     expect(await run(true)).toEqual(planned);
-    expect(lines).toContain(`org ${ctx.orgId}: pinned 1, schedules naming no set 1`);
+    const orgLine = `org ${ctx.orgId}: pinned 1, schedules naming no set 1`;
+    expect(lines).toContain(orgLine);
+    expect(lines.indexOf("pins: 1")).toBeGreaterThan(lines.indexOf(orgLine));
     expect(lines).toContain(
       `  pin ${AGENT} / ${INTEGRATION} → ${made} (space ${here}, member ${ctx.user.id})`,
     );
@@ -276,7 +285,7 @@ describe("0045 — the connection made in a space pinned for the agents binding 
 
     lines.length = 0;
     expect(await run(true)).toEqual({ pins: [], schedules: planned.schedules });
-    expect(lines).toContain("to pin: 0");
+    expect(lines).toContain("pins: 0");
     expect(lines).toContain("left to pin: 0");
     expect(await pinRows()).toHaveLength(1);
     expect(await pinAudits()).toHaveLength(1);
@@ -288,6 +297,20 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     await seedConnection(elsewhere, { scoped: true });
 
     await expect(run(true)).rejects.toThrow("0041 or 0043 has work left");
+    expect(lines).toContain("left to widen (0041): 1");
+    expect(lines).toContain("space-tier auto clients left (0043): 0");
+    expect(await pinRows()).toEqual([]);
+    expect(await pinAudits()).toEqual([]);
+  });
+
+  it("refuses while 0043 has a space-tier auto client left to promote, writing nothing", async () => {
+    const { made } = await seedBothSpaces();
+    await seedBoundRun(made);
+    await seedSpaceClient(elsewhere, { autoProvisioned: true });
+
+    await expect(run(true)).rejects.toThrow("0041 or 0043 has work left");
+    expect(lines).toContain("left to widen (0041): 0");
+    expect(lines).toContain("space-tier auto clients left (0043): 1");
     expect(await pinRows()).toEqual([]);
     expect(await pinAudits()).toEqual([]);
   });
@@ -355,7 +378,8 @@ describe("0045 — the connection made in a space pinned for the agents binding 
       await seedMemberSchedule();
       const before = await pinRows();
       expect(await run(true)).toEqual({ pins: [], schedules: [] });
-      expect(lines).toContain("to pin: 0");
+      expect(lines).toContain("pins: 0");
+      expect(lines.filter((line) => line.startsWith("org "))).toEqual([]);
       expect(await pinRows()).toEqual(before);
       expect(await pinAudits()).toEqual([]);
     }
@@ -516,7 +540,7 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     });
 
     await run(false);
-    expect(lines).toContain("to pin: 2");
+    expect(lines).toContain("pins: 2");
     for (const orgId of [ctx.orgId, otherCtx.orgId]) {
       expect(lines).toContain(`org ${orgId}: pinned 1, schedules naming no set 0`);
     }

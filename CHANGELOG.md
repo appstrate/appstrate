@@ -254,9 +254,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   - **The picker's least-privilege order is the server's.** Each
     `candidates[]` item of `GET /api/agents/{scope}/{name}/connection-readiness`
     carries `scope_fit` (`exact`, `unjudged`, `broader`, `missing`), and the
-    list is served least privilege first, the order a `must_choose_connection`
-    item lists its `candidate_connections` in (#1929). The dashboard lists it
-    as served and no longer ranks on its own.
+    list is served least privilege first. The dashboard lists it as served and
+    no longer ranks on its own.
   - **A partial OAuth consent is reported.** The callback page names the
     requested scopes the consent left out, its completion message carries them
     as `scopesDenied`, the dashboard shows them, and the audit records
@@ -835,11 +834,12 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   `remote_binds_one_connection` item, since a remote run binds one connection
   per integration.
 - **`appstrate run --connection <integration>=<connection-id>`** (#1929),
-  repeatable; several values for one integration form its set. The picks are
-  sent as the launch's `connection_overrides`, by `--remote` and by a local
-  run reporting to the instance. The flag is refused whenever no run ends up
-  registered on the instance: reporting off, no profile or API key,
-  `--integrations none` or `local`, or a registration that failed under
+  repeatable; several values for one integration form its set under
+  `--remote`, a run executed locally binding one connection per integration.
+  The picks are sent as the launch's `connection_overrides`, by `--remote` and
+  by a local run reporting to the instance. The flag is refused whenever no
+  run ends up registered on the instance: reporting off, no profile or API
+  key, `--integrations none` or `local`, or a registration that failed under
   `--report-fallback console`. A `must_choose_connection` refusal or launch
   warning prints each candidate on its own line with the flag naming it.
 - **A connection added from an agent joins that agent's pin** (#1929). In the
