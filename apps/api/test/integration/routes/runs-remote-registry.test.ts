@@ -853,12 +853,16 @@ describe("POST /api/runs/remote — kind: registry", () => {
         });
 
         it("refuses a key the manifest does not declare (400), as the agent-run route does", async () => {
-          const problem = await expectProblem(
-            await launchWith(kind, { [INTEG]: [a], "@acme/typo": [b] }),
-            400,
-            { code: "invalid_request", param: "connection_overrides" },
-          );
-          expect(problem.detail).toContain("@acme/typo");
+          const res = await launchWith(kind, { [INTEG]: [a], "@acme/typo": [b] });
+          expect(res.status).toBe(400);
+          const body = (await res.json()) as { code: string; errors: unknown[] };
+          expect(body.code).toBe("validation_failed");
+          expect(body.errors).toEqual([
+            expect.objectContaining({
+              field: "connection_overrides.@acme/typo",
+              code: "undeclared_connection_override",
+            }),
+          ]);
           expect(await db.select().from(runs)).toHaveLength(0);
         });
       });
@@ -959,6 +963,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
 
     expect(res.status).toBe(400);
+    expect(((await res.json()) as { errors?: unknown[] }).errors).toEqual([
+      expect.objectContaining({
+        field: "dependency_overrides.@acme/not-a-dep",
+        code: "undeclared_dependency_override",
+      }),
+    ]);
   });
 
   it("rejects a malformed dependency_overrides value (400)", async () => {

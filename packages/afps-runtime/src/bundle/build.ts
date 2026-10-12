@@ -145,7 +145,7 @@ export async function buildBundleFromCatalog(
     // Settle ALL fetches instead of racing on the first rejection: with
     // several broken deps, `Promise.all` surfaced whichever rejection lost
     // the I/O race, so the package named in the error changed run to run —
-    // read as "the corruption moves around" by operators (#896). Failures
+    // read as "the corruption moves around" by operators. Failures
     // are folded back in declaration order, and integrity failures are
     // aggregated so one error names every corrupted package at once.
     const settled = await Promise.allSettled(

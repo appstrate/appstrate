@@ -86,7 +86,7 @@ Tag `core@X.0.0` and push it. Do **not** bump the consumers first.
 A consumer physically cannot declare `^X.0.0` before X.0.0 exists on npm — its
 own CI runs `bun install --frozen-lockfile`, which cannot resolve an unpublished
 version. Inverting the order is therefore a deadlock: each consumer's CI goes
-red _and_ the gate blocks the very publish that would unblock it (issue #1028).
+red _and_ the gate blocks the very publish that would unblock it.
 
 The gate accommodates this and only this: at an `X.0.0` release, a consumer
 found **exactly one major behind** is a **warning**, not a failure.
@@ -166,7 +166,7 @@ blocking, `off` skips the check entirely.
 
 A clean run prints `Summary: 0 failure(s)`; warnings count the consumers one
 minor behind (or one major behind at an `X.0.0`) — `core@11.1.0` printed
-`Summary: 0 failure(s), 1 warning(s)`. It no longer hides a
+`Summary: 0 failure(s), 1 warning(s)`. It does not hide a
 failed fetch or an unparsable range: both are counted. It can still include an
 informational "does not depend on `@appstrate/core`" line, so read the
 per-consumer output too.

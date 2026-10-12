@@ -637,14 +637,12 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * first setup), the existing row is updated in place — same
  * `client_id`, so outstanding tokens and live sessions remain valid.
  *
- * Auth-shape reconciliation is what upgrades pre-#154 installs. Before
- * that PR the platform SPA was provisioned as a confidential client
- * (`tokenEndpointAuthMethod="client_secret_basic"` + hashed
- * `clientSecret`). The create path now provisions it as public + PKCE,
- * but existing rows were left stuck as confidential — every SPA OIDC
- * token exchange then failed with `invalid_client: client secret must
- * be provided`. The existing-row path below converges the stored shape
- * to the public-client contract.
+ * Auth-shape reconciliation: the platform SPA is a public + PKCE client. A
+ * stored row provisioned as confidential
+ * (`tokenEndpointAuthMethod="client_secret_basic"` + hashed `clientSecret`)
+ * fails every SPA OIDC token exchange with `invalid_client: client secret
+ * must be provided`, so the existing-row path below converges the stored
+ * shape to the public-client contract.
  *
  * Without this reconciliation the dashboard SPA would loop on
  * `/api/auth/oauth2/authorize` after a URL change and eventually hit

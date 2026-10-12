@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.2d — HTTPS MITM listener bound to a single integration's
+ * HTTPS MITM listener bound to a single integration's
  * credential payload (proposal §4.1.4 + §4.1.6).
  *
  * Wire flow:
@@ -199,7 +199,7 @@ interface CreateMitmListenerOptions {
   onEvent?: (event: MitmListenerEvent) => void;
   /** The connection's egress allowlist — SNI at TLS level, the full URL per request. */
   egressPolicy: RunnerEgressPolicy;
-  /** Only the owning runner may connect (#1458). */
+  /** Only the owning runner may connect. */
   isPeerAllowed: PeerCheck;
 }
 
@@ -273,7 +273,7 @@ export function createIntegrationMitmListener(
 
   // Inner servers keyed by upstream authority: the inner request carries no
   // trace of the tunnel it came through, so the server itself must know the
-  // port the runner asked for (#1588). Their sockets live in one 0700
+  // port the runner asked for. Their sockets live in one 0700
   // directory, named by a counter, not the authority: AF_UNIX paths cap near
   // 104 bytes.
   const tlsServers = new Map<string, Promise<InnerTlsServer>>();
@@ -555,7 +555,7 @@ async function handleInboundConnection(
     return;
   }
   // … then the egress allowlist (no cert mint, no DNS for an unauthorized host).
-  // The upstream is the SNI host on the port the runner CONNECTed to (#1588).
+  // The upstream is the SNI host on the port the runner CONNECTed to.
   if (!deps.egressPolicy.allowsAuthority(sniHost, result.port)) {
     emit({ kind: "connect-rejected", reason: "not-authorized", host: sniHost, port: result.port });
     rawSocket.destroy();

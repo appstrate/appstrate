@@ -8,10 +8,10 @@
  * Two consumers:
  *   1. `scripts/verify-compose-defaults.ts` — PR-time guard that fails
  *      CI when a tracked compose template mirrors a code default (the
- *      #513 `MODULES` drift class), in either of the two shapes a
+ *      `MODULES` drift class), in either of the two shapes a
  *      compose file can pin a value: the `${VAR:-default}` fallback and
  *      the literal `VAR: value` / `- VAR=value` assignment.
- *   2. `apps/cli` — the runtime side (issue #515): `appstrate doctor`
+ *   2. `apps/cli` — the runtime side: `appstrate doctor`
  *      flags an operator's *on-disk* `docker-compose.yml` when it still
  *      carries stale duplicated defaults, and `appstrate install
  *      --upgrade-compose` surgically strips them.
@@ -26,14 +26,13 @@
  * transforms and refinements that do not extract cleanly, so the values
  * below stay hand-written. That much is unchanged.
  *
- * What is no longer true is the old claim that a gap in this table is
- * harmless — "it just fails to catch one duplication". It fails SILENTLY,
+ * A gap in this table is not harmless. It fails SILENTLY,
  * and `analyzeComposeDefaults` below is where: a variable absent from
  * `CODE_DEFAULTS` hits `codeDefault === undefined` and is skipped, so the
  * gate's coverage was this table's length rather than the schema's. It was
  * short by 14, among them `WORKSPACE_TMPFS_SIZE_MB` and `FILE_MAX_BYTES`
  * — a compose file pinning either at exactly its schema default passed
- * clean, which is #513 verbatim.
+ * clean.
  *
  * So the SET of defaulted variable names — a far weaker thing to extract
  * than their values — is now derived from the schema source by
@@ -215,7 +214,7 @@ function defaultPattern(): RegExp {
 // reason `test/setup/docker-compose.health-e2e.yml` pinned `MODULES`,
 // `SYSTEM_PROVIDER_KEYS` and `SYSTEM_PROXIES` at their schema defaults for a
 // whole release while this module reported the file clean. A pinned literal is
-// the WORSE half of #513: `${MODULES:-…}` at least still lets the host
+// the WORSE half of that drift: `${MODULES:-…}` at least still lets the host
 // environment win, a literal does not.
 //
 // Both are anchored and capture at most once per line, so unlike
@@ -335,7 +334,7 @@ export type ComposeFinding = ComposeDuplicateFinding | ComposeAllowlistDriftFind
  * {@link ALLOWLIST}. Returns findings in line order:
  *
  *   - `duplicate`       — a pinned value equal to the code default, in
- *                         either shape (the #513 drift class — safe-but-stale,
+ *                         either shape (the drift class — safe-but-stale,
  *                         the YAML value masks future schema changes). Only an
  *                         EXACT mirror is a finding: a compose file that
  *                         deliberately sets something else is not this bug.
@@ -442,7 +441,7 @@ function escapeRegExp(s: string): string {
  *
  * `allowlist-drift` findings are intentionally LEFT ALONE: a divergent
  * intentional-override default may be the operator's own deliberate
- * choice, not the #513 bug — they surface in `appstrate doctor` for a
+ * choice, not drift — they surface in `appstrate doctor` for a
  * human to judge, but are never auto-edited here.
  *
  * Any duplicated-default occurrence that is NOT in the canonical

@@ -82,7 +82,7 @@ function readPositiveIntFromEnv(name: string): number | undefined {
   if (raw === undefined || raw === "") return undefined;
   const parsed = Number.parseInt(raw, 10);
   // Soft-fail at boot: if the launcher passes a garbage value we fall back
-  // to the legacy run-budget-only path rather than refusing to start. The
+  // to the run-budget-only path rather than refusing to start. The
   // platform always emits stringified positive ints — anything else is a
   // launcher bug we want surfaced via logs, not a hard sidecar crash.
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -176,7 +176,7 @@ if (connectLoginJson) {
 
 const cookieJar: CookieJar = new Map();
 
-// #1458 — the agent's proxy refuses runner peers (they have their own policed
+// The agent's proxy refuses runner peers (they have their own policed
 // listener). Rebound once the adapter is prepared; no runner exists before that.
 let peerAttribution: PeerAttribution = noRunnerPeers;
 const proxy = createForwardProxy({
@@ -185,7 +185,7 @@ const proxy = createForwardProxy({
   listenHost: env.listenHost,
   isPeerAllowed: (peer) => admitsAgentProxyPeer(peerAttribution, peer),
 });
-// The platform notices a sidecar that EXITS (#1561), not one alive without its
+// The platform notices a sidecar that EXITS, not one alive without its
 // proxy — whose port another process may then be holding for the agent's traffic.
 proxy.ready.catch((err: unknown) => {
   logger.error("Forward proxy could not bind, exiting", {
@@ -201,7 +201,7 @@ const oauthTokenCache = new OAuthTokenCache({
   getRunToken: () => config.runToken,
 });
 
-// Phase 1.4 — bootstrap declared integrations IN THE BACKGROUND so the
+// Bootstrap declared integrations IN THE BACKGROUND so the
 // sidecar's `/mcp` listener comes up immediately (the agent retries the
 // MCP handshake; the per-connection spawn + listTools handshake can
 // take several seconds for a fresh node_modules tree). The agent's
@@ -219,7 +219,7 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 
 // Platform runtime tools (output/log/note/pin) the agent selected,
 // hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
-// same transport every other tool uses, so they are no longer Pi-SDK
+// same transport every other tool uses, so they are not Pi-SDK
 // extensions. Static for the run's lifetime (selection + output schema are
 // fixed at boot).
 //
@@ -316,7 +316,6 @@ logger.info("Sidecar proxy listening", {
 // `idleTimeout` mirrors `apps/api/src/index.ts` — value + rationale live
 // in `SIDECAR_IDLE_TIMEOUT_SECONDS` so the test suite can pin the bound
 // without booting this entry point (which has port-binding side effects).
-// See issue #426.
 export default {
   port: env.port,
   hostname: env.listenHost,

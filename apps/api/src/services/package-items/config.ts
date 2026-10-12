@@ -87,7 +87,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     validateContent: checkSkillMarkdown,
     manifestIsStoredFile: false,
   },
-  // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
   integration: {
     type: "integration",
     storageFolder: "integrations",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Better Auth plugin — `/api/auth/cli/*` endpoints (issue #165, #251).
+ * Better Auth plugin — `/api/auth/cli/*` endpoints.
  *
  * Exposes the rotating-refresh-token surface used by the 2.x CLI.
  * Mounted alongside the existing `deviceAuthorization()` plugin — the
@@ -25,17 +25,17 @@
  *     body: { token, client_id }   // `token` = refresh_token
  *     200: { revoked: boolean }
  *
- *   GET  /api/auth/cli/sessions                    [issue #251]
+ *   GET  /api/auth/cli/sessions
  *     Cookie auth required (BA session). Lists the caller's active
  *     CLI sessions (one entry per `family_id` head, not revoked, not
  *     expired). 200: { object: "list", data: [...], hasMore: false }
  *
- *   POST /api/auth/cli/sessions/revoke              [issue #251]
+ *   POST /api/auth/cli/sessions/revoke
  *     Cookie auth required. Body: { familyId }. Revokes a single
  *     session owned by the caller. 200: { revoked: boolean } —
  *     `false` when the family is unknown / not owned / already revoked.
  *
- *   POST /api/auth/cli/sessions/revoke-all          [issue #251]
+ *   POST /api/auth/cli/sessions/revoke-all
  *     Cookie auth required. Server primitive backing
  *     `appstrate logout --all`. 200: { revokedCount: number }.
  *
@@ -55,8 +55,7 @@
  * deferred — granting `cli-sessions:delete` to an API key would let a
  * compromised key sign every device of every account out of the platform,
  * which is a much wider blast radius than the key holder's intent.
- * If a future use case justifies the scope, it lands as a Phase 3
- * extension with its own RBAC contribution.
+ * A use case that justifies the scope needs its own RBAC contribution.
  */
 
 import { eq } from "drizzle-orm";
@@ -329,7 +328,7 @@ export function cliTokenPlugin() {
         },
       ),
 
-      // ── Issue #251: dashboard-facing session management ────────────────
+      // ── Dashboard-facing session management ────────────────
 
       cliListSessions: createAuthEndpoint(
         "/cli/sessions",

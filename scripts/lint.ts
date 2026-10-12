@@ -181,7 +181,7 @@ const LOAD_BEARING_RULES = [
   "@typescript-eslint/no-unused-vars",
   // The escape hatch out of every other type-level guarantee.
   "@typescript-eslint/no-explicit-any",
-  // Failure legibility (PR #1161): a rethrow that drops the caught error
+  // Failure legibility: a rethrow that drops the caught error
   // destroys the only record of what actually failed. This rule sat at "off"
   // in `eslint.config.mjs` — the file's one unjustified suppression — hiding
   // 20 such sites, so it is exactly the "switched off in silence" case this
@@ -272,7 +272,7 @@ async function main(): Promise<number> {
   // The repo's four deliberate `"warn"` rules stay `"warn"`: three under
   // `**\/test\/**` and `react-refresh/only-export-components`. Their severity is
   // an editor signal (a yellow squiggle rather than a red one) and this flag
-  // does not change that; what it changes is that CI no longer treats them as
+  // does not change that; under it, CI does not treat them as
   // optional. The flag costs nothing today — measured 2026-08-26 on a COLD
   // cache, `bun scripts/lint.ts --max-warnings 0` printed zero bytes and exited
   // 0, so the repo currently emits zero warnings of any kind.

@@ -395,8 +395,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       checkJsonPath(path, ["identity_claims", claim]);
     }
 
-    // (1g) Entries templated with `{$credential.<field>}` (#1458) reference declared, required
-    // fields, in the authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden
+    // (1g) Entries templated with `{$credential.<field>}` reference declared, required
+    // fields, in the authority of a `scheme://` entry or as a leading whole URL. Forbidden
     // with `connect` (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only
     // tokens in the bundle). Allowed on api_call: its consumers pin only the declared literal
     // entries. Entries carrying `{$variable.<name>}` are `@afps-spec/schema`'s (§7.9, §7.12).
@@ -1590,6 +1590,26 @@ export const MISSING_INTEGRATION_CONNECTION_CODES = [
 
 export type MissingIntegrationConnectionCode =
   (typeof MISSING_INTEGRATION_CONNECTION_CODES)[number];
+
+/** Every code an `errors[]` item of the connection-readiness read carries. */
+export const READINESS_ERROR_CODES = [
+  ...CONNECTION_RESOLUTION_ERROR_CODES,
+  "agent_not_active",
+] as const;
+
+export type ReadinessErrorCode = (typeof READINESS_ERROR_CODES)[number];
+
+/**
+ * What a launch override key is refused over at the write: a 400 item on
+ * `connection_overrides.<id>` or `dependency_overrides.<id>`.
+ */
+export const OVERRIDE_REFUSAL_CODES = [
+  "undeclared_connection_override",
+  "required_integration_unbound",
+  "undeclared_dependency_override",
+] as const;
+
+export type OverrideRefusalCode = (typeof OVERRIDE_REFUSAL_CODES)[number];
 
 /**
  * One connection carried by `must_choose_connection`.

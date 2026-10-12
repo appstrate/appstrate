@@ -158,7 +158,7 @@ export const META_NAMESPACE_KEY_REGEX: RegExp = /^([a-z0-9-]+(\.[a-z0-9-]+)+\/)?
  * namespaces are accepted (consumers MUST NOT reject them per §10.1); malformed
  * keys and reserved prefixes are hard-rejected (a malformed `_meta` key makes the
  * package malformed per §2). The earlier local soft-fail layer is gone — appstrate
- * no longer owns any `_meta` policy.
+ * does not own any `_meta` policy.
  */
 export const metaSchema = afpsMetaSchema;
 
@@ -269,7 +269,7 @@ function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): voi
 
 /**
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
- * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
+ * AND the `dependencies.integrations` map.
  */
 const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
@@ -290,7 +290,7 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // maps + §4.4 per-integration config, including the rule that every
   // `integrations_configuration` key matches a declared integration dep).
   // We do not override those fields here to avoid drifting from the spec.
-  // The §4.4 `tools` wildcard (`string[] | "*"`, issue #547) is supported by
+  // The §4.4 `tools` wildcard (`string[] | "*"`) is supported by
   // the canonical schema as of @afps-spec/schema@0.5.0; no local widening is
   // needed — the inherited shape already matches the Appstrate runtime
   // contract (`dependencies.ts` `ToolsWildcard` / `isToolsWildcard`).
@@ -474,7 +474,7 @@ function parseWithSchema(
  * Purely structural — no Zod round-trip. Key order, unknown fields and the
  * absence of schema defaults are preserved exactly, because the version
  * snapshot path serialises the result into an integrity-hashed artifact: a
- * re-parse that reordered keys would silently defeat publish dedup (#896).
+ * re-parse that reordered keys would silently defeat publish dedup.
  * Returns the input untouched (same reference) when nothing needs dropping.
  *
  * **When a drop empties the list, the key is REMOVED, not left as `[]`.** AFPS
@@ -524,7 +524,7 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
  * this manifest author input, or something already persisted?") and splitting
  * them into two flags would let a future call site set one and forget the
  * other, which is precisely how the author-input rejection was lost once
- * already (#1021):
+ * already:
  *
  *   1. `runtime_tools` ids the platform retired (or an author mistyped).
  *   2. `dependencies` keys AFPS 2.0 retired — `tools` (now `mcp_servers`) and
@@ -595,7 +595,7 @@ export function validateManifest(
   const type = obj.type;
 
   // AFPS 1.x retired dependency vocabulary: on the author direction, reject
-  // and name the replacement key (#1021). See {@link RetiredRuntimeToolsPolicy}
+  // and name the replacement key. See {@link RetiredRuntimeToolsPolicy}
   // for why the keys still parse. Checked before the type dispatch because
   // every package type may declare `dependencies`.
   if (options?.retiredRuntimeTools !== "drop") {

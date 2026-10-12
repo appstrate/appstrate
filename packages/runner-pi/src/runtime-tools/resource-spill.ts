@@ -54,7 +54,7 @@ export interface ResourceSpillOptions {
    * provided, each link is resolved via MCP `resources/read` and spilled to a
    * file just like an embedded resource, so the agent can grep / head / tail /
    * read-with-offset it instead of receiving an unreadable `appstrate://` URI.
-   * Omitted ⇒ links are passed through untouched (legacy behaviour).
+   * Omitted ⇒ links are passed through untouched.
    */
   readResource?: (uri: string) => Promise<{
     contents: Array<{ uri: string; mimeType?: string; text?: string; blob?: string }>;

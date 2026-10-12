@@ -355,7 +355,7 @@ const extensionFactories: ExtensionFactory[] = [];
 // shows as dead air before the run goes `running`.
 //
 // Fire-and-forget: this POST rides the sidecar's forward proxy (the agent's
-// only route out), which boots in parallel (#406) — awaiting it serializes
+// only route out), which boots in parallel — awaiting it serializes
 // the whole boot behind the proxy coming up (~2s of HttpSink backoff on a
 // cold host). Provisioning below retries through the same proxy, so nothing
 // downstream depends on this event having landed. Ordering is safe: the sink
@@ -417,8 +417,7 @@ await Promise.all([provisionWorkspace(provisionDeps), provisionFiles(provisionDe
 // The bundle is unconditionally present here: `provisionWorkspace` above either
 // wrote `agent-package.afps` into the workspace or called `die()` (process.exit)
 // — a 404 included. So there is no "no package shipped with this run" branch to
-// take; PR #549 replaced that delivery model (the platform used to pre-install
-// files into the workspace directly) with self-provisioning. A read failure is
+// take: the container provisions itself. A read failure is
 // therefore a genuine defect — a truncated or corrupt upload — and gets the same
 // fail-loud treatment as a missing one, with a breadcrumb naming the cause
 // rather than an unhandled rejection.
@@ -443,7 +442,7 @@ const bundlePrepareStart = performance.now();
 try {
   await prepareBundleForPi(bundle, { workspaceDir: WORKSPACE });
 
-  // Fail-loud safety net (issue #549): verify every skill the bundle
+  // Fail-loud safety net: verify every skill the bundle
   // carries actually landed under `.pi/skills/<id>`. Before agent
   // self-provisioning, a dropped bundle degraded silently — the agent
   // booted onto an empty workspace and only an easily-missed log line
@@ -532,12 +531,12 @@ await progress("connecting to sidecar");
 const mcpConnectStart = performance.now();
 try {
   // Retry the initial MCP handshake — the platform now starts the agent
-  // in parallel with sidecar boot (issue #406), so the sidecar's /mcp
+  // in parallel with sidecar boot, so the sidecar's /mcp
   // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
   // still wiring its listener and the Docker DNS alias is propagating.
   // AWS-style full jitter (50ms → 1s) absorbs the race without
   // pessimising the warm-path; the fixed 60s deadline covers worst-case
-  // cold container pulls (#406 acceptance criteria: 20–45s boots are
+  // cold container pulls (20–45s boots are
   // routine). It is not operator-tunable — see `MCP_CONNECT_DEADLINE_MS`.
   // The sidecar's /mcp endpoint gates inbound requests on the run's
   // `SIDECAR_AUTH_HEADER` token (denied by default) plus the Host-header
@@ -546,7 +545,7 @@ try {
   mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
     clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
     extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
-    // #779 annex — operator-tunable per-call tool timeout (absent →
+    // Operator-tunable per-call tool timeout (absent →
     // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
     // honoured sidecar-side, so both legs of an integration tool call
     // share one budget.
@@ -787,8 +786,8 @@ const DEFAULT_FILE_MAX_BYTES = 100 * 1024 * 1024;
  * compiled 100 MiB default when absent/unparseable. The server is the
  * authoritative gate (it cuts an over-cap stream mid-flight); this just avoids
  * streaming a file that is certain to be rejected. Reading the forwarded value
- * keeps the two in lockstep — an operator who raises the platform cap no longer
- * sees large deliverables silently skipped here.
+ * keeps the two in lockstep — an operator who raises the platform cap does not
+ * see large deliverables silently skipped here.
  */
 function resolveMaxFileBytes(): number {
   const raw = process.env.FILE_MAX_BYTES;

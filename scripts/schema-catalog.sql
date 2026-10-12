@@ -1,7 +1,7 @@
 -- Schema catalog fingerprint — one sorted line per column, index, constraint and
 -- enum of the platform's `public` schema. Read-only: catalog queries only.
 --
--- What it is for (#1507): a database created before a migration squash can sit
+-- What it is for: a database created before a migration squash can sit
 -- at the full journal and still not be the schema the chain builds — production
 -- carried 60 `timestamp` columns, two retired enum labels, 19 auto-named
 -- constraints and 6 missing ones that way, invisible to everything but a

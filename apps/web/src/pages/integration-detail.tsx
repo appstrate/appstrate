@@ -30,7 +30,7 @@
  *     must not have to download the `.afps` and unzip it.
  *   - Versions — read-only release history (non-system packages only).
  *
- * Connect drives a popup through the hosted connect portal (issue #769) —
+ * Connect drives a popup through the hosted connect portal —
  * mint `/connect/session`, open the returned `connect_url` (which dispatches to
  * the provider OAuth screen or the hosted credential form), then refetch the
  * detail to surface the new connection row.

@@ -178,10 +178,9 @@ type DockerCpSpawn = (
  *
  * The scope is deliberately "find the socket", not "configure the client".
  * `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH`, `DOCKER_CONTEXT` and `DOCKER_CONFIG`
- * used to reach the CLI (it inherited `process.env` wholesale) and no longer
- * do. That is a non-event for the documented deployment — a plaintext
+ * do not reach the CLI. That is a non-event for the documented deployment — a plaintext
  * socket-proxy on `DOCKER_HOST` — and it BREAKS a TLS-secured or
- * context-selected remote daemon, which would now be contacted unverified or
+ * context-selected remote daemon, which would be contacted unverified or
  * not found. Widening the list is the fix if that setup ever ships; each added
  * name also becomes reachable from an `=`-less `--env-file` line, so add only
  * names that carry no secret.
@@ -692,7 +691,7 @@ export async function writeSecretEnvFile(
 
 /**
  * The sidecar's own IPv4 on the per-run network, where the transparent egress
- * plane (#779) binds. Binding to that specific IP (not 0.0.0.0) keeps
+ * plane binds. Binding to that specific IP (not 0.0.0.0) keeps
  * :53/:443/:80 off the sidecar's other interfaces (the shared egress network) —
  * only this run's containers can reach them. Low-port binds require the
  * platform to have granted `net.ipv4.ip_unprivileged_port_start=0` on the
@@ -718,7 +717,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const hostTempDirsByContainer: Map<string, string[]> = new Map();
   let runNetwork: string | null = null;
   /**
-   * #779 — `null` when the setup failed: spawn() then omits
+   * `null` when the setup failed: spawn() then omits
    * `--dns` and the runner degrades to the proxy-env-only contract.
    */
   let transparentEgress: TransparentEgressPlane | null = null;
@@ -747,7 +746,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         network,
         inspect: (name) => dockerExec(["network", "inspect", name]),
       });
-      // #779 — transparent egress plane for proxy-unaware HTTP clients.
+      // Transparent egress plane for proxy-unaware HTTP clients.
       transparentEgress = await startTransparentEgressPlane({
         ipv4: () => sidecarIpOn(network),
         policyForPeer: policyForRunnerPeer(peers.runnerOf, transparentPolicies),
@@ -841,7 +840,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
 
       const networkFlags = ["--network", runNetwork];
 
-      // #779 — transparent egress for plain-CONNECT egress runners
+      // Transparent egress for plain-CONNECT egress runners
       // (`caCertHostPath === null`). `--dns` points the embedded DNS
       // forwarder (127.0.0.11) at the sidecar's responder, so external names
       // resolve to the sidecar's SNI-passthrough splicer and proxy-unaware
@@ -975,7 +974,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
       }
       hostTempDirsByContainer.clear();
-      // #779 — tear down the transparent egress plane (DNS responder +
+      // Tear down the transparent egress plane (DNS responder +
       // SNI-passthrough splicers). Idempotent: close() resolves even when
       // the underlying socket already died.
       await transparentEgress?.close();

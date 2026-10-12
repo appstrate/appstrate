@@ -210,7 +210,7 @@ export function isIntegrationConnectMessage<T extends { origin: string; data: un
  * an append.
  *
  * The cost of that closure, deliberately accepted: a surface holding only a
- * `packageId` (the hosted-connect offer) no longer mirrors the OAuth callback's
+ * `packageId` (the hosted-connect offer) does not mirror the OAuth callback's
  * early failures, because those name a state it was never told and no package.
  * It keeps waiting while the callback page itself shows the user the error. The
  * fix for that is to widen the SENDER — give those paths their `packageId` — not

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1 — import-time validation that an agent's
+ * Import-time validation that an agent's
  * `integrations_configuration[id]` selections (tools / scopes, §4.4)
  * are consistent with the catalog declared on each referenced
  * integration's manifest.
@@ -21,8 +21,8 @@
  *    (`agent-readiness.ts`) is the authority on "integration must be
  *    active in the space", not us.
  *  - Integration declares no `tools_policy` block or no `scope_catalog`
- *    catalog → the corresponding subset check is skipped (matches the
- *    Phase 0 schema semantics).
+ *    catalog → the corresponding subset check is skipped (an absent
+ *    catalog means "unknown", not "none").
  *
  * `requireCallableTools` adds two freeze-point rules that are NOT subset checks —
  * `no_tools_selected` and `auth_key_serves_no_selected_tool` — opt-in per call
@@ -241,7 +241,7 @@ function selectsNoCallableTool(
   // enumerates nothing in its manifest discovers its tools at connect time, so
   // an empty catalog means "unknown", not "none" — intersecting would refuse a
   // perfectly good publish. Same reason `validateAgentIntegrationScopes` skips
-  // its own subset check on an empty catalog (Phase 0 semantics).
+  // its own subset check on an empty catalog.
   //
   // A DECLARED surface that `hidden_tools` empties is the opposite case and must
   // refuse: the integration told us its tools and then hid all of them, so the

@@ -31,7 +31,7 @@ appstrate install
 
 Why two steps? Running `install` from your real interactive shell gives
 you the full clack-style prompts (tier picker, install dir, port, owner
-email) and sidesteps a Bun macOS regression (#199, oven-sh/bun #6862,
+email) and sidesteps a Bun macOS regression (oven-sh/bun #6862,
 #7033, #24615) that hangs interactive prompts when launched under
 `curl|bash`. The two-step pattern is the same one Supabase, Vercel,
 Railway, gh CLI, and fly.io use.
@@ -88,7 +88,7 @@ curl -fsSL https://get.appstrate.dev | bash -s -- --yes
 
 The `--yes` flag fires the legacy all-in-one path: download + verify +
 exec `appstrate install --yes` in a single command. **Closed-by-default
-semantics apply (#344):** when no `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is
+semantics apply:** when no `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is
 provided, the installer generates a single-use `AUTH_BOOTSTRAP_TOKEN`,
 ships the instance with `AUTH_DISABLE_SIGNUP=true`, and prints a banner
 with the redemption URL. Open `<APP_URL>/claim`, paste the token plus

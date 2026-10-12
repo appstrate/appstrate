@@ -310,8 +310,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // via the environment.
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
-  // context so dev-loop replays (previously served by `afps run`) keep
-  // working — agent authors can re-use the same fixture files.
+  // context so dev-loop replays
+  // work — agent authors can re-use the same fixture files.
   const runId = opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   const baseContext: ExecutionContext = {
     runId,

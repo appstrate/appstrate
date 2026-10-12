@@ -497,6 +497,7 @@
   "error.overrideOutranked": "A chosen connection is outside the set an admin pin or the enforced space default imposes: remove that choice.",
   "error.requiredIntegrationUnbound": "The agent requires this integration, but the choice in force is \"No connection\": pick a connection, or remove that choice.",
   "error.connectionOverridesRefused": "A connection choice names an integration this version of the agent does not declare. Remove that choice, then try again.",
+  "error.dependencyOverridesRefused": "A version choice names a dependency this version of the agent does not declare. Remove that choice, then try again.",
   "launchWarnings.run_one": "Running without the {{names}} integration",
   "launchWarnings.run_other": "Running without the {{names}} integrations",
   "launchWarnings.schedule_one": "Scheduled runs will start without the {{names}} integration",

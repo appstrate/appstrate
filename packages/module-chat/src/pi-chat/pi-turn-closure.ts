@@ -12,10 +12,8 @@
  * chunks are transient and never become persisted message parts, which is
  * exactly how a 10-minute turn once ended as an empty message.
  *
- * These primitives used to sit one directory up, in `src/turn-closure.ts`, so
- * the AI-SDK loop and the Pi engine could share ONE closure rule. #1173 deleted
- * the AI-SDK loop; every caller is now under `pi-chat/`, so the neutral home no
- * longer buys anything and the rule lives with the only engine that applies it.
+ * Every caller is under `pi-chat/`: the rule lives with the only engine that
+ * applies it.
  * The step-cap controller stays next door in `pi-chat/turn-control.ts`.
  */
 

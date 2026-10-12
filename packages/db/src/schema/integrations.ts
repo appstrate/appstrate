@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS integration storage tables (Phase 1.1 — credential layer).
+ * AFPS integration storage tables.
  *
  * The integration credential model is keyed per-auth:
  *
@@ -22,7 +22,7 @@
  *     either a dashboard user (`userId`) or a headless end-user
  *     (`endUserId`), enforced by a check constraint.
  *
- * The runtime spawn flow (Phase 1.2a) hits this table once per declared
+ * The runtime spawn flow hits this table once per declared
  * auth at integration boot, decrypts with the v1 credential envelope, and
  * feeds `resolveIntegrationCredentials`
  * (packages/connect/integration-credentials.ts).
@@ -356,7 +356,7 @@ export const integrationOauthClients = pgTable(
       sql`${table.tokenEndpointAuthMethod} IS NULL OR ${table.tokenEndpointAuthMethod} IN ('client_secret_post', 'client_secret_basic', 'none')`,
     ),
     // Public client IFF no stored ciphertext — the state this column exists to
-    // make unrepresentable: a row can no longer claim to be public while
+    // make unrepresentable: a row cannot claim to be public while
     // holding a secret, nor name a secret-based method while holding none.
     //
     // What it does NOT guarantee is anything about the PLAINTEXT: the check is

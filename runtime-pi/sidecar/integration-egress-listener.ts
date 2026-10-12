@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-connection plain HTTP egress proxy (issue #543).
+ * Per-connection plain HTTP egress proxy.
  *
  * A local-source runner sits on the per-run network (`internal: true` in
  * docker mode) with no direct egress. When the integration injects a
@@ -22,7 +22,7 @@
  * surface (`ready` / `address` / `proxyUrl` / `close`) so `integrations-boot`
  * collects and tears down both listener kinds uniformly.
  *
- * Only the owning runner may connect (`isPeerAllowed`, #1458).
+ * Only the owning runner may connect (`isPeerAllowed`).
  */
 
 import { createServer as createHttpServer } from "node:http";

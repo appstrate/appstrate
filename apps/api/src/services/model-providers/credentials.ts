@@ -1072,7 +1072,7 @@ export async function listOrgModelProviderCredentials(
       }),
     );
 
-  // Built-in credentials whose EVERY backing model is an alias (issue #727):
+  // Built-in credentials whose EVERY backing model is an alias:
   // hide the binding (apiShape + baseUrl) so the endpoint host doesn't reveal
   // the hidden provider to an org admin who can read credentials but never
   // configured the env key. Mirrors `projectAliasedModel` for the model list.
@@ -1180,7 +1180,7 @@ export async function listOrgModelProviderCredentials(
  * OAuth token). Returns `undefined` when the id is unknown to either source.
  *
  * Used by the create/update handlers to return the full (non-secret) resource
- * instead of an id-only stub (issue #646). Re-runs the list serializer rather
+ * instead of an id-only stub. Re-runs the list serializer rather
  * than duplicating the system+DB merge — guarantees the returned shape matches
  * `GET`/list and can never leak secret material.
  */

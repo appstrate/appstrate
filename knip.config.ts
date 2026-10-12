@@ -7,12 +7,12 @@ import { fileURLToPath } from "node:url";
 import type { KnipConfig } from "knip";
 
 /**
- * Dead-code gate — issue #1181.
+ * Dead-code gate.
  *
  * `no-unused-vars` only sees locals: an exported symbol is "used" by
  * construction, so nothing in the `check` chain answered "does this exported
- * symbol still have a reader". That blind spot is how #1178 accumulated
- * months of dead weight invisibly. knip answers it, and covers dead files and
+ * symbol still have a reader". That blind spot lets dead weight accumulate
+ * invisibly. knip answers it, and covers dead files and
  * unused dependencies in the same pass.
  *
  * Two rules for anything added below:
@@ -104,7 +104,7 @@ import type { KnipConfig } from "knip";
  * is exactly how this config drifted: 6 dead files and ~450 phantom unused
  * exports, all of them entries that had simply stopped being declared.
  *
- * That re-declaration is no longer written by hand. `manifestEntries()` below
+ * That re-declaration is not written by hand. `manifestEntries()` below
  * reads the workspace's `package.json` and derives it, so a manifest edit
  * cannot silently desynchronise from this file. What stays hand-written is
  * the other half — the entries no manifest implies (Docker CMDs, test
@@ -253,7 +253,7 @@ const config: KnipConfig = {
    * one OS and none on another is not measuring this repo, and does not get
    * to block a merge.
    *
-   * What issue #1181 asked for is unaffected. Unused files, unused exports
+   * The gate itself is unaffected. Unused files, unused exports
    * and unused dependencies are knip *issues*, not hints: they fail the run
    * on their own, and they agreed across both hosts (CI reported none). Hints
    * still print on every run — they are read, not obeyed.
@@ -420,7 +420,7 @@ const config: KnipConfig = {
         "src/modules/firecracker/guest/supervisor.ts",
         "src/modules/firecracker/runner/daemon.ts",
         "src/modules/firecracker/scripts/dev/smoke.ts",
-        // The smoke's #1547 guest probe programs: `smoke-runner-egress.ts`
+        // The smoke's guest probe programs: `smoke-runner-egress.ts`
         // reads each off disk by path and bundles it (`Bun.build`) into the
         // guest — a runner's `server.js`, the agent's `bun -e` argument — so
         // no import edge reaches them. Their shared `helpers.js` is reached

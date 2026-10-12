@@ -327,7 +327,7 @@ export function firstViolatedConstraint(event: RunEvent): string | undefined {
  *  - `../sinks/stdout-bridge.ts` validates what the agent prints on stdout.
  *    That is a trust boundary: untrusted container output, structurally
  *    checked before it is believed.
- *  - `../events/cloudevents.ts` no longer consults it. The `dataschema` stamp
+ *  - `../events/cloudevents.ts` does not consult it. The `dataschema` stamp
  *    it used to gate is gone (see that module for why).
  *
  * So this is not a cosmetic classifier. Every constraint in

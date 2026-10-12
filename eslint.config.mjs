@@ -46,7 +46,7 @@ const PI_SDK_BAN = {
 // own `utils/url.mjs` deliberately keeps the zod-carrying one out of the client
 // bundle), and `isLoopbackHost` is a pure predicate — no module state, so no
 // identity to get wrong. `oidc/services/redirect-uri.ts` needs the very
-// predicate DCR applies, and re-implementing it is the drift #1012 is about.
+// predicate DCR applies, and re-implementing it would drift.
 const BETTER_AUTH_CORE_BAN = {
   // Everything under `@better-auth/core`, except `@better-auth/core/utils/host`
   // itself (deep subpaths of it stay banned). gitignore-style `group` can't
@@ -168,7 +168,7 @@ const PROCESS_STREAM_MESSAGE =
 const CLACK_FUNNEL_MESSAGE =
   "Render through a `lib/ui.ts` wrapper (intro / outro / note / logInfo / logWarn / spinner / withSpinner / select / confirm / askText / cancel / exitWithError), never `clack.*` directly. Only `ui.ts` hands clack an `output`, so a direct call writes to the process-global stdout and is invisible to an injected CommandIO — the coupling issue #1180 is about. `clack.spinner()` additionally leaks its paint interval when the body throws; use `withSpinner`, or `spinner()` + a `finally` for a conditional start.";
 
-// `@clack/prompts` funnel (issue #1180). Every byte the CLI renders through
+// `@clack/prompts` funnel. Every byte the CLI renders through
 // clack must go through a `lib/ui.ts` wrapper, because that is the only layer
 // that hands clack an `output` — the seam a test injects a `CommandIO` into
 // instead of swapping the process-global streams. A direct `clack.note(...)` /
@@ -331,7 +331,7 @@ export default tseslint.config(
       // actually failed — the driver's message, the errno, the provider's
       // response body — and leaves the operator a hand-written summary of a
       // failure nobody can now inspect. That is precisely the information
-      // PR #1161 (failure legibility) exists to preserve, so the `"off"` this
+      // failure legibility exists to preserve, so the `"off"` this
       // replaces was undoing a release's worth of work one `catch` at a time,
       // and was the only rule in this file suppressed without a reason.
       //
@@ -468,7 +468,7 @@ export default tseslint.config(
     },
   },
   {
-    // Both CLI output guards (issue #1180) — the clack funnel and the
+    // Both CLI output guards — the clack funnel and the
     // `process.*.write` ban — over every `apps/cli/src` file exempt from
     // neither.
     //
@@ -513,7 +513,7 @@ export default tseslint.config(
     },
   },
   {
-    // Global-stream capture guard (issue #1180): tests used to assert on output
+    // Global-stream capture guard: tests used to assert on output
     // by swapping the *global* `process.stdout.write` / `process.stderr.write`
     // / `process.exit` for the duration of a call. The whole repo runs in one
     // `bun test` process, so that buffer is not owned by the test writing to it

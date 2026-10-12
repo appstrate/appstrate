@@ -29,10 +29,12 @@ import {
   CONNECTION_SCOPE_FITS,
   INSUFFICIENT_SCOPES_REMEDIES,
   CONNECTION_RESOLUTION_WARNING_CODES,
+  READINESS_ERROR_CODES,
   CONNECT_FLOW_CODES,
   INTEGRATION_MANIFEST_FAILURE_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
   MISSING_INTEGRATION_CONNECTION_CODES,
+  OVERRIDE_REFUSAL_CODES,
 } from "@appstrate/core/integration";
 import {
   connectionIdSetJsonSchema,
@@ -202,7 +204,7 @@ export const schemas = {
       field: { type: "string" },
       code: {
         type: "string",
-        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or one of ${INTEGRATION_MANIFEST_FAILURE_CODES.map((c) => `\`${c}\``).join(", ")} (the declared integration's manifest could not be loaded; no extras), or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's \`warnings[]\` item, one of ${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")} (see ConnectionResolutionWarning). On any other validation item, the validator's own code.`,
+        description: `On a connection-resolution item (\`field: integrations.<id>\`) one of ${CONNECTION_RESOLUTION_ERROR_CODES.map((c) => `\`${c}\``).join(", ")} — the extras below are keyed on it — or one of ${INTEGRATION_MANIFEST_FAILURE_CODES.map((c) => `\`${c}\``).join(", ")} (the declared integration's manifest could not be loaded; no extras), or, on \`POST /api/runs/remote\` only, \`remote_binds_one_connection\` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's \`warnings[]\` item, one of ${CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(", ")} (see ConnectionResolutionWarning). On a refused launch override key (\`field: connection_overrides.<id>\` or \`dependency_overrides.<id>\`), one of ${OVERRIDE_REFUSAL_CODES.map((c) => `\`${c}\``).join(", ")}. On any other validation item, the validator's own code.`,
       },
       message: { type: "string" },
       title: {
@@ -1110,7 +1112,7 @@ export const schemas = {
   // Canonical version detail DTO — the exact shape the `GET .../versions/{version}`
   // endpoints serialize (the per-type GET detail uses a type-specific manifest
   // `$ref`; this generic form is reused by the version create/restore mutation
-  // responses so they echo the resulting version resource — issue #646).
+  // responses so they echo the resulting version resource).
   PackageVersionDetail: {
     type: "object",
     required: [
@@ -1526,7 +1528,7 @@ export const schemas = {
       unread: {
         type: "boolean",
         description:
-          "True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
+          "True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
       },
       runNumber: {
         type: ["integer", "null"],
@@ -1564,7 +1566,7 @@ export const schemas = {
       dependency_overrides: {
         type: ["object", "null"],
         description:
-          'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
+          'Per-run dependency version overrides. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
         additionalProperties: { type: "string" },
       },
       connections_used: {
@@ -1708,7 +1710,7 @@ export const schemas = {
       dependency_overrides: {
         type: ["object", "null"],
         description:
-          'Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run\'s `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.',
+          'Per-dependency version overrides frozen on the schedule row. Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run\'s `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.',
         additionalProperties: { type: "string" },
       },
       last_run_at: { type: ["string", "null"], format: "date-time" },
@@ -1928,7 +1930,7 @@ export const schemas = {
       apiShape: {
         type: ["string", "null"],
         description:
-          "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider.",
+          "Protocol family. `null` for a built-in credential whose every model is managed — the binding is not exposed, so the endpoint doesn't reveal the provider.",
       },
       base_url: {
         type: ["string", "null"],
@@ -2344,7 +2346,7 @@ export const schemas = {
               properties: {
                 code: {
                   type: "string",
-                  enum: [...CONNECTION_RESOLUTION_ERROR_CODES, "agent_not_active"],
+                  enum: [...READINESS_ERROR_CODES],
                 },
               },
             },

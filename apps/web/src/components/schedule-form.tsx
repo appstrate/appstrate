@@ -248,7 +248,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
-  // #738: execution identity. `undefined` = caller (create) / unchanged (edit).
+  // Execution identity. `undefined` = caller (create) / unchanged (edit).
   const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
   const { user } = useAuth();
   // Who a fire runs as while the select holds nothing: the schedule's own actor

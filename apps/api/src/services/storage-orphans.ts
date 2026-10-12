@@ -133,10 +133,7 @@ export function runWorkspaceOwner(key: string): string | null {
  * The first descriptor reconciles objects under the `files` bucket
  * ({@link FILES_BUCKET}) against `files.storage_key` values, which are all
  * written as `files/<path>`. Bucket and stored key must agree or every object
- * in the bucket reads as an orphan: they were both spelled `documents` until
- * the #1177 rename was finished at the physical layer, and migration
- * `0044_finish_file_rename` moved the stored keys in the same change that moved
- * the constant.
+ * in the bucket reads as an orphan.
  */
 export function orphanScanBuckets(): OrphanScanBucket[] {
   return [

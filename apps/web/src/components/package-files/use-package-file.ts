@@ -99,7 +99,7 @@ export function usePackageFile(
  * Download one file from the artifact. The route serves
  * `Content-Disposition: attachment`, but the blob still has to be handed to an
  * `<a download>` to name it — `triggerBlobDownload` is that step, shared with
- * every other download in the SPA so its empty-body (#1118) and inert-type
+ * every other download in the SPA so its empty-body and inert-type
  * guards apply here too. A non-2xx throws in the client middleware and lands in
  * the catch below.
  */

@@ -481,7 +481,7 @@ export async function listOrgModels(
  * credential is NOT such a case — it resolves, flagged `needs_reconnection`.
  *
  * Used by the create/update handlers to return the full resource instead of an
- * id-only stub (issue #646). Deliberately re-runs `listOrgModels` rather than
+ * id-only stub. Deliberately re-runs `listOrgModels` rather than
  * duplicating the merge/credential-resolution logic — these lists are small
  * (per-org models) and correctness/parity beats shaving one credential lookup.
  */

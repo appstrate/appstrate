@@ -5,8 +5,8 @@
  * completion even when the modal that started them has been closed.
  *
  * The pairing modal (`OAuthPairingBody`) registers the pairing in
- * `pairingStore` on mint and no longer cancels it on unmount — so closing
- * the modal mid-flow (tab switch, accidental dismiss) no longer kills the
+ * `pairingStore` on mint and does not cancel it on unmount — so closing
+ * the modal mid-flow (tab switch, accidental dismiss) does not kill the
  * token. This component, mounted once for all authenticated routes, polls
  * each pending pairing and fires the global success side effects (toast +
  * credential/model-list invalidation) the moment the helper consumes the

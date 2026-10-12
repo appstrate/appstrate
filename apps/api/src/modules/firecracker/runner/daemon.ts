@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate-runner` daemon entrypoint (issue #819, phase 1).
+ * `appstrate-runner` daemon entrypoint.
  *
  * Runs directly on the KVM host and exposes the local
  * {@link FirecrackerOrchestrator} over the wire protocol in
@@ -66,7 +66,7 @@ try {
 // dev, containers).
 await checkHostHygiene({ logger });
 
-// Resolve prebuilt guest artifacts (issue #819, phase 2) BEFORE
+// Resolve prebuilt guest artifacts BEFORE
 // initialize(): download the versioned, checksum-verified kernel + rootfs
 // from the release assets unless they are already installed (or
 // FIRECRACKER_ARTIFACTS_LOCAL is set). A protocol/checksum mismatch is
@@ -86,8 +86,8 @@ try {
   fatal("guest artifacts", err);
 }
 
-// Warm the host page cache for the boot artifacts in the background
-// (issue #835): after a host reboot the first run otherwise pays cold-disk
+// Warm the host page cache for the boot artifacts in the background:
+// after a host reboot the first run otherwise pays cold-disk
 // virtio-blk latency for the whole guest boot read set. Deliberately not
 // awaited — a slow disk must not delay daemon readiness, and the warm is
 // pure best-effort (it logs, never throws).
@@ -149,7 +149,7 @@ const app = createRunnerApp({
   artifactsVersion,
 });
 
-// Listen transport (issue #868): a Unix socket when
+// Listen transport: a Unix socket when
 // FIRECRACKER_RUNNER_SOCKET is set (co-located platform container
 // bind-mounts the socket dir — the wire never touches the network),
 // TCP host:port otherwise.

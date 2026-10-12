@@ -47,7 +47,7 @@ function primaryLabel(name: string | null | undefined, email: string | null, id:
 /**
  * Unified, searchable actor picker. Lists org members and end-users in one
  * combobox so a single field selects either kind. Reusable anywhere an
- * execution identity is chosen (#738). End-users are searched server-side
+ * execution identity is chosen. End-users are searched server-side
  * (debounced) so large tenants aren't capped; members are filtered in-memory.
  */
 export function ActorSelect({

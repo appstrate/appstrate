@@ -216,6 +216,39 @@ integration_connections WHERE shared_with_org;` tells whether the step
 
 ### Changed
 
+- **BREAKING (API): an undeclared override key has its own code, on both
+  maps.** A key naming an id the agent does not declare answers
+  `400 validation_failed` with one `errors[]` item, the shape
+  `required_integration_unbound` has there:
+  - `connection_overrides` (agent run, inline run and its validation, remote
+    run, schedule create and update):
+    `{ field: "connection_overrides.<id>", code: "undeclared_connection_override" }`.
+  - `dependency_overrides` (agent run, remote run, schedule create and
+    update):
+    `{ field: "dependency_overrides.<id>", code: "undeclared_dependency_override" }`.
+
+  Before, both answered `400 invalid_request` with `param` naming the map and
+  the key only in `detail`. The inline run declares no `dependency_overrides`:
+  it stays an unrecognized-key 400 there. (#1914)
+
+- **`token_usage` and `integrations_unbound` of a run are read under one
+  policy** by the REST reads, the `run_metric` stream and event ingestion: a
+  stored value that does not match its schema reads as not recorded (`null`)
+  and is logged. Before, such an `integrations_unbound` made `GET /api/runs`
+  and `GET /api/runs/{id}` answer 500, and such a `token_usage` was served as
+  stored by REST while the stream dropped the whole metric frame. REST
+  `token_usage` carries only the declared counters and `tiers`. (#1914)
+- **`llm_usage` and `runs` refuse a payer without a member's own credential,
+  and the reverse** (migration `0090`, CHECKs `llm_usage_payer_iff_user_source`
+  and `runs_payer_iff_user_source`: `payer_user_id` is set iff the row's
+  `credential_source` / `model_source` is `user`). Schema only; each constraint
+  validates the existing rows as it is added. (#1925)
+- **The starter agent's publication is audited**: a new organization's
+  `hello-world` 1.0.0 writes a `package.version_created` line, actor `system`,
+  in its default space. (#1914)
+- **The launch-warning toast offers "Connecter" exactly when the agent page
+  shows its Connexions tab**: both read one rule,
+  `agentConnectionsTabVisible`. (#1914)
 - **BREAKING (API): connect and scopes** (#1913).
   - **Login refusals carry their own code.** A `connect.login` or
     `connect.tool` login the service refused is `400 login_rejected` on

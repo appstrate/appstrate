@@ -453,9 +453,14 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       body: JSON.stringify({ input: {}, dependency_overrides: { "@verorg/undeclared": "draft" } }),
     });
     expect(res.status, await res.clone().text()).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.detail).toContain("@verorg/undeclared");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "dependency_overrides.@verorg/undeclared",
+        code: "undeclared_dependency_override",
+      }),
+    ]);
     expect(await db.select().from(runs).where(eq(runs.packageId, DRAFT_AGENT))).toHaveLength(0);
   });
 

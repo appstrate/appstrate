@@ -143,8 +143,8 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * catalog for a `?source=draft` export as for a published one, since only the
  * ROOT of a draft export is a working copy). A bundle carrying a skill
  * therefore hands out exactly the bytes
- * `GET /api/packages/{scope}/{name}/files[/content]` serves — and #1123/#1124
- * settled that those need `skills:read`, resolved per package TYPE rather than
+ * `GET /api/packages/{scope}/{name}/files[/content]` serves — and
+ * those need `skills:read`, resolved per package TYPE rather than
  * one blanket scope. Without this guard the export is a looser door to the same
  * bytes: an `agents:read`-only credential is 403'd on the file explorer and
  * served the identical content here.
@@ -235,7 +235,7 @@ export function createAgentsRouter() {
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
         // list output is directly usable as `{scope}` path-param input — one
-        // operation's output must be valid input for the next (issue #629).
+        // operation's output must be valid input for the next.
         scope: parsed ? `@${parsed.scope}` : null,
         // `version` from the manifest may be absent on a partial draft; the DB
         // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
@@ -332,7 +332,7 @@ export function createAgentsRouter() {
         after: { locked: body.locked_fields },
       });
 
-      // 200 + the bare persisted resource (#657): validation failures are
+      // 200 + the bare persisted resource: validation failures are
       // 400s, so a 200 needs no valid:true scrap.
       return c.json({ values, locked_fields: body.locked_fields });
     },
@@ -342,7 +342,7 @@ export function createAgentsRouter() {
   // Permission BEFORE `requireAgent()`, as on every agent route: that
   // middleware 404s on an unknown agent, so the reverse order answers "does
   // this agent exist?" to a caller that is not allowed to read agents at all —
-  // 403-vs-404 enumerates the space's private catalog (#1341). The order is
+  // 403-vs-404 enumerates the space's private catalog. The order is
   // enforced by `test/integration/middleware/agent-lookup-permission-order.test.ts`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/proxy`,
@@ -413,7 +413,7 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/proxy.
       const { proxyId } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
@@ -439,7 +439,7 @@ export function createAgentsRouter() {
       const scope = getSpaceScope(c);
       const data = await readJsonBody(c, modelIdSchema);
 
-      // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
+      // Reject unknown/cross-org ids like run and schedule overrides do; null clears.
       const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
@@ -470,7 +470,7 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/model (#657).
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/model.
       const { modelId, generationConfig } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ modelId, generation: generationConfig });
     },

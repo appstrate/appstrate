@@ -159,7 +159,7 @@ appstrate login --profile prod --instance https://app.my.io
 | `--create-space`  | `<name>`       | Create a new space with this name after login and pin it. Skips the cascade's default-space pick.                                             |
 | `--no-space`      | —              | Skip the post-login space-pinning step entirely. Subsequent calls must carry `-H 'X-Space-Id: …'`, or pin later via `appstrate space switch`. |
 
-**Org pinning after login** (issue #209): on success, the CLI calls `GET /api/orgs` and branches:
+**Org pinning after login**: on success, the CLI calls `GET /api/orgs` and branches:
 
 - **Exactly one org** → auto-pin. The success banner names it: `Logged in as … to "Acme" (org_xxx)`.
 - **Zero orgs** (fresh signup, dashboard onboarding skipped) → offer inline creation (`POST /api/orgs`) which also provisions a default space + hello-world agent server-side.
@@ -167,7 +167,7 @@ appstrate login --profile prod --instance https://app.my.io
 
 The pinned org id is written to `config.toml` and automatically sent as `X-Org-Id` on every subsequent `appstrate api` call, so `appstrate api GET /api/me` works immediately after a fresh login with no extra flags.
 
-**Space pinning after login** (issue #217): after the org pin succeeds, the CLI cascades into `GET /api/spaces` and branches:
+**Space pinning after login**: after the org pin succeeds, the CLI cascades into `GET /api/spaces` and branches:
 
 - **Exactly one space** → auto-pin.
 - **≥2 spaces** → auto-pin the one with `isDefault: true` (the server provisions exactly one default per org). No interactive picker at login — use `appstrate space switch` afterwards for a different space.
@@ -180,7 +180,7 @@ On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / space
 1. `POST /api/auth/device/code` → receive `device_code`, `user_code`, `verification_uri_complete`, `expires_in` (10 min), `interval` (5s).
 2. CLI prints the code, opens the verification URI in the browser via the [`open`](https://www.npmjs.com/package/open) package (silent fallback on headless hosts — the URL is still displayed in the terminal).
 3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. a space-level end-user trying to approve a CLI session).
-4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair — see issue #165.
+4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair.
 5. CLI decodes the JWT payload locally to extract `sub` (user id) and `email` from its claims. No second round-trip needed — the JWT is the authoritative identity source, and `/api/auth/get-session` does not understand Bearer JWTs (that endpoint is BA's cookie-based session reader).
 6. Tokens are stored in the OS keyring; profile is written to `config.toml`.
 
@@ -992,7 +992,7 @@ The pinned profile has no `spaceId`. Either the cascade at login skipped it (`--
 The pinned `spaceId` belongs to a different org than the currently pinned `orgId`. Happens when something mutates `config.toml` between an `org switch` and the next API call, or after a manual hand-edit. Run `appstrate space switch` to re-pin a valid space under the current org.
 
 **`Profile "<name>" in <path> was written by an older Appstrate CLI: it pins the retired key "applicationId" …`**
-`applicationId` was renamed to `spaceId`. The old key is refused rather than read, so the pin is never silently erased from `config.toml`. Delete the `applicationId = …` line from the profile section, then run `appstrate space switch` to re-pin. The refusal fires on any profile in the file, not just the active one — every command reads the whole config.
+The key is `spaceId`. `applicationId` is refused rather than read, so the pin is never silently erased from `config.toml`. Delete the `applicationId = …` line from the profile section, then run `appstrate space switch` to re-pin. The refusal fires on any profile in the file, not just the active one — every command reads the whole config.
 
 **`This CLI is not registered on the target instance. The platform may be running an incompatible version.`**
 The instance's `appstrate-cli` OAuth client is missing. Boot the platform — `ensureCliClient()` auto-provisions it on startup. If the instance is much older than the CLI (pre-Phase-1 device flow), the CLI binary is incompatible — downgrade via `APPSTRATE_VERSION=<older-tag> curl get.appstrate.dev | bash`.

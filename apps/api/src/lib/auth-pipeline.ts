@@ -127,7 +127,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
   // the fly so the server is tolerant of BOTH content types (RFC-compliant
   // clients succeed, older JSON-sending binaries keep working). The same
   // shim covers the Appstrate-specific `/cli/token` and `/cli/revoke`
-  // endpoints (issue #165). Tracked in
+  // endpoints. Tracked in
   // https://github.com/appstrate/appstrate/issues/166.
   app.on(["POST", "GET"], "/api/auth/*", async (c) => {
     // `CLIENT_IP_HEADER` is already on `c.req.raw` (the edge `clientIp()`
@@ -316,7 +316,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
 
     // Appstrate-User rejection under cookie auth is enforced centrally by the
     // auth-conditional header guard below (see AUTH_CONDITIONAL_HEADERS), so it
-    // cannot drift per-branch the way it previously did.
+    // cannot drift per-branch.
 
     c.set("user", {
       id: session.user.id,
@@ -503,7 +503,7 @@ export function skipAuth(
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
   if (path === "/api/integrations/callback") return true; // Integration OAuth redirect — no session
   if (INTEGRATION_TAGGED_CALLBACK_PATH.test(path)) return true; // Its per-authorization-server twin
-  // Hosted connect portal (issue #769) — token/page-cookie authenticated at the
+  // Hosted connect portal — token/page-cookie authenticated at the
   // route layer. The authed MINT route lives at
   // `/api/integrations/:packageId/auths/:authKey/connect/session` (packageId
   // prefix) and does NOT match this, so it keeps its session/permission guard.
@@ -538,7 +538,7 @@ const REMOTE_RUN_EVENT_PATH_PATTERN =
  * Device-flow + CLI-token content-type shim.
  *
  * RFC 8628 specifies `application/x-www-form-urlencoded` at `/device/code`;
- * the 2.x CLI (issue #165) extends that convention to the `/cli/token`
+ * the 2.x CLI extends that convention to the `/cli/token`
  * and `/cli/revoke` endpoints it polls. Better Auth's `better-call` router
  * only accepts JSON, so if the incoming request targets any of those paths
  * with a form-urlencoded body we parse the body, rewrite it as JSON, and
@@ -550,7 +550,7 @@ const REMOTE_RUN_EVENT_PATH_PATTERN =
  */
 const FORM_TO_JSON_PATHS = new Set([
   "/api/auth/device/code",
-  // Issue #165 — the 2.x CLI polls these endpoints with form-urlencoded
+  // The 2.x CLI polls these endpoints with form-urlencoded
   // bodies for protocol parity with the RFC 8628 endpoint above. Without
   // this shim entry, every real CLI login hits `/api/auth/cli/token` with
   // a form body that better-call refuses — the integration tests pass

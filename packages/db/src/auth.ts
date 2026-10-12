@@ -59,7 +59,7 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
 }
 
 /**
- * Post-bootstrap side-effect hook (issue #228). Fires once `createBootstrapOrg`
+ * Post-bootstrap side-effect hook. Fires once `createBootstrapOrg`
  * has actually inserted the org row — never on the idempotent no-op path.
  * apps/api wires this at boot to (a) emit `onOrgCreate` so the ee module's
  * free-tier gate and other module listeners observe the bootstrap org, and (b) provision
@@ -335,7 +335,7 @@ const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 
 // ─── Bootstrap-token redemption (per-request bypass) ─────────────────────────
 //
-// `AUTH_BOOTSTRAP_TOKEN` (issue #344 Layer 2b) ships an instance with
+// `AUTH_BOOTSTRAP_TOKEN` ships an instance with
 // `AUTH_DISABLE_SIGNUP=true` so a fresh `curl|bash -s -- --yes` install
 // is closed by default. The redemption route (`POST
 // /api/auth/bootstrap/redeem`) needs to bypass that gate exactly once,
@@ -672,7 +672,7 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
               }
 
               // Magic-link is now a pure passwordless-login channel. The
-              // invitation flow no longer rides on magic-link: an invited
+              // invitation flow does not ride on magic-link: an invited
               // user opens the `/invite/{token}` page and authenticates
               // through the standard login/signup path, then accepts. So a
               // single generic template covers every magic-link send.
@@ -964,14 +964,12 @@ function buildAuth(options: CreateAuthOptions) {
       // OFF by default, opt-in per deployment via
       // `AUTH_SESSION_COOKIE_CACHE_SECONDS` (0 = off).
       //
-      // History: this was hardcoded off to work around BA issue #7607 — when
-      // `session_data` expired, BA was reported to fail regenerating it from
-      // the still-valid `session_token` under some plugin configurations,
-      // logging the user out on the next request. That issue is now closed
-      // "not planned", which is NOT evidence of a fix, so the behavior was
-      // measured directly against this repo's Better Auth version and plugin
-      // set instead: `test/integration/auth/session-cookie-cache.test.ts`
-      // drives expiry-then-request, logout, cross-device revocation, the
+      // Better Auth issue #7607 reports that an expired `session_data` is not
+      // always regenerated from the still-valid `session_token`, logging the
+      // user out on the next request. The behavior is measured against this
+      // repo's Better Auth version and plugin set:
+      // `test/integration/auth/session-cookie-cache.test.ts` drives
+      // expiry-then-request, logout, cross-device revocation, the
       // freshness gate and the realm guard with the cache enabled.
       //
       // What enabling it buys: one fewer DB read per authenticated request.
@@ -1103,7 +1101,7 @@ function buildAuth(options: CreateAuthOptions) {
             // hook. A pending invitation overrides BOTH closed mode and the
             // domain allowlist (see `invited` below).
             const envForGate = getEnv();
-            // Bootstrap-token redemption (#344 Layer 2b) — explicitly
+            // Bootstrap-token redemption — explicitly
             // bypasses the `AUTH_DISABLE_SIGNUP` gate. The redeem route
             // has already verified a single-use 256-bit token against
             // `env.AUTH_BOOTSTRAP_TOKEN` via timing-safe compare; trying
@@ -1225,7 +1223,7 @@ function buildAuth(options: CreateAuthOptions) {
             // additionalField is declared. Fall back to "platform" if the
             // adapter strips it (defensive — the SQL default matches anyway).
             const realm = (user as { realm?: string }).realm ?? "platform";
-            // Self-hosting bootstrap path (issue #228) — auto-create the
+            // Self-hosting bootstrap path — auto-create the
             // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
             // BEFORE the module after-hook so the ee module's free-tier hook etc.
             // see a coherent state.

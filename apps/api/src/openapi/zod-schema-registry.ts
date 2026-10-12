@@ -204,7 +204,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
 
   // ─── Runs ───────────────────────────────────────────────────────────────
   //
-  // The launch surfaces are `.strict()` (#1187), so every field they honour
+  // The launch surfaces are `.strict()`, so every field they honour
   // must be documented: an entry here is what turns "accepted by Zod but absent
   // from the spec" into a failing check instead of a field callers cannot
   // discover. The two inline surfaces are NOT registered: their schema is a

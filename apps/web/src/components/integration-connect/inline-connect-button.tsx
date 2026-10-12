@@ -6,7 +6,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 
 /**
- * Reconnects one connection in place through the hosted connect portal (issue #769), so the
+ * Reconnects one connection in place through the hosted connect portal, so the
  * credential secret never touches this bundle. It requests no scopes: the server re-consents
  * what the row holds, which widens no agent bound to it.
  */

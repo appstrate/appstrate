@@ -30,7 +30,7 @@ interface DependencyOverridesSectionProps {
 }
 
 /**
- * Per-skill dependency override editor (#666). For each declared skill the
+ * Per-skill dependency override editor. For each declared skill the
  * user can keep the manifest pin (inherit), run the dependency's mutable
  * working copy ("draft" — the skill edit loop, offered only for a skill this
  * caller can write), or pin an exact published version for this run. Emits

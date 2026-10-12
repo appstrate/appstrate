@@ -494,7 +494,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
 
-  // 7. Success-path diagnostic envelope (#404). One structured line per
+  // 7. Success-path diagnostic envelope. One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,
   //    and the request/response header *names* (values redacted). Only
   //    emitted at LOG_LEVEL=debug, so it is silent in default production

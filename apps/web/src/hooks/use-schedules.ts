@@ -160,7 +160,7 @@ interface ScheduleFormDeps {
   /**
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)
    * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input
-   * renders with full fidelity, not just the bare schema (#770). It also
+   * renders with full fidelity, not just the bare schema. It also
    * carries the per-space layers (`values` + `locked_fields`), so a
    * consumer needing those reads them off this same object rather than a
    * second prop that could drift from it.
@@ -177,14 +177,14 @@ interface ScheduleFormDeps {
   homeWritable: boolean;
   hasFileInputs: boolean;
   /**
-   * Agent's declared integration deps (#199) — drives the schedule
+   * Agent's declared integration deps — drives the schedule
    * connection-overrides picker. Empty when the agent has no
    * integrations.
    */
   agentIntegrations: Array<{ id: string; tools?: string[] | "*"; scopes?: string[] }>;
   /**
    * Agent's declared skill dependencies — drives the per-skill dependency
-   * override picker. Version-pinned when `version` is passed (#770).
+   * override picker. Version-pinned when `version` is passed.
    * `homeWritable` is the dependency's OWN `home_writable`: the draft option
    * is offered per skill, because the server gates it per skill.
    */
@@ -204,7 +204,7 @@ interface ScheduleFormDeps {
  * sync by hand, and a `version` passed to one but not the other silently
  * reported the wrong query's error.
  *
- * `version` (#770) pins the agent-detail projection to a published version so
+ * `version` pins the agent-detail projection to a published version so
  * the input / integrations / skills the form renders match the version the run
  * will execute. Omitted → the projection the detail route renders by default:
  * the working copy for whoever can write the package, the latest published

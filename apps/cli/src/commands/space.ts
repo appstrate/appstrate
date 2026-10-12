@@ -2,8 +2,8 @@
 
 /**
  * `appstrate space` — manage the pinned space for the active CLI
- * profile. Counterpart to the `spaceId` written at `appstrate login` time
- * (issue #217): lets users re-pin, create, or inspect their space
+ * profile. Counterpart to the `spaceId` written at `appstrate login` time:
+ * lets users re-pin, create, or inspect their space
  * without re-running the device flow.
  *
  * Mirror of `./org.ts` — the command family, wiring conventions, and
@@ -13,7 +13,7 @@
  * Mirroring extends to the IO seam: every subcommand takes a trailing
  * `io: CommandIO = DEFAULT_IO` (after `deps`, since `list` and `current`
  * have no `deps`), so tests capture output in a sink they own instead of
- * reassigning the process-wide streams — issue #1180.
+ * reassigning the process-wide streams.
  *
  * Subcommands:
  *   space list          — enumerate spaces in the pinned org

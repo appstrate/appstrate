@@ -46,7 +46,7 @@
  * see {@link createRunLlmProxyRouter}.
  *
  * Observability:
- *   - `X-Run-Id` request header (optional; Phase 4 populates it) pins
+ *   - `X-Run-Id` request header (optional) pins
  *     a call to a specific `runs` row so cost rolls up per-run. The id is
  *     validated against the principal (org + space + actor for JWT
  *     users) before the upstream call — see `requireAttributableRun`.

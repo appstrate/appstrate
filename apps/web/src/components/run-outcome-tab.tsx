@@ -19,7 +19,7 @@
  *
  * The "Fichiers produits" card always lists what the run produced. Above it,
  * when the run produced exactly ONE file, that file's viewer is HOISTED out of
- * the card and is the first thing on the pane — the derived rule #1177 features
+ * the card and is the first thing on the pane — the derived rule features
  * a file only at exactly one, so several are listed and the reader picks.
  *
  * The single file therefore appears twice, and that is on purpose: the viewer
@@ -94,7 +94,7 @@ export function RunOutcomeTab(props: RunOutcomeProps) {
  *
  * Split from the fetch so which sections appear — in which order, in which
  * shape, and which files reach them — is testable without a query harness.
- * That decision is the whole of the derived presentation rule (#1177) and of
+ * That decision is the whole of the derived presentation rule and of
  * "produced only", so it is the part that must not be assumed correct.
  */
 export function RunOutcomeView({
@@ -133,7 +133,7 @@ export function RunOutcomeView({
   // an earlier run arrives here carrying `agent_output` and is told apart only
   // by its own `runId`.
   const produced = useMemo(() => producedRunFiles(files, runId), [files, runId]);
-  // Derived from the produced files alone (#1177) — exactly one is featured and
+  // Derived from the produced files alone — exactly one is featured and
   // opened, several are only listed and the user picks.
   const featured = useMemo(() => featuredRunFile(files, runId), [files, runId]);
 

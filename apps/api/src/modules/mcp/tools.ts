@@ -162,7 +162,7 @@ export interface McpToolContext {
    * requests carry). Lets the file resource provider call the files
    * service DIRECTLY — no in-process HTTP round-trip, so it works identically
    * across FS / S3-proxy / S3-presigned storage (the 307-redirect a fetch
-   * cannot follow no longer degrades the read).
+   * cannot follow does not degrade the read).
    */
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */

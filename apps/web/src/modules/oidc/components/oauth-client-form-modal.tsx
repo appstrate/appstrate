@@ -167,8 +167,7 @@ function OAuthClientFormBody({
    * `onError` below, so this check is deliberately a superset of the server
    * rule: `https:` or `http:` on anything that looks loopback. Being looser
    * than the server only costs a round-trip; being stricter silently blocks
-   * URIs the API accepts — that was #1012, where `http://127.0.0.1/callback`
-   * was refused here even after the server started accepting it.
+   * URIs the API accepts, `http://127.0.0.1/callback` for instance.
    */
   function validateUris(uris: string[]): string[] | null {
     for (const uri of uris) {

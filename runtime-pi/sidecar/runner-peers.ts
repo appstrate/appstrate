@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Which runner, if any, a sidecar listener was reached from (#1458). Each
+ * Which runner, if any, a sidecar listener was reached from. Each
  * adapter attributes its own runners; the docker one ({@link createRunnerPeers})
  * keys on source IP from `docker network inspect` (a runner has no IP until
  * started): a miss re-reads once, only while a registered runner was never seen.

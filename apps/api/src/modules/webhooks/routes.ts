@@ -149,12 +149,12 @@ export function createWebhooksRouter() {
   // `/x/*` matches `/x` too, so this covers the collection and every by-id route.
   router.use("/api/webhooks/*", enterCallerSpace);
 
-  // Issue #172 (extension) — webhooks are space-scoped (or org-level and span
+  // Webhooks are space-scoped (or org-level and span
   // every space). A pinned credential — a key or an end-user token — must never
   // reach a webhook outside its space, so we narrow it to `SpaceScope`; a caller
   // that pins none keeps `OrgScope` (full org reach) and filters via query
   // params. Keyed on the pinned space, NOT on `authMethod === "api_key"`, for
-  // the reason `pinnedSpaceScopeGuard` is (issue #1313): an end-user token pins
+  // the reason `pinnedSpaceScopeGuard` is: an end-user token pins
   // a space too. Safe here because nothing on `/api/webhooks*` writes `spaceId`
   // for a session — the route family is not in `SPACE_SCOPED_PREFIXES` and the
   // space-context applier deliberately never writes that key, so it only ever

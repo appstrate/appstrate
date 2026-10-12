@@ -156,7 +156,7 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
  * the agent package (`buildAgentPackage` never returns an empty bundle), so a
  * missing object is never a legitimate "empty workspace": it means the upload
  * was lost, deleted early, or the request was misrouted. Continuing in that
- * state is exactly the silent-degradation regression #549 fixed, so we fail
+ * state would be a silent degradation, so we fail
  * loud instead.
  */
 export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
@@ -188,15 +188,13 @@ export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
  * never buffers the whole payload — peak memory stays bounded regardless of
  * upload size. The manifest enumerates them; a 404 on the manifest means the
  * run carries no files (the common case) and is NOT a fault. A non-ok on a
- * file the manifest listed IS fatal, same reasoning as the bundle (#549).
+ * file the manifest listed IS fatal, same reasoning as the bundle.
  */
 export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
-  // `/files` is the ONLY manifest path. There is no `/documents` probe, and the
-  // reason is the ROUTE, not the image-tag guard: a platform old enough to
-  // serve `/documents` (pre-#1193) has no `/files` route, so it answers 404 —
-  // which is already the documented "this run carries no input files" case.
-  // Probing a second path would buy nothing and would put a dual-read fallback
-  // on the common boot path (`docs/NO_TRANSITIONAL_CODE.md` §1).
+  // `/files` is the ONLY manifest path. There is no `/documents` probe: a
+  // platform without a `/files` route answers 404, the documented "this run
+  // carries no input files" case, and a second path would put a dual-read
+  // fallback on the common boot path (`docs/NO_TRANSITIONAL_CODE.md` §1).
   //
   // Do NOT lean on `findRuntimeImageTagMismatch` (`@appstrate/env`) to argue
   // this: it compares `PI_IMAGE` against `SIDECAR_IMAGE` unconditionally, but

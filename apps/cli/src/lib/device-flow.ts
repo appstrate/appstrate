@@ -5,7 +5,7 @@
  *
  * Plain `fetch()` against BA-mounted endpoints:
  *   - `/api/auth/device/code` to initiate (RFC 8628 §3.1).
- *   - `/api/auth/cli/token`   to poll / exchange (Appstrate #165).
+ *   - `/api/auth/cli/token`   to poll / exchange.
  *
  * We poll `/api/auth/cli/token` and receive a **signed JWT access
  * token (15 min) + rotating opaque refresh token (30 d)**. The same
@@ -181,7 +181,7 @@ interface PollOptions {
   delayFn?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /**
    * Injectable clock for tests — defaults to `Date.now`. Scoped to this
-   * poll loop only; the test no longer has to monkey-patch the global
+   * poll loop only; the test does not have to monkey-patch the global
    * `Date.now`, which would otherwise leak into any parallel code in
    * the same Bun worker and make the suite order-dependent. Do not set
    * in prod.
@@ -308,7 +308,7 @@ export async function pollDeviceFlow(
 
 /**
  * `grant_type=refresh_token` — exchange the stored refresh token for a
- * fresh access + refresh pair (rotation). Issue #165. Returns the new
+ * fresh access + refresh pair (rotation). Returns the new
  * pair; the caller must persist it atomically (the old refresh token is
  * single-use — a second exchange of the same plaintext triggers the
  * server-side reuse-detection sweep that revokes the whole family).

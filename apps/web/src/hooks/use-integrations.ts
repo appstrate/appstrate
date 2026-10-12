@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * React Query hooks for the AFPS integration marketplace (Phase 1.3).
+ * React Query hooks for the AFPS integration marketplace.
  *
  * Hooks backed by `/api/integrations/*` through the typed OpenAPI client.
  * Query keys are the openapi-react-query `[method, path, init]` triples; the
@@ -267,7 +267,7 @@ export function useIntegrationReadinessEntry(
 }
 
 /**
- * Mint a hosted-connect-portal session (issue #769). Auth-type-agnostic: the
+ * Mint a hosted-connect-portal session. Auth-type-agnostic: the
  * returned `connect_url` dispatches server-side to the provider OAuth screen or
  * the hosted credential form, so the caller never branches on the auth type.
  * Same body as the OAuth initiate (scopes / force_account_select / connection_id)
@@ -514,7 +514,7 @@ export function useUpdateIntegrationSettings() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return useMutation({
-    // 200 + the bare integration detail resource (#657) — the toggled
+    // 200 + the bare integration detail resource — the toggled
     // gate is the resource's `block_user_connections` field.
     mutationFn: async (vars: {
       params: { path: { packageId: string } };
@@ -634,7 +634,7 @@ export function useRenameIntegrationConnection() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return useMutation({
-    // 200 + the bare connection resource (#657) — same serializer as the
+    // 200 + the bare connection resource — same serializer as the
     // connections list.
     mutationFn: async (vars: {
       params: { path: { packageId: string; connectionId: string } };

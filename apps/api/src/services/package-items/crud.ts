@@ -164,7 +164,7 @@ export interface CreateItemInput {
  * out of a ZIP/bundle). It used to be optional, and the `{version, name}` stub
  * synthesized in its absence was persisted as the draft and then snapshotted
  * verbatim into the immutable `package_versions.manifest` row, where no AFPS
- * schema had ever accepted it (issue #987).
+ * schema had ever accepted it.
  *
  * `manifest.type` MUST equal `cfg.type` — see {@link buildStoredManifest},
  * which stamps the stored copy and throws on divergence.
@@ -389,10 +389,10 @@ export async function deleteOrgItem(
   await db.transaction(async (tx) => {
     // Enumerate BEFORE the delete: `ON DELETE CASCADE` on `package_versions`
     // makes every published artifact's key unrecoverable the moment the
-    // `packages` row goes. This previously ran as a bare delete followed by a
-    // best-effort `deletePackageFiles`, which removed only the
-    // `library-packages` object and orphaned every `agent-packages` version ZIP
-    // of the item outright — a permanent leak on an ordinary user action.
+    // `packages` row goes. A bare delete followed by a best-effort
+    // `deletePackageFiles` would remove only the `library-packages` object and
+    // orphan every `agent-packages` version ZIP of the item — a permanent leak
+    // on an ordinary user action.
     const jobs = await packageStorageDeletionJobs(tx, orgId, itemId, "package_deleted");
 
     // Scope delete to non-ephemeral rows only: deleting a shadow package

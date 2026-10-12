@@ -2,7 +2,7 @@
 
 /**
  * The one file a run produced, previewed in place — the visible half of the
- * derived presentation rule (#1177): a run that produced exactly one file
+ * derived presentation rule: a run that produced exactly one file
  * presents it, several are only listed and the user picks.
  *
  * Rendered by the Outcome pane ONLY, and it leads that pane: the artefact is

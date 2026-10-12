@@ -4,7 +4,7 @@
  * Effective agent manifest for an ACTIVE run — the single post-kickoff read
  * path for "what does the running agent's definition say?".
  *
- * At kickoff, `resolveAgentRunVersion` (#636) pins the run's definition to a
+ * At kickoff, `resolveAgentRunVersion` pins the run's definition to a
  * published `package_versions` snapshot and stamps the concrete semver on
  * `runs.version_ref` (`"draft"` when the working copy runs). Every runtime
  * surface that consults the agent manifest AFTER kickoff — the sidecar

@@ -55,7 +55,7 @@ services:
   # ── MinIO (S3-compatible storage) ───────────────────────────
   # Deliberately PRIVATE: no host ports are published at all. The S3 API
   # (:9000) is unreachable from outside the compose network — browser
-  # uploads proxy through the platform on APP_URL (issue #829 — the
+  # uploads proxy through the platform on APP_URL (the
   # platform signs app-domain upload URLs and streams the bytes to MinIO
   # server-side), so MinIO needs no public FQDN and no exposed port. The
   # admin web console is disabled entirely (MINIO_BROWSER=off); inspect

@@ -84,7 +84,7 @@ function workspaceDirFor(runId: string): string {
  * ONLY thing that lets a boot-time sweep tell "residue of my own crashed
  * self" apart from "a live sibling instance's run" — the `appstrate-ws-*`
  * naming convention and the uid say nothing about which instance owns a
- * directory, and two `bun run dev` sessions on one host share both (#1130).
+ * directory, and two `bun run dev` sessions on one host share both.
  *
  * A pid is deliberately enough: pids are global, so `kill(pid, 0)` answers
  * the ownership question from any working directory, which matters because
@@ -135,7 +135,7 @@ async function ownerIsAlive(runId: string): Promise<boolean> {
  * regardless of working directory, so this sweep sees the live runs of
  * sibling instances — including ones started from another worktree, which
  * the cwd-relative dataDir sweep cannot even see. Deleting those wiped a
- * running agent's `/workspace` mid-run (#1130).
+ * running agent's `/workspace` mid-run.
  *
  * The uid filter avoids two problems on shared hosts:
  *   - Reaping a workspace owned by another platform instance (running
@@ -342,7 +342,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // owning platform process is still alive belongs to a sibling instance
       // started from this same working directory (two `bun run dev`, or a
       // redeploy overlapping the old process). SIGKILLing its workloads and
-      // deleting its boundary killed live runs at every sibling boot (#1130).
+      // deleting its boundary killed live runs at every sibling boot.
       // Our own residue always fails this check: a crashed platform's pid is
       // dead, which is exactly what makes its runs reclaimable.
       if (await ownerIsAlive(name)) {
@@ -493,9 +493,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     // No /health gate — the agent's MCP client retries its handshake against
     // the sidecar's /mcp with AWS full-jitter backoff (50ms→1s, 30s deadline)
-    // until the listener is up. Docker mode adopted the same contract in
-    // issue #406; process mode now mirrors it. Removes the unconditional
-    // ~200-500ms warm-path wait (5s on cold starts) from the run hot path.
+    // until the listener is up, as in Docker mode. That keeps an unconditional
+    // ~200-500ms warm-path wait (5s on cold starts) off the run hot path.
     logger.info("Sidecar spawned", { runId, ports, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
@@ -507,12 +506,11 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // (which receive WORKSPACE_DIR via the sidecar) read and write the
     // exact same filesystem surface as the agent.
     //
-    // This used to fall back to a "legacy per-boundary subdirectory" for
-    // non-agent roles. No non-agent role reaches this method: sidecars come
-    // from `createSidecar` (which hardcodes `role: "sidecar"`), and the sole
-    // production caller passes the literal `"agent"`. The fallback only ever
-    // meant "agent and runners disagree about where the workspace is", so it
-    // is gone — a non-directory workspace now fails loudly instead. (`kind`
+    // No non-agent role reaches this method: sidecars come from
+    // `createSidecar` (which hardcodes `role: "sidecar"`), and the sole
+    // production caller passes the literal `"agent"`. A non-directory
+    // workspace fails loudly: a fallback subdirectory would mean "agent and
+    // runners disagree about where the workspace is". (`kind`
     // is a discriminant of the shape this backend itself created, so a
     // mismatch means the boundary came from a different orchestrator.)
     if (boundary.workspace.kind !== "directory") {
@@ -527,7 +525,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     // Sidecar-relative URLs (SIDECAR_URL, MODEL_BASE_URL, HTTP(S)_PROXY,
     // NO_PROXY) arrive in spec.env — pi.ts builds them from the boundary's
-    // sidecarEndpoints, so this orchestrator no longer patches them in.
+    // sidecarEndpoints, so this orchestrator does not patch them in.
     //
     // SECURITY (§6.2): the workload — an AFPS *agent* runs untrusted code here —
     // gets only a NON-SECRET system baseline plus its explicit spec.env, so it

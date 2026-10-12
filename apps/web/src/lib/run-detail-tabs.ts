@@ -39,7 +39,7 @@ export interface RunTabAvailability {
   /**
    * How many files the run PRODUCED. Inputs it merely consumed are not counted
    * and nothing the agent declared takes part — the count is the whole of the
-   * derived presentation rule (#1177): 0 features nothing, exactly 1 is
+   * derived presentation rule: 0 features nothing, exactly 1 is
    * featured and opened, several are listed for the user to pick from.
    */
   producedFileCount: number;
