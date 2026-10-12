@@ -224,15 +224,15 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 A `Select` never holds hundreds of entries.
 
 **The model picker** shows only what the PERSON can use, grouped by who pays, in this
-order: « <credential> · Clé org » (the organization's credentials, named after the credential
-or, for someone who cannot read it, its provider), « <credential> · Clé perso » or
+order: « <key> · Clé org » (the organization's keys, named after the key or, for someone who
+cannot read it, its provider: « Mistral · Clé org »), « <credential> · Clé perso » or
 « … · Abonnement perso » (the models their own credential serves), « Système » (the instance's
 own models). The first row is « Hériter (<model>) » where the usage has an inheritance. The default
 model wears a `Par défaut` badge; a search field appears from eight models. A model the person
 cannot use stays in the list, greyed, with its reason underneath (« Clé org indisponible »,
 « Désactivé », « Clé perso requise », « Clé perso à reconnecter », « Clés perso désactivées par
 l'organisation »), and when the fix is theirs, one link under its group (« Ajouter votre clé
-Anthropic → », to Préférences › Mes fournisseurs). In a schedule every model a personal key or
+Anthropic → », to Préférences › Mes clés). In a schedule every model a personal key or
 subscription serves is greyed with « Une planification ne peut pas encore utiliser une clé perso »
 (the server refuses it: `model_scheduled`). The groups come from what `GET /api/models` already
 says for the caller (`binding`, `billed_to`, `credentialId`, `needs_reconnection`) plus their own
@@ -313,53 +313,61 @@ its fixtures.
   (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
   truncated with a tooltip. Déclencheur names who or what launched it, and a dash
   when nothing is recorded: no column is left blank.
-- **The providers tables** (Settings › Models, two tabs; Preferences › Mes fournisseurs). The
-  rule that reads the whole page: **a connected provider makes its models available.** A row is a
-  provider or a service, never a model. Vocabulary, everywhere: **Clé org**, **Clé perso**,
-  **Abonnement perso**, **Système** (the instance). The tabs are `CollectionTabs`, kept in the URL
+- **The keys tables** (Settings › Models, two tabs; Preferences › Mes clés). The rule that reads
+  the whole page: **a connected key makes its provider's models available.** A row is a key or a
+  provider, never a model. **Vocabulary, everywhere (`apps/web`, `packages/ui`,
+  `packages/module-chat`, fr and en):** a **Fournisseur** (Provider) is the company that runs the
+  model (Anthropic, Mistral, OpenAI); never « Service », and never a key. A **Clé** (Key) is a
+  caller's connection to a provider: **Clé org** (org key), **Clé perso** (personal key),
+  **Abonnement perso** (personal subscription); « fournisseur » never names a key. Plus
+  **Système** (the instance). Say « Mes clés », « Ajouter une clé org », « Autoriser des modèles
+  avec une clé perso », never « Mes fournisseurs », « Ajouter un fournisseur », « identifiant ».
+  Keep « fournisseur » where it means the company (« Ce fournisseur ne propose pas ce modèle »). The tabs are `CollectionTabs`, kept in the URL
   (`?tab=personal`, the first leaves it out), and both are read by a member with no write right
   (no Actions menu, no click on a row). Each tab places its own deed in the page's Actions menu.
   - **« Clés org »** (`components/providers-table.tsx`, columns in
     `pages/org-settings/provider-columns.tsx`, rows from `lib/model-providers.ts`): one row per
-    organization key, then the instance's row, named « Système » (its Service says « Livrés avec
-    l'instance »). Columns: Fournisseur (name, no badge beside it), Service, Modèles (the models
+    organization key, then the instance's row, named « Système » (its Fournisseur says « Livrés avec
+    l'instance »). Columns: Nom (no badge beside it), Fournisseur, Modèles (the models
     this key makes usable, a short list, the default one marked with a small star, « Aucun »
     otherwise), État, « … ». An organization key serves the models bound to it (`credentialId`);
     the instance row serves the built-in ones. A key the caller cannot read stays a row, named by
-    its service, with no menu. Menu: Renommer, Choisir les modèles, Changer la clé, Tester,
+    its provider, with no menu. Menu: Renommer, Choisir les modèles, Changer la clé, Tester,
     Supprimer; the instance, Choisir le modèle par défaut. A click on the row (name included)
-    chooses its models. Actions menu: « Ajouter un fournisseur ».
+    chooses its models. Actions menu: « Ajouter une clé org ».
   - **« Clés perso »** (`components/personal-services-table.tsx`, columns in
     `pages/org-settings/personal-service-columns.tsx`): first the organization's
     `personal_model_credentials` switch (`components/settings/personal-credentials-setting.tsx`,
-    the same write as in General), then one row per SERVICE open to personal keys
-    (`personalServiceRows`: a service with a model left to personal keys, or one somebody
-    connected a key for). Columns: Service, Modèles (the ones usable with a personal key of that
-    service, `binding: "member"`), Clés connectées (who plugged a personal key or subscription in,
+    the same write as in General), then one row per PROVIDER open to personal keys
+    (`personalServiceRows`: a provider with a model left to personal keys, or one somebody
+    connected a key for). Columns: Fournisseur, Modèles (the ones usable with a personal key of that
+    provider, `binding: "member"`), Clés connectées (who plugged a personal key or subscription in,
     « Olivier Tarbès (vous), Pierre » or « Aucune », read off the credentials the server shows the
-    caller), État, « … ». The members' own providers are not rows here: each manages them in
-    Mes fournisseurs, linked under the table. A click on the row, or « Choisir les modèles » in its
-    menu, opens the service's checklist (`?personalModels=<providerId>`). Actions menu: « Ouvrir
-    un service aux clés perso » (the same checklist, on a service not open yet). Switched off, the
+    caller), État, « … ». The members' own keys are not rows here: each manages them in
+    Mes clés, linked under the table. A click on the row, or « Choisir les modèles » in its
+    menu, opens the provider's checklist (`?personalModels=<providerId>`). Actions menu:
+    « Autoriser des modèles avec une clé perso » (the same checklist, with a choice of provider, titled
+    « Modèles utilisables avec une clé perso »). Switched off, the
     table stays, greyed and inert, under « Les clés perso sont désactivées pour l'organisation ».
   - **One State column** (`components/row-state-cell.tsx`, decided by `rowStates`), in both tables,
     in this order, and nothing when all is well: `Indisponible` (a key or subscription to
-    reconnect, a key refused; for a service, every key connected is), `Par défaut` (the row
+    reconnect, a key refused; for a provider, every key connected is), `Par défaut` (the row
     carries the organization's default model), `Désactivé` (it carries models and every one is
-    switched off), `Aucune clé connectée` (a personal service nobody connected a key for). No
+    switched off), `Aucune clé connectée` (a personal provider nobody connected a key for). No
     badge ever sits beside a name. It is a read column: below 36rem it waits for room like any other.
-  - **Preferences › Mes fournisseurs** shows the first table narrowed to the caller's own
-    personal keys and subscriptions, with a Type column (Clé perso or Abonnement perso). The
+  - **Preferences › Mes clés** shows the first table narrowed to the caller's own
+    personal keys and subscriptions, with a Type column (Clé perso or Abonnement perso); its action
+    is « Ajouter une clé perso ou un abonnement ». The
     menu: Renommer, Changer la clé (or Reconnecter), Tester, Supprimer; another person's, Tester.
   - **Choose the models** (`?models=<credentialId>`, `components/model-choice-dialog.tsx`,
     state in `hooks/use-model-choice-state.ts`, the plan in `lib/model-choice.ts`): the checklist of
-    the service's models, the ones already created ticked, a star on the default. « Enregistrer »
+    the provider's models, the ones already created ticked, a star on the default. « Enregistrer »
     creates the ticked models bound to the key, deletes the unticked (the footer says how many),
     sets the default. A saved model's finer settings (name, capabilities, prices) are the
     « Réglages avancés » link on its line: the model form, `?editModel=<id>`, which replaces the
-    list. « Add a provider » is the same list as its second step (service and key first, every model
+    list. « Ajouter une clé org » is the same list as its second step (provider and key first, every model
     ticked, nothing written until the last button, « Retour » keeps what was typed). The personal
-    keys' models are the same list per service (`?personalModels=<providerId>`, no star).
+    keys' models are the same list per provider (`?personalModels=<providerId>`, no star).
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.
@@ -402,7 +410,7 @@ its fixtures.
   hidden until opened; it never repeats a button that is already visible beside
   the list (the connections table's toolbar already carries « Ajouter une
   connexion », its empty state adds nothing, and a Preferences page whose
-  « Ajouter un fournisseur » is a visible button does the same): two identical
+  « Ajouter une clé perso ou un abonnement » is a visible button does the same): two identical
   buttons on one screen read as a mistake. A person who may not add gets the sentence alone
   (it says who can, or says nothing about creating); the hint never promises a button
   that is not on screen. A filtered empty (« Aucun résultat ») offers « Tout effacer »,
@@ -456,7 +464,7 @@ its fixtures.
   value names what is open (a card's stable key, `<integrationId>:<tool>`), and
   never a position.
   - **Naming**: the param is named by the act and the object, in camelCase.
-    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows, `?models=<credentialId>` chooses the models of a provider. A
+    `?newWebhook=1` creates, `?editModel=<id>` edits, `?endUser=<id>` shows, `?models=<credentialId>` chooses the models of a key. A
     value is `1` when there is no object, the object's id otherwise (a composite
     value when a page holds several of them: `?editOauthClient=<authKey>:<ref>`).
     A param read by several components of one page must differ per component.

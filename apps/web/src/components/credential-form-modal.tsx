@@ -290,7 +290,7 @@ function CredentialFormBody({
   const oauthDismiss = usePairingDismissConfirm(onClose);
 
   const title = !credential
-    ? t("credentials.form.title")
+    ? t(personal ? "credentials.form.titlePersonal" : "credentials.form.title")
     : isOAuthSelected
       ? t("credentials.form.reconnectTitle", { label: credential.label })
       : t("credentials.form.editTitle", { label: credential.label });

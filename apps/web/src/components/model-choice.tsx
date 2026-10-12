@@ -7,7 +7,7 @@
  * `useModelChoice` (`hooks/use-model-choice-state.ts`) holds the state (what is ticked, starred,
  * searched, detected) and hands back the plan it amounts to; `ModelChoiceList` draws it. The three dialogs that choose
  * models (an organization key's, the personal keys' per service, and the second step of
- * « Add a provider ») own their footer and apply the plan, so the same list serves all three.
+ * « Ajouter une clé org ») own their footer and apply the plan, so the same list serves all three.
  */
 
 import { useTranslation } from "react-i18next";

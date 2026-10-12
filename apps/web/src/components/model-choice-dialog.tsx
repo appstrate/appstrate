@@ -2,7 +2,7 @@
 
 /**
  * The dialog around « Choose the models »: an organization key's, the personal keys' per
- * service, and the second step of « Add a provider ». The list is `ModelChoiceList`; this owns
+ * service, and the second step of « Ajouter une clé org ». The list is `ModelChoiceList`; this owns
  * the footer, the write (`useApplyModelChoice`) and the refusals it can name.
  */
 
@@ -41,7 +41,7 @@ interface ChoiceDialogProps {
   existing: OrgModelInfo[];
   /** Where the models live: an organization key, or none (each person's own). */
   credentialId: string | null;
-  /** « Add a provider »: the key to mint with the models, and the way back to its form. */
+  /** « Ajouter une clé org »: the key to mint with the models, and the way back to its form. */
   newCredential?: NewProviderCredential;
   onBack?: () => void;
   discoverWith: DiscoverWith;
@@ -281,7 +281,7 @@ export function PersonalModelsModal({
   );
 }
 
-/** Step 2 of « Add a provider »: the models the new key makes available, all ticked. */
+/** Step 2 of « Ajouter une clé org »: the models the new key makes available, all ticked. */
 export function NewProviderModelsModal({
   draft,
   onBack,

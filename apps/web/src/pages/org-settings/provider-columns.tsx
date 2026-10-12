@@ -108,7 +108,7 @@ export function useProviderColumns({
   const columns: DataColumn<ProviderRow>[] = [
     {
       id: "provider",
-      header: t("providers.col.provider"),
+      header: t("providers.col.name"),
       width: "minmax(110px,1.7fr)",
       cell: (row) => {
         const pk = row.credential;
@@ -122,9 +122,7 @@ export function useProviderColumns({
               );
         const result = testResults[row.id];
         const label =
-          row.kind === "system"
-            ? t("providers.type.system")
-            : row.label || t("providers.col.provider");
+          row.kind === "system" ? t("providers.type.system") : row.label || t("providers.col.name");
         return (
           <div className="flex min-w-0 items-center gap-2">
             {Icon ? (
@@ -146,6 +144,13 @@ export function useProviderColumns({
               ) : (
                 <span className="block truncate text-sm font-medium" title={label}>
                   {label}
+                </span>
+              )}
+              {/* Mes clés holds keys and subscriptions together: the kind reads under the name,
+                  where no width tier can hide it. */}
+              {showType && (
+                <span className="text-muted-foreground block truncate text-xs">
+                  {typeText(row.kind)}
                 </span>
               )}
               {pk?.oauth_email && (
@@ -171,19 +176,8 @@ export function useProviderColumns({
       },
     },
     {
-      id: "type",
-      header: t("providers.col.type"),
-      width: "minmax(96px,0.8fr)",
-      tier: 3,
-      cell: (row) => (
-        <span className="text-muted-foreground block truncate text-xs" title={typeText(row.kind)}>
-          {typeText(row.kind)}
-        </span>
-      ),
-    },
-    {
       id: "service",
-      header: t("providers.col.service"),
+      header: t("providers.col.provider"),
       width: "minmax(90px,0.9fr)",
       tier: 2,
       cell: (row) => {
@@ -329,5 +323,5 @@ export function useProviderColumns({
       },
     },
   ];
-  return showType ? columns : columns.filter((column) => column.id !== "type");
+  return columns;
 }

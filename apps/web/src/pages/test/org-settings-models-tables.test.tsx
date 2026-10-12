@@ -208,14 +208,13 @@ describe("the providers table", () => {
 
   it("heads the columns Provider, Service, Models, State, and no Type nor owner", () => {
     for (const key of [
+      "providers.col.name",
       "providers.col.provider",
-      "providers.col.service",
       "providers.col.models",
       "providers.col.state",
     ] as const) {
       expect(html).toContain(settingsFr[key]);
     }
-    expect(html).not.toContain(`>${settingsFr["providers.col.type"]}<`);
     expect(html).not.toContain("Appartient à");
   });
 
@@ -223,9 +222,8 @@ describe("the providers table", () => {
     expect(rowOf(html, system)).toContain(settingsFr["providers.instanceName"]);
   });
 
-  it("heads a Type column when asked, and names a personal key and a subscription in it", () => {
+  it("says under the name, when asked, whether a row is a personal key or a subscription", () => {
     const typed = providersTable([], [MY_KEY, BOB_SUBSCRIPTION], { showType: true });
-    expect(typed).toContain(`>${settingsFr["providers.col.type"]}<`);
     expect(rowOf(typed, MY_KEY.label)).toContain(settingsFr["providers.type.personalKey"]);
     expect(rowOf(typed, BOB_SUBSCRIPTION.label)).toContain(
       settingsFr["providers.type.subscription"],
@@ -312,7 +310,7 @@ describe("the personal keys table", () => {
 
   it("heads the columns Service, Models, Connected keys, State", () => {
     for (const key of [
-      "providers.col.service",
+      "providers.col.provider",
       "providers.col.models",
       "providers.col.keys",
       "providers.col.state",

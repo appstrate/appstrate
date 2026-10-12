@@ -167,7 +167,7 @@ export function OrgSettingsModelsPage() {
               onSelect={() => personalModels.open(nextService)}
             >
               <Plus />
-              {t("providers.openService")}
+              {t("providers.allowPersonalModels")}
             </DropdownMenuItem>
           </PageActionsMenu>
         </SettingsPageActions>

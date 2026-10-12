@@ -2,7 +2,7 @@
 
 /**
  * The providers table, one for the organization (Settings › Models) and one for a person
- * (Preferences › My providers). It owns what a row's menu needs to run (the connection test,
+ * (Preferences › Mes clés). It owns what a row's menu needs to run (the connection test,
  * the name being edited); the page owns what the deeds do.
  */
 

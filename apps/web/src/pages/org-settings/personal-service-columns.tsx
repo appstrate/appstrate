@@ -36,7 +36,7 @@ export function usePersonalServiceColumns({
   return [
     {
       id: "service",
-      header: t("providers.col.service"),
+      header: t("providers.col.provider"),
       width: "minmax(110px,1.2fr)",
       cell: (row) => {
         const Icon = getProviderIcon(row.service) ?? KeyRound;

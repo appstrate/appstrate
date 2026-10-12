@@ -155,7 +155,7 @@ describe("the Preferences models page, for a member who holds connect", () => {
 
   it("has no owner column, since every row is the caller's own, and says the kind of key", () => {
     expect(html).not.toContain("Appartient à");
-    expect(html).toContain(`>${settingsFr["providers.col.type"]}<`);
+    expect(html).toContain(settingsFr["providers.type.personalKey"]);
     expect(html).toContain(settingsFr["providers.col.state"]);
   });
 
@@ -176,7 +176,7 @@ describe("the Preferences models page, for a member who holds connect", () => {
 
   it("offers the add deed in the Actions menu, and repeats nothing while the list has rows", () => {
     expect(html).toContain("data-page-actions-trigger");
-    expect(html).not.toContain(settingsFr["credentials.add"]);
+    expect(html).not.toContain(settingsFr["credentials.addPersonal"]);
   });
 });
 

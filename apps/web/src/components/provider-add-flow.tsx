@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * « Add a provider », for the organization: a key, then the models it makes available. Nothing
+ * « Ajouter une clé org », for the organization: a key, then the models it makes available. Nothing
  * is written until the second step's button: one click creates the provider and its models.
  * « Back » returns to the first step with what was typed.
  */

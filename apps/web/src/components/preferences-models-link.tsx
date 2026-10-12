@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 /**
- * A link to the caller's own model providers (Preferences › Mes fournisseurs).
+ * A link to the caller's own keys (Preferences › Mes clés).
  * It carries the router state along, so from inside the settings overlay the
  * Preferences open over the same screen instead of turning into a full page.
  */

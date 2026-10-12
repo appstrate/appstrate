@@ -131,7 +131,7 @@ export function PreferencesModelsPage() {
           <PageActionsMenu>
             <DropdownMenuItem data-page-action="create-credential" onSelect={openCreate}>
               <Plus />
-              {t("credentials.add")}
+              {t("credentials.addPersonal")}
             </DropdownMenuItem>
           </PageActionsMenu>
         )}
@@ -147,7 +147,7 @@ export function PreferencesModelsPage() {
           message: t("modelCredentials.empty"),
           hint: t("modelCredentials.emptyHint"),
           action: canAdd ? (
-            <EmptyStateAction label={t("credentials.add")} onClick={openCreate} />
+            <EmptyStateAction label={t("credentials.addPersonal")} onClick={openCreate} />
           ) : undefined,
         }}
         canWriteModels={false}
