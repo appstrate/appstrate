@@ -5,7 +5,8 @@
  * in a space and another made elsewhere, both usable there, whose last run of an agent there bound
  * the first by default after the second existed. It gets a member pin; a dry run writes nothing, a
  * second `--apply` neither. Every other case is that fixture with one condition changed. Enabled
- * schedules naming no set are listed with what their next fire binds through.
+ * schedules naming no set where their member owns several usable connections are listed with what
+ * their next fire binds through.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -17,6 +18,7 @@ import {
   integrationConnectionShares,
   integrationOrgDefaults,
   integrationPins,
+  organizationMembers,
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { ConnectionResolutionSource } from "@appstrate/core/integration";
@@ -199,14 +201,15 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     await seedMemberSchedule({ connectionOverrides: { [INTEGRATION]: [made] } });
     await seedMemberSchedule({ enabled: false });
     await seedBoundRun(made, { scheduleId: unnamed.id });
-    const on = { agentId: AGENT, integrationId: INTEGRATION };
+    const on = { spaceId: here, userId: ctx.user.id, agentId: AGENT, integrationId: INTEGRATION };
     const planned: Awaited<ReturnType<typeof run>> = {
-      pins: [{ spaceId: here, userId: ctx.user.id, ...on, connectionId: made }],
+      pins: [{ ...on, connectionId: made }],
       schedules: [{ scheduleId: unnamed.id, ...on, verdict: "binds through the pin" }],
     };
 
     expect(await run(false)).toEqual(planned);
     expect(lines[0]).toStartWith("database: ");
+    expect(lines[1]).toBe("user-owned org-scoped connections: 2");
     expect(lines).toContain("to pin: 1");
     expect(lines).toContain("schedules with no pin: 0");
     expect(lines.at(-1)).toContain("DRY RUN");
@@ -220,7 +223,7 @@ describe("0045 — the connection made in a space pinned for the agents binding 
       `  pin ${AGENT} / ${INTEGRATION} → ${made} (space ${here}, member ${ctx.user.id})`,
     );
     expect(lines).toContain(
-      `  schedule ${unnamed.id}: ${AGENT} / ${INTEGRATION} — binds through the pin`,
+      `  schedule ${unnamed.id}: ${AGENT} / ${INTEGRATION} (space ${here}, member ${ctx.user.id}) — binds through the pin`,
     );
     expect(lines.at(-1)).toBe("0045: APPLIED — committed.");
     const pin = { spaceId: here, packageId: AGENT, integrationId: INTEGRATION };
@@ -261,22 +264,24 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     expect(resolved[INTEGRATION]).toMatchObject([{ connectionId: made, source: "member_pin" }]);
   });
 
-  it("lists a schedule on an agent the member never ran there as having no pin, and writes nothing", async () => {
+  it("lists the member's schedules with no pin, in a space they connected from or not, and writes nothing", async () => {
     await seedBothSpaces();
-    const firing = await seedMemberSchedule();
+    const third = (await seedSpace({ orgId: ctx.orgId })).id;
+    const firing = [await seedMemberSchedule(), await seedMemberSchedule({ spaceId: third })];
+    const on = `${AGENT} / ${INTEGRATION}`;
     const undeclaring = "@mig0045/undeclaring";
     await seedAgent({ id: undeclaring, orgId: ctx.orgId });
     await seedMemberSchedule({ packageId: undeclaring });
 
-    const listed = { scheduleId: firing.id, agentId: AGENT, integrationId: INTEGRATION };
-    expect(await run(true)).toEqual({
-      pins: [],
-      schedules: [{ ...listed, verdict: "no pin: name the set" }],
-    });
-    expect(lines).toContain("schedules with no pin: 1");
-    expect(lines).toContain(
-      `  schedule ${firing.id}: ${AGENT} / ${INTEGRATION} — no pin: name the set`,
-    );
+    const { pins, schedules } = await run(true);
+    expect(pins).toEqual([]);
+    expect(schedules).toHaveLength(2);
+    expect(lines).toContain("schedules with no pin: 2");
+    for (const { id, spaceId } of firing) {
+      expect(lines).toContain(
+        `  schedule ${id}: ${on} (space ${spaceId}, member ${ctx.user.id}) — no pin: name the set`,
+      );
+    }
     expect(await pinRows()).toEqual([]);
   });
 
@@ -288,17 +293,11 @@ describe("0045 — the connection made in a space pinned for the agents binding 
       expect(await run(true)).toEqual({ pins: [], schedules: [] });
       expect(lines).toContain("to pin: 0");
       expect(await pinRows()).toEqual(before);
+      expect(await pinAudits()).toEqual([]);
     }
 
     it("the member owns one connection usable there", async () => {
       await seedBoundRun(await seedConnection(here));
-      await expectNothing();
-    });
-
-    it("two of their connections were made there", async () => {
-      await seedBoundRun(await seedConnection(here));
-      await seedConnection(here);
-      await seedConnection(elsewhere);
       await expectNothing();
     });
 
@@ -314,12 +313,9 @@ describe("0045 — the connection made in a space pinned for the agents binding 
       await expectNothing();
     });
 
-    it("their other connection is shared into the space, which it reached whatever its scope", async () => {
-      const { made, other } = await seedBothSpaces();
-      await seedBoundRun(made);
-      await db
-        .insert(integrationConnectionShares)
-        .values({ connectionId: other, spaceId: here, orgId: ctx.orgId });
+    it("the member has left the organization", async () => {
+      await seedBoundRun((await seedBothSpaces()).made);
+      await db.delete(organizationMembers).where(eq(organizationMembers.userId, ctx.user.id));
       await expectNothing();
     });
 
@@ -353,6 +349,22 @@ describe("0045 — the connection made in a space pinned for the agents binding 
       ]);
       expect(await pinRows()).toEqual([]);
     }
+
+    it("two of their connections were made there", async () => {
+      await seedBoundRun(await seedConnection(here));
+      await seedConnection(here);
+      await seedConnection(elsewhere);
+      await expectNoPin();
+    });
+
+    it("their other connection is shared into the space, which it reached whatever its scope", async () => {
+      const { made, other } = await seedBothSpaces();
+      await seedBoundRun(made);
+      await db
+        .insert(integrationConnectionShares)
+        .values({ connectionId: other, spaceId: here, orgId: ctx.orgId });
+      await expectNoPin();
+    });
 
     it("their last binding there was a launch override, after an older default one", async () => {
       const { made } = await seedBothSpaces();
