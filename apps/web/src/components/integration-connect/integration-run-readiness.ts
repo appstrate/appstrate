@@ -18,8 +18,6 @@ interface ResolutionView {
   lockedConnectionIds: string[];
   /** Which of the two locks it — they are lifted in different places, so the badge names it. */
   lockedBy: "admin_pin" | "org_default" | null;
-  /** Bound without anyone's pick: a soft org default or the actor's single own connection. */
-  byDefault: boolean;
   /** The soft org default's whole stored set while in play, incl. members candidates hide. */
   softDefaultIds: string[];
   /** Connection health, not run relevance (the server's `run_blocking`). No verdict ⇒ false. */
@@ -40,7 +38,6 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
   return {
     lockedConnectionIds: lock?.ids ?? [],
     lockedBy: lock?.by ?? null,
-    byDefault: source === "org_default" || source === "fallback_auto",
     softDefaultIds: source === "org_default" ? orgDefault : [],
     resolved: code === null && resolution.resolved_connection_ids.length > 0,
     emptyPickerPrompt:

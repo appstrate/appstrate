@@ -16,26 +16,19 @@ export function toggleCapped(ids: string[], id: string): string[] {
 /** A cascade layer's stored set: `null` defers to the next layer, `[]` wins and binds none. */
 export type ConnectionSet = string[] | null;
 
-/** `picks` (integration id → set) with one integration's set replaced; `null` removes the key. */
-export function withConnectionPick(
-  picks: Readonly<Record<string, string[]>>,
-  integrationId: string,
-  connectionIds: ConnectionSet,
-): Record<string, string[]> {
-  const next = { ...picks };
-  if (connectionIds !== null) next[integrationId] = connectionIds;
-  else delete next[integrationId];
-  return next;
-}
-
-/** {@link withConnectionPick} on `overrides.connection_overrides`; an empty map drops the key. */
+/**
+ * `overrides` with one integration's set replaced; `null` removes its key, and an emptied map
+ * drops `connection_overrides`.
+ */
 export function withConnectionOverride(
   overrides: RunOverridesValue,
   integrationId: string,
   connectionIds: ConnectionSet,
 ): RunOverridesValue {
   const { connection_overrides: picks, ...rest } = overrides;
-  const next = withConnectionPick(picks ?? {}, integrationId, connectionIds);
+  const next = { ...picks };
+  if (connectionIds !== null) next[integrationId] = connectionIds;
+  else delete next[integrationId];
   return Object.keys(next).length > 0 ? { ...rest, connection_overrides: next } : rest;
 }
 
@@ -63,12 +56,6 @@ export interface FallbackBindingEntry {
   >;
 }
 
-/** The set the fallback binds for one integration; `null` when no run binds it that way. */
-function fallbackBoundIds(entry: FallbackBindingEntry): string[] | null {
-  const { source, resolved_connection_ids: bound } = entry.resolution;
-  return entry.inert || source !== "fallback_auto" || bound.length === 0 ? null : bound;
-}
-
 /**
  * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
  * the fallback binds in that actor's `readiness` (`fallback_auto`), whatever its health.
@@ -80,24 +67,11 @@ export function withFallbackConnections(
   let next = overrides;
   for (const entry of readiness ?? []) {
     const id = entry.integration_package_id;
-    const bound = fallbackBoundIds(entry);
-    if (bound === null || next.connection_overrides?.[id] !== undefined) continue;
-    next = withConnectionOverride(next, id, bound);
-  }
-  return next;
-}
-
-/** Inverse of {@link withFallbackConnections}: drops each pick equal to the set the fallback binds. */
-export function withoutFallbackConnections(
-  overrides: RunOverridesValue,
-  readiness: readonly FallbackBindingEntry[] | undefined,
-): RunOverridesValue {
-  let next = overrides;
-  for (const entry of readiness ?? []) {
-    const id = entry.integration_package_id;
-    const bound = fallbackBoundIds(entry);
-    const pick = next.connection_overrides?.[id];
-    if (bound && pick && sameSet(pick, bound)) next = withConnectionOverride(next, id, null);
+    const { source, resolved_connection_ids: bound } = entry.resolution;
+    const binds = !entry.inert && source === "fallback_auto" && bound.length > 0;
+    if (binds && next.connection_overrides?.[id] === undefined) {
+      next = withConnectionOverride(next, id, bound);
+    }
   }
   return next;
 }
@@ -123,17 +97,11 @@ export function canApplyConnectionSet(
   );
 }
 
-/** Bound as displayed: an unpinned member still sees the cascade; an unpicked override inherits. */
-export function displayedConnectionIds(input: {
-  overrideMode: boolean;
-  explicitIds: ConnectionSet;
-  resolvedIds: string[];
-}): string[] {
-  if (input.explicitIds !== null) return input.explicitIds;
-  return input.overrideMode ? [] : input.resolvedIds;
-}
-
-/** The ticked set "Valider" writes. A tick the user cannot see is one they cannot remove. */
+/**
+ * The set a picker holds, kept to the candidates: the uncommitted `draft`, else the stored pick,
+ * else what the cascade binds. Without a draft it is the set displayed as bound; with one, the
+ * ticked set "Valider" writes — a tick the user cannot see is one they cannot remove.
+ */
 export function checkedConnectionIds(input: {
   draft: string[] | null;
   explicitIds: ConnectionSet;

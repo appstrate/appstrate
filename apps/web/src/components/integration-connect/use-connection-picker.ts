@@ -28,7 +28,6 @@ import {
   canApplyConnectionSet,
   checkedConnectionIds,
   type ConnectionSet,
-  displayedConnectionIds,
   placeCreatedConnection,
   toggleCapped,
   unavailableConnectionIds,
@@ -46,7 +45,8 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *  - `override` — controlled form value (schedule editor, per-run modal);
  *                 nothing is persisted until the form is. `null` = inherit.
  *
- * In both, `[]` is "no connection", offered only when the agent does not require the integration.
+ * In both, an unset pick displays what the cascade binds, and `[]` is "no connection", offered
+ * only when the agent does not require the integration.
  *
  * Locks (admin pin, enforced org default) render read-only in both modes: a
  * member pin loses to them, and an override naming a connection outside the
@@ -161,7 +161,7 @@ export function useConnectionPicker(
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
   } = resolution;
-  const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
+  const { lockedConnectionIds, lockedBy, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
   const byId = (id: string): IntegrationCandidate | undefined =>
@@ -187,34 +187,26 @@ export function useConnectionPicker(
 
   const explicitIds: ConnectionSet = overrideMode ? persistence.value : memberPinnedConnectionIds;
   const pickedNone = explicitIds?.length === 0;
-  const boundIds = displayedConnectionIds({
-    overrideMode,
-    explicitIds,
-    resolvedIds: resolvedConnectionIds,
-  });
-  // The set in play, named whole: the actor's own pick, else (pin mode) a soft
-  // space default — a member of either that is no candidate blocks the run.
-  const fromDefault = !overrideMode && explicitIds === null && softDefaultIds.length > 0;
-  const storedIds = fromDefault ? softDefaultIds : (explicitIds ?? []);
+  // The stored set in play, named whole: the pick, else the layer an unset pick falls to — the
+  // member's pin under an override, then a soft space default. A member of it that is no
+  // candidate blocks the run.
+  const fromDefault = explicitIds === null && softDefaultIds.length > 0;
+  const storedIds = explicitIds ?? memberPinnedConnectionIds ?? softDefaultIds;
   const unavailableIds = unavailableConnectionIds(storedIds, candidateIds);
   const dirty = draft !== null;
-  const checkedIds = checkedConnectionIds({
-    draft,
-    explicitIds,
-    resolvedIds: resolvedConnectionIds,
-    candidateIds,
-  });
+  // One rule in both modes: an unset pick holds what the cascade binds.
+  const pick = { explicitIds, resolvedIds: resolvedConnectionIds };
+  const checkedIds = checkedConnectionIds({ ...pick, draft, candidateIds });
   const atCap = checkedIds.length >= MAX_CONNECTIONS_PER_INTEGRATION;
   const oneClick = candidates.length === 1;
 
   const toConns = (ids: string[]) => ids.map(byId).filter((c): c is IntegrationCandidate => !!c);
   // The trigger reflects the bound set, never the uncommitted draft.
-  const displayConns = toConns(boundIds);
+  const displayConns = toConns(checkedConnectionIds({ ...pick, draft: null, candidateIds }));
   const checkedConns = toConns(checkedIds);
-  // Warnings judge the set "Valider" would write, not the bound one.
-  const verdictConns = dirty ? checkedConns : displayConns;
-  const underScopedConns = verdictConns.filter((c) => c.missing_scopes.length > 0);
-  const deadConns = verdictConns.filter((c) => c.needs_reconnection);
+  // Warnings judge the set "Valider" would write: the bound one until a tick moves it.
+  const underScopedConns = checkedConns.filter((c) => c.missing_scopes.length > 0);
+  const deadConns = checkedConns.filter((c) => c.needs_reconnection);
   const hasCandidates = candidates.length > 0;
   // Every entry that writes waits for the write in flight.
   const busy = upsertPin.isPending || deletePin.isPending;
@@ -249,7 +241,6 @@ export function useConnectionPicker(
    * agent bound to it.
    */
   const triggerConnect = async (authKey: string, opts?: { replacing?: string }) => {
-    if (!auths[authKey]) return;
     // The popup cannot return the new id: it is the candidate this snapshot lacks.
     const before = new Set(candidateIds);
     // Consent asks for what THIS agent needs on top of the auth's `default_scopes`, which the
@@ -276,12 +267,7 @@ export function useConnectionPicker(
     const placed = placeCreatedConnection({
       // What the picker bound when the connect started (the refetched cascade may already count
       // the created connection), without the draft, kept to the ids the refetch still offers.
-      boundIds: checkedConnectionIds({
-        draft: null,
-        explicitIds,
-        resolvedIds: resolvedConnectionIds,
-        candidateIds: refetchedIds,
-      }),
+      boundIds: checkedConnectionIds({ ...pick, draft: null, candidateIds: refetchedIds }),
       createdId,
       ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
@@ -317,7 +303,6 @@ export function useConnectionPicker(
     canAddConnection,
     lockedConnectionIds,
     lockedBy,
-    byDefault,
     softDefaultIds,
     emptyPickerPrompt,
     // Actor

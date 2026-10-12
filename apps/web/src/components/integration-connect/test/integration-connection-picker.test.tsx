@@ -577,14 +577,13 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(unpinned).toContain(t("connectLabel"));
   });
 
-  it("an override of 'no connection' inherits nothing: the trigger says so", () => {
-    const html = renderPicker(resolution({}), false, {
-      mode: "override",
-      value: [],
-      onChange: () => {},
-    });
+  it("an override of 'no connection' inherits nothing: the trigger never shows the cascade's set", () => {
+    const fallback = resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] });
+    const none: Persistence = { mode: "override", value: [], onChange: () => {} };
+    const html = renderPicker(fallback, false, none);
     expect(html).toContain(t("none"));
-    expect(html).not.toContain(t("inherit"));
+    expect(html).not.toContain(">web<");
+    expect(html).not.toContain(t("defaultBadge"));
   });
 
   it("warns on a stored 'no connection' override for an integration the agent requires", () => {
@@ -1251,19 +1250,22 @@ function summaryOf(node: unknown): string | undefined {
   return summaryOf(node.props.children);
 }
 
-describe("IntegrationConnectionPicker — override trigger without a pick", () => {
-  const t = (key: string) => i18n.t(`agents:detail.integrationMemberPicker.${key}`);
-  const inherit: Persistence = { mode: "override", value: null, onChange: () => {} };
+describe("IntegrationConnectionPicker — an unset override", () => {
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+  const OVERRIDE = { mode: "override", onChange: () => {} } as const;
+  const inherit: Persistence = { ...OVERRIDE, value: null };
+  const picked = (value: string[]): Persistence => ({ ...OVERRIDE, value });
+  const fallback = resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] });
 
-  it("asks to connect when the member has no connection to inherit, warning while runs are blocked", () => {
-    const html = renderPicker(
-      resolution({ candidates: [], resolved_connection_ids: [] }),
-      true,
-      inherit,
-    );
+  it("asks to connect when the cascade binds nothing, warning while runs are blocked", () => {
+    const unbound = resolution({ candidates: [], resolved_connection_ids: [] });
+    const html = renderPicker(unbound, true, inherit);
     expect(html).toContain(t("connectLabel"));
-    expect(html).not.toContain(t("inherit"));
+    expect(html).not.toContain(t("defaultBadge"));
     expect(html).toContain("text-amber-600");
+    // Control: the same prompt on an integration the run starts without does not warn.
+    expect(renderPicker(unbound, false, inherit)).not.toContain("text-amber-600");
   });
 
   it("asks for a choice when the verdict says the member must choose", () => {
@@ -1273,15 +1275,94 @@ describe("IntegrationConnectionPicker — override trigger without a pick", () =
       inherit,
     );
     expect(html).toContain(t("chooseLabel"));
-    expect(html).not.toContain(t("inherit"));
+    expect(html).not.toContain(t("defaultBadge"));
   });
 
-  it("still inherits a resolved fallback", () => {
+  it("shows the connection the cascade binds, marked as the default, exactly as a member pin does", () => {
+    for (const persistence of [inherit, undefined]) {
+      const html = renderPicker(fallback, false, persistence);
+      expect(html).toContain(">web<");
+      expect(html).toContain(t("defaultBadge"));
+      expect(html).not.toContain("text-amber-600");
+    }
+  });
+
+  it("counts a set the cascade binds", () => {
     const html = renderPicker(
-      resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] }),
+      resolution({ source: "org_default", resolved_connection_ids: [WEB, DB] }),
       false,
       inherit,
     );
-    expect(html).toContain(t("inherit"));
+    expect(html).toContain(t("selectedCount", { count: 2 }));
+    expect(html).toContain(t("defaultBadge"));
+  });
+
+  it("marks the member's own pin as inherited, and a set override as chosen", () => {
+    const pinned = resolution({
+      member_pinned_connection_ids: [WEB],
+      resolved_connection_ids: [WEB],
+    });
+    const inherited = renderPicker(pinned, false, inherit);
+    expect(inherited).toContain(">web<");
+    expect(inherited).toContain(t("defaultBadge"));
+    // The same connection, chosen: here as an override, on the agent page as the pin itself.
+    const override = renderPicker(fallback, false, picked([WEB]));
+    for (const chosen of [override, renderPicker(pinned, false)]) {
+      expect(chosen).toContain(">web<");
+      expect(chosen).not.toContain(t("defaultBadge"));
+    }
+  });
+
+  it("warns on an inherited connection that blocks the run, and names why", () => {
+    const dead = resolution({
+      source: "fallback_auto",
+      error_code: "needs_reconnection",
+      resolved_connection_ids: [WEB],
+      candidates: [{ ...candidate(WEB, "web"), needs_reconnection: true }, candidate(DB, "db")],
+    });
+    const html = renderPicker(dead, true, inherit);
+    expect(html).toContain(">web<");
+    expect(html).toContain("text-amber-600");
+    expect(html).toContain(`member-pick-dead-warning-${INTEGRATION}`);
+    // A set override replaces what the cascade binds: its verdict is no longer the run's.
+    const overridden = renderPicker(dead, true, picked([DB]));
+    expect(overridden).toContain(">db<");
+    expect(overridden).not.toContain("text-amber-600");
+    expect(overridden).not.toContain(`member-pick-dead-warning-${INTEGRATION}`);
+  });
+
+  it("names whole an inherited set with a member gone: the space default's, or the member's pin", () => {
+    const count = `${t("selectedCount", { count: 2 })} · ${t("unavailableCount", { count: 1 })}`;
+    const brokenDefault = renderPicker(
+      resolution({
+        source: "org_default",
+        error_code: "pinned_connection_unavailable",
+        org_default_connection_ids: [WEB, GONE],
+      }),
+      true,
+      inherit,
+    );
+    expect(brokenDefault).toContain(count);
+    expect(brokenDefault).toContain(t("defaultBadge"));
+    expect(brokenDefault).toContain(t("defaultUnavailableWarning", { count: 1 }));
+    const brokenPin = renderPicker(
+      resolution({
+        error_code: "pinned_connection_unavailable",
+        member_pinned_connection_ids: [WEB, GONE],
+      }),
+      true,
+      inherit,
+    );
+    expect(brokenPin).toContain(count);
+    expect(brokenPin).toContain(t("defaultBadge"));
+    expect(brokenPin).toContain(t("unavailableWarning", { count: 1 }));
+    // A set override speaks for itself, whatever the layers under it hold.
+    const overridden = renderPicker(
+      resolution({ member_pinned_connection_ids: [WEB, GONE] }),
+      true,
+      picked([DB]),
+    );
+    expect(overridden).not.toContain(WARNING);
+    expect(overridden).not.toContain("text-amber-600");
   });
 });

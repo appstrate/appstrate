@@ -2,8 +2,8 @@
 
 /**
  * Set composition shared by every connection-composing surface: the write cap,
- * the pin-vs-override asymmetry of "no explicit pick", "no pick" (`null`) versus
- * "no connection" (`[]`), and which ids may reach a `connection_ids` body.
+ * "no pick" (`null`) versus "no connection" (`[]`), and which ids may reach a
+ * `connection_ids` body.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -12,15 +12,12 @@ import {
   toggleCapped,
   keepAvailable,
   canApplyConnectionSet,
-  displayedConnectionIds,
   checkedConnectionIds,
   placeCreatedConnection,
   unavailableConnectionIds,
   withConnectionOverride,
-  withConnectionPick,
   withDeclaredConnections,
   withFallbackConnections,
-  withoutFallbackConnections,
   type FallbackBindingEntry,
 } from "../connection-set";
 
@@ -87,21 +84,7 @@ describe("canApplyConnectionSet", () => {
     expect(canApplyConnectionSet(conns(untouched), null, true)).toBe(true);
   });
 
-  it("refuses an untouched override that inherits — it would freeze the cascade", () => {
-    const explicitIds = null;
-    expect(
-      displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds: ["conn_a"] }),
-    ).toEqual([]);
-    const untouched = checkedConnectionIds({
-      draft: null,
-      explicitIds,
-      resolvedIds: ["conn_a"],
-      candidateIds,
-    });
-    expect(canApplyConnectionSet(conns(untouched), explicitIds, false)).toBe(false);
-  });
-
-  it("lets the actor rewrite a stored pick that names an unavailable connection", () => {
+  it("lets the actor rewrite a stored pick naming an unavailable connection, while a member survives", () => {
     // Nothing was ticked or unticked, yet the stored set differs from what a
     // write would send: without this the ghost id could never be dropped.
     const explicitIds = ["conn_a", "conn_unshared"];
@@ -115,37 +98,8 @@ describe("canApplyConnectionSet", () => {
     expect(canApplyConnectionSet(conns(cleaned), explicitIds, false)).toBe(true);
     // Control: an untouched pick with no ghost has nothing to rewrite.
     expect(canApplyConnectionSet([a], ["conn_a"], false)).toBe(false);
-  });
-});
-
-describe("displayedConnectionIds", () => {
-  const resolvedIds = ["conn_resolved"];
-
-  it("shows the explicit pick in both modes", () => {
-    const explicitIds = ["conn_picked"];
-    expect(displayedConnectionIds({ overrideMode: false, explicitIds, resolvedIds })).toEqual([
-      "conn_picked",
-    ]);
-    expect(displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds })).toEqual([
-      "conn_picked",
-    ]);
-  });
-
-  it("falls back to the cascade in pin mode, but NOT in override mode", () => {
-    // Same inputs, only the mode differs: pin mode has no "inherit" state, so
-    // an unpinned agent page still displays the connection a run would use;
-    // an override with no pick IS inherit and must display nothing.
-    const explicitIds = null;
-    expect(displayedConnectionIds({ overrideMode: false, explicitIds, resolvedIds })).toEqual(
-      resolvedIds,
-    );
-    expect(displayedConnectionIds({ overrideMode: true, explicitIds, resolvedIds })).toEqual([]);
-  });
-
-  it("shows a stored 'no connection' as nothing bound in both modes, never the cascade", () => {
-    for (const overrideMode of [false, true]) {
-      expect(displayedConnectionIds({ overrideMode, explicitIds: [], resolvedIds })).toEqual([]);
-    }
+    // No member survives: the set left to write is empty, which "Valider" never writes.
+    expect(canApplyConnectionSet([], ["conn_unshared"], false)).toBe(false);
   });
 });
 
@@ -260,45 +214,26 @@ describe("unavailableConnectionIds", () => {
     expect(unavailableConnectionIds(["a", "b"], ["a", "b", "c"])).toEqual([]);
     expect(unavailableConnectionIds([], ["a"])).toEqual([]);
   });
-
-  // The scenario the picker exists for: [a, gone] stored, `gone` deleted by its
-  // owner. Untouched, the ticks are the survivors and "Valider" is live — it
-  // writes [a], the change the unavailable row announces.
-  it("leaves 'Valider' live on the survivors, and dead once nothing survives", () => {
-    const explicitIds = ["a", "gone"];
-    const candidateIds = ["a", "b"];
-    const checked = checkedConnectionIds({
-      draft: null,
-      explicitIds,
-      resolvedIds: [],
-      candidateIds,
-    });
-    expect(checked).toEqual(["a"]);
-    expect(canApplyConnectionSet([{ id: "a" }], explicitIds, false)).toBe(true);
-    expect(
-      checkedConnectionIds({ draft: null, explicitIds: ["gone"], resolvedIds: [], candidateIds }),
-    ).toEqual([]);
-    expect(canApplyConnectionSet([], ["gone"], false)).toBe(false);
-  });
-});
-
-describe("withConnectionPick", () => {
-  it("replaces one integration's set and leaves the others", () => {
-    const picks = { "@acme/a": ["1"], "@acme/b": ["2"] };
-    expect(withConnectionPick(picks, "@acme/a", ["3", "4"])).toEqual({
-      "@acme/a": ["3", "4"],
-      "@acme/b": ["2"],
-    });
-    expect(picks["@acme/a"]).toEqual(["1"]);
-  });
-
-  it("drops the key for no pick, and keeps an explicit 'no connection'", () => {
-    expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", null)).toEqual({});
-    expect(withConnectionPick({ "@acme/a": ["1"] }, "@acme/a", [])).toEqual({ "@acme/a": [] });
-  });
 });
 
 describe("withConnectionOverride", () => {
+  it("replaces one integration's set, leaving the other picks and overrides", () => {
+    const picks = { "@acme/a": ["1"], "@acme/b": ["2"] };
+    const overrides = { model_id_override: "m", connection_overrides: picks };
+    expect(withConnectionOverride(overrides, "@acme/a", ["3", "4"])).toEqual({
+      model_id_override: "m",
+      connection_overrides: { "@acme/a": ["3", "4"], "@acme/b": ["2"] },
+    });
+    expect(picks).toEqual({ "@acme/a": ["1"], "@acme/b": ["2"] });
+  });
+
+  it("removes the key for no pick, leaving the other picks", () => {
+    const overrides = { connection_overrides: { "@acme/a": ["1"], "@acme/b": ["2"] } };
+    expect(withConnectionOverride(overrides, "@acme/a", null)).toEqual({
+      connection_overrides: { "@acme/b": ["2"] },
+    });
+  });
+
   it("drops `connection_overrides` once its last pick is cleared", () => {
     const overrides = { model_id_override: "m", connection_overrides: { "@acme/a": ["1"] } };
     expect(withConnectionOverride(overrides, "@acme/a", null)).toEqual({ model_id_override: "m" });
@@ -396,50 +331,5 @@ describe("withFallbackConnections", () => {
       connection_overrides: { [GMAIL]: ["c_own"] },
     });
     expect(withFallbackConnections(overrides, undefined)).toBe(overrides);
-  });
-});
-
-describe("withoutFallbackConnections", () => {
-  const readiness = [entry(GMAIL)];
-
-  it("removes the set the fallback binds", () => {
-    expect(
-      withoutFallbackConnections({ connection_overrides: { [GMAIL]: ["c_own"] } }, readiness),
-    ).toEqual({});
-  });
-
-  it("keeps a stored 'no connection'", () => {
-    const overrides = { connection_overrides: { [GMAIL]: [] } };
-    expect(withoutFallbackConnections(overrides, readiness)).toEqual(overrides);
-  });
-
-  it("keeps picks of integrations the fallback does not bind", () => {
-    const slack = { "@acme/slack": ["c_slack"] };
-    const bindsNothing = [
-      entry(GMAIL, { source: "member_pin" }),
-      { ...entry("@acme/slack"), inert: true },
-      entry("@acme/notion", { source: "org_default" }),
-    ];
-    const overrides = { connection_overrides: { ...slack, [GMAIL]: ["c_own"] } };
-    expect(withoutFallbackConnections(overrides, bindsNothing)).toEqual({
-      connection_overrides: { ...slack, [GMAIL]: ["c_own"] },
-    });
-  });
-
-  it("drops the emptied `connection_overrides` key, keeping the other overrides", () => {
-    expect(
-      withoutFallbackConnections(
-        { model_id_override: "m1", connection_overrides: { [GMAIL]: ["c_own"] } },
-        readiness,
-      ),
-    ).toEqual({ model_id_override: "m1" });
-  });
-
-  it("returns the same reference when nothing is removed", () => {
-    const overrides = { model_id_override: "m1" };
-    expect(withoutFallbackConnections(overrides, readiness)).toBe(overrides);
-    const picked = { connection_overrides: { [GMAIL]: ["c_other"] } };
-    expect(withoutFallbackConnections(picked, readiness)).toBe(picked);
-    expect(withoutFallbackConnections(picked, undefined)).toBe(picked);
   });
 });

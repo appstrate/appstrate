@@ -33,15 +33,13 @@ import { ScopeSummaryText } from "./scope-summary-text";
 import type { ConnectionPicker } from "./use-connection-picker";
 
 /** What the closed trigger shows, first match wins. */
-type TriggerKind = "unavailable" | "none" | "one" | "many" | "inherit" | "choose" | "connect";
+type TriggerKind = "unavailable" | "none" | "one" | "many" | "choose" | "connect";
 
 function triggerKind(p: ConnectionPicker): TriggerKind {
   if (p.unavailableIds.length > 0) return "unavailable";
   if (p.pickedNone) return "none";
   if (p.displayConns.length === 1) return "one";
   if (p.displayConns.length > 1) return "many";
-  if (p.overrideMode && p.resolvedConnectionIds.length > 0) return "inherit";
-  // Nothing bound by the cascade: nothing to inherit.
   return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
 }
 
@@ -50,7 +48,6 @@ const TRIGGER_ICONS: Record<TriggerKind, LucideIcon> = {
   none: Ban,
   one: Users,
   many: Users,
-  inherit: Plus,
   choose: Plus,
   connect: Plus,
 };
@@ -71,7 +68,6 @@ export function PickerMenu({
     candidates,
     resolvedConnectionIds,
     canAddConnection,
-    byDefault,
     softDefaultIds,
     canConnect,
     integrationPath,
@@ -140,22 +136,22 @@ export function PickerMenu({
     none: () => t("detail.integrationMemberPicker.none"),
     one: () => displayConns[0]!.label,
     many: () => t("detail.integrationMemberPicker.selectedCount", { count: displayConns.length }),
-    inherit: () => t("detail.integrationMemberPicker.inherit"),
     choose: () => t("detail.integrationMemberPicker.chooseLabel"),
     connect: () => t("detail.integrationMemberPicker.connectLabel"),
   }[trigger]();
-  // Amber on exactly the states that gate a run: pin mode reads the server's
-  // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
-  // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
-  // warns — or a stored "no connection" for an integration the agent now requires, or a
-  // connect or choose prompt that blocks the run.
-  const triggerWarn = overrideMode
-    ? underScopedConns.length > 0 ||
-      unavailableIds.length > 0 ||
-      deadConns.length > 0 ||
-      (pickedNone && required) ||
-      ((trigger === "connect" || trigger === "choose") && runBlocking)
-    : runBlocking;
+  // An unset pick shows a set the cascade binds: nobody chose it here.
+  const inherited = explicitIds === null && trigger !== "choose" && trigger !== "connect";
+  // Amber on exactly the states that gate a run. The server's `run_blocking` (same verdict as
+  // the launch badge and the kickoff 409) judges the cascade: a member pin, and what an unset
+  // override inherits. It does not know a set override, judged here: an under-scoped,
+  // unavailable or dead member, or "no connection" for an integration the agent requires.
+  const triggerWarn =
+    overrideMode && explicitIds !== null
+      ? underScopedConns.length > 0 ||
+        unavailableIds.length > 0 ||
+        deadConns.length > 0 ||
+        (pickedNone && required)
+      : runBlocking;
   const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
 
   return (
@@ -169,7 +165,7 @@ export function PickerMenu({
         >
           <TriggerIcon className="size-3" />
           <span className="max-w-[14rem] truncate">{triggerLabel}</span>
-          {!overrideMode && byDefault && (
+          {inherited && (
             <span className="text-muted-foreground/70">
               {t("detail.integrationMemberPicker.defaultBadge")}
             </span>

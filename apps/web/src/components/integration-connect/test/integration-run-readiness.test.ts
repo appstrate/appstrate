@@ -122,19 +122,6 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
   });
 });
 
-describe("describeResolution — (par défaut)", () => {
-  it("marks what bound without anyone's pick: a soft org default or the own fallback", () => {
-    expect(describeResolution(resolution({ source: "org_default" })).byDefault).toBe(true);
-    expect(describeResolution(resolution({ source: "fallback_auto" })).byDefault).toBe(true);
-  });
-
-  it("never marks an explicit pick", () => {
-    for (const source of ["admin_pin", "org_default_enforced", "member_pin", null] as const) {
-      expect(describeResolution(resolution({ source })).byDefault).toBe(false);
-    }
-  });
-});
-
 describe("describeResolution — resolved", () => {
   it("holds when connections bind with no error, however they were bound", () => {
     for (const source of ["admin_pin", "member_pin", "fallback_auto"] as const) {
