@@ -1052,7 +1052,7 @@ describe("runRemote — error paths", () => {
     );
   });
 
-  it("lists a must_choose_connection item's candidates under it, each with its --connection flag", async () => {
+  it("prints a choice's candidates under its item, at the hint's indent", async () => {
     const WORK = "11111111-1111-4111-8111-111111111111";
     const fetchImpl = makeFetchImpl(
       {

@@ -1,36 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// `appstrate run --connection <integration>=<connection id>` — the launch body's
-// `connection_overrides`, the same map on both launch routes (`--remote` and `--report`).
-
-/** `{ "<integration id>": ["<connection id>", …] }`. */
-export type ConnectionOverrides = Record<string, string[]>;
-
-/** A usage error: `formatError` renders `<message> — <hint>`. */
-class ConnectionFlagError extends Error {
-  override readonly name = "ConnectionFlagError";
-  readonly hint =
-    "Pass --connection <integration>=<connection id> (e.g. --connection @scope/integration=<id>); repeat the flag to name several.";
-}
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 
 /**
- * Fold the repeated `--connection` values into one set per integration, in the order given.
- * `undefined` when the flag was not passed: the launch body then carries no `connection_overrides`.
- * The first `=` separates: neither an integration id nor a connection id contains one.
+ * The repeated `--connection <integration>=<connection-id>` values as the launch body's
+ * `connection_overrides`: one set per integration, in the order given, split on the first `=`.
  */
-export function parseConnectionFlags(
-  values: readonly string[] | undefined,
-): ConnectionOverrides | undefined {
-  if (!values || values.length === 0) return undefined;
+export function parseConnectionFlags(values: readonly string[]): ConnectionOverrides | undefined {
+  if (values.length === 0) return undefined;
   const sets = new Map<string, string[]>();
   for (const raw of values) {
     const eq = raw.indexOf("=");
-    const integrationId = eq === -1 ? "" : raw.slice(0, eq).trim();
-    const connectionId = raw.slice(eq + 1).trim();
-    if (!integrationId || !connectionId) {
-      throw new ConnectionFlagError(`Invalid --connection "${raw}"`);
+    if (eq <= 0 || eq === raw.length - 1) {
+      throw new Error(`Invalid --connection "${raw}" (expected <integration>=<connection-id>)`);
     }
-    sets.set(integrationId, [...(sets.get(integrationId) ?? []), connectionId]);
+    const integrationId = raw.slice(0, eq);
+    sets.set(integrationId, [...(sets.get(integrationId) ?? []), raw.slice(eq + 1)]);
   }
   return Object.fromEntries(sets);
 }

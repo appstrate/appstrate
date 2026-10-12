@@ -48,6 +48,7 @@ import type { TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types";
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { createConsoleSink } from "./sink.ts";
 import {
   announceLaunch,
@@ -56,7 +57,6 @@ import {
   type LaunchItem,
 } from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
-import type { ConnectionOverrides } from "./connection-flag.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;

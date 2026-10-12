@@ -1128,8 +1128,8 @@ program
     "Proxy id to associate with the run (overrides per-space run-config inheritance)",
   )
   .option(
-    "--connection <integration=id>",
-    "Connection the run binds to an integration, as <integration>=<connection id> (repeatable; several values for one integration form its set). Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
+    "--connection <integration>=<connection-id>",
+    "Connection the run binds to an integration (repeatable; several values for one integration form its set). Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
     collect,
     [],
   )

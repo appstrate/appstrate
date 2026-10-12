@@ -29,6 +29,7 @@ import {
 } from "@appstrate/runner-pi";
 import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import {
   readBundleFromBuffer,
   readBundleFromFile,
@@ -72,7 +73,6 @@ import {
   type ReportSource,
 } from "./run/report.ts";
 import { announceLaunch } from "./run/launch-warnings.ts";
-import type { ConnectionOverrides } from "./run/connection-flag.ts";
 import {
   attachStdoutBridge,
   CompositeSink,
@@ -137,12 +137,7 @@ export interface RunCommandOptions {
    * platform applies the override to the spawned container.
    */
   proxy?: string;
-  /**
-   * `--connection <integration>=<connection id>`, folded per integration: the
-   * launch body's `connection_overrides`. It names connections for the run the
-   * instance creates — the trigger in remote mode, the `--report` registration
-   * in local mode — so a local run that registers none refuses it.
-   */
+  /** `--connection`, folded per integration: the launch body's `connection_overrides`. */
   connectionOverrides?: ConnectionOverrides | undefined;
   /**
    * When true, ignore the per-space `run-config` (model / proxy /
@@ -1013,7 +1008,28 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
 // --report wiring
 // ---------------------------------------------------------------------------
 
+/**
+ * The run registered on the instance, or null for a console-only run. `--connection` is refused
+ * on the latter, whatever left it unregistered: its credential-proxy calls bind the caller's own
+ * connection by default, not the one named.
+ */
 async function resolveReportSession(
+  opts: RunCommandOptions,
+  bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
+  bundleSource: BundleSource,
+  resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
+): Promise<ReportSession | null> {
+  const session = await registerReportSession(opts, bundle, bundleSource, resolverInputs);
+  if (!session && opts.connectionOverrides) {
+    throw new ReportConfigError(
+      "--connection names a connection for the run registered on the instance, and no run is registered",
+      "Run with reporting on (a profile or API key, no --report=false) and a registration that succeeds, or drop --connection.",
+    );
+  }
+  return session;
+}
+
+async function registerReportSession(
   opts: RunCommandOptions,
   bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
   bundleSource: BundleSource,
@@ -1045,17 +1061,7 @@ async function resolveReportSession(
     }
     throw err;
   }
-  if (!enabled || !reportCtx) {
-    // Accept-and-ignore would run on whichever connection the credential proxy
-    // binds by default while the caller believes they named one.
-    if (opts.connectionOverrides) {
-      throw new ReportConfigError(
-        "--connection names connections for the run registered on the instance, and this run registers none",
-        "Drop --report=false and run with a profile or API key (remote integrations), or drop --connection.",
-      );
-    }
-    return null;
-  }
+  if (!enabled || !reportCtx) return null;
 
   // The bundle is sourced one of two ways:
   //   - From a local file (path mode) → we have no registry handle, so
@@ -1253,6 +1259,17 @@ export async function _buildResolverInputsForTesting(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
+}
+
+/**
+ * Test-only access to the report-session resolution. Exercised by
+ * `apps/cli/test/run-report-source.test.ts` for the `--connection` rule on
+ * every path that ends with no registered run.
+ */
+export function _resolveReportSessionForTesting(
+  ...args: Parameters<typeof resolveReportSession>
+): Promise<ReportSession | null> {
+  return resolveReportSession(...args);
 }
 
 /**

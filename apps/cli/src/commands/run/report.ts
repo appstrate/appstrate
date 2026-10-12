@@ -28,8 +28,8 @@
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./launch-warnings.ts";
-import type { ConnectionOverrides } from "./connection-flag.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";

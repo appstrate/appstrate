@@ -25,6 +25,10 @@ import {
   type ReportSource,
 } from "../src/commands/run/report.ts";
 import { announceLaunch } from "../src/commands/run/launch-warnings.ts";
+import {
+  _resolveReportSessionForTesting as resolveReportSession,
+  type RunCommandOptions,
+} from "../src/commands/run.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 
 const REPORT_CTX = {
@@ -344,41 +348,25 @@ describe("startReportSession — integration readiness", () => {
     );
   });
 
-  it("lists a must_choose_connection item's candidates with the flag that names each", async () => {
-    const WORK = "11111111-1111-4111-8111-111111111111";
-    const OPS = "22222222-2222-4222-8222-222222222222";
+  it("prints a choice's candidates under its item, at the snippet's indent", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
     stub = installStubFetch(
       () =>
         new Response(
           JSON.stringify({
-            status: 409,
             code: "missing_integration_connection",
             errors: [
               {
                 field: "integrations.@appstrate/clickup",
                 code: "must_choose_connection",
-                message: "Integration '@appstrate/clickup' has 2 usable connections; choose one",
                 candidate_connections: [
                   {
-                    id: WORK,
+                    id,
                     label: "Work",
                     account_id: "work@acme.com",
                     owned_by_actor: true,
                     needs_reconnection: false,
-                    scopes_granted: [],
-                    missing_scopes: [],
                   },
-                  {
-                    id: OPS,
-                    label: "Ops",
-                    account_id: "ops@acme.com",
-                    owned_by_actor: false,
-                    needs_reconnection: true,
-                    scopes_granted: [],
-                    missing_scopes: [],
-                  },
-                  // Nothing to pass without an id: dropped, not printed half-formed.
-                  { label: "No id" },
                 ],
               },
             ],
@@ -388,9 +376,8 @@ describe("startReportSession — integration readiness", () => {
     );
     const err = await session().catch((e: unknown) => e);
     expect((err as ReportStartError).responseSnippet).toBe(
-      "@appstrate/clickup: Integration '@appstrate/clickup' has 2 usable connections; choose one (must_choose_connection)" +
-        `\n      Work (work@acme.com, yours): --connection @appstrate/clickup=${WORK}` +
-        `\n      Ops (ops@acme.com, shared, needs reconnection): --connection @appstrate/clickup=${OPS}`,
+      "@appstrate/clickup: must_choose_connection (must_choose_connection)" +
+        `\n      Work (work@acme.com, yours): --connection @appstrate/clickup=${id}`,
     );
   });
 
@@ -438,5 +425,66 @@ describe("startReportSession — integration readiness", () => {
     stub = installStubFetch(() => new Response("x".repeat(600), { status: 500 }));
     const err = await session().catch((e: unknown) => e);
     expect((err as ReportStartError).responseSnippet).toBe(`${"x".repeat(512)}…`);
+  });
+});
+
+// `--connection` names a connection for the run the instance registers. Unregistered, the
+// run's credential-proxy calls bind the caller's own connection by default: refused instead.
+describe("resolveReportSession — --connection needs a registered run", () => {
+  const CONNECTION = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
+  const REFUSAL =
+    "--connection names a connection for the run registered on the instance, and no run is registered";
+  let stub: ReturnType<typeof installStubFetch>;
+
+  afterEach(() => stub.restore());
+
+  /** `--json` keeps the fallback warnings off the test's stderr. */
+  function resolve(over: Partial<RunCommandOptions>, context: typeof REPORT_CTX | null) {
+    return resolveReportSession(
+      { bundle: "./agent.afps", json: true, ...over },
+      makeBundle(),
+      { kind: "path", path: "./agent.afps", label: "./agent.afps" },
+      context,
+    );
+  }
+
+  it("refuses it with --report=false", async () => {
+    stub = installStubFetch(() => ok());
+    await expect(
+      resolve({ report: "false", connectionOverrides: CONNECTION }, REPORT_CTX),
+    ).rejects.toThrow(REFUSAL);
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it("refuses it when no profile or API key gives a run to register (auto)", async () => {
+    stub = installStubFetch(() => ok());
+    await expect(resolve({ connectionOverrides: CONNECTION }, null)).rejects.toThrow(REFUSAL);
+  });
+
+  it("refuses it when --report=true has no profile and falls back to console", async () => {
+    stub = installStubFetch(() => ok());
+    await expect(
+      resolve({ report: "true", reportFallback: "console", connectionOverrides: CONNECTION }, null),
+    ).rejects.toThrow(REFUSAL);
+  });
+
+  it("refuses it when the registration fails and falls back to console", async () => {
+    stub = installStubFetch(() => new Response("upstream down", { status: 503 }));
+    await expect(
+      resolve({ reportFallback: "console", connectionOverrides: CONNECTION }, REPORT_CTX),
+    ).rejects.toThrow(REFUSAL);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("registers the run with the connection it names", async () => {
+    stub = installStubFetch(() => ok());
+    const session = await resolve({ connectionOverrides: CONNECTION }, REPORT_CTX);
+    expect(session?.runId).toBe(SUCCESS_BODY.id);
+    expect(stub.calls[0]!.body.connection_overrides).toEqual(CONNECTION);
+  });
+
+  it("still falls back to a console-only run when no connection is named", async () => {
+    stub = installStubFetch(() => new Response("upstream down", { status: 503 }));
+    expect(await resolve({ reportFallback: "console" }, REPORT_CTX)).toBeNull();
   });
 });
