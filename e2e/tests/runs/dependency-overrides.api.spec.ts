@@ -112,8 +112,12 @@ test.describe("Run dependency resolution (#666)", () => {
     });
 
     expect(res.status()).toBe(400);
-    expect(JSON.stringify(await res.json()).toLowerCase()).toContain(
-      "declared skill or integration dependency",
+    const problem = (await res.json()) as { errors?: { field: string; code: string }[] };
+    expect(problem.errors).toContainEqual(
+      expect.objectContaining({
+        field: "dependency_overrides.@x/y",
+        code: "undeclared_dependency_override",
+      }),
     );
   });
 
