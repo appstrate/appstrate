@@ -179,32 +179,40 @@ integration_connections WHERE shared_with_org;` tells whether the step
   The dry run prints that number. A second `--apply` promotes nothing.
   Details: `scripts/migration/README.md`.
 
-- **After the deploy, run `scripts/migration/0045-pin-space-connection.ts`,
-  dry, then with `--apply`, right after `0041 --apply` and `0043 --apply`**
-  (#1929). Those two widen members' connections to the organization, so a
-  member who connected one integration from two spaces owns two connections
-  in each, and a run binds by default only its actor's one own connection (see
-  Changed). Where such a member made exactly one of them in a space, `0045`
-  pins it for them (a member pin, audited `integration.member_pin.upserted` by
-  the `system` actor) on each agent one of their runs in that space bound to
-  it by default, unless a pin of theirs, an admin pin or an org default
-  already names a set there. With the app up and a `pg_dump` taken, run the
-  dry run
-  (`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-space-connection.ts`),
-  which writes nothing, read the pins it lists per organization and the
-  enabled schedules whose next fire binds through one, then run it again with
-  `--apply`. It commits one transaction per organization and exits 1 if a pin
-  is left to write; a second run finds nothing to pin. Without it, those
-  members' agents in those spaces answer `must_choose_connection` from the
-  widening on, scheduled fires included. Details:
-  `scripts/migration/README.md`.
+- **After the deploy, run
+  `scripts/migration/0045-pin-connection-made-in-space.ts`, dry, then with
+  `--apply`, right after `0041 --apply` and `0043 --apply`** (#1929). Those
+  two widen members' connections to the organization, so a member who
+  connected one integration from two spaces owns two connections in each, and
+  a run binds by default only its actor's one own connection (see Changed):
+  from the widening on, their agents in those spaces answer
+  `must_choose_connection`, scheduled fires included. `0045` pins the
+  connection made in the space (a member pin, audited
+  `integration.member_pin.upserted` by the `system` actor) for an agent only
+  where the data shows that choice: the member owns several connections
+  usable in the space, exactly one made there and none of the others shared
+  into it, no org default covers the integration, neither they nor an admin
+  pinned the agent, and their most recent run of that agent in the space that
+  resolved the integration bound that connection by default, started after
+  every other one existed. With the app up and a `pg_dump` taken, run the dry
+  run
+  (`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-connection-made-in-space.ts`),
+  which writes nothing. Per organization it lists the pins and every enabled
+  schedule of those members that names no set for the integration, each with
+  a verdict, `binds through the pin` or `no pin: name the set`. Then run it
+  again with `--apply`: one transaction per organization, exit 1 if a pin is
+  left to write, and a second run finds nothing to pin. It does not settle
+  every case: a schedule listed `no pin: name the set` answers
+  `must_choose_connection` at its next fire until its owner names the set (on
+  the schedule, or with a member pin on the agent), and an agent it does not
+  pin asks on its next run. Details: `scripts/migration/README.md`.
 
 - **API clients that write schedules must name their connection sets**
-  (#1929). The write of an enabled schedule is refused (`409`) for an
-  integration its actor owns a connection for and no pin, org default or
-  `connection_overrides` entry covers; schedules already stored keep firing
-  and are refused at their next enabled write until the set is named (see
-  Changed).
+  (#1929). The write of an enabled schedule running as its caller or as an
+  end user is refused (`409`) for an integration the actor owns a connection
+  for and no pin, org default or `connection_overrides` entry covers;
+  schedules already stored keep firing and are refused at their next such
+  write until the set is named (see Changed).
 
 ### Changed
 
@@ -526,31 +534,35 @@ integration_connections WHERE shared_with_org;` tells whether the step
   names a set for. Health never changes the answer: an only own connection
   that is dead is bound and reported `needs_reconnection`. A connection
   another member shares is never bound without an explicit pick. The item's
-  `title` is `Connection Choice Required` and, over the actor's own
-  connections, its message is
+  `title` is `Connection Choice Required` and, at a launch over the actor's
+  own connections, its message is
   `Integration '<id>' needs a connection choice — pick one.` Its
   `candidate_connections` list every serving connection, own and shared,
   least privilege first: the order of readiness `candidates[]` (#1913), so a
   connection's scopes order the list and choose nothing. The credential proxy
-  outside a run follows the same rule, `X-Connection-Id` naming one among
-  several.
+  outside a run binds by the same rule: the caller's one own connection, and
+  among several the one `X-Connection-Id` names.
 
 - **BREAKING (API): the write of an enabled schedule names its connection
-  sets** (#1929). Creating a schedule, or updating one it leaves enabled (a
-  rename included), answers `409 missing_integration_connection` with one
-  `must_choose_connection` item per integration whose set nothing names (no
-  admin pin, org default, member pin of the schedule's actor or
-  `connection_overrides` entry) while the actor owns a connection serving it,
-  a single one included: the write takes no default. Nobody answers at a fire
-  the choice a second connection made later would open, so the set is named
-  at the write. Remedy: name one of the item's `candidate_connections` in the
-  schedule's `connection_overrides`, or have the actor pin one for the agent
-  (an end-user actor holds no pin). A caller writing for another member is
-  offered only the connections shared in the space. Fires are unchanged: a
+  sets** (#1929). For a schedule running as its caller or as an end user,
+  creating it, or updating one it leaves enabled (a rename included), answers
+  `409 missing_integration_connection` with one `must_choose_connection` item
+  per integration whose set nothing names (no admin pin, org default, member
+  pin of the schedule's actor or `connection_overrides` entry) while the
+  actor owns a connection serving it, a single one included: that write takes
+  no default. Nobody answers at a fire the choice a second connection made
+  later would open, so the set is named at the write. Remedy: name one of the
+  item's `candidate_connections` in the schedule's `connection_overrides`, or
+  pin one for the agent (an end-user actor holds no pin). A caller writing a
+  schedule that runs as another member cannot name that member's own
+  connections and is not asked: the write takes the actor's one own
+  connection by default, and with several it answers `must_choose_connection`
+  listing only the connections shared in the space. Fires are unchanged: a
   schedule stored without a set keeps firing as before, and its next enabled
-  write is refused until the set is named; a write that leaves the schedule
-  disabled is not refused over it. The dashboard's schedule form names the
-  caller's own default connection when it saves a schedule running as them.
+  write by such a caller is refused until the set is named; a write that
+  leaves the schedule disabled is not refused over it. The dashboard's
+  schedule form names the caller's own default connection when it saves a
+  schedule running as them.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -811,12 +823,19 @@ integration_connections WHERE shared_with_org;` tells whether the step
   several is refused with `409 missing_integration_connection` and a
   `remote_binds_one_connection` item, since a remote run binds one connection
   per integration.
-- **`appstrate run --connection <integration>=<connection id>`** (#1929),
+- **`appstrate run --connection <integration>=<connection-id>`** (#1929),
   repeatable; several values for one integration form its set. The picks are
   sent as the launch's `connection_overrides`, by `--remote` and by a local
-  run reporting to the instance; a run that registers nothing on the instance
-  refuses the flag. A `must_choose_connection` refusal prints each candidate
-  on its own line with the flag naming it.
+  run reporting to the instance. The flag is refused whenever no run ends up
+  registered on the instance: reporting off, no profile or API key, or a
+  registration that failed under `--report-fallback console`. A
+  `must_choose_connection` refusal prints each candidate on its own line with
+  the flag naming it.
+- **Connection readiness says which integrations are inert** (#1929): each
+  integration of `GET /api/agents/{scope}/{name}/connection-readiness`
+  carries a required boolean `inert`, true when the agent declares it with
+  nothing a run would start, so a run resolves no connection for it whatever
+  `resolution` reports for the picker.
 
 - **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
   hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
