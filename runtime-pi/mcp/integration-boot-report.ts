@@ -6,7 +6,8 @@ import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core
 /**
  * Cap on how long we wait for the sidecar's boot report. Generous: it
  * exceeds the sidecar's per-connection MCP connect deadline (30 s) plus
- * headroom for a few sequential connections, so a report that never
+ * headroom for the successive waves a many-connection boot prepares in and
+ * for their ordered registration, so a report that never
  * arrives means an integration boot genuinely hung — which we treat as a
  * fatal "did not start as declared", not a transient blip.
  */
