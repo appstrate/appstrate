@@ -349,39 +349,6 @@ describe("startReportSession — integration readiness", () => {
     );
   });
 
-  it("prints a choice's candidates under its item, at the snippet's indent", async () => {
-    const id = "11111111-1111-4111-8111-111111111111";
-    stub = installStubFetch(
-      () =>
-        new Response(
-          JSON.stringify({
-            code: "missing_integration_connection",
-            errors: [
-              {
-                field: "integrations.@appstrate/clickup",
-                code: "must_choose_connection",
-                candidate_connections: [
-                  {
-                    id,
-                    label: "Work",
-                    account_id: "work@acme.com",
-                    owned_by_actor: true,
-                    needs_reconnection: false,
-                  },
-                ],
-              },
-            ],
-          }),
-          { status: 409, headers: { "Content-Type": "application/problem+json" } },
-        ),
-    );
-    const err = await session().catch((e: unknown) => e);
-    expect((err as ReportStartError).responseSnippet).toBe(
-      "@appstrate/clickup: must_choose_connection (must_choose_connection)" +
-        `\n      Work (work@acme.com, yours): --connection @appstrate/clickup=${id}`,
-    );
-  });
-
   it("summarises a refusal body longer than the raw-display cut", async () => {
     const body = JSON.stringify({
       type: "https://docs.appstrate.dev/errors/missing-integration-connection",

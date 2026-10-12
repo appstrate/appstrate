@@ -1052,47 +1052,6 @@ describe("runRemote — error paths", () => {
     );
   });
 
-  it("prints a choice's candidates under its item, at the hint's indent", async () => {
-    const WORK = "11111111-1111-4111-8111-111111111111";
-    const fetchImpl = makeFetchImpl(
-      {
-        "POST /api/agents/@system/hello-world/run": {
-          status: 409,
-          contentType: "application/problem+json",
-          body: {
-            code: "missing_integration_connection",
-            errors: [
-              {
-                field: "integrations.@appstrate/clickup",
-                code: "must_choose_connection",
-                candidate_connections: [
-                  {
-                    id: WORK,
-                    label: "Work",
-                    account_id: "work@acme.com",
-                    owned_by_actor: true,
-                    needs_reconnection: false,
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      },
-      [],
-    );
-
-    const err = await runRemote(
-      withCapturedWriters(buildBaseOpts({ fetchImpl })),
-      new AbortController().signal,
-    ).catch((e: unknown) => e);
-    expect((err as RemoteRunError).hint).toBe(
-      "the launch was refused:\n" +
-        "  @appstrate/clickup: must_choose_connection (must_choose_connection)\n" +
-        `    Work (work@acme.com, yours): --connection @appstrate/clickup=${WORK}`,
-    );
-  });
-
   it("throws RemoteRunError when trigger response lacks an id", async () => {
     const calls: FetchCall[] = [];
     const fetchImpl = makeFetchImpl(

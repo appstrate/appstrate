@@ -181,38 +181,21 @@ integration_connections WHERE shared_with_org;` tells whether the step
 
 - **After the deploy, run
   `scripts/migration/0045-pin-connection-made-in-space.ts`, dry, then with
-  `--apply`, right after `0041 --apply` and `0043 --apply`** (#1929). Those
-  two widen members' connections to the organization, so a member who
-  connected one integration from two spaces owns two connections in each, and
-  a run binds by default only its actor's one own connection (see Changed):
-  from the widening on, their agents in those spaces answer
-  `must_choose_connection`, scheduled fires included. `0045` pins the
-  connection made in the space (a member pin, audited
-  `integration.member_pin.upserted` by the `system` actor) for an agent only
-  where the data shows that choice: the member owns several connections
-  usable in the space, exactly one made there and none of the others shared
-  into it, no org default covers the integration, neither they nor an admin
-  pinned the agent, and their most recent run of that agent in the space that
-  resolved the integration bound that connection by default, started after
-  every other one existed. With the app up and a `pg_dump` taken, run the dry
-  run
-  (`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-connection-made-in-space.ts`),
-  which writes nothing. Per organization it lists the pins and every enabled
-  schedule of those members that names no set for the integration, each with
-  a verdict, `binds through the pin` or `no pin: name the set`. Then run it
-  again with `--apply`: one transaction per organization, exit 1 if a pin is
-  left to write, and a second run finds nothing to pin. It does not settle
-  every case: a schedule listed `no pin: name the set` answers
-  `must_choose_connection` at its next fire until its owner names the set (on
-  the schedule, or with a member pin on the agent), and an agent it does not
-  pin asks on its next run. Details: `scripts/migration/README.md`.
+  `--apply`, right after `0041 --apply` and `0043 --apply`** (#1929), app up.
+  Those two leave a member who connected one integration from two spaces
+  owning two connections in each, where a run now asks (see Changed),
+  scheduled fires included. `0045` writes a member pin on the connection made
+  in the space for each agent whose last run there bound it by default; it
+  refuses to run while `0041` or `0043` has work left. Its dry run also lists
+  every enabled schedule of those members naming no set, `binds through the
+pin` or `no pin: name the set`: the latter answers `must_choose_connection`
+  at its next fire until its owner names the set (on the schedule, or a member
+  pin on the agent), and an agent it does not pin asks on its next run. A
+  second `--apply` pins nothing. Details: `scripts/migration/README.md`.
 
 - **API clients that write schedules must name their connection sets**
-  (#1929). The write of an enabled schedule running as its caller or as an
-  end user is refused (`409`) for an integration the actor owns a connection
-  for and no pin, org default or `connection_overrides` entry covers;
-  schedules already stored keep firing and are refused at their next such
-  write until the set is named (see Changed).
+  (#1929): the write of an enabled schedule is refused `409` until they do;
+  see Changed.
 
 ### Changed
 
@@ -492,10 +475,7 @@ integration_connections WHERE shared_with_org;` tells whether the step
   which client mints its new connections, never which existing ones serve
   it. The owner shares a connection with chosen spaces; losing access to a space
   withdraws that share only, and deleting a space withdraws it from every
-  share. With several of their own connections serving an integration, a
-  member's run answers `must_choose_connection`, wherever each was made, until
-  a pin, an org default or `connection_overrides` names the set (#1929).
-  Promoting a space OAuth client to the org widens its connections.
+  share. Promoting a space OAuth client to the org widens its connections.
 - **Remote MCP clients registered by DCR/CIMD live at the org tier**
   (#1870): one client per organization, integration, auth and authorization
   server, reused by every space. A client registered in a space before this
@@ -571,10 +551,9 @@ integration_connections WHERE shared_with_org;` tells whether the step
   own connections, its message is
   `Integration '<id>' needs a connection choice — pick one.` Its
   `candidate_connections` list every serving connection, own and shared,
-  least privilege first: the order of readiness `candidates[]` (#1913), so a
-  connection's scopes order the list and choose nothing. The credential proxy
-  outside a run binds by the same rule: the caller's one own connection, and
-  among several the one `X-Connection-Id` names.
+  least privilege first: the order of readiness `candidates[]` (#1913). The
+  credential proxy outside a run binds by the same rule: the caller's one own
+  connection, and among several the one `X-Connection-Id` names.
 
 - **BREAKING (API): the write of an enabled schedule names its connection
   sets** (#1929). For a schedule running as its caller or as an end user,
@@ -590,12 +569,11 @@ integration_connections WHERE shared_with_org;` tells whether the step
   schedule that runs as another member cannot name that member's own
   connections and is not asked: the write takes the actor's one own
   connection by default, and with several it answers `must_choose_connection`
-  listing only the connections shared in the space. Fires are unchanged: a
-  schedule stored without a set keeps firing as before, and its next enabled
-  write by such a caller is refused until the set is named; a write that
-  leaves the schedule disabled is not refused over it. The dashboard's
-  schedule form names the caller's own default connection when it saves a
-  schedule running as them.
+  listing only the connections shared in the space. The rule is on writes only:
+  a fire resolves like any run (above), and a write that leaves the schedule
+  disabled is not refused. The dashboard's schedule form names
+  the caller's own default connection when it saves a schedule running as
+  them.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in

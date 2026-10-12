@@ -49,18 +49,22 @@ describe("connectionRefusalLines", () => {
     ]);
   });
 
-  it("drops a candidate outside the contract's shape and keeps its item", () => {
-    const kept = { field: "integrations.@appstrate/gmail", code: "not_connected" };
-    expect(connectionRefusalLines(refusal([choice([{ label: "No id" }]), kept]))).toEqual([
-      "@appstrate/clickup: Integration '@appstrate/clickup' has 2 usable connections; choose one (must_choose_connection)",
-      "@appstrate/gmail: not_connected (not_connected)",
-    ]);
-  });
-
   it("prints an item with its valid candidate when another candidate is malformed", () => {
-    expect(connectionRefusalLines(refusal([choice([candidate({}), { label: "No id" }])]))).toEqual([
+    const kept = { field: "integrations.@appstrate/gmail", code: "not_connected" };
+    const noCandidate = {
+      ...choice([{ label: "No id" }]),
+      field: "integrations.@appstrate/notion",
+      message: "Integration '@appstrate/notion' has 2 usable connections; choose one",
+    };
+    expect(
+      connectionRefusalLines(
+        refusal([choice([candidate({}), { label: "No id" }]), noCandidate, kept]),
+      ),
+    ).toEqual([
       "@appstrate/clickup: Integration '@appstrate/clickup' has 2 usable connections; choose one (must_choose_connection)",
       `  Work (work@acme.com, yours): --connection @appstrate/clickup=${WORK}`,
+      "@appstrate/notion: Integration '@appstrate/notion' has 2 usable connections; choose one (must_choose_connection)",
+      "@appstrate/gmail: not_connected (not_connected)",
     ]);
   });
 
