@@ -176,101 +176,74 @@ describe("checkedConnectionIds", () => {
 });
 
 describe("placeCreatedConnection", () => {
-  it("binds only the created connection when the actor had no pick of their own", () => {
-    // Control: the picker DISPLAYS the org default as bound here. Joining onto
-    // that displayed set would write ["conn_org_default", "conn_new"] as a
-    // member pin and silently detach the member from later org-default changes.
-    const shown = displayedConnectionIds({
-      overrideMode: false,
+  const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) => `c${i}`);
+
+  it("joins the set the cascade's fallback binds", () => {
+    // The picker's base for an actor with no pick of their own: the resolved set.
+    const boundIds = checkedConnectionIds({
+      draft: null,
       explicitIds: null,
-      resolvedIds: ["conn_org_default"],
+      resolvedIds: ["conn_fallback"],
+      candidateIds: ["conn_fallback", "conn_new"],
     });
-    expect(shown).toEqual(["conn_org_default"]);
+    expect(placeCreatedConnection({ boundIds, createdId: "conn_new" })).toEqual([
+      "conn_fallback",
+      "conn_new",
+    ]);
+  });
+
+  it("joins an explicit pick, after its members", () => {
     expect(
-      placeCreatedConnection({
-        explicitIds: null,
-        checkedIds: shown,
-        createdId: "conn_new",
-      }),
-    ).toEqual({ persist: ["conn_new"] });
+      placeCreatedConnection({ boundIds: ["conn_a", "conn_b"], createdId: "conn_new" }),
+    ).toEqual(["conn_a", "conn_b", "conn_new"]);
   });
 
   it("replaces a stored 'no connection' with the created connection", () => {
-    expect(
-      placeCreatedConnection({ explicitIds: [], checkedIds: [], createdId: "conn_new" }),
-    ).toEqual({ persist: ["conn_new"] });
+    expect(placeCreatedConnection({ boundIds: [], createdId: "conn_new" })).toEqual(["conn_new"]);
   });
 
-  it("only ticks it beside an explicit pick: a pin never grows into a set unasked", () => {
-    expect(
-      placeCreatedConnection({
-        explicitIds: ["conn_mine"],
-        checkedIds: ["conn_mine"],
-        createdId: "conn_new",
-      }),
-    ).toEqual({ draft: ["conn_mine", "conn_new"] });
-  });
-
-  it("ticks onto the unsaved ticks, not the stored pick", () => {
-    expect(
-      placeCreatedConnection({
-        explicitIds: ["conn_mine"],
-        checkedIds: ["conn_other"],
-        createdId: "conn_new",
-      }),
-    ).toEqual({ draft: ["conn_other", "conn_new"] });
-  });
-
-  it("leaves the ticks as they are at the cap", () => {
-    const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) => `c${i}`);
-    expect(
-      placeCreatedConnection({ explicitIds: ["c0"], checkedIds: full, createdId: "conn_new" }),
-    ).toEqual({ draft: full });
+  it("returns a full set unchanged: the cap refuses the addition", () => {
+    expect(placeCreatedConnection({ boundIds: full, createdId: "conn_new" })).toBe(full);
   });
 
   describe("replacing an under-scoped member", () => {
-    it("binds only the created connection when the member was the cascade's fallback", () => {
+    it("swaps it in place within a set, which keeps its size and order", () => {
       expect(
         placeCreatedConnection({
-          explicitIds: null,
-          checkedIds: ["conn_old"],
+          boundIds: ["conn_a", "conn_old", "conn_b"],
           createdId: "conn_new",
           replacing: "conn_old",
         }),
-      ).toEqual({ persist: ["conn_new"] });
+      ).toEqual(["conn_a", "conn_new", "conn_b"]);
     });
 
-    it("writes the swap of a sole pin straight away, so the fix outlives the closed menu", () => {
+    it("swaps a sole bound connection for the created one", () => {
       expect(
         placeCreatedConnection({
-          explicitIds: ["conn_old"],
-          checkedIds: ["conn_old"],
+          boundIds: ["conn_old"],
           createdId: "conn_new",
           replacing: "conn_old",
         }),
-      ).toEqual({ persist: ["conn_new"] });
+      ).toEqual(["conn_new"]);
     });
 
-    it("swaps it in place within a pinned set, which keeps its size", () => {
-      expect(
-        placeCreatedConnection({
-          explicitIds: ["conn_a", "conn_old", "conn_b"],
-          checkedIds: ["conn_a", "conn_old", "conn_b"],
-          createdId: "conn_new",
-          replacing: "conn_old",
-        }),
-      ).toEqual({ persist: ["conn_a", "conn_new", "conn_b"] });
+    it("swaps inside a full set: the place it frees is the one it takes", () => {
+      const swapped = placeCreatedConnection({
+        boundIds: full,
+        createdId: "conn_new",
+        replacing: "c0",
+      });
+      expect(swapped).toEqual(["conn_new", ...full.slice(1)]);
     });
 
-    it("swaps an unsaved tick in the draft when the pin does not hold it", () => {
+    it("adds plainly when the set does not hold the replaced member", () => {
       expect(
         placeCreatedConnection({
-          explicitIds: ["conn_mine"],
-          checkedIds: ["conn_mine", "conn_old"],
+          boundIds: ["conn_a"],
           createdId: "conn_new",
           replacing: "conn_old",
         }),
-      ).toEqual({ draft: ["conn_mine", "conn_new"] });
+      ).toEqual(["conn_a", "conn_new"]);
     });
   });
 });

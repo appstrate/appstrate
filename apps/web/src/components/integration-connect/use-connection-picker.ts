@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import {
   invalidateIntegrationQueries,
@@ -242,14 +243,15 @@ export function useConnectionPicker(
   const toggle = (connectionId: string) => setDraft(toggleCapped(checkedIds, connectionId));
 
   /**
-   * A NEW connection with the agent's scopes, which takes the place of `replacing` (an
-   * under-scoped member) in the pick. Never sends a `connection_id`: the server would union the
-   * scopes into that connection, widening every agent bound to it.
+   * Connects a NEW connection with the agent's scopes, then writes the bound set with it added —
+   * in the place of `replacing` (an under-scoped member) when given. Never sends a
+   * `connection_id`: the server would union the scopes into that connection, widening every
+   * agent bound to it.
    */
   const triggerConnect = async (authKey: string, opts?: { replacing?: string }) => {
     if (!auths[authKey]) return;
     // The popup cannot return the new id: it is the candidate this snapshot lacks.
-    const before = new Set(candidates.map((c) => c.id));
+    const before = new Set(candidateIds);
     // Consent asks for what THIS agent needs on top of the auth's `default_scopes`, which the
     // server always requests. Non-OAuth auths connect at their fixed credentials.
     const scopes = requiredScopesFor(authKey);
@@ -262,27 +264,34 @@ export function useConnectionPicker(
     });
     // A settled popup has refetched the readiness verdict: read it, never ask again.
     if (!settled) return;
-    let added: IntegrationCandidate | undefined;
+    let refetchedIds: string[];
     try {
-      added = readResolution()?.candidates.find((c) => !before.has(c.id));
+      refetchedIds = (readResolution()?.candidates ?? []).map((c) => c.id);
     } catch (err) {
       toastError(err);
       return;
     }
-    if (!added) return;
+    const createdId = refetchedIds.find((id) => !before.has(id));
+    if (!createdId) return;
     const placed = placeCreatedConnection({
-      explicitIds,
-      checkedIds,
-      createdId: added.id,
+      // What the picker bound when the connect started (the refetched cascade may already count
+      // the created connection), without the draft, kept to the ids the refetch still offers.
+      boundIds: checkedConnectionIds({
+        draft: null,
+        explicitIds,
+        resolvedIds: resolvedConnectionIds,
+        candidateIds: refetchedIds,
+      }),
+      createdId,
       ...(opts?.replacing ? { replacing: opts.replacing } : {}),
     });
-    if ("persist" in placed) {
-      await persist(placed.persist);
+    if (!placed.includes(createdId)) {
+      toast.warning(
+        t("detail.integrationMemberPicker.maxReached", { max: MAX_CONNECTIONS_PER_INTEGRATION }),
+      );
       return;
     }
-    // The menu closed on the connect click; reopen it on the new tick so "Valider" is at hand.
-    setDraft(placed.draft);
-    setOpen(true);
+    await persist(placed);
   };
 
   // The two in-place writes. A settled popup has already refetched the active integration queries.

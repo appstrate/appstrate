@@ -14,7 +14,8 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { isValidElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { $api, type components } from "../../../api/client.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { $api, client, type components } from "../../../api/client.ts";
 import { ApiError } from "../../../api/errors.ts";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
@@ -762,13 +763,17 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
   type Readiness = ReturnType<typeof readiness>;
   type OpenPopup = NonNullable<ConnectionPickerDeps["openPopup"]>;
 
-  const before = async () => readiness(resolution({}));
-  const withAdded = async () =>
-    readiness(
-      resolution({
-        candidates: [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")],
-      }),
-    );
+  const answer = (res: Partial<Resolution>) => async () => readiness(resolution(res));
+  const before = answer({});
+  const ALL = [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")];
+  const withAdded = answer({ candidates: ALL });
+  // The fallback binds `web` alone; with a second connection to choose from it binds nothing.
+  const fallbackBefore = answer({ source: "fallback_auto", resolved_connection_ids: [WEB] });
+  const fallbackAfter = answer({
+    source: null,
+    error_code: "must_choose_connection",
+    candidates: ALL,
+  });
 
   /** The readiness query mounted as the picker holds it: active, each fetch answered in turn. */
   async function mountReadiness(qc: QueryClient, answers: Array<() => Promise<Readiness>>) {
@@ -813,28 +818,34 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     return null;
   }
 
-  /** Override mode, so a created connection is written straight through `onChange`. */
-  async function setup(
+  async function mount(
     answers: Array<() => Promise<Readiness>>,
     popup: (qc: QueryClient) => OpenPopup,
-    stored: string[] | null = null,
+    persistence: ConnectionPickerPersistence,
   ) {
     const qc = new QueryClient();
     const mounted = await mountReadiness(qc, answers);
-    const picked: Array<string[] | null> = [];
     const pickers: Array<ConnectionPicker | null> = [];
     render(
-      <Probe
-        persistence={{ mode: "override", value: stored, onChange: (ids) => picked.push(ids) }}
-        openPopup={popup(qc)}
-        onPicker={(p) => pickers.push(p)}
-      />,
+      <Probe persistence={persistence} openPopup={popup(qc)} onPicker={(p) => pickers.push(p)} />,
       { queryClient: qc },
     );
     mounted.rebind();
     const picker = pickers[0];
     if (!picker) throw new Error("the readiness verdict should be loaded");
-    return { mounted, picked, picker };
+    return { mounted, picker };
+  }
+
+  /** Override mode: the written set is what `onChange` receives. */
+  async function setup(
+    answers: Array<() => Promise<Readiness>>,
+    popup: (qc: QueryClient) => OpenPopup,
+    stored: string[] | null = null,
+  ) {
+    const picked: Array<string[] | null> = [];
+    const onChange = (ids: string[] | null) => picked.push(ids);
+    const persistence = { mode: "override" as const, value: stored, onChange };
+    return { ...(await mount(answers, popup, persistence)), picked };
   }
 
   /** The real popup's contract: `true` once the active integration queries were refetched. */
@@ -845,12 +856,50 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
       return true;
     };
 
-  it("writes the created connection, read off the one refetch the popup awaited", async () => {
-    const { mounted, picked, picker } = await setup([before, withAdded], settles);
+  it("adds the created connection to the set the fallback bound, read off the one refetch the popup awaited", async () => {
+    const { mounted, picked, picker } = await setup([fallbackBefore, fallbackAfter], settles);
     await picker.triggerConnect("primary");
-    expect(picked).toEqual([[ADDED]]);
+    expect(picked).toEqual([[WEB, ADDED]]);
     // The mount, then the popup's refetch: reading after it asks nothing more.
     expect(mounted.asked()).toBe(2);
+    mounted.unsubscribe();
+  });
+
+  it("writes the fallback's set with the created connection as the member's pin", async () => {
+    const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
+    try {
+      const { mounted, picker } = await mount(
+        [fallbackBefore, fallbackAfter, fallbackAfter],
+        settles,
+        { mode: "pin" },
+      );
+      await picker.triggerConnect("primary");
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([path, init]) => [path, init.body])).toEqual([
+        [
+          "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+          { connection_ids: [WEB, ADDED] },
+        ],
+      ]);
+      // The pin write moved the verdict: it is read again.
+      expect(mounted.asked()).toBe(3);
+      mounted.unsubscribe();
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("adds the created connection to a stored pick", async () => {
+    const { mounted, picked, picker } = await setup([before, withAdded], settles, [WEB]);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[WEB, ADDED]]);
+    mounted.unsubscribe();
+  });
+
+  it("replaces a stored 'no connection' with the created connection, never the cascade's set", async () => {
+    const { mounted, picked, picker } = await setup([fallbackBefore, fallbackAfter], settles, []);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[ADDED]]);
     mounted.unsubscribe();
   });
 
@@ -858,6 +907,56 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     const { mounted, picked, picker } = await setup([before, withAdded], settles, [WEB, DB]);
     await picker.triggerConnect("primary", { replacing: WEB });
     expect(picked).toEqual([[ADDED, DB]]);
+    mounted.unsubscribe();
+  });
+
+  it("leaves out a stored member the refetch offers no more", async () => {
+    const dbGone = answer({ candidates: [candidate(WEB, "web"), candidate(ADDED, "new")] });
+    const { mounted, picked, picker } = await setup([before, dbGone], settles, [WEB, DB]);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[WEB, ADDED]]);
+    mounted.unsubscribe();
+  });
+
+  it("writes nothing at the cap and says so", async () => {
+    const warned = spyOn(toast, "warning").mockImplementation(() => 0);
+    try {
+      const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) =>
+        candidate(`c${i}`, `c${i}`),
+      );
+      const fullIds = full.map((c) => c.id);
+      const { mounted, picked, picker } = await setup(
+        [answer({ candidates: full }), answer({ candidates: [...full, candidate(ADDED, "new")] })],
+        settles,
+        fullIds,
+      );
+      await picker.triggerConnect("primary");
+      expect(picked).toEqual([]);
+      expect(warned.mock.calls as unknown[][]).toEqual([
+        [
+          i18n.t("agents:detail.integrationMemberPicker.maxReached", {
+            max: MAX_CONNECTIONS_PER_INTEGRATION,
+          }),
+        ],
+      ]);
+      mounted.unsubscribe();
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  it("swaps at the cap: the replaced member frees the place", async () => {
+    const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) =>
+      candidate(`c${i}`, `c${i}`),
+    );
+    const fullIds = full.map((c) => c.id);
+    const { mounted, picked, picker } = await setup(
+      [answer({ candidates: full }), answer({ candidates: [...full, candidate(ADDED, "new")] })],
+      settles,
+      fullIds,
+    );
+    await picker.triggerConnect("primary", { replacing: "c0" });
+    expect(picked).toEqual([[ADDED, ...fullIds.slice(1)]]);
     mounted.unsubscribe();
   });
 
