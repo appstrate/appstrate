@@ -25,7 +25,7 @@
  * run's shadow. Each pin is audited `integration.member_pin.upserted` by the `system` actor.
  *
  * Schedules, listed and never written: every enabled schedule running as a member of the
- * organization in a space, for each integration its agent declares (draft manifest only) of which
+ * organization in a space, for each integration its agent declares (its draft or any published version) of which
  * that member owns several connections usable there, wherever they were made, when the schedule's
  * `connection_overrides` names no set for it, no admin pin governs the agent and no org default the
  * integration. Each reads `binds through the pin` (the member's on that agent, existing or written
@@ -36,28 +36,32 @@
  * Rows: UNMEASURED — the state it repairs exists only after `0041 --apply`, which no reachable
  * database has run. Rehearse on a restored dump, after `0041` and `0043` there.
  *
- * Run after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first; its second line counts the
- * user-owned org-scoped connections, 0 while `0041` has not run. Refuses an empty `DATABASE_URL`
+ * Run after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first; it refuses to run while
+ * `0041` or `0043` has work left. Refuses an empty `DATABASE_URL`
  * (the client would open `./data/pglite`). One transaction per organization; dry run by default
  * (each rolled back), `--apply` commits each. With `--apply`, the pins left to write must be 0,
  * else it exits 1. Idempotent: a second run finds nothing to pin.
  */
 
 import { parseArgs } from "node:util";
-import { and, desc, eq, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections as c,
+  integrationOauthClients,
   integrationOrgDefaults,
   integrationPins,
   organizationMembers,
   packages,
+  packageVersions,
   runs,
   schedules,
 } from "@appstrate/db/schema";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { DbOrTx } from "../../apps/api/src/lib/db-helpers.ts";
+import { TO_WIDEN } from "./0041-widen-connections-to-org-scope.ts";
+import { SPACE_AUTO } from "./0043-promote-auto-clients-to-org.ts";
 
 class DryRunRollback extends Error {}
 
@@ -132,6 +136,34 @@ async function agentsBoundByDefault(
     .map((run) => run.agentId);
 }
 
+/**
+ * The integrations each agent declares, by its draft and by every version not yanked: a fire runs a
+ * published version, so a draft that dropped one still reaches it.
+ */
+async function declaredByAgent(
+  dbx: DbOrTx,
+  firing: { agentId: string; draftManifest: unknown }[],
+): Promise<Map<string, Set<string>>> {
+  const declared = new Map<string, Set<string>>();
+  const declare = (agentId: string, manifest: unknown) => {
+    const ids = declared.get(agentId) ?? new Set<string>();
+    for (const entry of parseManifestIntegrations((manifest ?? {}) as Record<string, unknown>)) {
+      ids.add(entry.id);
+    }
+    declared.set(agentId, ids);
+  };
+  for (const schedule of firing) declare(schedule.agentId, schedule.draftManifest);
+  const agentIds = [...new Set(firing.map((schedule) => schedule.agentId))];
+  if (agentIds.length > 0) {
+    const versions = await dbx
+      .select({ packageId: packageVersions.packageId, manifest: packageVersions.manifest })
+      .from(packageVersions)
+      .where(and(inArray(packageVersions.packageId, agentIds), eq(packageVersions.yanked, false)));
+    for (const version of versions) declare(version.packageId, version.manifest);
+  }
+  return declared;
+}
+
 /** The member pins `orgId` is owed, and its enabled schedules naming no set among several. */
 async function planOrg(dbx: DbOrTx, reach: Reach, orgId: string): Promise<Plan> {
   const members = await dbx
@@ -193,6 +225,7 @@ async function planOrg(dbx: DbOrTx, reach: Reach, orgId: string): Promise<Plan> 
         ),
       )
       .orderBy(schedules.id);
+    const declaredIds = await declaredByAgent(dbx, firing);
 
     for (const integrationId of [...new Set(own.map((row) => row.integrationId))].sort()) {
       const usable = own.filter((row) => row.integrationId === integrationId);
@@ -237,9 +270,7 @@ async function planOrg(dbx: DbOrTx, reach: Reach, orgId: string): Promise<Plan> 
       for (const schedule of firing) {
         if (schedule.connectionOverrides?.[integrationId] !== undefined) continue;
         if (byAdmin.has(schedule.agentId)) continue;
-        const manifest = (schedule.draftManifest ?? {}) as Record<string, unknown>;
-        const declared = parseManifestIntegrations(manifest).map((entry) => entry.id);
-        if (!declared.includes(integrationId)) continue;
+        if (!declaredIds.get(schedule.agentId)?.has(integrationId)) continue;
         plan.schedules.push({
           scheduleId: schedule.id,
           spaceId,
@@ -275,11 +306,19 @@ export async function runPinConnectionMadeInSpace(options: {
     ),
   );
   out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
-  const [orgScoped] = await db
+  const [widen] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(c)
-    .where(and(isNotNull(c.userId), isNull(c.spaceId)));
-  out(`user-owned org-scoped connections: ${orgScoped!.n}`);
+    .where(TO_WIDEN);
+  const [autoLeft] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(integrationOauthClients)
+    .where(SPACE_AUTO);
+  out(`left to widen (0041): ${widen!.n}`);
+  out(`space-tier auto clients left (0043): ${autoLeft!.n}`);
+  if (widen!.n !== 0 || autoLeft!.n !== 0) {
+    throw new Error("0041 or 0043 has work left — run them with --apply first");
+  }
 
   const planned = async () => {
     const orgs = await db
@@ -302,6 +341,8 @@ export async function runPinConnectionMadeInSpace(options: {
 
   const result: Plan = { pins: [], schedules: [] };
   for (const { orgId } of perOrg) {
+    const batch: Plan = { pins: [], schedules: [] };
+    const lines: string[] = [];
     try {
       await db.transaction(async (tx) => {
         await tx.execute("SET LOCAL lock_timeout = '5s'");
@@ -309,15 +350,20 @@ export async function runPinConnectionMadeInSpace(options: {
         // As `validatePinTargets` asks, each connection is its member's, of the integration and
         // usable in the space; that the agent is active there is not checked.
         const { pins, schedules: unnamed } = await planOrg(tx, reach, orgId);
-        out(`org ${orgId}: pinned ${pins.length}, schedules naming no set ${unnamed.length}`);
         for (const pin of pins) {
-          await tx.insert(integrationPins).values({
-            spaceId: pin.spaceId,
-            packageId: pin.agentId,
-            integrationId: pin.integrationId,
-            userId: pin.userId,
-            connectionIds: [pin.connectionId],
-          });
+          const inserted = await tx
+            .insert(integrationPins)
+            .values({
+              spaceId: pin.spaceId,
+              packageId: pin.agentId,
+              integrationId: pin.integrationId,
+              userId: pin.userId,
+              connectionIds: [pin.connectionId],
+            })
+            .onConflictDoNothing()
+            .returning({ id: integrationPins.id });
+          // Pinned meanwhile by the member: nothing to write or to report for it.
+          if (inserted.length === 0) continue;
           await tx.insert(auditEvents).values({
             orgId,
             spaceId: pin.spaceId,
@@ -327,22 +373,30 @@ export async function runPinConnectionMadeInSpace(options: {
             resourceId: pinAuditResourceId(pin.agentId, pin.integrationId),
             after: { connectionIds: [pin.connectionId], userId: pin.userId, reason: "migrated" },
           });
-          out(
+          batch.pins.push(pin);
+          lines.push(
             `  pin ${pin.agentId} / ${pin.integrationId} → ${pin.connectionId} (space ${pin.spaceId}, member ${pin.userId})`,
           );
         }
         for (const row of unnamed) {
-          out(
+          lines.push(
             `  schedule ${row.scheduleId}: ${row.agentId} / ${row.integrationId} (space ${row.spaceId}, member ${row.userId}) — ${row.verdict}`,
           );
         }
-        result.pins.push(...pins);
-        result.schedules.push(...unnamed);
+        batch.schedules.push(...unnamed);
         if (!apply) throw new DryRunRollback();
       });
     } catch (error) {
-      if (!(error instanceof DryRunRollback)) throw error;
+      if (!(error instanceof DryRunRollback)) {
+        throw new Error(`org ${orgId}: ${getErrorMessage(error)}`, { cause: error });
+      }
     }
+    result.pins.push(...batch.pins);
+    result.schedules.push(...batch.schedules);
+    out(
+      `org ${orgId}: pinned ${batch.pins.length}, schedules naming no set ${batch.schedules.length}`,
+    );
+    for (const line of lines) out(line);
   }
   if (!apply) {
     out("0045: DRY RUN — rolled back, nothing written. Re-run with --apply to commit.");
@@ -350,7 +404,7 @@ export async function runPinConnectionMadeInSpace(options: {
   }
   const left = (await planned()).reduce((sum, row) => sum + row.pins, 0);
   out(`left to pin: ${left}`);
-  if (left !== 0) throw new Error("pins are left to write");
+  if (left !== 0) throw new Error("pins are left to write after --apply");
   out("0045: APPLIED — committed.");
   return result;
 }

@@ -39,7 +39,7 @@ import type { WidenedConnection } from "../../apps/api/src/services/integration-
 
 class DryRunRollback extends Error {}
 
-const SPACE_AUTO: SQL = and(eq(ioc.autoProvisioned, true), isNotNull(ioc.spaceId))!;
+export const SPACE_AUTO: SQL = and(eq(ioc.autoProvisioned, true), isNotNull(ioc.spaceId))!;
 
 export interface OrgAutoClientReport {
   orgId: string;

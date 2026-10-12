@@ -21,7 +21,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 class DryRunRollback extends Error {}
 
 /** User-owned, space-scoped, not minted by a space client. Table-qualified: never alias the table. */
-const TO_WIDEN: SQL = sql`${c.spaceId} IS NOT NULL AND ${c.endUserId} IS NULL AND NOT EXISTS (
+export const TO_WIDEN: SQL = sql`${c.spaceId} IS NOT NULL AND ${c.endUserId} IS NULL AND NOT EXISTS (
   SELECT 1 FROM ${integrationOauthClients} o WHERE o.id::text = ${c.clientRef} AND o.space_id IS NOT NULL)`;
 
 export interface WidenedConnection {

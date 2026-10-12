@@ -82,12 +82,13 @@ the root `CHANGELOG.md` (Operators).
 3. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
 4. Start the app.
 5. `0041` dry run, then `--apply`: connections widened to org scope.
-6. `0042` dry run, then `--apply`: model subscriptions made personal. It refuses four cases per
+6. `0043` dry run, then `--apply`: space-tier auto-provisioned OAuth clients moved to their org.
+7. `0045` dry run, then `--apply`: the connection a member made in a space pinned for the agents that bound it there by default. It lists the enabled schedules left naming no set; it refuses to run while `0041` or `0043` has work left.
+8. `0042` dry run, then `--apply`: model subscriptions made personal. It refuses four cases per
    organization (an aliased model bound to a subscription, a `pending` or `running` run pinned to
    one, a schedule whose model override it would unbind, two models it would unbind onto one pair),
    committing nothing for that organization, and fails at the end, after the others have committed,
    on an unreadable org-owned blob. Fix the case and re-run it: committed organizations are a no-op.
-7. `0043` dry run, then `--apply`: space-tier auto-provisioned OAuth clients moved to their org.
 
 ## The split
 
@@ -1250,7 +1251,7 @@ on a deleted agent or an inline run's shadow package. Each pin is audited
 `integration.member_pin.upserted` by the `system` actor (`reason: migrated`).
 
 It also lists, without writing, every enabled schedule running as a member of the organization in
-a space, for each integration its agent declares (draft manifest only) of which that member owns
+a space, for each integration its agent declares (its draft or any published version) of which that member owns
 several connections usable there, wherever they were made (a space they never connected from
 included), when the schedule's `connection_overrides` names no set for it, no admin pin governs the
 agent and no org default the integration: `binds through the pin` (the member's pin on that agent,
@@ -1259,8 +1260,8 @@ existing or written here) or `no pin: name the set` (its next fire answers
 users' schedules are not listed: their connections stay in their space
 (`integration_connections_end_user_is_space`), so the widening changes nothing for them.
 
-It prints the count of user-owned org-scoped connections (0 while `0041` has not run: nothing to
-find yet), the pins to write and the schedules with no pin, then per organization (one transaction
+It prints what `0041` and `0043` have left and refuses to run unless both are 0, then the pins to
+write and the schedules with no pin, then per organization (one transaction
 each) every pin and every listed schedule with its space, member and verdict;
 `grep 'no pin: name the set'` is the list to act on. With `--apply`, the pins left to write must
 then be 0. Rows: UNMEASURED, the state it repairs exists only after `0041 --apply`, which no

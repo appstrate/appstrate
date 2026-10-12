@@ -16,6 +16,7 @@ import {
   auditEvents,
   integrationConnections,
   integrationConnectionShares,
+  integrationOauthClients,
   integrationOrgDefaults,
   integrationPins,
   organizationMembers,
@@ -33,6 +34,7 @@ import {
 import {
   seedAgent,
   seedPackage,
+  seedPackageVersion,
   seedRun,
   seedSchedule,
   seedSpace,
@@ -83,10 +85,16 @@ const lines: string[] = [];
 const run = (apply: boolean) =>
   runPinConnectionMadeInSpace({ apply, out: (line) => lines.push(line) });
 
-/** An org-scoped connection made in `madeIn`; `scoped`: a space client's, serving `madeIn` only. */
+/** An org-scoped connection made in `madeIn`; `scoped`: space-scoped there, `clientRef` its client. */
 async function seedConnection(
   madeIn: string,
-  opts: { scoped?: boolean; userId?: string; orgId?: string; createdAt?: Date } = {},
+  opts: {
+    scoped?: boolean;
+    clientRef?: string;
+    userId?: string;
+    orgId?: string;
+    createdAt?: Date;
+  } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
@@ -99,10 +107,27 @@ async function seedConnection(
       originSpaceId: opts.scoped ? null : madeIn,
       userId: opts.userId ?? ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+      clientRef: opts.clientRef ?? null,
       label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       createdAt: opts.createdAt ?? new Date("2026-01-01T00:00:00Z"),
     })
     .returning({ id: integrationConnections.id });
+  return row!.id;
+}
+
+/** A space-tier client of the integration: the connections it mints serve that space only. */
+async function seedSpaceClient(spaceId: string): Promise<string> {
+  const [row] = await db
+    .insert(integrationOauthClients)
+    .values({
+      orgId: ctx.orgId,
+      spaceId,
+      integrationId: INTEGRATION,
+      authKey: "primary",
+      clientId: `cid-${crypto.randomUUID().slice(0, 8)}`,
+      clientSecretEncrypted: "x",
+    })
+    .returning({ id: integrationOauthClients.id });
   return row!.id;
 }
 
@@ -116,9 +141,17 @@ async function seedBoundRun(
     spaceId?: string;
     orgId?: string;
     scheduleId?: string;
+    /** A second connection of the integration the same run bound. */
+    alsoBound?: string;
   } = {},
 ): Promise<void> {
   const source = opts.source ?? "fallback_auto";
+  const bound = (id: string) => ({
+    connectionId: id,
+    source,
+    label: "Connexion",
+    accountId: "acct",
+  });
   await seedRun({
     packageId: opts.agentId ?? AGENT,
     orgId: opts.orgId ?? ctx.orgId,
@@ -127,7 +160,9 @@ async function seedBoundRun(
     scheduleId: opts.scheduleId,
     startedAt: new Date(Date.UTC(2026, 1, 1, 0, minute++)),
     resolvedConnections: {
-      [INTEGRATION]: [{ connectionId, source, label: "Connexion", accountId: "acct" }],
+      [INTEGRATION]: opts.alsoBound
+        ? [bound(connectionId), bound(opts.alsoBound)]
+        : [bound(connectionId)],
     },
   });
 }
@@ -209,7 +244,8 @@ describe("0045 — the connection made in a space pinned for the agents binding 
 
     expect(await run(false)).toEqual(planned);
     expect(lines[0]).toStartWith("database: ");
-    expect(lines[1]).toBe("user-owned org-scoped connections: 2");
+    expect(lines[1]).toBe("left to widen (0041): 0");
+    expect(lines[2]).toBe("space-tier auto clients left (0043): 0");
     expect(lines).toContain("to pin: 1");
     expect(lines).toContain("schedules with no pin: 0");
     expect(lines.at(-1)).toContain("DRY RUN");
@@ -244,6 +280,16 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     expect(lines).toContain("left to pin: 0");
     expect(await pinRows()).toHaveLength(1);
     expect(await pinAudits()).toHaveLength(1);
+  });
+
+  it("refuses while 0041 has a connection left to widen, writing nothing", async () => {
+    const { made } = await seedBothSpaces();
+    await seedBoundRun(made);
+    await seedConnection(elsewhere, { scoped: true });
+
+    await expect(run(true)).rejects.toThrow("0041 or 0043 has work left");
+    expect(await pinRows()).toEqual([]);
+    expect(await pinAudits()).toEqual([]);
   });
 
   it("the pin is what the member's next run of the agent binds there", async () => {
@@ -285,6 +331,24 @@ describe("0045 — the connection made in a space pinned for the agents binding 
     expect(await pinRows()).toEqual([]);
   });
 
+  it("lists a schedule whose published version declares the integration its draft dropped", async () => {
+    await seedBothSpaces();
+    const published = "@mig0045/published";
+    await seedAgent({ id: published, orgId: ctx.orgId });
+    await seedPackageVersion({
+      packageId: published,
+      version: "1.0.0",
+      manifest: { ...agentManifest, name: published },
+    });
+    const schedule = await seedMemberSchedule({ packageId: published });
+
+    const { pins, schedules } = await run(true);
+    expect(pins).toEqual([]);
+    expect(schedules.map((row) => [row.scheduleId, row.verdict])).toEqual([
+      [schedule.id, "no pin: name the set"],
+    ]);
+  });
+
   describe("writes no pin and lists no schedule when", () => {
     /** `--apply` over the fixture and an enabled schedule of the member naming no set. */
     async function expectNothing(): Promise<void> {
@@ -303,7 +367,10 @@ describe("0045 — the connection made in a space pinned for the agents binding 
 
     it("their other connection is scoped to another space, which it does not leave", async () => {
       await seedBoundRun(await seedConnection(here));
-      await seedConnection(elsewhere, { scoped: true });
+      await seedConnection(elsewhere, {
+        scoped: true,
+        clientRef: await seedSpaceClient(elsewhere),
+      });
       await expectNothing();
     });
 
@@ -396,6 +463,25 @@ describe("0045 — the connection made in a space pinned for the agents binding 
       const shadow = "@mig0045/shadow";
       await seedPackage({ id: shadow, orgId: ctx.orgId, ephemeral: true });
       await seedBoundRun((await seedBothSpaces()).made, { agentId: shadow });
+      await expectNoPin();
+    });
+
+    it("their last default binding of the agent was in another space, none in the one made in", async () => {
+      const { made } = await seedBothSpaces();
+      await seedBoundRun(made, { spaceId: elsewhere });
+      await expectNoPin();
+    });
+
+    it("the last run bound two connections of the integration, not one", async () => {
+      const { made, other } = await seedBothSpaces();
+      await seedBoundRun(made, { alsoBound: other });
+      await expectNoPin();
+    });
+
+    it("the run started the very instant the other connection was created, not after it", async () => {
+      const made = await seedConnection(here);
+      await seedBoundRun(made);
+      await seedConnection(elsewhere, { createdAt: new Date("2026-02-01T00:00:00Z") });
       await expectNoPin();
     });
   });
