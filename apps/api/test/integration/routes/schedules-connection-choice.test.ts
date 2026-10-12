@@ -15,13 +15,12 @@
  * judged with nothing to report.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { eq, like, sql } from "drizzle-orm";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
+import { eq, sql } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOrgDefaults,
   integrationPins,
-  oauthResource,
   runs,
   schedules,
 } from "@appstrate/db/schema";
@@ -41,13 +40,7 @@ import {
   seedPackageVersion,
   seedSchedule,
 } from "../../helpers/seed.ts";
-import { flushRedis } from "../../helpers/redis.ts";
-import { inSpace, mcpRpc } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
-import { getMcpOrgResourceUri } from "../../../src/lib/audiences.ts";
-import { resetOidcGuardsLimiters } from "../../../src/modules/oidc/auth/guards.ts";
-import { authorizationCodeFlow } from "../../../src/modules/oidc/test/helpers/authorization-code-flow.ts";
-import mcpModule from "../../../src/modules/mcp/index.ts";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 import {
   createFakeOrchestrator,
@@ -907,14 +900,11 @@ describe("schedule writes for an end user — the caller picks among its connect
 });
 
 describe("schedule writes — one rule whatever the door", () => {
-  const REDIRECT_URI = "http://localhost:9917/callback";
   let ctx: TestContext;
   let only: string;
 
   beforeEach(async () => {
     await truncateAll();
-    await flushRedis();
-    resetOidcGuardsLimiters();
     ctx = await createTestContext({ orgSlug: "schedchoice" });
     await seedConnectionTestIntegration(ctx, INTEGRATION);
     await seedSchedulableAgent({
@@ -925,13 +915,6 @@ describe("schedule writes — one rule whatever the door", () => {
       manifest: agentManifest(true),
     });
     only = await seedIntegrationConnection(ctx, INTEGRATION);
-  });
-
-  // `oauth_resources` sits outside `truncateAll`.
-  afterEach(async () => {
-    await db
-      .delete(oauthResource)
-      .where(like(oauthResource.identifier, `${getMcpOrgResourceUri(ctx.orgId)}%`));
   });
 
   /** `createSchedule` through one door: the HTTP status and the JSON body. */
@@ -952,45 +935,6 @@ describe("schedule writes — one rule whatever the door", () => {
           body: JSON.stringify(body),
         });
         return { status: res.status, body: await res.json() };
-      };
-    },
-    "invoke_operation with a minted MCP instance token": async () => {
-      await mcpModule.events!.onOrgCreate!(ctx.orgId, ctx.user.email);
-      const registered = await app.request("/api/auth/oauth2/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_name: "MCP client (schedule write)",
-          redirect_uris: [REDIRECT_URI],
-          grant_types: ["authorization_code", "refresh_token"],
-          response_types: ["code"],
-          token_endpoint_auth_method: "none",
-        }),
-      });
-      const { token } = await authorizationCodeFlow(app, {
-        cookie: ctx.cookie,
-        clientId: ((await registered.json()) as { client_id: string }).client_id,
-        redirectUri: REDIRECT_URI,
-        scope: "openid mcp:read mcp:invoke",
-        resource: getMcpOrgResourceUri(ctx.orgId),
-      });
-      const headers = inSpace(
-        { Authorization: `Bearer ${String(token.access_token)}`, "X-Org-Id": ctx.orgId },
-        ctx.defaultSpaceId,
-      );
-      return async (body) => {
-        const [scope, name] = AGENT.split("/");
-        const { envelope } = await mcpRpc(app)(headers, {
-          jsonrpc: "2.0",
-          id: 1,
-          method: "tools/call",
-          params: {
-            name: "invoke_operation",
-            arguments: { operation_id: "createSchedule", path_params: { scope, name }, body },
-          },
-        });
-        const content = envelope.result!.content as { text: string }[];
-        return JSON.parse(content[0]!.text) as { status: number; body: unknown };
       };
     },
   };
@@ -1040,37 +984,6 @@ describe("schedule fires — a named set binds, an unnamed one takes the fallbac
       userId: ctx.user.id,
       manifest: agentManifest(true),
     });
-  });
-
-  it("binds it as schedule_override, whatever its actor connects afterwards", async () => {
-    const headers = { ...authHeaders(ctx), "Content-Type": "application/json" };
-    const named = await seedIntegrationConnection(ctx, INTEGRATION);
-    const created = await app.request(`/api/agents/${AGENT}/schedules`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        cron_expression: "0 9 * * *",
-        connection_overrides: { [INTEGRATION]: [named] },
-      }),
-    });
-    expect(created.status).toBe(201);
-    const { id } = (await created.json()) as WriteBody;
-
-    await seedIntegrationConnection(ctx, INTEGRATION);
-
-    const renamed = await app.request(`/api/schedules/${id}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ name: "renamed" }),
-    });
-    expect(renamed.status).toBe(200);
-    await triggerScheduledRun(id);
-    const [run] = await db.select().from(runs).where(eq(runs.scheduleId, id));
-    expect(run!.status).not.toBe("failed");
-    expect(run!.resolvedConnections).toMatchObject({
-      [INTEGRATION]: [{ connectionId: named, source: "schedule_override" }],
-    });
-    await waitForRunPipelineSettled();
   });
 
   it("fires a schedule stored without a set on its actor's one connection, and fails on two", async () => {

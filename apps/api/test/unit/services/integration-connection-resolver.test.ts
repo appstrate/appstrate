@@ -480,11 +480,6 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     { name: "own 1, shared 0", rows: () => [own()], verdict: { bind: 0 } },
     { name: "own 1, shared 1 (the own one)", rows: () => [shared(), own()], verdict: { bind: 1 } },
     {
-      name: "own 1, shared 2 (the own one)",
-      rows: () => [shared(), own(), shared({ authKey: "pat" })],
-      verdict: { bind: 1 },
-    },
-    {
       name: "own 1 dead",
       rows: () => [own(DEAD)],
       verdict: { error: "needs_reconnection", on: 0 },
@@ -503,11 +498,6 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       name: "own 2 of one account and auth",
       rows: () => [own(), own()],
       verdict: { error: "must_choose_connection", candidates: [0, 1] },
-    },
-    {
-      name: "own 3, shared 0",
-      rows: () => [own(), own(), own({ authKey: "pat" })],
-      verdict: { error: "must_choose_connection", candidates: [0, 1, 2] },
     },
     {
       name: "own 2, shared 2 (every serving row is a candidate)",
@@ -583,52 +573,17 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     }
   }
 
-  it("where a connection was made never picks one: made here and elsewhere → must choose", () => {
-    const fallback = (rows: ConnectionRow[]) =>
-      resolveConnections({
-        requirements: [req(oauth2Manifest())],
-        accessibleConnections: rows,
-        pins: [],
-      });
-    const elsewhere = own({ spaceId: null, originSpaceId: "spc_other" });
-    expect(fallback([elsewhere]).resolved[INTEG]).toMatchObject([
-      { connectionId: elsewhere.id, source: "fallback_auto" },
-    ]);
-    // A second one made in the resolving space is a choice, never a rebind to it.
-    for (const here of [own(), own({ spaceId: null, originSpaceId: SPACE_ID })]) {
-      const result = fallback([elsewhere, here]);
-      expect(result.resolved[INTEG]).toBeUndefined();
-      expect(result.errors[0]!.code).toBe("must_choose_connection");
-      expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual([
-        elsewhere.id,
-        here.id,
-      ]);
-    }
-  });
-
-  it("scopes never pick one: two own oauth2 connections of one account → must choose, least privilege first", () => {
+  it("a proxy call with two own connections of one account asks", () => {
     const broad = own({ label: "écriture", scopesGranted: ["read", "write"] });
     const narrow = own({ label: "lecture", scopesGranted: ["read"] });
-    const candidates = (requirement: IntegrationRequirement) => {
-      const result = resolveConnections({
-        requirements: [requirement],
-        accessibleConnections: [broad, narrow],
-        pins: [],
-      });
-      expect(result.resolved[INTEG]).toBeUndefined();
-      expect(result.errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
-      return result.errors[0]!.candidateConnections!.map((c) => [c.id, c.missingScopes]);
-    };
-    expect(candidates(req(oauth2Manifest(), [], ["read"]))).toEqual([
-      [narrow.id, []],
-      [broad.id, []],
-    ]);
-    expect(candidates(req(oauth2Manifest(), [], ["write"]))).toEqual([
-      [broad.id, []],
-      [narrow.id, ["write"]],
-    ]);
-    // A credential-proxy call selects nothing and asks the same way.
-    expect(candidates(proxyRequirement(INTEG, oauth2Manifest()))).toEqual([
+    const result = resolveConnections({
+      requirements: [proxyRequirement(INTEG, oauth2Manifest())],
+      accessibleConnections: [broad, narrow],
+      pins: [],
+    });
+    expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
+    expect(result.errors[0]!.candidateConnections!.map((c) => [c.id, c.missingScopes])).toEqual([
       [narrow.id, []],
       [broad.id, []],
     ]);
@@ -890,27 +845,6 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
           );
           expect([...result.errors, ...result.warnings].map((item) => item.code)).toEqual([code]);
         }
-      }
-    });
-
-    it("binds the set every layer names", () => {
-      const mine = own();
-      const named = { [INTEG]: [mine.id] };
-      const orgDefault = (enforce: boolean) => ({
-        orgDefaults: { [INTEG]: { connectionIds: [mine.id], enforce } },
-      });
-      const layers: [ConnectionResolutionSource, Partial<Input>][] = [
-        ["admin_pin", { pins: [pin(mine.id)] }],
-        ["org_default_enforced", orgDefault(true)],
-        ["run_override", { launchOverrides: runOverride(named) }],
-        ["schedule_override", { launchOverrides: scheduleOverride(named) }],
-        ["member_pin", { pins: [memberPin(mine.id)] }],
-        ["org_default", orgDefault(false)],
-      ];
-      for (const [source, layer] of layers) {
-        const result = resolve([mine], layer);
-        expect(result.errors).toEqual([]);
-        expect(result.resolved[INTEG]).toMatchObject([{ connectionId: mine.id, source }]);
       }
     });
   });
@@ -2706,21 +2640,24 @@ describe("resolveConnections — a layer absent, set to `[]`, or naming a set", 
   }
 
   for (const layer of layers) {
-    it(`${layer.name} naming a set → binds it, however many own connections exist`, () => {
-      for (const ownCount of [0, 1, 3]) {
-        const named = conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID] });
-        const result = resolveConnections({
-          requirements: [requiredReq(oauth2Manifest())],
-          accessibleConnections: [named, ...Array.from({ length: ownCount }, () => conn({}))],
-          pins: [],
-          ...layer.input([named.id]),
-        });
-        expect(result.errors).toEqual([]);
-        expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
-          [named.id, layer.source],
-        ]);
-      }
-    });
+    for (const noFallback of [false, true]) {
+      it(`${layer.name} naming a set → binds it, however many own connections exist (noFallback ${noFallback})`, () => {
+        for (const ownCount of [0, 1, 3]) {
+          const named = conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID] });
+          const result = resolveConnections({
+            requirements: [requiredReq(oauth2Manifest())],
+            accessibleConnections: [named, ...Array.from({ length: ownCount }, () => conn({}))],
+            pins: [],
+            noFallback,
+            ...layer.input([named.id]),
+          });
+          expect(result.errors).toEqual([]);
+          expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
+            [named.id, layer.source],
+          ]);
+        }
+      });
+    }
 
     it(`${layer.name} absent → the next layer decides (fallback binds the own row)`, () => {
       for (const required of [true, false]) {

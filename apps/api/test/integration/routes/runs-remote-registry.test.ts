@@ -737,18 +737,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       });
     }
 
-    function launch() {
-      return post({
-        source: {
-          kind: "registry",
-          packageId: "@acme/briefing",
-          stage: "published",
-          spec: "1.2.3",
-        },
-        spaceId: ctx.defaultSpaceId,
-        input: {},
-      });
-    }
+    const launch = () => launchWith("registry");
 
     it("refuses a run whose cascade binds several connections to one integration (409, remote_binds_one_connection item)", async () => {
       await pinMine([a, b]);
@@ -868,20 +857,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
       });
     }
 
-    it("refuses a connection_overrides set of several (409, remote_binds_one_connection item)", async () => {
-      const items = await refusalItems(await launchWith("registry", { [INTEG]: [a, b] }));
-      expect(items.map((e) => [e.field, e.code])).toEqual([
-        [`integrations.${INTEG}`, "remote_binds_one_connection"],
-      ]);
-      expect(items[0]!.message).toContain("connection_overrides");
-      expect(await db.select().from(runs)).toHaveLength(0);
-    });
-
     it("refuses an inline run whose set binds several connections and purges its shadow package", async () => {
       const items = await refusalItems(await launchWith("inline", { [INTEG]: [a, b] }));
       expect(items.map((e) => [e.field, e.code])).toEqual([
         [`integrations.${INTEG}`, "remote_binds_one_connection"],
       ]);
+      expect(items[0]!.message).toContain("connection_overrides");
       expect(await db.select().from(runs)).toHaveLength(0);
       expect(
         await db.select({ id: packages.id }).from(packages).where(eq(packages.ephemeral, true)),

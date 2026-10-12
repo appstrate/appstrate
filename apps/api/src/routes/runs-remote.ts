@@ -303,8 +303,6 @@ export function createRunsRemoteRouter() {
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
-        // Same gate, same place as on the platform run route: FORM (the key
-        // names a declared integration) ahead of the authority asked below.
         assertConnectionOverridesAllowed(
           agentForRun.manifest as unknown as Record<string, unknown>,
           body.connection_overrides,
@@ -388,8 +386,6 @@ export function createRunsRemoteRouter() {
             manifest: src.manifest,
             prompt: src.prompt,
             input: body.input,
-            // The preflight refuses an undeclared key itself, with the rule the
-            // registry branch asks above (`connectionOverrideRefusals`).
             connection_overrides: body.connection_overrides,
           },
         });
@@ -438,8 +434,6 @@ export function createRunsRemoteRouter() {
           agent: agentForRun,
           ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
           input: effectiveInput,
-          // Normalize an empty map to null (mirrors the platform run route): a
-          // non-null map on the row means the run carried explicit overrides.
           dependencyOverrides,
           launchOverrides,
           apiKeyId: c.get("apiKeyId") ?? undefined,

@@ -11,30 +11,7 @@
  * `must_choose_connection` on several. `0041` and `0043` widen user-owned rows to org scope, so a
  * member who connected one integration from two spaces owns two in every space.
  *
- * Pins. A (space, member, integration) qualifies when the member, still one of the organization,
- * owns several connections usable in the space (`usableInSpace`), exactly one made there
- * (`coalesce(space_id, origin_space_id)`) and none of the others shared into it (`sharedInto`: that
- * one reached the space whatever its scope). For a qualifying tuple and an agent, the member pin
- * naming the connection made there is written when the member's most recent run of that agent in
- * that space recording the integration (`runs.resolved_connections`, a schedule's fire included)
- * bound exactly that connection by `fallback_auto` and started (`runs.started_at`, set when the run
- * row is inserted, never NULL) after each of the others was created: both existed and the space
- * bound its own, which only the scope explains. A later binding of another source, or a connection
- * made since, is the member's own word: no pin. Nor where an org default names a set for the
- * integration there, where they or an admin pinned the agent, on a deleted agent or an inline
- * run's shadow. Each pin is audited `integration.member_pin.upserted` by the `system` actor.
- *
- * Schedules, listed and never written: every enabled schedule running as a member of the
- * organization in a space, for each integration its agent declares (its draft or any published version) of which
- * that member owns several connections usable there, wherever they were made, when the schedule's
- * `connection_overrides` names no set for it, no admin pin governs the agent and no org default the
- * integration. Each reads `binds through the pin` (the member's on that agent, existing or written
- * here) or `no pin: name the set` (its fire answers `must_choose_connection`). End users'
- * schedules are not listed: their rows stay in their space
- * (`integration_connections_end_user_is_space`), so the widening changes nothing for them.
- *
- * Rows: UNMEASURED — the state it repairs exists only after `0041 --apply`, which no reachable
- * database has run. Rehearse on a restored dump, after `0041` and `0043` there.
+ * Rule and schedule listing: scripts/migration/README.md, Detail (script `0045`).
  *
  * Run after `0041 --apply` and `0043 --apply`, app up, `pg_dump` first; it refuses to run while
  * `0041` or `0043` has work left. Refuses an empty `DATABASE_URL`
@@ -44,7 +21,7 @@
  */
 
 import { parseArgs } from "node:util";
-import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections as c,
@@ -60,6 +37,7 @@ import {
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { DbOrTx } from "../../apps/api/src/lib/db-helpers.ts";
+import { sharedInto, usableInSpace } from "../../apps/api/src/services/connection-reach.ts";
 import { TO_WIDEN } from "./0041-widen-connections-to-org-scope.ts";
 import { SPACE_AUTO } from "./0043-promote-auto-clients-to-org.ts";
 
@@ -67,13 +45,6 @@ class DryRunRollback extends Error {}
 
 const THROUGH_PIN = "binds through the pin";
 const NO_PIN = "no pin: name the set";
-
-/** The platform's reach predicates (`connection-reach.ts`), imported late with the client. */
-interface Reach {
-  /** `usableInSpace` for a member. */
-  usableBy: (spaceId: string, userId: string) => SQL;
-  sharedInto: (spaceId: string) => SQL;
-}
 
 interface Pin {
   spaceId: string;
@@ -165,7 +136,7 @@ async function declaredByAgent(
 }
 
 /** The member pins `orgId` is owed, and its enabled schedules naming no set among several. */
-async function planOrg(dbx: DbOrTx, reach: Reach, orgId: string): Promise<Plan> {
+async function planOrg(dbx: DbOrTx, orgId: string): Promise<Plan> {
   const members = await dbx
     .select({ userId: organizationMembers.userId })
     .from(organizationMembers)
@@ -190,7 +161,11 @@ async function planOrg(dbx: DbOrTx, reach: Reach, orgId: string): Promise<Plan> 
   const plan: Plan = { pins: [], schedules: [] };
   for (const key of [...pairs.keys()].sort()) {
     const { spaceId, userId } = pairs.get(key)!;
-    const mine = and(eq(c.orgId, orgId), eq(c.userId, userId), reach.usableBy(spaceId, userId));
+    const mine = and(
+      eq(c.orgId, orgId),
+      eq(c.userId, userId),
+      usableInSpace(spaceId, { type: "user", id: userId }),
+    );
     const own = await dbx
       .select({
         id: c.id,
@@ -205,7 +180,7 @@ async function planOrg(dbx: DbOrTx, reach: Reach, orgId: string): Promise<Plan> 
     const shared = await dbx
       .select({ id: c.id })
       .from(c)
-      .where(and(mine, reach.sharedInto(spaceId)));
+      .where(and(mine, sharedInto(spaceId)));
     const sharedIds = new Set(shared.map((row) => row.id));
     const firing = await dbx
       .select({
@@ -292,12 +267,6 @@ export async function runPinConnectionMadeInSpace(options: {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
-  const { usableInSpace, sharedInto } =
-    await import("../../apps/api/src/services/connection-reach.ts");
-  const reach: Reach = {
-    usableBy: (spaceId, userId) => usableInSpace(spaceId, { type: "user", id: userId }),
-    sharedInto,
-  };
   const { pinAuditResourceId } =
     await import("../../apps/api/src/services/integration-pins-service.ts");
   const [target] = toRows<{ name: string; addr: string | null; port: number | null }>(
@@ -328,7 +297,7 @@ export async function runPinConnectionMadeInSpace(options: {
       .orderBy(c.orgId);
     const perOrg: { orgId: string; pins: number; unpinned: number }[] = [];
     for (const { orgId } of orgs) {
-      const plan = await planOrg(db, reach, orgId);
+      const plan = await planOrg(db, orgId);
       if (plan.pins.length + plan.schedules.length === 0) continue;
       const unpinned = plan.schedules.filter((schedule) => schedule.verdict === NO_PIN).length;
       perOrg.push({ orgId, pins: plan.pins.length, unpinned });
@@ -349,7 +318,7 @@ export async function runPinConnectionMadeInSpace(options: {
         await tx.execute("SET LOCAL statement_timeout = '300s'");
         // As `validatePinTargets` asks, each connection is its member's, of the integration and
         // usable in the space; that the agent is active there is not checked.
-        const { pins, schedules: unnamed } = await planOrg(tx, reach, orgId);
+        const { pins, schedules: unnamed } = await planOrg(tx, orgId);
         for (const pin of pins) {
           const inserted = await tx
             .insert(integrationPins)

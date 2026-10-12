@@ -61,10 +61,7 @@ interface CreateRunInput {
    * `freezeRunSpawnDependencies` — an unsatisfiable pin aborts the run.
    */
   dependencyOverrides?: Record<string, string> | null;
-  /**
-   * Cascade layer 3 (the body's `connection_overrides`): the value the route's readiness pass
-   * read, so both resolve the same cascade. Its ids persist on `runs.connection_overrides`.
-   */
+  /** Cascade layer 3; its ids persist on `runs.connection_overrides`. */
   launchOverrides?: LaunchOverrides | null;
   /** Client-requested sink TTL. */
   sink?: SinkRequest;
