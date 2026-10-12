@@ -42,6 +42,7 @@ import {
 import {
   withConnectionOverride,
   withFallbackConnections,
+  withoutFallbackConnections,
   type ConnectionSet,
 } from "../lib/connection-set";
 import {
@@ -288,7 +289,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
 
   // The verdict judges the viewer: it is read for a schedule running as them only, whose save
   // names what the fallback binds. Derived, not seeded.
-  const { data: readiness } = useAgentConnectionReadiness(
+  const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
     actorIsViewer ? packageId : undefined,
     firedVersion,
   );
@@ -579,7 +580,9 @@ export function ScheduleForm(props: ScheduleFormProps) {
                     ? { agentIntegrations: firedIntegrations }
                     : {})}
                   value={withFallbackConnections(overrides, held.readiness)}
-                  onChange={setOverrides}
+                  onChange={(next) =>
+                    setOverrides(withoutFallbackConnections(next, held.readiness))
+                  }
                   version={firedVersion}
                   scheduled
                 />
@@ -631,7 +634,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
         <Button type="button" variant="outline" onClick={onCancel}>
           {t("btn.cancel")}
         </Button>
-        <Button type="submit" disabled={isPending || Boolean(blockedMessage)}>
+        <Button type="submit" disabled={isPending || Boolean(blockedMessage) || readinessLoading}>
           {isEdit ? t("btn.save") : t("btn.create")}
         </Button>
       </div>

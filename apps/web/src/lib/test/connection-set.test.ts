@@ -20,6 +20,7 @@ import {
   withConnectionPick,
   withDeclaredConnections,
   withFallbackConnections,
+  withoutFallbackConnections,
   type FallbackBindingEntry,
 } from "../connection-set";
 
@@ -362,20 +363,21 @@ describe("withDeclaredConnections", () => {
   });
 });
 
+const GMAIL = "@acme/gmail";
+const entry = (
+  id: string,
+  resolution: Partial<FallbackBindingEntry["resolution"]> = {},
+): FallbackBindingEntry => ({
+  integration_package_id: id,
+  inert: false,
+  resolution: {
+    source: "fallback_auto",
+    resolved_connection_ids: ["c_own"],
+    ...resolution,
+  },
+});
+
 describe("withFallbackConnections", () => {
-  const GMAIL = "@acme/gmail";
-  const entry = (
-    id: string,
-    resolution: Partial<FallbackBindingEntry["resolution"]> = {},
-  ): FallbackBindingEntry => ({
-    integration_package_id: id,
-    inert: false,
-    resolution: {
-      source: "fallback_auto",
-      resolved_connection_ids: ["c_own"],
-      ...resolution,
-    },
-  });
   const picksOf = (picks: Record<string, string[]> | undefined, readiness = [entry(GMAIL)]) => {
     const overrides = picks ? { connection_overrides: picks } : {};
     return withFallbackConnections(overrides, readiness).connection_overrides;
@@ -421,5 +423,62 @@ describe("withFallbackConnections", () => {
       connection_overrides: { [GMAIL]: ["c_own"] },
     });
     expect(withFallbackConnections(overrides, undefined)).toBe(overrides);
+  });
+});
+
+describe("withoutFallbackConnections", () => {
+  const readiness = [entry(GMAIL)];
+
+  it("removes the set the fallback binds", () => {
+    expect(
+      withoutFallbackConnections({ connection_overrides: { [GMAIL]: ["c_own"] } }, readiness),
+    ).toEqual({});
+  });
+
+  it("keeps a pick that differs from the fallback's set", () => {
+    const overrides = { connection_overrides: { [GMAIL]: ["c_other"] } };
+    expect(withoutFallbackConnections(overrides, readiness)).toEqual(overrides);
+  });
+
+  it("keeps a stored 'no connection'", () => {
+    const overrides = { connection_overrides: { [GMAIL]: [] } };
+    expect(withoutFallbackConnections(overrides, readiness)).toEqual(overrides);
+  });
+
+  it("keeps picks of integrations the fallback does not bind", () => {
+    const slack = { "@acme/slack": ["c_slack"] };
+    const bindsNothing = [
+      entry(GMAIL, { source: "member_pin" }),
+      { ...entry("@acme/slack"), inert: true },
+      entry("@acme/notion", { source: "org_default" }),
+    ];
+    const overrides = { connection_overrides: { ...slack, [GMAIL]: ["c_own"] } };
+    expect(withoutFallbackConnections(overrides, bindsNothing)).toEqual({
+      connection_overrides: { ...slack, [GMAIL]: ["c_own"] },
+    });
+  });
+
+  it("drops the emptied `connection_overrides` key, keeping the other overrides", () => {
+    expect(
+      withoutFallbackConnections(
+        { model_id_override: "m1", connection_overrides: { [GMAIL]: ["c_own"] } },
+        readiness,
+      ),
+    ).toEqual({ model_id_override: "m1" });
+  });
+
+  it("returns the same reference when nothing is removed", () => {
+    const overrides = { model_id_override: "m1" };
+    expect(withoutFallbackConnections(overrides, readiness)).toBe(overrides);
+    const picked = { connection_overrides: { [GMAIL]: ["c_other"] } };
+    expect(withoutFallbackConnections(picked, readiness)).toBe(picked);
+    expect(withoutFallbackConnections(picked, undefined)).toBe(picked);
+  });
+
+  it("undoes withFallbackConnections on a value that had no picks", () => {
+    const overrides = { model_id_override: "m1" };
+    const augmented = withFallbackConnections(overrides, readiness);
+    expect(augmented).not.toBe(overrides);
+    expect(withoutFallbackConnections(augmented, readiness)).toEqual(overrides);
   });
 });

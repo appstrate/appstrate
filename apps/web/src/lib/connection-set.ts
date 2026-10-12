@@ -64,6 +64,12 @@ export interface FallbackBindingEntry {
   >;
 }
 
+/** The set the fallback binds for one integration; `null` when no run binds it that way. */
+function fallbackBoundIds(entry: FallbackBindingEntry): string[] | null {
+  const { source, resolved_connection_ids: bound } = entry.resolution;
+  return entry.inert || source !== "fallback_auto" || bound.length === 0 ? null : bound;
+}
+
 /**
  * `overrides` naming, for each integration a run binds and no pick covers (`[]` is one), the set
  * the fallback binds in that actor's `readiness` (`fallback_auto`), whatever its health.
@@ -73,13 +79,29 @@ export function withFallbackConnections(
   readiness: readonly FallbackBindingEntry[] | undefined,
 ): RunOverridesValue {
   let next = overrides;
-  for (const { integration_package_id: id, inert, resolution } of readiness ?? []) {
-    const { source, resolved_connection_ids: bound } = resolution;
-    if (inert || source !== "fallback_auto" || bound.length === 0) continue;
-    if (next.connection_overrides?.[id] !== undefined) continue;
+  for (const entry of readiness ?? []) {
+    const id = entry.integration_package_id;
+    const bound = fallbackBoundIds(entry);
+    if (bound === null || next.connection_overrides?.[id] !== undefined) continue;
     next = withConnectionOverride(next, id, bound);
   }
   return next;
+}
+
+/** Inverse of {@link withFallbackConnections}: drops each pick equal to the set the fallback binds. */
+export function withoutFallbackConnections(
+  overrides: RunOverridesValue,
+  readiness: readonly FallbackBindingEntry[] | undefined,
+): RunOverridesValue {
+  const { connection_overrides: picks, ...rest } = overrides;
+  if (!picks || !readiness) return overrides;
+  const kept = Object.entries(picks).filter(([id, ids]) => {
+    const entry = readiness.find((e) => e.integration_package_id === id);
+    const bound = entry ? fallbackBoundIds(entry) : null;
+    return bound === null || !sameSet(ids, bound);
+  });
+  if (kept.length === Object.keys(picks).length) return overrides;
+  return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
 }
 
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {
