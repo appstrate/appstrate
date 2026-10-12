@@ -1664,7 +1664,7 @@
   "models.alert.noModelDescription": "Configure a model in organization settings to run this agent.",
   "providers.tableLabel": "Providers",
   "providers.instanceName": "Shipped with the instance",
-  "providers.col.provider": "Provider",
+  "providers.col.provider": "Name",
   "providers.col.type": "Type",
   "providers.col.service": "Service",
   "providers.col.models": "Models",
