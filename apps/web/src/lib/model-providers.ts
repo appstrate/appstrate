@@ -191,6 +191,22 @@ export function providerRows(
  * list their models without a key to ask with. The organization opens some of them to
  * personal keys (`personalServiceRows`), and « Choose the models » edits each one's models.
  */
+/**
+ * The providers a person may add a personal key or subscription for: those whose key would serve
+ * at least one model the organization opened to personal keys. Any other one would serve nothing.
+ */
+export function providersOpenToPersonalKeys(
+  models: readonly OrgModelInfo[],
+  registry: readonly ProviderRegistryEntry[],
+): Set<string> {
+  const open = memberModels(models).filter((m) => m.enabled);
+  return new Set(
+    registry
+      .filter((p) => p.personal_allowed && open.some((m) => serves(p, m, registry)))
+      .map((p) => p.providerId),
+  );
+}
+
 export function personalModelServices(
   registry: readonly ProviderRegistryEntry[],
 ): ProviderRegistryEntry[] {

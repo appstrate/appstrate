@@ -6,7 +6,12 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
-import { personalServiceRows, providerRows, rowStates } from "../model-providers.ts";
+import {
+  personalServiceRows,
+  providerRows,
+  providersOpenToPersonalKeys,
+  rowStates,
+} from "../model-providers.ts";
 
 const CREATED = "2026-07-01T10:00:00.000Z";
 
@@ -263,5 +268,22 @@ describe("rowStates", () => {
     ).toEqual(["unavailable", "default"]);
     expect(rowStates({ ...base, models: [], disabled: true })).toEqual(["disabled"]);
     expect(rowStates({ ...base, noKey: true })).toEqual(["no-key"]);
+  });
+});
+
+describe("providersOpenToPersonalKeys", () => {
+  it("offers only the providers whose key would serve a model opened to personal keys", () => {
+    // Claude A is opened: Anthropic's key and the Claude Code subscription both serve it.
+    const open = providersOpenToPersonalKeys([BOUND, MEMBER_A], REGISTRY);
+    expect([...open].sort()).toEqual(["anthropic", "claude-code"]);
+  });
+
+  it("offers nothing while the organization opened no model to personal keys", () => {
+    expect(providersOpenToPersonalKeys([BOUND, SYSTEM], REGISTRY).size).toBe(0);
+  });
+
+  it("leaves out a provider whose opened models are all disabled", () => {
+    const open = providersOpenToPersonalKeys([{ ...MEMBER_MISTRAL, enabled: false }], REGISTRY);
+    expect(open.has("mistral")).toBe(false);
   });
 });

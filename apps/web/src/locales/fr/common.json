@@ -239,7 +239,7 @@
   "apiError.model_not_offered": "Ce modèle n'est pas proposé par ce fournisseur : {{message}}",
   "apiError.credential_in_use": "Cette clé est utilisée par des modèles : supprimez-les d'abord.",
   "apiError.model_scheduled": "Des planifications activées exécuteraient un modèle servi uniquement par des clés perso ; changez leur modèle ou liez-le à une clé org.",
-  "apiError.model_credential_required": "Ce modèle demande votre clé perso ou votre abonnement perso. Ajoutez-le dans Préférences › Mes clés, ou demandez à un administrateur de le servir avec une clé org.",
+  "apiError.model_credential_required": "Ce modèle demande votre clé perso ou votre abonnement perso. Ajoutez-le dans Préférences › Mes clés de modèles, ou demandez à un administrateur de le servir avec une clé org.",
   "apiError.personal_model_credentials_disabled": "L'organisation n'autorise pas les clés perso ni les abonnements perso : demandez à un administrateur de les activer.",
   "apiError.personal_credential_custom_endpoint": "Une clé perso ne peut pas servir un endpoint personnalisé : utilisez une clé org.",
   "apiError.personal_credential_not_bindable": "Une clé perso ne peut pas être liée à un modèle de l'organisation : choisissez une clé org.",

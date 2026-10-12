@@ -88,6 +88,8 @@ interface CredentialFormModalProps {
    * picker leaves it out and says where to connect it.
    */
   apiKeyOnly?: boolean;
+  /** With `personal`: only these providers, the ones whose key would serve a model the org opened. */
+  onlyProviders?: ReadonlySet<string>;
   /** The key being added comes back here from the next step with what was typed. */
   initial?: CredentialFormData;
   /** Replaces « Save » when the form is a step, not the whole act. */
@@ -134,6 +136,7 @@ function CredentialFormBody({
   onClose,
   personal,
   apiKeyOnly,
+  onlyProviders,
   initial,
   submitLabel,
 }: {
@@ -143,6 +146,7 @@ function CredentialFormBody({
   onClose: () => void;
   personal: boolean;
   apiKeyOnly: boolean;
+  onlyProviders?: ReadonlySet<string>;
   initial?: CredentialFormData;
   submitLabel?: string;
 }) {
@@ -151,7 +155,14 @@ function CredentialFormBody({
   const registry = registryQuery.data ?? [];
   const options = buildOptions(
     personal
-      ? registry.filter((p) => p.personal_allowed)
+      ? registry.filter(
+          (p) =>
+            p.personal_allowed &&
+            // An existing credential keeps its own provider listed, whatever the org opened since.
+            (!onlyProviders ||
+              onlyProviders.has(p.providerId) ||
+              p.providerId === credential?.providerId),
+        )
       : apiKeyOnly && !credential
         ? registry.filter((p) => p.authMode !== "oauth2")
         : registry,
@@ -506,6 +517,7 @@ export function CredentialFormModal({
   onSubmit,
   personal = false,
   apiKeyOnly = false,
+  onlyProviders,
   initial,
   submitLabel,
 }: CredentialFormModalProps) {
@@ -522,6 +534,7 @@ export function CredentialFormModal({
       onClose={onClose}
       personal={personal}
       apiKeyOnly={apiKeyOnly}
+      onlyProviders={onlyProviders}
       initial={initial}
       submitLabel={submitLabel}
     />

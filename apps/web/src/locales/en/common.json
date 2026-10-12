@@ -239,7 +239,7 @@
   "apiError.model_not_offered": "This model is not offered by this provider: {{message}}",
   "apiError.credential_in_use": "This key is used by models: delete them first.",
   "apiError.model_scheduled": "Enabled schedules would run a model served only by personal keys; change their model or bind it to an org key.",
-  "apiError.model_credential_required": "This model needs your personal key or subscription. Add it under Preferences › My keys, or ask an administrator to serve it with an org key.",
+  "apiError.model_credential_required": "This model needs your personal key or subscription. Add it under Preferences › My model keys, or ask an administrator to serve it with an org key.",
   "apiError.personal_model_credentials_disabled": "The organization does not allow personal keys or personal subscriptions: ask an administrator to enable them.",
   "apiError.personal_credential_custom_endpoint": "A personal key cannot serve a custom endpoint: use an org key.",
   "apiError.personal_credential_not_bindable": "A personal key cannot be bound to an organization model: choose an org key.",
