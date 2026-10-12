@@ -1113,7 +1113,7 @@ export const oidcPaths = {
       },
     },
   },
-  // ── CLI auth plugin endpoints (issue #165, #251) ──────────────────────────
+  // ── CLI auth plugin endpoints ──────────────────────────
   // Mounted by `cliTokenPlugin()` via `betterAuthPlugins()` under
   // `/api/auth/cli/*`. Documented here so the public surface is discoverable
   // from `/api/docs`. Token/revoke use client_id auth; the session-management

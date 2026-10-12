@@ -23,7 +23,7 @@ import { runs } from "./runs.ts";
  * Replaces the previous design where read-state lived on the `runs` row
  * itself (`runs.notifiedAt` / `runs.readAt`), which made the read flag
  * global: marking a notification read flipped it for every viewer, and a
- * non-owner's mark-as-read silently matched zero rows (issue #667).
+ * non-owner's mark-as-read silently matched zero rows.
  *
  * The recipient is modelled as a single polymorphic pair
  * (`recipientType` + `recipientId`) — the same shape as the `Actor`

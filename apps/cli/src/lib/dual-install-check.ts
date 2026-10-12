@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One-time runtime warning when more than one `appstrate` is on `$PATH`
- * (issue #249, phase 5).
+ * One-time runtime warning when more than one `appstrate` is on `$PATH`.
  *
  * The bootstrap pre-check (phase 4) covers the "user installs curl
  * AFTER having bun" path. This module covers the reverse — "user has

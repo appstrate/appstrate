@@ -9,8 +9,7 @@
  * token refresh, hence its own worker decoupled from
  * `OAUTH_REFRESH_WORKER_ENABLED`.
  *
- * The queue/scheduler names below are frozen: every install since #397 (which
- * introduced this worker) has registered a BullMQ repeatable under them, and
+ * The queue/scheduler names below are frozen: every install has registered a BullMQ repeatable under them, and
  * renaming would strand those schedulers in Redis with nothing to remove them.
  */
 

@@ -196,7 +196,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Bootstrap-token redemption (#344 Layer 2b) — registered BEFORE the
+// Bootstrap-token redemption — registered BEFORE the
 // Better Auth catch-all so the more-specific path wins. This route owns
 // its own gate (timing-safe token compare + DB-org-count check) and
 // must NOT pass through Better Auth's normal `/api/auth/*` handler.
@@ -266,7 +266,7 @@ await initAppConfig();
 // Build the per-request `<script>` that injects `window.__APP_CONFIG__`.
 // Most fields are stable after boot (modules don't load/unload at runtime),
 // but `bootstrapTokenPending` flips false the moment the operator claims
-// an unattended install via `/api/auth/bootstrap/redeem` (#344). Re-
+// an unattended install via `/api/auth/bootstrap/redeem`. Re-
 // stringifying on every SPA request is ~1µs and means the post-claim
 // page reload doesn't loop the user back into `/claim`.
 import { isBootstrapTokenPending } from "./lib/bootstrap-token.ts";
@@ -475,7 +475,7 @@ void bootBackground()
     process.exit(1);
   });
 
-// Proxy-upload diagnosability (issue #829): with S3 storage and no
+// Proxy-upload diagnosability: with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser
 // PUTs the bytes there. If APP_URL is still a loopback address on a remotely
 // reached production instance, every remote browser PUTs uploads at ITS OWN

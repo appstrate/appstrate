@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { CompanionViolationReason } from "@appstrate/afps-shared/companion-files";
 import type {
-  ConnectionOverrideRefusalCode,
+  OverrideRefusalCode,
   INTEGRATION_MANIFEST_FAILURE_CODES,
   MissingIntegrationConnectionCode,
 } from "@appstrate/core/integration";
@@ -41,8 +41,9 @@ const RESOLUTION_ERROR_KEYS = {
   override_outranked: "error.overrideOutranked",
   required_integration_unbound: "error.requiredIntegrationUnbound",
   undeclared_connection_override: "error.connectionOverridesRefused",
+  undeclared_dependency_override: "error.dependencyOverridesRefused",
 } as const satisfies Record<
-  Exclude<MissingIntegrationConnectionCode, CommonSentenceCode> | ConnectionOverrideRefusalCode,
+  Exclude<MissingIntegrationConnectionCode, CommonSentenceCode> | OverrideRefusalCode,
   string
 >;
 

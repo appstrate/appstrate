@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate install --upgrade-compose` (issue #515) — strip stale
+ * `appstrate install --upgrade-compose` — strip stale
  * duplicated env defaults from an operator's on-disk
  * `<dir>/docker-compose.yml` without touching `.env`, without running
  * Docker, and without disturbing any operator-added blocks.

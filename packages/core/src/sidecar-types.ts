@@ -74,7 +74,7 @@ export interface SidecarConfig {
    * `modelContextWindow - modelMaxTokens` (reserve for the response) spills
    * to the blob store instead — preventing a parallel batch of large
    * tool_results from blowing past the upstream model's hard limit before
-   * Pi SDK's turn-boundary compaction has a chance to fire. See issue #464.
+   * Pi SDK's turn-boundary compaction has a chance to fire.
    */
   modelContextWindow?: number;
   /**
@@ -328,7 +328,7 @@ export interface IntegrationSpawnSpec {
        * to `GET /internal/mcp-server-bundle/:scope/:name?version=…` so the
        * runnable BYTES come from the SAME version as the manifest the
        * spawn-resolver read — eliminating the manifest/bytes version skew and
-       * the "publish ≠ deploy" footgun (issue #588). Omitted for system
+       * the "publish ≠ deploy" footgun. Omitted for system
        * mcp-servers — the byte route serves those from the in-memory boot
        * registry by id alone — and for remote/serverless integrations.
        */

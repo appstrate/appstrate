@@ -7,8 +7,7 @@
  *   - the server ships the whole schema in one call (ETag-cached),
  *   - filtering in-process keeps `list` sub-100ms even on 191 paths,
  *   - we avoid coupling the CLI release cadence to the API's filter
- *     query-param surface (issue #206's "server-side filtering"
- *     option was explicitly rejected for the same reason).
+ *     query-param surface.
  *
  * Exports two layers:
  *   1. pure filter predicates (`matchesTag`, `matchesMethod`, …) and

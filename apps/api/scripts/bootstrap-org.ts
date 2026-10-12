@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate admin bootstrap-org` (issue #228) — create the root
+ * `appstrate admin bootstrap-org` — create the root
  * organization for a self-hosted instance running in closed mode.
  *
  *   bun apps/api/scripts/bootstrap-org.ts \

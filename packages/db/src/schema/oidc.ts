@@ -394,7 +394,7 @@ export const oauthClientAssertion = pgTable("oauth_client_assertions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
-// ─── CLI refresh tokens (issue #165) ──────────────────────────────────────────
+// ─── CLI refresh tokens ──────────────────────────────────────────
 
 export const cliRefreshToken = pgTable(
   "cli_refresh_tokens",

@@ -169,12 +169,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // identically to a cookie session so every downstream hook
     // (`requirePlatformRealm`, org membership, etc.) sees the correct
     // identity. The Appstrate CLI does not use this path — it presents
-    // a JWT obtained from `/cli/token` (issue #165) verified through
+    // a JWT obtained from `/cli/token` verified through
     // the `oidc-jwt` strategy — but BA's bearer surface is kept
     // available for any third-party caller carrying a raw BA session
     // token (e.g. legacy integrations).
     bearer(),
-    // CLI token plugin (issue #165) — exposes `/api/auth/cli/token` and
+    // CLI token plugin — exposes `/api/auth/cli/token` and
     // `/api/auth/cli/revoke` for the 2.x appstrate CLI. Runs ALONGSIDE
     // BA's default `deviceAuthorization()` plugin below; the device-flow
     // `/device/code`, `/device/approve`, `/device/deny` endpoints are

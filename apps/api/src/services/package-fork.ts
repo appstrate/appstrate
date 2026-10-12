@@ -158,13 +158,10 @@ async function forkWithConfig(
   // draft row, version row and ZIP unnoticed. Rejecting is not an option:
   // manifests today's validator refuses DO sit in the catalog, and a gate here
   // would make them permanently un-forkable — the fork is a READ of an
-  // immutable, unrepairable artifact. One source remains, and it is legacy
-  // only: the provider→integration migration (#481, shipped in beta.17) left
-  // `type: "provider"` manifests behind, repaired at the time by a one-off
-  // backfill script no longer in this repo. #987 closed the write direction —
-  // every create path now validates author input unconditionally and 400s — so
-  // no NEW invalid manifest enters the catalog; this fork is the one path that
-  // still propagates the legacy ones, which is the price of staying forkable.
+  // immutable, unrepairable artifact. Every create path validates author input
+  // unconditionally and 400s, so no NEW invalid manifest enters the catalog;
+  // this fork is the one path that propagates a stored one (a
+  // `type: "provider"` manifest, for instance), the price of staying forkable.
   // So the operator gets a log line, and the fork proceeds.
   const validation = validateManifest(updatedManifest, { retiredRuntimeTools: "drop" });
   if (!validation.valid) {
@@ -177,12 +174,12 @@ async function forkWithConfig(
   }
 
   // Same reason the check above only warns, applied to the identity itself: a
-  // drifted `type` (the `provider` rows #481 left behind, or a snapshot whose
+  // drifted `type` (a `provider` row, or a snapshot whose
   // type no longer matches its `packages.type` row) sits in an immutable,
   // unrepairable artifact, so the fork is the one path allowed to normalize it.
   // `createOrgItem` used to do this silently for every caller, which is how a
-  // manifest valid for one type became a stored manifest no schema accepts
-  // (issue #987); it now REFUSES divergence, so the repair lives here.
+  // manifest valid for one type became a stored manifest no schema accepts;
+  // it now REFUSES divergence, so the repair lives here.
   if (updatedManifest.type !== cfg.type) {
     logger.warn("normalizing drifted manifest type on fork", {
       sourcePackageId,

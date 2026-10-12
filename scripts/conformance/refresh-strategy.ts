@@ -97,7 +97,7 @@ const REFRESH_DECLARATIONS = new Set(["default", "not_supported"]);
  *   3. Bump the package `version`, rename its source directory to match, and
  *      run `bun run scripts/build-system-packages.ts` — an already-published
  *      version is immutable, so without the bump the fix never reaches
- *      production (#928).
+ *      production.
  *   4. Delete the entry from this list AND decrement {@link UNVERIFIED_CEILING}
  *      by one. Both, in the same commit: the ceiling is an equality, so
  *      either edit alone fails the gate.

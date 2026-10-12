@@ -86,7 +86,7 @@ Tag `core@X.0.0` and push it. Do **not** bump the consumers first.
 A consumer physically cannot declare `^X.0.0` before X.0.0 exists on npm — its
 own CI runs `bun install --frozen-lockfile`, which cannot resolve an unpublished
 version. Inverting the order is therefore a deadlock: each consumer's CI goes
-red _and_ the gate blocks the very publish that would unblock it (issue #1028).
+red _and_ the gate blocks the very publish that would unblock it.
 
 The gate accommodates this and only this: at an `X.0.0` release, a consumer
 found **exactly one major behind** is a **warning**, not a failure.

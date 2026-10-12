@@ -8,7 +8,7 @@
  * tool output ({@link ../connect-offer.ts}) — the only place the live URLs
  * exist in a persisted result. The payload itself is never scraped; in the
  * model channel every connect URL is replaced by the redaction placeholder, and
- * scraping it rendered that placeholder as a relative href (issue #906).
+ * scraping it rendered that placeholder as a relative href.
  *
  * Kept React-free so it can be unit-tested without a DOM.
  */

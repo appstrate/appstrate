@@ -87,7 +87,7 @@ function isAuthorizedAgentRequest(
  * `Bun.serve` idle-timeout (seconds) applied to the sidecar's HTTP
  * surface. Bun's default of 10 s otherwise kills any LLM stream that
  * goes quiet longer than that (reasoning, parallel tool-call generation,
- * slow upstream) — see issue #426. 255 s is Bun's maximum allowed value
+ * slow upstream). 255 s is Bun's maximum allowed value
  * and sits under the 300 s run-tracker ceiling, so genuinely dead
  * connections still get reclaimed before the run is forcibly killed.
  * Imported by `server.ts` for the Bun.serve config.
@@ -186,10 +186,8 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
  * Per-call telemetry attached to `/llm/*` pass-throughs. Each observation
  * yields one info-level `llm.stream.observed` log on close (with TTFB,
  * max inter-chunk gap, total bytes) plus warn-level `llm.stream.error` /
- * `llm.stream.cancelled` on abnormal terminations. Added in #426 after a
- * silent 10 s Bun.serve idleTimeout was burning the 300 s run timeout in
- * a retry loop — keeping the closed-loop visibility avoids re-discovering
- * that class of bug from scratch.
+ * `llm.stream.cancelled` on abnormal terminations. Without it, a silent
+ * Bun.serve idleTimeout burning the run timeout in a retry loop is invisible.
  */
 interface LlmStreamObservation {
   targetUrl?: string;
@@ -244,8 +242,7 @@ async function passUpstream(
   // `pull`-based: `reader.read()` is only invoked when the downstream
   // consumer (pi-ai) pulls a chunk. `maxIdleMs` therefore reflects the
   // time between consumer pulls — exactly what Bun.serve's idle watchdog
-  // measures, and the reason a `>10 s` upstream pause was killing the
-  // connection before #426. A separate eager reader would isolate raw
+  // measures. A separate eager reader would isolate raw
   // upstream byte timing, but we intentionally match what the serve
   // layer sees so the metric stays comparable to the idle-timeout
   // threshold.
@@ -822,16 +819,12 @@ export function createApp(deps: AppDeps): Hono {
     //   - `LLM_STREAM_IDLE_TIMEOUT_MS` (120 s) — inter-chunk silence, enforced
     //     in `passUpstream`, NOT here (a fetch-level signal cannot express
     //     "silent for 2 min" without also capping the total).
-    // HISTORY, do not re-litigate: this block used to say there was
-    // "deliberately no inter-chunk timeout", because undici's hardcoded 300 s
-    // `bodyTimeout` once motivated a global `globalThis.fetch` → undici swap
-    // that was reverted in #366 (see issue #369). That reasoning stands —
-    // undici is still not the answer, the sidecar runs Bun's native `fetch`
-    // and we are not swapping it back. What changed is that "no body timeout"
-    // stopped being acceptable: pi-ai's per-adapter `timeoutMs` is not honoured
-    // by every api shape we map (`pi-messages` ignores it), so a stalled stream had NO bound
-    // below 30 min and runs died on their wall-clock watchdog with no error.
-    // The idle bound lives in our own stream wrapper instead — provider
+    // The sidecar runs Bun's native `fetch`, not undici (whose `bodyTimeout`
+    // is hardcoded at 300 s). "No body timeout" is not acceptable either:
+    // pi-ai's per-adapter `timeoutMs` is not honoured by every api shape we
+    // map (`pi-messages` ignores it), so a stalled stream would have NO bound
+    // below 30 min and the run would die on its wall-clock watchdog with no
+    // error. The idle bound lives in our own stream wrapper — provider
     // agnostic, and no transport swap.
     const abort = llmUpstreamAbort();
     try {

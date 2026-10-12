@@ -2,7 +2,7 @@
 
 /**
  * Resolve which agent definition a run executes — the mutable draft or a
- * published `package_versions` snapshot (#636).
+ * published `package_versions` snapshot.
  *
  * Selector grammar (snake_case wire value of `?version=` on the run route
  * and `version_override` on schedules):
@@ -14,7 +14,7 @@
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
  *                     range) via {@link getVersionDetail}. 404 when nothing
  *                     matches.
- *   - omitted       → `"published"` (#636). There is no third answer: an
+ *   - omitted       → `"published"`. There is no third answer: an
  *                     placement carries no version, so a space runs what its
  *                     author last published unless the caller asks for
  *                     something else.
@@ -38,13 +38,13 @@
  *
  * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
  * the selected version. It derives nothing: the readiness gate projects the
- * declared skills off the effective manifest itself (#878). The transitive
+ * declared skills off the effective manifest itself. The transitive
  * skill closure that ships to the container is pinned separately, on the run
- * hot path, by `RunPackageCatalog` (#666) — it resolves each
+ * hot path, by `RunPackageCatalog` — it resolves each
  * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
  * pin, so a dependency's mutable draft never leaks into a run. Integration /
  * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
- * before the sidecar receives its spawn plan (#686).
+ * before the sidecar receives its spawn plan.
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
@@ -88,7 +88,7 @@ interface ResolvedRunAgent {
  *
  * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
  * so swapping those two fields swaps the definition wholesale — nothing
- * derived from the draft manifest rides along (#878).
+ * derived from the draft manifest rides along.
  */
 function substituteVersion(
   agent: LoadedPackage,

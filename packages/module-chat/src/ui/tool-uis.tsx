@@ -62,8 +62,8 @@ import {
 
 /**
  * `invoke_operation` operationId that kicks off an integration connect flow.
- * `initiateIntegrationConnect` is the unified, auth-type-agnostic op (issue
- * #769) whose result carries a `connect_url`; its result renders the connect
+ * `initiateIntegrationConnect` is the unified, auth-type-agnostic op
+ * whose result carries a `connect_url`; its result renders the connect
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";

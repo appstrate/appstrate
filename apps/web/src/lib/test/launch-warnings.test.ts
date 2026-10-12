@@ -10,12 +10,15 @@ import { afterAll, describe, expect, it } from "bun:test";
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import i18n, { i18nReady } from "../../i18n.ts";
 import {
+  connectionsTabReachable,
   isViewersLaunch,
   launchWarningsToast,
   NONE_CHOOSING_SOURCES,
   warnedIntegrationIds,
   type LaunchWarning,
 } from "../launch-warnings.ts";
+import { routeVerdict } from "../route-access.ts";
+import { routeOf } from "../route-match.ts";
 
 await i18nReady;
 afterAll(async () => {
@@ -229,5 +232,27 @@ describe("isViewersLaunch", () => {
     // An end-user's schedule names no member.
     expect(isViewersLaunch({ kind: "schedule", userId: null }, "usr_me")).toBe(false);
     expect(isViewersLaunch({ kind: "schedule", userId: null }, undefined)).toBe(false);
+  });
+});
+
+describe("connectionsTabReachable", () => {
+  /** The verdict for a viewer holding `permissions`, read off the route declaration. */
+  const reachable = (permissions: string[]) => {
+    const can = (permission: string) => permissions.includes(permission);
+    const canReach = (target: string) =>
+      routeVerdict(routeOf(target)!, can, {}, false) === "granted";
+    return connectionsTabReachable("/agents/@acme/mailer", canReach, can);
+  };
+
+  it("holds when the viewer reaches the agent's page and sees its Connexions tab", () => {
+    expect(reachable(["agents:read", "integrations:read"])).toBe(true);
+  });
+
+  it("fails when the page shows the viewer no Connexions tab", () => {
+    expect(reachable(["agents:read"])).toBe(false);
+  });
+
+  it("fails when the agent's page is closed to the viewer", () => {
+    expect(reachable(["integrations:read"])).toBe(false);
   });
 });

@@ -98,7 +98,7 @@ import { CLI_VERSION } from "./lib/version.ts";
 // Defense in depth: restore cooked mode on exit. `@clack/prompts`
 // sets raw mode via `process.stdin.setRawMode(true)` and relies on its
 // own listeners to flip it back — if the process dies while a prompt
-// is open (crash, SIGINT, the Bun macOS keypress regression in #199)
+// is open (crash, SIGINT, a Bun macOS keypress regression)
 // the terminal is left unusable and only `reset` fixes it. Registering
 // a cooked-mode restore on every exit path is cheap and catches the
 // edge cases clack's own cleanup misses.
@@ -183,8 +183,8 @@ program
       process.env.APPSTRATE_INSECURE = "1";
     }
 
-    // One-time runtime warning when more than one `appstrate` is on PATH
-    // (issue #249, phase 5). Skipped for machine-readable subcommands and
+    // One-time runtime warning when more than one `appstrate` is on PATH.
+    // Skipped for machine-readable subcommands and
     // help/version flags — see `lib/dual-install-check.ts`.
     const subName = actionCommand.name();
     if (
@@ -290,7 +290,7 @@ program
     });
   });
 
-// ─── Lifecycle commands (#343) — manage a Docker-tier install ────
+// ─── Lifecycle commands — manage a Docker-tier install ────
 //
 // Each command reads `<dir>/.appstrate/project.json` for the Compose
 // project name (never re-derived) and forwards to `docker compose`
@@ -439,7 +439,7 @@ program
     await tokenCommand({ profile: globalOpts.profile });
   });
 
-// ─── `appstrate org …` — manage the pinned organization (issue #209) ───
+// ─── `appstrate org …` — manage the pinned organization ───
 
 const orgGroup = program
   .command("org")
@@ -492,7 +492,7 @@ orgGroup
     });
   });
 
-// ─── `appstrate space …` — manage the pinned space (issue #217) ────────
+// ─── `appstrate space …` — manage the pinned space ────────
 
 const spaceGroup = program
   .command("space")
@@ -935,7 +935,7 @@ program
     await doctorCommand({ json: opts.json === true });
   });
 
-// ─── `appstrate runner …` — manage the Firecracker runner daemon (#819) ───
+// ─── `appstrate runner …` — manage the Firecracker runner daemon ───
 //
 // The daemon is a SEPARATELY-compiled binary (`appstrate-runner-<arch>`,
 // published as a GH Release asset) — the CLI downloads + verifies + installs

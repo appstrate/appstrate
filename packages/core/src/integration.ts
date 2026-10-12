@@ -1599,13 +1599,17 @@ export const READINESS_ERROR_CODES = [
 
 export type ReadinessErrorCode = (typeof READINESS_ERROR_CODES)[number];
 
-/** What a `connection_overrides` key is refused over at the write: a 400 item on `connection_overrides.<id>`. */
-export const CONNECTION_OVERRIDE_REFUSAL_CODES = [
+/**
+ * What a launch override key is refused over at the write: a 400 item on
+ * `connection_overrides.<id>` or `dependency_overrides.<id>`.
+ */
+export const OVERRIDE_REFUSAL_CODES = [
   "undeclared_connection_override",
   "required_integration_unbound",
+  "undeclared_dependency_override",
 ] as const;
 
-export type ConnectionOverrideRefusalCode = (typeof CONNECTION_OVERRIDE_REFUSAL_CODES)[number];
+export type OverrideRefusalCode = (typeof OVERRIDE_REFUSAL_CODES)[number];
 
 /**
  * One connection carried by `must_choose_connection`.

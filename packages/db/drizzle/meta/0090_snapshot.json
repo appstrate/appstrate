@@ -1,5 +1,5 @@
 {
-  "id": "71d7f68f-216d-4cea-8915-19d72e04da68",
+  "id": "f7556afa-06cd-4fc6-88cd-c353f98fb92c",
   "prevId": "cfc088dd-ec7c-4844-a1c2-0f997d8b1c6e",
   "version": "7",
   "dialect": "postgresql",
@@ -4554,6 +4554,10 @@
         "runs_cost_non_negative": {
           "name": "runs_cost_non_negative",
           "value": "cost >= 0"
+        },
+        "runs_payer_iff_user_source": {
+          "name": "runs_payer_iff_user_source",
+          "value": "(model_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)"
         },
         "runs_cost_pricing_status_valid": {
           "name": "runs_cost_pricing_status_valid",

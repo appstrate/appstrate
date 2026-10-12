@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Hosted-connect-portal session plumbing (issue #769).
+ * Hosted-connect-portal session plumbing.
  *
  * Centralizes the connect-session token lifecycle so the route layer stays
  * thin:
@@ -38,7 +38,7 @@ const JTI_PREFIX = "connect-jti:";
 
 /**
  * Resolve the connect-session signing keyring. `CONNECT_SESSION_SECRET` is a
- * required env var (boot fails without it — issue #905), so the hosted connect
+ * required env var (boot fails without it), so the hosted connect
  * surface is always available once the platform is up.
  */
 function connectSessionSecret(): string {
@@ -134,16 +134,15 @@ export async function consumeJti(jti: string, expSeconds: number): Promise<boole
  * Hand a consumed `jti` back so the same link can be clicked again.
  *
  * Only for a click that was consumed and then failed BEFORE anything was
- * granted or minted on the strength of it — the missing-OAuth-client case of
- * issue #1263, where the user has to wait for an admin and then retry. The
+ * granted or minted on the strength of it — the missing-OAuth-client case,
+ * where the user has to wait for an admin and then retry. The
  * failed click is then indistinguishable from no click at all, so the replay
  * guard has nothing to protect; the token's own `exp` keeps bounding reuse.
  * Never call this after a partial success (a state row or provider redirect
  * issued): the burn is what stops a replay from re-entering that flow.
  *
  * Best-effort: a cache fault here must not mask the error being rendered, so
- * it is swallowed — the worst case is the pre-#1263 behaviour (link burned,
- * one re-mint).
+ * it is swallowed — the worst case is a burned link and one re-mint.
  */
 export async function releaseJti(jti: string): Promise<void> {
   try {

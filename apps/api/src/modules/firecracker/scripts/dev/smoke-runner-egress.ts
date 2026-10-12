@@ -141,7 +141,7 @@ const UDP_CONTROL_PAYLOAD = "runner-egress-1547 host-control";
 const UDP_TABLE = "smoke1547";
 /**
  * Reporter ids, in spawn order (the sidecar boots specs sequentially):
- *   r1   plain-CONNECT runner allowed https://example.com (the #1458 probes)
+ *   r1   plain-CONNECT runner allowed https://example.com (the allowlist probes)
  *   r2   plain-CONNECT runner allowed https://example.org only, opted into the
  *        workspace — the cross-runner attribution probe, the per-runner plane
  *        policy probe, and the positive `workspace` control

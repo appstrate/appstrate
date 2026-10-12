@@ -230,6 +230,36 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
   });
 });
 
+describe("runs — a payer only on a run a member's own credential pays", () => {
+  it("stores the legal pairs and refuses the others", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "runpayer" });
+    await seedAgent({ id: "@runpayer/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    const run = (modelSource: "org" | "user" | null, payerUserId: string | null) =>
+      seedRun({
+        packageId: "@runpayer/agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        modelSource,
+        payerUserId,
+      });
+    const refusal = async (...args: Parameters<typeof run>) => {
+      const error = await run(...args).catch((err: unknown) => err);
+      const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+      return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+    };
+
+    expect((await run("user", ctx.user.id)).payerUserId).toBe(ctx.user.id);
+    expect((await run("org", null)).payerUserId).toBeNull();
+    expect((await run(null, null)).payerUserId).toBeNull();
+
+    expect(await refusal("org", ctx.user.id)).toContain("runs_payer_iff_user_source");
+    expect(await refusal(null, ctx.user.id)).toContain("runs_payer_iff_user_source");
+    expect(await refusal("user", null)).toContain("runs_payer_iff_user_source");
+  });
+});
+
 describe("recordLlmUsage — runner birth invariant", () => {
   it("rejects a runner entry without a runId (guard replaces the dropped DB CHECK)", async () => {
     // Since migration 0028 the DB can no longer forbid NULL run_id on runner

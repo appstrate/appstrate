@@ -341,6 +341,18 @@ describe("errorMessage", () => {
     });
     expect(errorMessage(err)).toBe(agentsFr["error.connectionOverridesRefused"]);
     expect(errorField(err)).toBe("connection_overrides.@acme/crm");
+    const dependency = await problem({
+      code: "validation_failed",
+      detail: "dependency_overrides.@acme/skill: …",
+      errors: [
+        {
+          field: "dependency_overrides.@acme/skill",
+          code: "undeclared_dependency_override",
+          message: "@acme/skill is not a skill or integration this agent declares",
+        },
+      ],
+    });
+    expect(errorMessage(dependency)).toBe(agentsFr["error.dependencyOverridesRefused"]);
   });
 
   it("words a 'no connection' override on a required integration as the pin's refusal", async () => {

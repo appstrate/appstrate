@@ -7,6 +7,7 @@ import type {
 import i18n from "../i18n";
 import type { components } from "../api/schema";
 import { integrationIdOfField } from "./connection-choice";
+import { agentConnectionsTabVisible } from "./route-access";
 
 /** One `warnings[]` item: an integration the run starts without, and why. */
 export type LaunchWarning = components["schemas"]["ConnectionResolutionWarning"];
@@ -17,6 +18,15 @@ export type LaunchTarget = { kind: "run" } | { kind: "schedule"; userId: string 
 /** Whether the run binds the VIEWER's connections, the only ones the Connexions tab offers. */
 export function isViewersLaunch(target: LaunchTarget, viewerId: string | undefined): boolean {
   return target.kind === "run" || (target.userId !== null && target.userId === viewerId);
+}
+
+/** Whether "Connecter" has somewhere to land: the agent's page opens for the viewer and shows its Connexions tab. */
+export function connectionsTabReachable(
+  agentPath: string,
+  canReach: (target: string) => boolean,
+  can: (permission: string) => boolean,
+): boolean {
+  return canReach(agentPath) && agentConnectionsTabVisible(can);
 }
 
 /** The layers that can choose `[]`: an org default is never empty, and the fallback binds. */

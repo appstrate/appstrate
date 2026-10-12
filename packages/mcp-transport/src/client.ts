@@ -74,7 +74,7 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
   extraHeaders?: Record<string, string>;
   /**
    * Opt-in retry policy for the `client.connect(transport)` handshake.
-   * When omitted the legacy single-shot behaviour is preserved — callers
+   * When omitted the handshake is single-shot — callers
    * that race against an external boot sequence (runtime-pi waiting on
    * the sidecar's `/mcp`) opt in explicitly to avoid surprising other
    * call sites that want a fail-fast surface.
@@ -99,7 +99,7 @@ export interface McpConnectRetryOptions {
    * Hard wall-clock budget for the entire connect (including all retries
    * + final attempt). Defaults to 60s — wider than the sidecar's 30s
    * outbound upstream timeout because cold-start container pulls + boot
-   * can routinely consume 20–45s (issue #406). NOT operator-tunable — it is a
+   * can routinely consume 20–45s. NOT operator-tunable — it is a
    * compiled constant in `runtime-pi/env.ts`. Making it a real knob means
    * adding the key to `SIDECAR_OPERATOR_ENV_KEYS`, not just reading it.
    */

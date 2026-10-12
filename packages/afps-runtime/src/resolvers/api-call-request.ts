@@ -49,7 +49,7 @@ function unresolved(where: string, keys: readonly string[]): Prepared {
 
 /**
  * `Bearer{{token}}` → `Bearer {{token}}`: an LLM sometimes drops the space. On the TEMPLATE only: on
- * a resolved value it would split a secret starting with a scheme name (`tokenlive_sk_123`, #988).
+ * a resolved value it would split a secret starting with a scheme name (`tokenlive_sk_123`).
  */
 function repairAuthScheme(headerName: string, template: string): string {
   if (headerName.toLowerCase() !== "authorization") return template;

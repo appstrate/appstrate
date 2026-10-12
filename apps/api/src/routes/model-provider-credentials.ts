@@ -399,7 +399,7 @@ export function createModelProviderCredentialsRouter() {
       });
       // Return the bare created resource — the public, non-secret
       // `ModelProviderCredentialInfo` projection (same as GET/list). The api
-      // key is NEVER echoed back (#657).
+      // key is NEVER echoed back.
       const credential = await getOrgModelProviderCredential(caller, id);
       if (!credential) throw internalError();
       return c.json(credential, 201);
@@ -548,7 +548,7 @@ export function createModelProviderCredentialsRouter() {
       });
       // Return the bare updated resource (non-secret
       // `ModelProviderCredentialInfo` projection, same as GET/list). The api
-      // key is NEVER echoed back (#657).
+      // key is NEVER echoed back.
       const credential = await getOrgModelProviderCredential(caller, id);
       if (!credential) throw notFound("Model provider credential not found");
       return c.json(credential);

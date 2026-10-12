@@ -1,7 +1,7 @@
 # Observability (OpenTelemetry)
 
 Production observability for the platform API, built on **OpenTelemetry** with
-**OTLP/HTTP** export. Addresses issue #616 item 1.
+**OTLP/HTTP** export.
 
 > **Disabled by default — twice over.** The OTel implementation lives in the
 > opt-in workspace module `@appstrate/module-observability`

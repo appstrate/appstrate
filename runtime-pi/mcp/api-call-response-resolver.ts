@@ -36,7 +36,7 @@
  *
  * Structured data vs. text: the file descriptor is ALSO emitted as MCP
  * `structuredContent`, mirrored verbatim into a JSON text block. The tool
- * declares no `outputSchema` (see `sidecar/mcp.ts`, issue #876), so the
+ * declares no `outputSchema` (see `sidecar/mcp.ts`), so the
  * mirror is the spec's backwards-compat recommendation rather than a
  * validated contract. Do NOT drop the text forms: Pi's `AgentToolResult`
  * forwards only text/image `content` blocks to the model (`details` is
@@ -241,7 +241,7 @@ export async function shapeApiCallResponse(
   )) as ToolResult;
   if (status === null) return spilled;
   // The spread keeps `_meta` intact. The sidecar attaches no
-  // `structuredContent` on this path (#876) — the body owns `content`.
+  // `structuredContent` on this path — the body owns `content`.
   // This prefix is the model-visible status channel: Pi forwards only
   // text/image content to the model (see module doc).
   return {

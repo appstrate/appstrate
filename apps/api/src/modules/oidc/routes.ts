@@ -1735,7 +1735,7 @@ export function createOidcRouter() {
     // reads the pending client from THESE headers to persist the
     // `(token → clientId)` binding that the BA-driven `/magic-link/verify`
     // create leg later resolves the realm from — a caller who strips or
-    // clobbers their own cookie can no longer detach the link from its
+    // clobbers their own cookie cannot detach the link from its
     // client. See `services/oauth-transaction-binding.ts`.
     const baHeaders = headersWithAuthoritativePendingClient(c.req.raw.headers, ctx.client.clientId);
     try {

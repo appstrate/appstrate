@@ -230,7 +230,7 @@ function enrichedRunSelect(actor: Actor | null) {
 
 /**
  * Per-recipient unread flag for the run's notification, computed as a
- * correlated EXISTS against the `notifications` table (issue #667). The
+ * correlated EXISTS against the `notifications` table. The
  * recipient is matched on the polymorphic `(recipientType, recipientId)`
  * tuple — the same match the notifications service uses — so a dashboard
  * user and an end-user never see each other's read-state. Read state lives
@@ -326,7 +326,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     runner_name: row.runnerName,
     runner_kind: row.runnerKind,
     // Stored bare on historical rows; emitted with the `@` sigil so every
-    // API surface uses the one canonical scope format (issue #629).
+    // API surface uses the one canonical scope format.
     agent_scope: row.agentScope ? normalizeScope(row.agentScope) : null,
     agent_name: row.agentName,
     runOrigin: row.runOrigin,
@@ -636,7 +636,7 @@ interface CreateRunParams {
   /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
   /**
-   * Per-run dependency version overrides (#666) — the `{ "@scope/name":
+   * Per-run dependency version overrides — the `{ "@scope/name":
    * "draft" | "<spec>" }` map the caller passed on the run trigger (or a
    * schedule froze). Persisted verbatim on `runs.dependency_overrides` as the
    * audit trail so a run that consumed draft bytes is never mistaken for a
@@ -678,7 +678,7 @@ interface CreateRunParams {
   integrationsUnbound?: RunIntegrationUnbound[];
   /**
    * Snapshot of each declared integration's resolved manifest version at
-   * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
+   * kickoff. Persisted on `runs.resolved_integration_versions` so the
    * runtime credential path reads the SAME version the spawn resolver used.
    */
   resolvedIntegrationVersions?: Record<

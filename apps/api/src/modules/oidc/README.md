@@ -163,7 +163,7 @@ The OAuth 2.1 / OIDC protocol endpoints themselves (`/api/auth/oauth2/authorize`
 
 `oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per AGENTS.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
-### Authorized devices — CLI sessions (PR #269)
+### Authorized devices — CLI sessions
 
 The OIDC module also owns the lifecycle of CLI refresh-token families that back `appstrate login` (RFC 8628 device flow handled by `auth/cli-plugin.ts`). Five endpoints sit on top of the head-of-family metadata captured on `cli_refresh_tokens` (`device_name`, `user_agent`, `created_ip`, `last_used_ip`, `last_used_at`). UA / device_name are captured at issuance only — never re-captured at refresh — so the row remains a stable identity for the device.
 

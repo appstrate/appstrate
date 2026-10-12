@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * CLI token service (issue #165).
+ * CLI token service.
  *
  * Mints a **15-minute signed JWT access token + 30-day opaque rotating
  * refresh token** pair for the Appstrate CLI's device-authorization
@@ -126,7 +126,7 @@ interface TokenPair {
 
 /**
  * Device metadata captured at device-code exchange. Persisted on the head
- * of family for the listing/revocation UI (issue #251). All fields
+ * of family for the listing/revocation UI. All fields
  * optional — pre-2.x CLIs that omit `X-Appstrate-Device-Name`, and
  * deployments where `getClientIpFromRequest` returns `null` (no
  * forwarded header trusted, no socket address surfaced), will produce

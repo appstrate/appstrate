@@ -178,7 +178,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   const input = (context.input as Record<string, unknown>) ?? {};
   const platformName = opts.platformName ?? "Appstrate";
 
-  // ─── Section model (#368) ─────────────────────────────────────────
+  // ─── Section model ─────────────────────────────────────────
   // The platform prompt owns SECTIONS — headers, intro prose, and data
   // dumps the runtime sources from DB/state. Tool USAGE prose lives in
   // each tool's MCP `description` (surfaced via `tools/list`), never in
@@ -207,7 +207,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     "- **Network access**: Outbound HTTP/HTTPS is available. " +
       "Use `curl`, `fetch`, or any HTTP client to call public APIs and websites directly.",
   );
-  // Pre-installed Python libs (#628). The runtime image bakes common data
+  // Pre-installed Python libs. The runtime image bakes common data
   // libraries into the agent venv — stating it here stops agents (and
   // weaker models especially) from running speculative `pip install`
   // steps or spiralling on ModuleNotFoundError before trying the import.
@@ -280,7 +280,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // default to "here are your results: …" free text, which silently
   // reaches no one. State the invariant explicitly so every result,
   // status update, question, or error is routed through a tool call.
-  // Kept tool-agnostic (no opt-in tool names) per the #368 section
+  // Kept tool-agnostic (no opt-in tool names) per the section
   // contract — which tool to use is taught by each tool's MCP descriptor
   // `description` (surfaced via `tools/list`), not the prompt.
   sections.push("### Communication");
@@ -302,7 +302,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // 24.1s — serialised independent calls, not model thinking, dominate the
   // wall clock. Models default to one call per turn unless told otherwise,
   // and nothing else in the preamble says they may batch. Stays tool-agnostic
-  // per the #368 contract above; this text is paid for on every run.
+  // per the contract above; this text is paid for on every run.
   sections.push(
     "**Batch independent tool calls.** Every turn is a full round trip to the model, so a turn " +
       "carrying one call costs the same as a turn carrying five: when several calls do not depend " +

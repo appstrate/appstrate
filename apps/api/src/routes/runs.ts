@@ -120,11 +120,9 @@ export const runAgentBodySchema = z
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
  *
- * `.strict()` since #1187, like the three other launch surfaces. It also closes
- * a live silent drop: `dependency_overrides` was accepted here (the parser read
- * it straight off the raw body) and then never applied — `triggerInlineRun`
- * does not forward it. Undeclared here, it is now a 400 instead of a run that
- * quietly ignored the pin it was handed.
+ * `.strict()`, like the three other launch surfaces. `dependency_overrides`
+ * is undeclared here because `triggerInlineRun` does not forward it: a 400,
+ * instead of a run that quietly ignores the pin it was handed.
  */
 const inlineRunBodySchema = z
   .object({
@@ -278,7 +276,7 @@ export function createRunsRouter() {
       // instead of being swallowed into `{}` and launched as an input-less run.
       const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
 
-      // Omitted ⇒ the latest PUBLISHED version (#636). The working copy is
+      // Omitted ⇒ the latest PUBLISHED version. The working copy is
       // opt-in via `version=draft`, and only for a caller who can WRITE the
       // agent — the resolver honours the selector, this decides who may name it
       // (plan decision 4).
@@ -436,10 +434,10 @@ export function createRunsRouter() {
 
         // 201 + the bare created run resource — same DTO and serializer as
         // GET /runs/:id — so callers see the full launched state (resolved
-        // `model_label` / `model_source` for org-default drift detection per
-        // #635, plus status, version_ref, agent_scope, …) without a follow-up
+        // `model_label` / `model_source` for org-default drift detection,
+        // plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
-        // No legacy `runId` alias (#657): the run id is `id`.
+        // No legacy `runId` alias: the run id is `id`.
         const row = await getRunFull(
           getSpaceScope(c),
           runId,
@@ -544,7 +542,7 @@ export function createRunsRouter() {
 
   // GET /api/runs/:id — get a single run
   //
-  // Optional `?wait=<seconds|true>` long-poll (issue #631): holds the
+  // Optional `?wait=<seconds|true>` long-poll: holds the
   // request until the run reaches a terminal status or the wait elapses
   // (capped at MAX_WAIT_SECONDS, below typical proxy idle timeouts), then
   // returns the run object exactly as the plain call does. A non-terminal
@@ -721,7 +719,7 @@ export function createRunsRouter() {
 
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
-    // completed_at). Same DTO and serializer as GET /runs/:id (#657).
+    // completed_at). Same DTO and serializer as GET /runs/:id.
     const row = await getRunFull(scope, runId, getActor(c), undefined, !agentReadIsSummary(c));
     if (!row) {
       // The run was readable above; a miss here means a concurrent delete
@@ -836,7 +834,7 @@ export function createRunsRouter() {
           after: { packageId, origin: "inline" },
         });
 
-        // 201 + the bare created run resource (#657) — same DTO and serializer
+        // 201 + the bare created run resource — same DTO and serializer
         // as GET /runs/:id, same status code as the sibling trigger
         // POST /agents/{scope}/{name}/run. The shadow package id callers used
         // to read from the `packageId` envelope field is the resource's own

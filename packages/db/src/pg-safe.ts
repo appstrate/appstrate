@@ -3,7 +3,7 @@
 /**
  * Deep-copy a JSON value so PostgreSQL can store every string in it, keys
  * included: NULs and lone UTF-16 surrogates (refused by `text`/`jsonb`, and
- * identically on every retry — #1501) become U+FFFD, so the gap stays visible.
+ * identically on every retry) become U+FFFD, so the gap stays visible.
  */
 export function toPgSafe<T>(value: T): T {
   return sanitize(value) as T;

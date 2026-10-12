@@ -363,13 +363,8 @@ export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
  * run prompt (`@appstrate/afps-runtime/bundle`), the MCP `run_and_wait` tool
  * descriptions (`apps/api/src/modules/mcp/tools.ts`), and the chat system
  * prompt (`@appstrate/module-chat`). `module-chat` does not depend on
- * afps-runtime, which is how the third one came to hold a hand-copied literal
- * of exactly these six names, in exactly this order — the drift the constant
- * was created to end, reintroduced in the same range that ended it.
- *
- * The copies had already drifted once before: the MCP sites banned three of
- * these six, omitting exactly the three (`result`, `document`, `file`) that
- * #1177's vocabulary makes most attractive to a model.
+ * afps-runtime, so a constant anywhere else would be hand-copied, and the
+ * copies would drift.
  */
 const CONTEXT_FREE_DELIVERABLE_FILENAMES: readonly string[] = [
   "report.md",

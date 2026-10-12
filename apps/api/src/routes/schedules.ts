@@ -277,10 +277,10 @@ async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceSco
   return schedule;
 }
 
-// #738: schedule execution identity, chosen by an admin from the form.
+// Schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of userId / endUserId. Omitted at create → defaults to
 // the caller (`getActor`). Omitted at update → actor left untouched. The actor
-// can never be cleared (preserves #735: a schedule always has an identity).
+// can never be cleared (a schedule always has an identity).
 // `strictObject` BEFORE `.refine()` — `.refine()` returns a ZodPipe on which
 // `.strict()` is no longer chainable, and the enclosing bodies' own `.strict()`
 // only closes their ROOT. Without it, `{ actor: { userId, endUserIds } }`
@@ -366,7 +366,7 @@ async function resolveScheduleActor(
 }
 
 /**
- * `.strict()` (#1187's rule, extended to this surface): an unknown field is a
+ * `.strict()`: an unknown field is a
  * 400, never a silent drop. A schedule is the strongest case for it — the other
  * launch surfaces mis-execute ONE run, whereas a schedule freezes exactly these
  * fields onto `package_schedules` and replays them on every fire, so a stripped
@@ -403,7 +403,7 @@ export const updateScheduleSchema = z
     version_override: z.string().nullable().optional(),
     connection_overrides: connectionOverridesSchema.nullable().optional(),
     dependency_overrides: dependencyOverridesSchema.nullable().optional(),
-    // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
+    // No `.nullable()` — the actor can be re-pointed but never cleared.
     actor: actorSchema.optional(),
   })
   .strict();
@@ -741,7 +741,7 @@ export function createSchedulesRouter() {
       }
     }
 
-    // #738: re-point the actor when the caller selected one (validated against
+    // Re-point the actor when the caller selected one (validated against
     // this org/space scope). `undefined` leaves the existing actor untouched.
     assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;

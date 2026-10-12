@@ -121,7 +121,7 @@ const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
  * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
  * from a terminal model error the runner already stamped: that verdict is
  * the runner's authoritative call (runner-pi's `getTerminalError()`), and
- * finalize no longer scans the `run_logs` adapter-error trail at all.
+ * finalize does not scan the `run_logs` adapter-error trail at all.
  *
  * One generic reason on purpose, so finalize stays transport-agnostic: the
  * proxy a run resolved at preflight is not in the sink context, and naming it
@@ -307,7 +307,7 @@ async function ingestInner(
  *           declared) — failure overrides to "failed".
  *        b. If still "success": apply the "zero tokens" rule (no LLM
  *           roundtrip ever happened) — overrides to "failed".
- *   4. Build the result payload (`{ output }`) mirroring the legacy
+ *   4. Build the result payload (`{ output }`) in the
  *      platform shape; consumers of `runs.result` get the same structure
  *      whether the run executed in-process or came from a remote runner.
  *   5. Build the terminal params shared by the CAS and the broadcast.
@@ -815,7 +815,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   };
   void emitEvent("onRunStatusChange", broadcastParams);
 
-  // Fan out in-app notifications — one row per recipient (issue #667). Only
+  // Fan out in-app notifications — one row per recipient. Only
   // the CAS winner reaches here, so this runs exactly once per run. Awaited
   // (after the broadcast) rather than detached: the run is already terminal
   // and the broadcast has already fired, so the small INSERT adds negligible
@@ -854,11 +854,10 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
  *
  * Three callers funnel through here today:
  *
- *   - `POST /api/runs/:id/cancel` — user-triggered cancellation. Without
- *     this convergence, the cancel route used to write `status='cancelled'`
- *     directly and the terminal ledger barrier + `onRunStatusChange`
- *     broadcast never ran — metering subscribers observed zero charge for
- *     cancelled runs that had already burned LLM tokens (issue #12 follow-up).
+ *   - `POST /api/runs/:id/cancel` — user-triggered cancellation. A cancel
+ *     route writing `status='cancelled'` directly would skip the terminal
+ *     ledger barrier + `onRunStatusChange` broadcast: metering subscribers
+ *     would observe zero charge for a cancelled run that burned LLM tokens.
  *   - `listOrphanRunIds` + boot loop — runs that were `running` when the
  *     server crashed are finalised here so billing/observability hooks see
  *     the exact same lifecycle as a clean termination.

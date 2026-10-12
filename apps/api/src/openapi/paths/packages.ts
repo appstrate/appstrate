@@ -78,7 +78,7 @@ const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mutation response schemas (issue #657)
+// Mutation response schemas
 //
 // Mutating package endpoints return the affected resource BARE — the exact
 // shape of the corresponding GET detail, `$ref`'d directly. No operation
@@ -906,8 +906,8 @@ export const packagesPaths = {
               // An unknown field is a 400, never a silent drop: the create /
               // update bodies are `.strict()` in `routes/packages.ts`, so a
               // client still sending the retired `source_code` learns it is
-              // gone instead of getting a 201 without it. Same rule the four
-              // launch surfaces took in #1187.
+              // gone instead of getting a 201 without it. Same rule as the four
+              // launch surfaces.
               additionalProperties: false,
             },
           },
@@ -2040,7 +2040,7 @@ export const packagesPaths = {
               schema: {
                 // The forked package resource, bare — same shape as the new
                 // package's GET detail, selected by the source package type at
-                // runtime (issue #657). Fields vary by type, so the response is
+                // runtime. Fields vary by type, so the response is
                 // a `oneOf`. Fork provenance is resource state: `forked_from`
                 // is part of both detail DTOs.
                 oneOf: [

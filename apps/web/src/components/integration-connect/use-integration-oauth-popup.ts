@@ -22,7 +22,7 @@ const POPUP_POLL_INTERVAL_MS = 500;
 const POPUP_FEATURES = "width=600,height=700";
 
 /**
- * Drives the unified hosted-connect-portal flow via popup (issue #769).
+ * Drives the unified hosted-connect-portal flow via popup.
  *
  * Auth-type-agnostic: mints a connect session (`/connect/session`) and opens the
  * returned `connect_url`, which dispatches server-side to the provider OAuth

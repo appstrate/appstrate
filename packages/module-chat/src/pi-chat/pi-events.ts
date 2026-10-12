@@ -11,7 +11,7 @@
  * heavy `@earendil-works/pi-coding-agent` graph loads only inside the engine,
  * via `loadPiCodingAgentSdk()`.
  *
- * What they no longer rely on is a human keeping them in step. The
+ * They do not rely on a human keeping them in step. The
  * conformance block at the bottom of this file asserts, at COMPILE time, that
  * every vendor variant the mapper branches on still fits its view here — a
  * renamed field or a dropped variant in a Pi upgrade is a type error, not a

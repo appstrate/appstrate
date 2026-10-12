@@ -20,8 +20,7 @@
  *    `SafeUrlSchema` inside `@better-auth/oauth-provider`), so the admin path
  *    accepts exactly what DCR accepts — a local re-implementation would drift
  *    on the edge forms upstream normalizes (IPv4-mapped IPv6, zone ids,
- *    trailing dots, `tenant.localhost`), which is the asymmetry #1012 is
- *    about. Upstream's docstring steers redirect *matching* to `isLoopbackIP`;
+ *    trailing dots, `tenant.localhost`). Upstream's docstring steers redirect *matching* to `isLoopbackIP`;
  *    that warning is about matching an authorization request against a
  *    registration, not about registration policy, where `SafeUrlSchema`
  *    itself uses `isLoopbackHost`.

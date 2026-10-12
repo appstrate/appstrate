@@ -16,7 +16,7 @@
  *
  * Nothing else resolves against drafts. A run with no override, and the bundle
  * EXPORT of a draft agent (`?source=draft`), both walk the closure with
- * {@link DbPackageCatalog} against published versions — the #666 rule, and what
+ * {@link DbPackageCatalog} against published versions, which
  * keeps the exported archive byte-identical to what the server would execute.
  *
  * Contract details:

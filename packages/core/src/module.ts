@@ -374,7 +374,7 @@ export interface AppstrateModule {
 /**
  * Fields shared by both halves of {@link ModulePermissionContribution}.
  * Distributes over {@link ModuleResources}: the `resource` literal PINS the
- * legal `actions` for that entry, so the runtime contribution can no longer
+ * legal `actions` for that entry, so the runtime contribution cannot
  * drift from the compile-time `declare module` augmentation that guards the
  * call sites. When both halves were plain `string`, a typo (`"taks"`, or an
  * action the augmentation never declared) produced a permission that type-
@@ -1519,7 +1519,7 @@ export interface PlatformServices {
    * `tx` is the caller's open DB transaction handle (opaque here — core carries
    * no Drizzle dependency). The chat module passes the SAME transaction it uses
    * to delete the `chat_sessions` row, so the file teardown and the row
-   * delete commit atomically: a file materializing in the gap can no longer
+   * delete commit atomically: a file materializing in the gap cannot
    * be cascade-deleted without a storage-deletion outbox job. Omitted → the
    * platform opens its own transaction, which is correct whenever the caller
    * has no wider unit of work to join.

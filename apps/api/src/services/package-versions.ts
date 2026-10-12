@@ -63,8 +63,8 @@ interface CreateVersionParams {
   /**
    * Artifact upload, invoked INSIDE the transaction and ONLY when the outcome
    * is `created` — i.e. strictly after the forward-only/exists decision, while
-   * the per-package advisory lock is held. This ordering is the #896 fix:
-   * uploading before the decision let an `exists` republish overwrite the
+   * the per-package advisory lock is held. Ordering matters:
+   * uploading before the decision would let an `exists` republish overwrite the
    * published bytes while the row kept the old integrity hash (a permanent
    * `bundle_integrity_mismatch` at run time), and let a `rejected` republish
    * clobber-then-delete a perfectly good artifact. An upload failure rolls the
@@ -152,7 +152,7 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
     if (outcome.action === "exists") {
       // Published versions are immutable: return the existing row WITHOUT
       // touching the stored artifact. Overwriting the bytes here while keeping
-      // the row's integrity hash is exactly the corruption reported in #896.
+      // the row's integrity hash would corrupt the published version.
       logger.warn("Version already exists", { packageId, version });
       const [existingRow] = await tx
         .select({ id: packageVersions.id, version: packageVersions.version })
@@ -196,8 +196,8 @@ export async function createPackageVersion(params: CreateVersionParams): Promise
     // Upload the artifact only now that the outcome is decided as `created`,
     // still inside the transaction: an upload failure rolls the row back, so
     // a committed row is never left pointing at absent bytes, and a rejected
-    // or already-existing version never has its published bytes overwritten
-    // (#896). Holding the per-package advisory lock across the upload is the
+    // or already-existing version never has its published bytes overwritten.
+    // Holding the per-package advisory lock across the upload is the
     // accepted cost — it only serializes publishes of the SAME package.
     if (uploadZip) {
       await uploadZip();
@@ -414,7 +414,7 @@ export async function getVersionRow(
 /**
  * A published version's files: null when the object is absent or will not unzip — a
  * reader that needs the bytes goes through {@link requirePublishedArchive}. Storage errors
- * propagate; bundle-layer refusals (the signature gate of an execution read) are coded (#878).
+ * propagate; bundle-layer refusals (the signature gate of an execution read) are coded.
  */
 export async function readVersionArchive(
   packageId: string,
@@ -741,7 +741,7 @@ type CreateVersionResult =
  *  invalid, fails forward-only validation, or content is identical to the latest version.
  *  A draft whose content changed but whose version was not bumped yields `version_exists`
  *  (published versions are immutable — the old silent-success path overwrote the stored
- *  bytes while keeping the stale integrity row, #896). */
+ *  bytes while keeping the stale integrity row). */
 export async function createVersionFromDraft(params: {
   packageId: string;
   orgId: string;
@@ -813,7 +813,7 @@ export async function createVersionFromDraft(params: {
   // this publish, i.e. create the very legacy the read paths then have to
   // tolerate forever. The drop is structural (no Zod re-parse): key order and
   // unknown fields survive byte-for-byte, so a draft with nothing to drop
-  // yields the exact same bytes as before and publish dedup (#896) is
+  // yields the exact same bytes as before and publish dedup is
   // unaffected.
   const { manifest: finalManifest, dropped: droppedRuntimeTools } =
     dropRetiredRuntimeTools(rawManifest);
@@ -872,14 +872,14 @@ export async function createVersionFromDraft(params: {
   // immutable so publish enforces the same executable-archive invariant as
   // create and import.
   //
-  // Keyed on `pkg.type` ALONE. This used to also require
-  // `finalManifest.type === "mcp-server"`, exempting a row whose stored
-  // manifest had drifted to another type — which meant the one row shape that
-  // cannot be trusted was the one that skipped the check, minting an immutable
-  // version + ZIP nothing ever validated. Every write direction is closed:
-  // create throws (`package-items/manifest.ts`), the author routes 400
-  // (`validateManifestForRoute`), fork normalizes (`package-fork.ts`), and
-  // #987 closed the last one. A surviving drifted row now fails publish loudly
+  // Keyed on `pkg.type` ALONE. Also requiring
+  // `finalManifest.type === "mcp-server"` would exempt a row whose stored
+  // manifest drifted to another type: the one row shape that cannot be trusted
+  // would skip the check and mint an immutable version + ZIP nothing validated.
+  // Every write direction is closed: create throws
+  // (`package-items/manifest.ts`), the author routes 400
+  // (`validateManifestForRoute`), fork normalizes (`package-fork.ts`). A
+  // surviving drifted row fails publish loudly
   // with `invalid_bundle` instead of publishing unchecked
   // (`docs/NO_TRANSITIONAL_CODE.md` §1).
   if (pkg.type === "mcp-server") {
@@ -1077,9 +1077,9 @@ export async function replaceVersionContent(params: {
   const deps = extractDependencies(manifest);
   await assertNoCycle(packageId, deps);
 
-  // Bail before touching storage when the version row doesn't exist: the old
-  // order uploaded first, so a bad `version` overwrote the artifact of... a
-  // version nobody had, or worse raced a concurrent publish (#896-adjacent).
+  // Bail before touching storage when the version row doesn't exist: uploading
+  // first would let a bad `version` write the artifact of a version nobody
+  // has, or race a concurrent publish.
   const [existingRow] = await db
     .select({ id: packageVersions.id })
     .from(packageVersions)
@@ -1127,11 +1127,10 @@ export async function replaceVersionContent(params: {
 /** Create a version snapshot and upload the ZIP to Storage in one call.
  *
  *  The upload happens INSIDE `createPackageVersion`'s transaction, strictly
- *  after the forward-only/exists decision (#896): an `exists` or `rejected`
- *  outcome never touches storage, so a republish of an existing version can
- *  no longer overwrite published bytes (leaving the row's stale integrity
- *  hash to fail every subsequent run) or delete a good artifact via the old
- *  upload-then-clean-up sequence. */
+ *  after the forward-only/exists decision: an `exists` or `rejected`
+ *  outcome never touches storage, so a republish of an existing version
+ *  cannot overwrite published bytes (leaving the row's stale integrity hash to
+ *  fail every subsequent run) or delete a good artifact. */
 export async function createVersionAndUpload(params: {
   packageId: string;
   version: string;

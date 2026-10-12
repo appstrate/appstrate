@@ -222,7 +222,7 @@ async function deleteStorageTarget(
  *
  * Both settles are guarded on `attempts = <the value this pass claimed with>`,
  * so a pass whose lease expired mid-flight (and whose job was re-claimed by
- * another instance, bumping `attempts`) can no longer overwrite the new owner's
+ * another instance, bumping `attempts`) cannot overwrite the new owner's
  * counter or backoff with its own stale computation.
  *
  * `storage.deleteFile` is idempotent on a missing object (FS tolerates ENOENT;

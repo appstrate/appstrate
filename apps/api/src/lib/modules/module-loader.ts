@@ -139,7 +139,7 @@ export async function importModule(specifier: string): Promise<AppstrateModule> 
 }
 
 // ---------------------------------------------------------------------------
-// Core-version contract guard (issue #973)
+// Core-version contract guard
 // ---------------------------------------------------------------------------
 
 const CORE_PACKAGE = "@appstrate/core";
@@ -211,7 +211,7 @@ export async function _coreRangeFromPackageJson(specifier: string): Promise<stri
 }
 
 /**
- * Boot guard on the module→platform direction of the contract (#973).
+ * Boot guard on the module→platform direction of the contract.
  *
  * `tsc` cannot see an out-of-tree module, and the platform's `PlatformServices`
  * surface changes shape between majors: a caller built against an older core

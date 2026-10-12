@@ -81,9 +81,7 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
  * Membership form of {@link CANONICAL_RUNTIME_TOOL_EVENT_TYPES}, for the trust
  * boundary in `reEmitRuntimeToolEvents`.
  *
- * Named CANONICAL, not ACCEPTED. It was briefly the latter, when it also held
- * the pre-#1177 `document.published` spelling; that member is gone and the
- * name outlived it. On a set whose whole job is to be closed, a name promising
+ * Named CANONICAL, not ACCEPTED: on a set whose whole job is to be closed, a name promising
  * a wider membership than it has is an invitation to add one back.
  */
 const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(

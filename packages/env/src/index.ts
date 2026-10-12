@@ -113,8 +113,8 @@ const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
 // defaults. When adding or changing a `.default(...)` value below, mirror
 // the entry in `scripts/verify-compose-defaults.ts:CODE_DEFAULTS` so the
 // compose-drift guard can still detect duplicated/stale YAML defaults
-// (root cause of #513 — MODULES drifted in compose vs. schema, every CLI
-// self-host shipped with zero model providers for weeks). The script's
+// (a `MODULES` default drifting in compose vs. schema ships a self-host
+// with zero model providers). The script's
 // hand-maintained table is intentional: Zod defaults are entangled with
 // transforms/refinements that don't extract cleanly via static analysis.
 
@@ -187,11 +187,11 @@ export const envSchema = z
       .refine((v) => v.split(",").every((k) => k.length >= 16), {
         message: "UPLOAD_SIGNING_SECRET: each comma-separated key must be at least 16 chars",
       }),
-    // Dedicated HMAC secret for hosted-connect-portal session tokens (issue
-    // #769) — short-lived capability tokens that gate the unified integration
+    // Dedicated HMAC secret for hosted-connect-portal session tokens
+    // — short-lived capability tokens that gate the unified integration
     // connect flow. Required: the hosted portal is the primary UI surface for
     // connecting integrations, so a deployment without this secret would boot
-    // "successfully" with its main connect button dead (issue #905). The
+    // "successfully" with its main connect button dead. The
     // installer generates it, upgrades backfill it via `mergeEnv`, and the
     // self-hosting compose templates loud-fail without it. Same comma-separated
     // keyring rotation as the upload secret; each key ≥16 chars. Keep separate
@@ -427,7 +427,7 @@ export const envSchema = z
     // pattern).
     MODULES: z.string().default("oidc,webhooks,mcp,core-providers,@appstrate/module-chat"),
     // Boot policy when a loaded module declares an `@appstrate/core` range this
-    // platform's `CORE_VERSION` does not satisfy (issue #973):
+    // platform's `CORE_VERSION` does not satisfy:
     //   - `fail` (default) — refuse to boot, naming the module and both versions.
     //   - `warn` — log the mismatch and boot anyway. The escape hatch for an
     //     operator running a module that has not been republished against the
@@ -959,7 +959,7 @@ export const envSchema = z
   // protocol to each other, and both speak a container boundary to the
   // platform, and all of it changes in the same commit. A trio that disagrees
   // boots fine and then fails runs with an opaque upstream error naming none of
-  // the three (#1195 for the pair, #1177 for the platform boundary). Detectable
+  // the three. Detectable
   // here, before anything starts. The rule itself, both carve-outs and the
   // worked examples live with the comparison in `@appstrate/core/image-ref`.
   //

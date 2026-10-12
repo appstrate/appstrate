@@ -155,8 +155,7 @@ interface McpHostUpstream {
    * tools are silently dropped (with an audit log) so the agent's LLM
    * never sees a tool it isn't authorised to call.
    *
-   * `undefined` (default) preserves the legacy "all tools allowed"
-   * behaviour. Empty `[]` is a valid explicit "register nothing".
+   * `undefined` (default) allows every tool. Empty `[]` is a valid explicit "register nothing".
    */
   allowedTools?: readonly string[];
   /**

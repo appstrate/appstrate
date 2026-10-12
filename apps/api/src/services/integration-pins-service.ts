@@ -521,15 +521,14 @@ export async function listAccessibleConnections(
  * `missingScopes` are a display annotation on top.
  *
  * `agentManifest` and `resolution` are REQUIRED and caller-supplied, which is
- * load-bearing rather than stylistic. This function used to load the package
- * itself and read `agent.manifest` — always the DRAFT — while its only caller
- * had already resolved the manifest for the requested `version`. On
- * `?version=<pinned>` the response therefore described the pinned version in
- * `blocks_run` and the draft in every `integrations[].resolution`, defeating
- * the reason #770 introduced the selector. Taking both as parameters makes
- * that divergence unrepresentable: there is no manifest in scope here to read
- * the wrong one from. It also removes an N+1 — the cascade ran once per
- * declared integration, each time re-fetching the package and every manifest.
+ * load-bearing rather than stylistic. Loading the package here would read
+ * `agent.manifest` — always the DRAFT — while the caller has resolved the
+ * manifest for the requested `version`: on `?version=<pinned>` the response
+ * would describe the pinned version in `blocks_run` and the draft in every
+ * `integrations[].resolution`. Taking both as parameters makes that divergence
+ * unrepresentable: there is no manifest in scope here to read the wrong one
+ * from. It also avoids an N+1 — one cascade per declared integration, each
+ * re-fetching the package and every manifest.
  */
 async function resolveAgentIntegrationPick(args: {
   scope: SpaceScope;
@@ -721,8 +720,8 @@ export async function resolveAgentConnectionReadiness(args: {
   // `packages.draft_manifest`: the readiness verdict would then judge auth keys
   // and required scopes against the integration author's LIVE DRAFT while the
   // run-kickoff 409 judges them against the pinned published version — exactly
-  // the disagreement this function's contract above forbids. (#1178 closed the
-  // agent-manifest half of it; this is the integration-manifest half.)
+  // the disagreement this function's contract above forbids. (This is the
+  // integration-manifest half of that contract.)
   //
   // The result is deliberately ignored. An unsatisfiable pin is a
   // `dependency_unresolved` (422) the kickoff raises on its own, not a
@@ -791,12 +790,13 @@ export async function resolveAgentConnectionReadiness(args: {
   if (!agentActive) {
     // First in the list: every other entry describes something to configure,
     // and none of it can run while the space has the agent switched off.
-    errors.unshift({
+    const notActive: ValidationFieldError & { code: ReadinessErrorCode } = {
       field: "agent",
-      code: "agent_not_active" satisfies ReadinessErrorCode,
+      code: "agent_not_active",
       title: "Agent Not Active",
       message: `Agent '${agent.id}' is not active in this space.`,
-    });
+    };
+    errors.unshift(notActive);
   }
 
   return {

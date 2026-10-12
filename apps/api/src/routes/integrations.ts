@@ -222,7 +222,7 @@ export const connectOAuthSchema = z
   })
   .strict();
 
-// Mint a hosted-connect-portal session — auth-type-agnostic (issue #769). The
+// Mint a hosted-connect-portal session — auth-type-agnostic. The
 // caller scopes the connect (optional OAuth scopes + reconnect target); the
 // server dispatches OAuth vs credential-form when the URL is opened.
 export const connectSessionSchema = z
@@ -679,7 +679,7 @@ type ConnectSessionClaims = NonNullable<ReturnType<typeof readConnectToken>>;
  * The scopes a connect requests: the manifest's `default_scopes`, the caller's, and — on a reconnect
  * — those already granted on the target connection, so an upgrade never silently shrinks.
  * `default_scopes` is the baseline of every connection of the auth (identity, refresh, least
- * capability); `requested` only widens it (afps-spec/afps-spec#34).
+ * capability); `requested` only widens it.
  */
 function connectScopes(
   auth: IntegrationAuthDef,
@@ -1155,7 +1155,7 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // ─── Hosted connect portal (issue #769) ────
+  // ─── Hosted connect portal ────
   //
   // Unified, auth-type-agnostic connect surface. The agent (or any client)
   // mints a session here and receives ONE `connect_url`; opening it dispatches
@@ -1223,8 +1223,8 @@ export function createIntegrationsRouter() {
     const claims = readConnectToken(token);
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
     const scope = scopeFromClaims(claims);
-    // Every completion this handler emits must name the integration (issue
-    // #1346): a completion identifying nothing matches every card by contract
+    // Every completion this handler emits must name the integration:
+    // a completion identifying nothing matches every card by contract
     // (`completionMatches`), and `packageId` is the only identifier a
     // hosted-connect page holds — the OAuth `state` is minted later.
     const completionDetail = { packageId: claims.package_id };
@@ -1483,7 +1483,7 @@ export function createIntegrationsRouter() {
       });
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
-      // resource (`block_user_connections`), not an operation scrap (#657).
+      // resource (`block_user_connections`), not an operation scrap.
       const detail = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
       return c.json(detail);
     },
@@ -1573,7 +1573,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const item = await getOrgDefault(scope, packageId);
       // Bare resource, or 204 when no default is set — same contract as
-      // PUT (bare resource) and the models/proxies default endpoints (#657).
+      // PUT (bare resource) and the models/proxies default endpoints.
       if (!item) return c.body(null, 204);
       return c.json(item);
     },

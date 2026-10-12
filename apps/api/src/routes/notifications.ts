@@ -64,7 +64,7 @@ export function createNotificationsRouter() {
     const id = c.req.param("id")!;
     // Idempotent for the recipient (204 whether it was unread or already
     // read); 404 when the notification isn't the caller's — no silent no-op
-    // for non-recipients (issue #667).
+    // for non-recipients.
     const ok = await markNotificationRead(scope, id, actor);
     if (!ok) throw notFound("Notification not found");
     return c.body(null, 204);
@@ -84,7 +84,7 @@ export function createNotificationsRouter() {
   });
 
   // PUT /api/notifications/read-all — bulk mutation: returns a documented
-  // operation result ({ updated_count }), not a resource (issue #657).
+  // operation result ({ updated_count }), not a resource.
   router.put("/notifications/read-all", feedCeiling, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);

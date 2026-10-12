@@ -679,14 +679,14 @@ export function createInternalRouter() {
         headers: { "Content-Type": "application/zip" },
       });
     }
-    // #588 — the spawn resolver pins the CONCRETE version (from
+    // The spawn resolver pins the CONCRETE version (from
     // `source.server.version`) and the sidecar forwards it here as `?version=`,
     // so the runnable bytes match the version's manifest the resolver read. The
     // version is server-resolved at run kickoff (not caller-chosen); we serve it
     // by exact match (yank-visibility already applied upstream). Past the system
     // short-circuit above, an absent `?version=` is unanswerable rather than a
-    // request for "latest": serving the newest published version is precisely
-    // the manifest/bytes skew #588 closed, so it fails loudly instead.
+    // request for "latest": serving the newest published version would skew
+    // the manifest from the bytes, so it fails loudly instead.
     const requestedVersion = c.req.query("version")?.trim();
     if (!requestedVersion) {
       throw invalidRequest(
@@ -782,7 +782,7 @@ export function createInternalRouter() {
       // system integration auto-active with no row); skip inactive ones.
       if (!(await isIntegrationActive(integrationId, run.spaceId))) continue;
       // Read the integration manifest AT the version frozen for this run
-      // (#686) so the authz check sees the same `source.server.name` the spawn
+      // so the authz check sees the same `source.server.name` the spawn
       // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
       const res = await readIntegrationManifestForRun(
         integrationId,

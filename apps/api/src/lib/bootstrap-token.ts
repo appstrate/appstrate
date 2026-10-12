@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `AUTH_BOOTSTRAP_TOKEN` lifecycle (issue #344 Layer 2b).
+ * `AUTH_BOOTSTRAP_TOKEN` lifecycle.
  *
  * The CLI writes a one-shot redemption token to `.env` on every closed
  * install, with or without a named owner email. The platform reads it at

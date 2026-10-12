@@ -1545,7 +1545,7 @@ export const integrationsPaths = {
             "application/json": {
               // Bare connection resource — same serializer as the
               // connections list / connect flows, not a hand-built
-              // subset (#657).
+              // subset.
               schema: integrationConnectionSchema,
             },
           },
@@ -1669,7 +1669,7 @@ export const integrationsPaths = {
             "application/json": {
               // Bare integration resource — same serializer as
               // GET /integrations/:packageId; the toggled gate is the
-              // resource's `block_user_connections` field (#657).
+              // resource's `block_user_connections` field.
               schema: integrationDetailSchema,
             },
           },

@@ -417,7 +417,7 @@ export async function triggerScheduledRun(
   }
 
   try {
-    // Revalidate the actor BEFORE any preflight (CRIT-13); a refusal is a visible failed run (#735).
+    // Revalidate the actor BEFORE any preflight (CRIT-13); a refusal is a visible failed run.
     if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
       logger.warn("Schedule actor is no longer valid — disabling schedule", {
         scheduleId,
@@ -981,9 +981,9 @@ export async function updateSchedule(
     versionOverride?: string | null;
     connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
-    // #738: re-point the schedule's execution identity. When set, overwrites
+    // Re-point the schedule's execution identity. When set, overwrites
     // both `userId` and `endUserId` (one non-null, mirroring create). Never
-    // clears the actor — the non-null type preserves #735's invariant that a
+    // clears the actor — the non-null type preserves the invariant that a
     // schedule always has an execution identity.
     actor?: Actor;
   },

@@ -54,7 +54,7 @@ interface CreateRunInput {
   apiKeyId?: string;
   overrideVersionLabel?: string;
   /**
-   * Per-dependency version overrides for THIS run (#666/#686). `"draft"` opts a
+   * Per-dependency version overrides for THIS run. `"draft"` opts a
    * declared skill/integration into its working copy; any other value replaces
    * the manifest pin. Persisted on `runs.dependency_overrides` and enforced by
    * `freezeRunSpawnDependencies` — an unsatisfiable pin aborts the run.
@@ -145,7 +145,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   if (!gates.ok) throw preflightGateApiError(gates.error);
   const { agent } = gates;
 
-  // --- Freeze integration manifest versions (#686, remote-path mirror of
+  // --- Freeze integration manifest versions (remote-path mirror of
   //     run-pipeline Step 2a). MUST run before the connection cascade so the
   //     cascade reads the pinned manifests, and before the row insert so the
   //     frozen map persists — the runtime credential path (origin-agnostic,
@@ -160,7 +160,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
     manifestCache,
   });
 
-  // --- Snapshot the connection cascade (#199, remote-path mirror of
+  // --- Snapshot the connection cascade (remote-path mirror of
   //     run-pipeline). `launchOverrides` is null here and in the readiness pass
   //     the route already ran — the remote body accepts no per-run connection
   //     picks — so the two resolve the same cascade. A failure at this point is

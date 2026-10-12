@@ -2,8 +2,8 @@
 
 /**
  * `appstrate org` — manage the pinned organization for the active CLI
- * profile. Counterpart to the `orgId` written at `appstrate login` time
- * (issue #209): lets users re-pin, create, or inspect their org without
+ * profile. Counterpart to the `orgId` written at `appstrate login` time:
+ * lets users re-pin, create, or inspect their org without
  * re-running the device flow.
  *
  * Subcommands:
@@ -19,7 +19,7 @@
  * to the real streams; tests inject a per-test sink instead of swapping the
  * process-wide ones.
  *
- * Cascade invariant (issue #217): the pinned `spaceId` is always scoped to
+ * Cascade invariant: the pinned `spaceId` is always scoped to
  * the pinned `orgId`. `org switch` and `org create` therefore clear the
  * stale space pin and re-pin the new org's default space in the same
  * atomic operation — otherwise the next `appstrate api` call would 404

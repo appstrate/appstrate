@@ -49,11 +49,9 @@ export {
 //
 // This list is deliberately the *consumed* surface, not everything `pi-sdk.ts`
 // holds. `streamSimple`/`SimpleStreamOptions`/`AssistantMessageEventStream`,
-// `Transport`, `KnownApi`, `Context` and `ModelRuntime` were re-exported here
-// for the AI-SDK chat loop and its generic dispatch seam; #1173 folded every
-// chat turn onto `runPiChat`, and no consumer has imported them from this
-// barrel since. They remain in `pi-sdk.ts` for in-package use — re-add a line
-// here only when something outside the package actually imports it.
+// `Transport`, `KnownApi`, `Context` and `ModelRuntime` stay in `pi-sdk.ts` for
+// in-package use: no consumer imports them from this barrel. A line belongs
+// here only when something outside the package imports it.
 export {
   InMemoryCredentialStore,
   Type,

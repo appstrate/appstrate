@@ -213,7 +213,7 @@ async function dumpConsole(runDir: string, label: string): Promise<void> {
 const aliasIp = platformAliasIp(process.env.FIRECRACKER_SUBNET_CIDR ?? "10.231.0.0/16");
 const platformPort = Number(process.env.PORT ?? "3000");
 
-// The #1547 VM bundles its guest probe programs up front: a bundling error
+// The direct-egress VM bundles its guest probe programs up front: a bundling error
 // fails here, before any VM boots.
 const runnerEgress = await createRunnerEgressVm({ aliasIp, platformPort, fail });
 
@@ -277,7 +277,7 @@ await orch.cleanupOrphans();
 // bundle the in-guest sidecar fetches exactly like the real
 // /internal/mcp-server-bundle route, the MITM integration's credential
 // exactly like /internal/integration-credentials (the run token is not
-// checked — nothing else is served), and the counter paths of the #1547
+// checked — nothing else is served), and the counter paths of the
 // direct-egress assertion.
 const platformStub = Bun.serve({
   hostname: aliasIp,

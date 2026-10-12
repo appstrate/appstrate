@@ -63,13 +63,13 @@ export async function buildPlatformSystemPrompt(
 ): Promise<string> {
   const executionMode = getExecutionMode();
   // `./files/` — the ONE directory `runtime-pi/provision.ts` streams the run's
-  // input files into, since #1177. This announcement and that layout must stay
+  // input files into. This announcement and that layout must stay
   // spelled the same: a divergence is a prompt-level miss, not an error — the
   // bytes are provisioned either way, the agent is simply pointed at a
   // directory that is not there and nothing reports a fault. It is kept true by
   // the env schema, which fails boot unless `PI_IMAGE` carries the platform's
-  // own version, so the image reading this prompt is never a different #1177
-  // side than the platform writing it.
+  // own version, so the image reading this prompt lays files out as the
+  // platform writing it does.
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./files/${f.workspaceName}`,
@@ -127,7 +127,7 @@ export async function buildPlatformSystemPrompt(
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
   // integration tools, and the platform runtime tools (output/log/note/
   // pin) — are all advertised to the model via MCP `tools/list`
-  // (name + description + input schema), so the prompt no longer lists
+  // (name + description + input schema), so the prompt does not list
   // them. The Communication contract (rendered above) is the only
   // tool-related instruction the model can't infer from `tools/list`, and
   // it stays. This keeps a single source of truth for each tool's

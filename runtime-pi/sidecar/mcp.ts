@@ -303,7 +303,7 @@ function bodyPreflightError(
  * checks — the right tool for external, tag-less data — so the handler
  * stays linear and this logic is unit-testable in isolation.
  *
- * Invariant (#765): a body that is PRESENT but cannot be turned into a
+ * Invariant: a body that is PRESENT but cannot be turned into a
  * sendable shape returns an error result — it is NEVER silently dropped
  * to `{ kind: "none" }` and shipped as an empty request.
  *
@@ -437,7 +437,7 @@ function resolveRequestBody(
     };
   }
 
-  // Present but not a usable shape (number, boolean, …). Per #765 this must
+  // Present but not a usable shape (number, boolean, …). This must
   // error — never silently fall through to an empty-bodied request.
   return bodyPreflightError(
     label,
@@ -776,7 +776,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // Per the MCP spec `structuredContent` is a structured MIRROR of
   // `content` — so a client that prefers it (Claude Code, VS Code)
   // handed the model `{"status":200}` and discarded the response body
-  // sitting in `content`. See issue #876.
+  // sitting in `content`.
   //
   // The upstream status/headers ride on `_meta`
   // (`UPSTREAM_META_KEY`); the agent-side shaper re-renders the status
@@ -1008,7 +1008,7 @@ function buildSidecarTools(options: MountMcpOptions): {
 
       // Resolve the loosely-typed body argument into the internal
       // discriminated `ApiCallRequestBody`. All shape narrowing + the
-      // silent-drop guard (#765) live in `resolveRequestBody`, keeping
+      // silent-drop guard live in `resolveRequestBody`, keeping
       // this handler linear and the logic unit-testable in isolation.
       const resolved = resolveRequestBody(args.body, {
         label: ctx.label,
@@ -1343,7 +1343,7 @@ async function responseToToolResult(
   //
   // No `structuredContent` is attached here. The response body owns
   // `content`, and a `structuredContent` that does not mirror it makes
-  // spec-compliant clients drop the body (#876). The status and headers
+  // spec-compliant clients drop the body. The status and headers
   // travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side shaper
   // reads back into a model-visible `[api_call status=…]` line.
   const withMeta = (r: Result): Result => {
@@ -1743,7 +1743,7 @@ interface MountMcpOptions {
    * Without a cap, an agent that fetches N items in parallel (8 Gmail
    * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
    * over-sized JSON dump and blow past the upstream model's TPM
-   * window. See issue #427 for the reference incident.
+   * window.
    *
    * Optional only so tests / embedders can omit it; production wires a
    * `pLimit` instance unconditionally via `createApp` (see `app.ts`).

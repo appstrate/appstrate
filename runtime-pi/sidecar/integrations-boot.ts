@@ -247,7 +247,7 @@ async function fetchBundleBytes(
   serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  // #588 — the platform pins a concrete version at run kickoff; forward it so
+  // The platform pins a concrete version at run kickoff; forward it so
   // the bytes match the manifest the spawn-resolver read. Only a system
   // mcp-server has none (boot registry, single version, served by id alone) —
   // for anything else the route rejects an absent `?version=`.
@@ -738,14 +738,14 @@ interface SpawnAndConnectResult {
  * collectors AS they are created, so a throw mid-pipeline still lets the
  * caller's teardown reclaim a half-built listener/client (no leak on error).
  */
-/** Max runner-stderr lines retained per runner for failure reports (#779). */
+/** Max runner-stderr lines retained per runner for failure reports. */
 const STDERR_TAIL_MAX_LINES = 20;
 /** Cap per stderr line folded into a failure report — avoids a runaway blob. */
 const STDERR_LINE_MAX_CHARS = 500;
 
 /**
  * Best-effort secret scrub for a runner stderr line before it is folded
- * into a run's failure report (#779). Runner stderr already flows to the
+ * into a run's failure report. Runner stderr already flows to the
  * sidecar's own logs; surfacing it in the run report widens the audience
  * to the operator who triggered the run, so scrub the high-signal
  * credential shapes a third-party server might print on a failed auth
@@ -766,7 +766,7 @@ export function scrubStderrLine(line: string): string {
 
 /**
  * Operator override for the per-call MCP tool timeout applied to
- * integration clients (#779 annex). Absent/invalid → `undefined` → the
+ * integration clients. Absent/invalid → `undefined` → the
  * MCP SDK default applies, unchanged behaviour. Third-party servers that
  * do a cold OAuth refresh on their first tool call can legitimately need
  * more. Unlike the connect deadline (a fixed constant — no writer ever set
@@ -830,7 +830,7 @@ async function spawnAndConnectLocalIntegration(params: {
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
   /**
-   * Caller-owned bounded tail of the runner's stderr lines (#779). The
+   * Caller-owned bounded tail of the runner's stderr lines. The
    * spawn pipeline pushes every line (capped at
    * {@link STDERR_TAIL_MAX_LINES}); on failure the caller folds the tail
    * into the recorded error so the actual cause (an OAuth 405, a module
@@ -841,7 +841,7 @@ async function spawnAndConnectLocalIntegration(params: {
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
-  // One listener per connection, picked MITM-first (#543). `egressCtx` is
+  // One listener per connection, picked MITM-first. `egressCtx` is
   // handed to the adapter as the runner's HTTPS_PROXY:
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
   //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
@@ -1383,7 +1383,7 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     const specStart = performance.now();
-    // #779 — bounded tail of the runner's stderr, folded into the failure
+    // Bounded tail of the runner's stderr, folded into the failure
     // report below so the real cause (an OAuth 405, a crashed module, …)
     // reaches operators instead of living only in `docker logs`.
     const stderrTail: string[] = [];
@@ -1631,7 +1631,7 @@ export async function bootIntegrations(
       // MITM is created only when the CA came up AND this integration declared
       // `delivery.http`. `mitmSource` is returned so the connect-login hook
       // (run-start acquisition, below) drives `setSessionOutputs` on the same
-      // source the MITM listener reads from. `spec.egress` (#543) is the
+      // source the MITM listener reads from. `spec.egress` is the
       // fallback: a no-injection runner that still needs an outbound route gets
       // a plain CONNECT egress listener instead.
       const wantsMitm =
@@ -1734,7 +1734,7 @@ export async function bootIntegrations(
       // bug.
       const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       const ms = Math.round(performance.now() - specStart);
-      // #779 — append the runner's stderr tail so the boot report carries
+      // Append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom
       // (e.g. "MCP connect timeout (30s)" hiding an OAuth 405 underneath).
       const stderrSuffix =

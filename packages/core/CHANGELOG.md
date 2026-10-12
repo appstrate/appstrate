@@ -23,11 +23,11 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus
-  `agent_not_active`. **`CONNECTION_OVERRIDE_REFUSAL_CODES`** /
-  **`ConnectionOverrideRefusalCode`**: what a `connection_overrides` key is
-  refused over at the write, `undeclared_connection_override` (new) and
-  `required_integration_unbound`, each a 400 item on
-  `connection_overrides.<id>`. (#1914)
+  `agent_not_active`. **`OVERRIDE_REFUSAL_CODES`** / **`OverrideRefusalCode`**:
+  what a launch override key is refused over at the write,
+  `undeclared_connection_override` and `undeclared_dependency_override` (both
+  new) and `required_integration_unbound`, each a 400 item on
+  `connection_overrides.<id>` or `dependency_overrides.<id>`. (#1914)
 - **`INSUFFICIENT_SCOPES_REMEDIES`** / **`InsufficientScopesRemedy`**
   (`@appstrate/core/integration`): how an `insufficient_scopes` item clears,
   `new_connection` | `upgrade_or_new` | `rebind_by_admin` |

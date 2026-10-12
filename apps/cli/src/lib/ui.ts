@@ -31,8 +31,7 @@ export const EXIT_CANCELLED = 130;
  *
  * clack accepts an `output` sink on every helper, so this is the seam that
  * lets a command's framing (`intro`, `outro`, the spinners) land in a
- * caller-owned buffer instead of the process-global stdout — the coupling
- * issue #1180 is about. Only the *bytes* are redirected: everything else is
+ * caller-owned buffer instead of the process-global stdout — no coupling to a global stream. Only the *bytes* are redirected: everything else is
  * inherited from the real stream, because clack asks its output for more
  * than `write`. `spinner()` reads `output.columns` to wrap frames (a bare
  * four-member sink has none, and clack would silently fall back to 80
@@ -117,7 +116,7 @@ export function cancel(message: string, io: CommandIO = DEFAULT_IO): void {
  * flag (Bun install confirm, "Start dev server?", upgrade confirm, the
  * login instance URL askText, etc.). Without this, `@clack/prompts`
  * reads a closed/missing stdin and either hangs or SIGKILLs with no
- * readable error — issue #184. Callers that do have a flag (resolveTier,
+ * readable error. Callers that do have a flag (resolveTier,
  * resolveDir) should guard earlier with a specific message naming it.
  */
 /**
@@ -280,7 +279,7 @@ export function spinner(io: CommandIO = DEFAULT_IO): Spinner {
  * `exitWithError` and the process exits — but `bun test` runs the whole repo
  * in one process, where the leak outlives its test: `runner.test.ts` exercised
  * exactly such a path and its frames landed in another suite's capture
- * (issue #1180, `Received: "◒  Enabling systemd unit..."` on `whoami`). With
+ * (`Received: "◒  Enabling systemd unit..."` on `whoami`). With
  * an injected `io` the frames go to that test's own sink instead — quieter,
  * but an unbounded buffer growing every 80ms for the rest of the run.
  *

@@ -37,7 +37,7 @@ export interface RunLaunch {
   /** Per-run temperature/reasoning override (wire `generation`). */
   generation?: ModelGenerationSettings;
   /**
-   * Per-run dependency version overrides (#666) — `{ "@scope/skill": "draft"
+   * Per-run dependency version overrides — `{ "@scope/skill": "draft"
    * | "<semver|dist-tag>" }`. From the run-with-options modal. "draft" runs a
    * dependency's working copy; any other value replaces the manifest pin.
    */
@@ -135,7 +135,8 @@ export interface LaunchRefusal {
 export function launchRefusal(err: unknown): LaunchRefusal | null {
   const errors = missingConnectionErrors(err);
   if (!errors || !(err instanceof ApiError)) return null;
-  return { errors, version: err.details?.version_ref };
+  const version = err.details?.version_ref;
+  return { errors, version: typeof version === "string" ? version : undefined };
 }
 
 /**

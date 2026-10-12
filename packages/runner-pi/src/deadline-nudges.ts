@@ -55,7 +55,7 @@ export const DEADLINE_NUDGE_EVENT = "deadline_nudge";
 /**
  * Model-facing text for a checkpoint.
  *
- * Tool-agnostic by contract (#368, documented in
+ * Tool-agnostic by contract (documented in
  * `@appstrate/afps-runtime/bundle/platform-prompt`): which tools exist varies
  * per agent, so platform-authored prose never names one — "the appropriate
  * tool" is taught by each tool's MCP `description`, not from here. Naming

@@ -115,7 +115,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   // Effective agent-facing tool catalog. Resolved server-side from the
   // referenced mcp-server's MCPB `tools[]` minus `hidden_tools` and
   // auto-hidden connect.tool primitives — the integration's sparse
-  // `tools{}` policy table is no longer the source of truth for "what
+  // `tools{}` policy table is not the source of truth for "what
   // exists" (it only carries per-tool policy when present).
   const fullCatalog = detail.tool_catalog ?? [];
   const fullCatalogNames = new Set(fullCatalog.map((tool) => tool.name));

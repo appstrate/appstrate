@@ -274,7 +274,7 @@ const OVERRIDE_KEYS: readonly string[] = ["APPSTRATE_VERSION"];
  *
  * Keys in `fresh` but not in `existing` are carried over (that's how
  * a tier-1 → tier-3 upgrade picks up the new MINIO_* entries, and how
- * pre-#905 installs get CONNECT_SESSION_SECRET backfilled). Keys
+ * an install without CONNECT_SESSION_SECRET gets one). Keys
  * in `existing` but not in `fresh` are also preserved (user additions
  * like SMTP_HOST stay intact).
  */

@@ -274,7 +274,7 @@ function buildIntegrationToolFactories(
           // truth, no trust in the result `_meta`. A drain is a cheap localhost
           // round-trip and a no-op when the journal is empty (e.g. integration
           // tools, which journal nothing). The shared helper preserves each
-          // event's journaled `timestamp` (it no longer gets overwritten with
+          // event's journaled `timestamp` (it is not overwritten with
           // the drain-time wall clock).
           await drainAndEmitInto({
             drainer: opts.drainer,

@@ -128,7 +128,7 @@ export const CreateRemoteRunBodySchema = z
     ]),
     spaceId: z.string().min(1),
     input: z.record(z.string(), z.unknown()).optional().default({}),
-    // Per-run dependency version overrides (#666/#686) — run-level, applies to
+    // Per-run dependency version overrides — run-level, applies to
     // both source shapes. `"draft"` opts a declared skill/integration into its
     // working copy; any other value replaces the manifest pin. Mirrors the
     // platform run route's value gate (`isValidDependencyOverride`); the KEY
@@ -510,7 +510,7 @@ export function createRunsRemoteRouter() {
       // value the caller asked to extend. No first-party client reads this
       // body today (the CLI/runtime keep-alive is POST /events/heartbeat);
       // the field naming is aligned with the resource convention (`id`,
-      // no `runId` alias — #657) for third-party runners.
+      // no `runId` alias) for third-party runners.
       return c.json({ id: runId, expiresAt: newExpiresAt.toISOString() });
     },
   );

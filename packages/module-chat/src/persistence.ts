@@ -9,7 +9,7 @@
  * messages and they never reappeared. The server now writes each message as soon
  * as it is known — the user turn before inference starts, the assistant turn when
  * the stream finalizes (driven to completion independently of the client by the
- * resumable-stream producer) — so a disconnect can no longer lose data.
+ * resumable-stream producer) — so a disconnect cannot lose data.
  *
  * Storage stays byte-compatible with assistant-ui's `ai-sdk/v6`
  * MessageFormatAdapter so the existing client history-adapter LOAD path keeps

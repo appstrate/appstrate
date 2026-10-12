@@ -113,7 +113,7 @@ versioned — the client refuses a daemon speaking another major version, so the
 daemon is upgraded with the platform whenever the protocol moves); logs
 stream as NDJSON with reconnect-and-skip and exit codes long-poll.
 
-## Installing the daemon — `appstrate runner install` (issue #819, phase 3)
+## Installing the daemon — `appstrate runner install`
 
 The supported install path is the **CLI**, not a manual checkout. On a fresh
 KVM host:
@@ -483,7 +483,7 @@ Two artifacts, shared by all runs, validated at `initialize()`:
   nftables AND the iptables owner match entirely (everything `=y`, nothing
   loadable), which would break the in-guest uid firewall.
 
-### Daemon install — download, don't build (issue #819, phase 2)
+### Daemon install — download, don't build
 
 A released daemon does **not** build artifacts on the host. At boot, BEFORE
 `initialize()`, `runner/artifacts.ts` resolves the kernel + rootfs:

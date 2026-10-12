@@ -103,7 +103,7 @@ export async function buildRunContext(params: {
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
-   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft"
+   * Per-run dependency version overrides — `{ "@scope/name": "draft"
    * | "<spec>" }`. Forwarded into `buildAgentPackage` so a single run can opt
    * a skill out of the published-only resolution (the skill edit loop). Null /
    * omitted resolves the manifest pins verbatim against published versions.

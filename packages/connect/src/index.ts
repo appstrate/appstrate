@@ -75,7 +75,7 @@ export { planCaBundle } from "./proxy-ca-planner.ts";
 export type { RefreshContext } from "./token-refresh.ts";
 
 // Connect-session tokens — short-lived HMAC capability tokens that gate the
-// unified hosted-connect-portal flow (issue #769). Stateless mint/verify;
+// unified hosted-connect-portal flow. Stateless mint/verify;
 // the secret (`CONNECT_SESSION_SECRET`) and single-use `jti` enforcement are
 // the caller's responsibility.
 export { mintConnectSession, verifyConnectSession } from "./connect-session-token.ts";

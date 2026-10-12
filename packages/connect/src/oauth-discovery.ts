@@ -67,7 +67,7 @@ export interface OAuthEndpointResolution {
    * RFC 8414 §2 `grant_types_supported` as projected from the discovery
    * document. Drives two MCP-spec refresh behaviours: registering a DCR client
    * for the `refresh_token` grant ONLY when the AS advertises it (else the AS
-   * never issues a refresh token — Claude Code #7744), and deciding whether a
+   * never issues a refresh token), and deciding whether a
    * connection that came back without a refresh token is a misconfig (AS
    * supports refresh) or expected (AS issues access-only tokens, e.g. ClickUp
    * MCP). `undefined` when the document omits the field.

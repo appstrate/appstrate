@@ -105,7 +105,7 @@ export interface InstallOptions {
   /** Override the host port the platform binds to (Tier 0/1/2/3). */
   port?: string;
   /**
-   * Public URL of the platform (issue #822) — what browsers, OAuth
+   * Public URL of the platform — what browsers, OAuth
    * redirects, and email links use. Independent of `--port` (the host
    * bind port / reverse-proxy upstream). Origin only, e.g.
    * `https://appstrate.example.com`. Also honored via
@@ -117,7 +117,7 @@ export interface InstallOptions {
    * name" preflight. Escape hatch for edge cases where the operator
    * knows the running project is the intended one (e.g. recovering
    * from a corrupted `.appstrate/project.json`). Not documented in the
-   * common install path — see `#167`.
+   * common install path.
    */
   force?: boolean;
   /**
@@ -131,7 +131,7 @@ export interface InstallOptions {
    *
    * Set by `-y/--yes` or `APPSTRATE_YES=1`. Required for the `curl|bash`
    * bootstrap because of the Bun compile + macOS setRawMode regression
-   * (#199) — zero clack prompts = zero raw mode = the Bun runtime bug is
+   * — zero clack prompts = zero raw mode = the Bun runtime bug is
    * bypassed by construction, independent of upstream fixes. Also makes
    * the installer usable from CI, Dockerfile `RUN`, cloud-init, Ansible.
    */
@@ -350,7 +350,7 @@ export async function installCommand(
       project?.name,
       { autoPick: autoConfirm, findRunningComposeProject: d.findRunningComposeProject },
     );
-    // Closed-mode bootstrap (issue #228) — env var > prompt > undefined.
+    // Closed-mode bootstrap — env var > prompt > undefined.
     // Skipped on upgrades (mergeEnv preserves whatever the user had) and
     // on Tier 0 interactive (local dev — invitation-only is meaningless).
     const bootstrap = await resolveBootstrapEmail({
@@ -359,7 +359,7 @@ export async function installCommand(
       nonInteractive,
     });
 
-    // Public URL (issue #822) — flag/env/prompt, defaults to
+    // Public URL — flag/env/prompt, defaults to
     // http://localhost:<port>. Resolved AFTER the port so the local
     // default reflects the (possibly auto-picked) final port.
     const appUrl = await resolveAppUrl(opts.appUrl, port, {
@@ -401,7 +401,7 @@ export async function installCommand(
 }
 
 /**
- * `appstrate install --upgrade-compose` (issue #515) — surgically strip
+ * `appstrate install --upgrade-compose` — surgically strip
  * stale duplicated env defaults from an existing install's
  * `docker-compose.yml`. Standalone maintenance op: no tier prompt, no
  * `.env` touch, no Docker. The flag short-circuits the normal install
@@ -440,7 +440,7 @@ export async function composeUpgradeCommand(
 }
 
 /**
- * Resolve the closed-mode bootstrap inputs for a fresh install (issue #228).
+ * Resolve the closed-mode bootstrap inputs for a fresh install.
  *
  * Order of precedence:
  *   1. `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` env var — the IaC / `curl|bash`
@@ -482,7 +482,7 @@ export async function resolveBootstrapEmail(opts: {
   if (opts.tier === 0) return {};
   // Non-interactive Docker tier on a fresh install: no named owner and
   // no env override means the historical default was a silently-public
-  // VPS (#344). Generate a single-use bootstrap token instead — the
+  // VPS. Generate a single-use bootstrap token instead — the
   // operator claims ownership at `<appUrl>/claim` after the install
   // banner. Dominant `curl|bash -s -- --yes` path.
   if (opts.nonInteractive) {
@@ -512,7 +512,7 @@ export async function resolveBootstrapEmail(opts: {
 const NO_EXISTING_INSTALL: ExistingInstall = { hasEnv: false, hasCompose: false, existingEnv: {} };
 
 /**
- * Resolve the public app URL for the install (issue #822).
+ * Resolve the public app URL for the install.
  *
  * Order of precedence:
  *   1. Upgrade with an existing `APP_URL` in `.env` → inherit it.
@@ -636,9 +636,8 @@ const AUTO_PICK_MAX_ATTEMPTS = 20;
  * `docker compose down` and we want the early, friendly preflight error
  * rather than the late failure from `docker compose up`.
  *
- * Tier 0 has no compose project, so `projectName === undefined` keeps
- * the legacy behaviour (skip preflight on hasEnv alone — there's no
- * cross-check we can perform).
+ * Tier 0 has no compose project, so `projectName === undefined` skips
+ * the preflight on hasEnv alone (there's no cross-check we can perform).
  */
 async function ourStackOwnsPort(
   dir: string | undefined,
@@ -829,7 +828,7 @@ interface TierResolverDeps {
   isDockerAvailable?: () => Promise<boolean>;
   /**
    * When true, skip the `clack.select` prompt entirely and return the
-   * Docker-aware default (3 if Docker reachable, else 0). See `#199`:
+   * Docker-aware default (3 if Docker reachable, else 0):
    * clack calls `setRawMode` which trips a Bun macOS regression inside
    * the `bun build --compile` binary — bypassing the prompt sidesteps
    * the bug regardless of upstream Bun fix status.
@@ -846,7 +845,7 @@ interface TierResolverDeps {
  * Interactive default: Tier 2 (PostgreSQL + Redis, filesystem storage)
  * when Docker is reachable — the happy path for the one-liner installer
  * is `press Enter → working production-grade Appstrate`. Filesystem
- * storage is the single-node default (issue #829): serving is app-domain
+ * storage is the single-node default: serving is app-domain
  * either way, so bundled MinIO adds a container without adding
  * capability — it stays available as the Tier 3 advanced option (or
  * bring your own S3 via env on any tier). When Docker is missing we
@@ -872,8 +871,8 @@ export async function resolveTier(
   const probe = deps.isDockerAvailable ?? isDockerAvailable;
 
   // --yes path: bypass the clack.select call entirely (never enters raw
-  // mode → never trips the Bun macOS keypress regression from #199) and
-  // accept the Docker-aware default #180 already set for interactive
+  // mode → never trips the Bun macOS keypress regression) and
+  // accept the Docker-aware default interactive
   // picks. The note() call is still informative so the user sees which
   // tier was chosen and how to override it on the next run.
   if (deps.autoConfirm === true) {
@@ -1651,7 +1650,7 @@ export async function resolveProjectName(
 /**
  * Refuse to proceed when an unrelated stack is already running under
  * the same project name from a different directory — the pre-fix case
- * that turned `appstrate install` into a stack-cannibal (#167). The
+ * that turned `appstrate install` into a stack-cannibal. The
  * docker daemon keys a project by name, not by working directory, so
  * two installs that resolve to the same name would silently adopt
  * each other's containers. Better to abort, loudly.
@@ -1933,7 +1932,7 @@ async function installDockerTier(
     );
   }
   printBootstrapFollowup(appUrl, opts.bootstrap);
-  // The lifecycle commands (#343) read `<dir>/.appstrate/project.json`
+  // The lifecycle commands read `<dir>/.appstrate/project.json`
   // to find the right `--project-name`, so the user never has to type
   // (or remember) the derived hash. The banner is health-verified
   // above (waitForAppstrate inside the rollback block), so we print it

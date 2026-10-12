@@ -55,7 +55,7 @@ export async function stopWorkloadAndWait(
         timeoutMs,
       });
       // Leave the stop promise running in the background so a slow-but-eventual
-      // stop still reclaims the workload; we just no longer block finalize on it.
+      // stop still reclaims the workload; we just do not block finalize on it.
       void stop;
       return false;
     }

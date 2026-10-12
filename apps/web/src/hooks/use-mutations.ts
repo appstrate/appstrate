@@ -74,7 +74,7 @@ function useRunAgent(packageId: string) {
         params: {
           path: splitPackageRef(packageId),
           // Pure pass-through — NO default here. Omitting `version` means the
-          // server's unified default (`published`, #636), exactly as for any
+          // server's unified default (`published`), exactly as for any
           // API caller. The editor's "run the working copy" intent is encoded
           // explicitly at the call site (`version: "draft"`), never inferred
           // by this transport hook — so API and front agree on every selector.
@@ -333,14 +333,13 @@ export function useCreatePackage(type: PackageType) {
     // Exactly the keys the editor sends: the skill/integration branches forward
     // this object whole and the create schemas are `.strict()`, so a key
     // declared here that the server does not model is a 400 rather than a
-    // silent drop. `id` sat beside the retired `source_code` until #1128 took
-    // that one; no caller ever passed either.
+    // silent drop.
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
       operations?: components["schemas"]["PackageFileWriteOperation"][];
     }): Promise<{ id: string; version_count?: number }> => {
-      // 201 → the created package resource, bare (issue #657).
+      // 201 → the created package resource, bare.
       switch (type) {
         case "mcp-server":
           throw new Error("MCP servers are created by importing their bundle");
@@ -401,7 +400,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
         params: { path: splitPackageRef(packageId), header: { "If-Match": etag } },
         body,
       });
-      // 200 → the updated package resource, bare (issue #657); its `ETag` bases the next save.
+      // 200 → the updated package resource, bare; its `ETag` bases the next save.
       return { id: data!.id, etag: response.headers.get("ETag") };
     },
     onSuccess: () => {

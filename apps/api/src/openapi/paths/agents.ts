@@ -123,7 +123,7 @@ export const agentsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              // Bare persisted resource — no `validation` echo (#657):
+              // Bare persisted resource — no `validation` echo:
               // validation failures are 400s.
               schema: { $ref: "#/components/schemas/AgentInputSettings" },
             },
@@ -208,7 +208,7 @@ export const agentsPaths = {
           content: {
             "application/json": {
               // Bare proxy-setting resource — same shape as GET …/proxy,
-              // no `success` scrap (#657).
+              // no `success` scrap.
               schema: {
                 type: "object",
                 required: ["proxyId", "resolved"],
@@ -565,7 +565,7 @@ export const agentsPaths = {
           content: {
             "application/json": {
               // Bare model-setting resource — same shape as GET …/model,
-              // no `success` scrap (#657).
+              // no `success` scrap.
               schema: {
                 type: "object",
                 required: ["modelId", "generation"],

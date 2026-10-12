@@ -1503,8 +1503,7 @@ export async function resolveIntegrationClientById(
   // The row's declaration wins; the manifest stands in when it has none.
   const method = row.tokenEndpointAuthMethod ?? manifestAuthMethod;
   // A public client stores no ciphertext, so there is nothing to decrypt. The
-  // converse needs no test: `ioc_public_iff_no_secret` (migration 0038, added
-  // VALIDATING after backfilling the legacy rows) makes an empty ciphertext
+  // converse needs no test: `ioc_public_iff_no_secret` (migration 0038) makes an empty ciphertext
   // with any other declared method unrepresentable, so emptiness here always
   // arrives as `"none"`.
   if (method === "none") {
@@ -2144,7 +2143,7 @@ async function registerAutoProvisionedClient(
     // MCP-spec refresh: register for the `refresh_token` grant only when the AS
     // advertises it (RFC 8414 `grant_types_supported`). Without it the client is
     // registered for authorization_code alone, so the AS never issues a refresh
-    // token (Claude Code #7744) and the connection can't self-renew. Conditional,
+    // token and the connection can't self-renew. Conditional,
     // not unconditional: a server that lacks the grant (e.g. ClickUp MCP) may
     // reject a registration that requests it.
     const grantTypes = input.grantTypesSupported?.includes("refresh_token")
@@ -2490,8 +2489,7 @@ function evaluateIdentityPath(
  *   2. If no mapping references the required OIDC claim (or
  *      `identity_claims` is undefined entirely — typically a login strategy
  *      promoting engine-output names directly), fall back to a direct lookup
- *      on the bag by the OIDC claim name. This preserves the legacy
- *      semantics for strategies whose claim bag is already keyed by the
+ *      on the bag by the OIDC claim name. This serves strategies whose claim bag is already keyed by the
  *      source-side name (login engine `identity_outputs` are merged into
  *      the bag verbatim — see `login-strategy.ts`).
  *
@@ -3939,7 +3937,7 @@ export async function getIntegrationAuthStatuses(
   // For local-source integrations the catalog comes from the referenced
   // mcp-server's MCPB `tools[]`. Fetch it best-effort: if the mcp-server
   // package is missing the resolver still falls back to the integration's
-  // sparse `tools{}` keys (legacy behaviour, no regression for the picker).
+  // sparse `tools{}` keys.
   const localRef = getLocalServerRef(manifest);
   let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
   if (localRef) {

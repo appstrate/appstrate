@@ -124,7 +124,7 @@ export async function bootCritical(): Promise<void> {
 
   await assertKeyringCoversCiphertexts();
 
-  // Bootstrap-token reconciliation (#344). If the env still carries an
+  // Bootstrap-token reconciliation. If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
   // flip the in-memory consumed flag so the per-request `bootstrapTokenPending`
   // boolean in AppConfig reports `false` immediately. Otherwise an operator
@@ -176,7 +176,7 @@ export async function bootCritical(): Promise<void> {
   // OAuth client so the onward /authorize redirect completes.
   setBeforeSignupHook((email, ctx) => callAllHooks("beforeSignup", email, ctx));
   setAfterSignupHook((user, ctx) => callAllHooks("afterSignup", user, ctx));
-  // Self-hosting bootstrap side effects (issue #228). Fires only when
+  // Self-hosting bootstrap side effects. Fires only when
   // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
   // create sequence in `routes/organizations.ts` so the bootstrap owner
   // lands on a usable workspace (default app + hello-world agent) AND so

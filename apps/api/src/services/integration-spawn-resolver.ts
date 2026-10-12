@@ -221,8 +221,8 @@ export async function resolveIntegrationSpawns(
 ): Promise<ResolveIntegrationSpawnsResult> {
   const { orgId, spaceId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
-  // fail-fasted upstream when actor-less + integrations are declared (#735,
-  // scheduler.ts `isScheduleActorValid`, which disables the schedule and
+  // fail-fasted upstream when actor-less + integrations are declared
+  // (scheduler.ts `isScheduleActorValid`, which disables the schedule and
   // records a VISIBLE failed run); request-triggered runs always carry an
   // actor (`getActor` is non-null), so this stays an empty return rather than
   // a throw.
@@ -297,7 +297,7 @@ async function resolveOne(
 ): Promise<ResolveOneResult> {
   // (a) Package exists + integration type. The manifest is read through the
   // per-run `manifestCache`, which `resolveRunIntegrationVersions` seeds at
-  // kickoff (#686) with the manifest AT the version the
+  // kickoff with the manifest AT the version the
   // `dependencies.integrations.<id>` pin resolved to (published / system /
   // draft-override). So this read honors the pin transparently; only when no
   // entry was seeded (soft-resolved or non-run callers) does it fall back to
@@ -459,13 +459,13 @@ async function resolveOne(
     // resolved `version` is forwarded to the byte route (below, via
     // `server.version`) so the runnable bytes come from the same version — no
     // manifest/bytes skew, and a `publish` is reflected on the run without a
-    // draft overwrite (issue #588). An unsatisfiable pin / missing published
+    // draft overwrite. An unsatisfiable pin / missing published
     // version skips the integration LOUDLY rather than silently falling back to
     // whatever bytes happen to be latest.
     const resolution = await resolveMcpServerForSpawn(ref.name, orgId, ref.version);
     if (!resolution.ok) {
       // A real `source.server.version` pin that cannot be met (unsatisfiable
-      // range / never-published) fails the run LOUDLY (#686) — a pinned run
+      // range / never-published) fails the run LOUDLY — a pinned run
       // must never silently spawn without the integration. A
       // missing/wrong/invalid referenced package stays a soft skip: the
       // integration is mis-declared, not the run's pin, so the run proceeds
@@ -615,7 +615,7 @@ async function resolveOne(
         ...(apiCalls.length > 0 ? { apiCalls } : {}),
         ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
         spawnEnv: deliveries.spawnEnv,
-        // Remote HTTP injects its own token (#543).
+        // Remote HTTP injects its own token.
         ...(deliveries.httpDeliveryAuths && !isRemoteHttp
           ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
           : {}),

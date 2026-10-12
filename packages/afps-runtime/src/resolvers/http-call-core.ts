@@ -371,8 +371,7 @@ export type ApiCallRequest = Omit<z.infer<typeof apiCallRequestSchema>, "body"> 
  *   - `file`   — large or `responseMode.toFile`-routed bodies materialized on disk
  *
  * The encoding is explicit on `inline` (always `base64`) so consumers
- * never have to guess. The legacy `{ inline; inlineEncoding } | { file }`
- * shape was lossy for binary data — see issues #149 / #151.
+ * never have to guess.
  *
  * `truncated` signals that the sidecar capped the upstream response at
  * `MAX_RESPONSE_SIZE` (or the agent-requested `maxInlineBytes`). When
@@ -1247,8 +1246,7 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
 
 /**
  * Whitelist of MIME types we are willing to decode as UTF-8 text. Every
- * other Content-Type is treated as binary and base64-encoded — this is
- * the bug fix at the heart of issues #149 / #151. `application/octet-stream`
+ * other Content-Type is treated as binary and base64-encoded. `application/octet-stream`
  * with a body that happens to be ASCII MUST come back as inline bytes,
  * not text.
  *
@@ -1514,10 +1512,8 @@ export interface SerializeFetchResponseContext {
  * {@link ApiCallResponse} every resolver returns to the LLM.
  *
  * Read once via `arrayBuffer()` (NEVER `text()`) so binary bytes are
- * preserved end-to-end — the regression fixed by issues #149 / #151 in
- * the sidecar resurfaced when the runtime moved from `curl` to typed
- * `{ns}__api_call` tools, because the client-side serializer still
- * stringified bytes as UTF-8. Decoding now follows a strict media-type
+ * preserved end-to-end: a serializer that stringifies bytes as UTF-8
+ * corrupts them. Decoding follows a strict media-type
  * whitelist (text/*, application/json, application/xml, +json/+xml/+yaml
  * suffixes — see {@link isTextLikeMimeType}); a `; charset=...` parameter is
  * NOT a whitelist entry, only a fallback consulted when the base type is

@@ -4,8 +4,8 @@
  * Shared HTTP CONNECT-tunnel primitives.
  *
  * Both the agent's shared {@link createForwardProxy} (port 8081) and the
- * per-connection plain egress listener ({@link createIntegrationEgressListener},
- * issue #543) terminate `CONNECT host:port` and relay absolute-form `http://`
+ * per-connection plain egress listener ({@link createIntegrationEgressListener})
+ * terminate `CONNECT host:port` and relay absolute-form `http://`
  * requests. This module is the ONE implementation of the mechanical parts they
  * share; the SSRF policy and any upstream-proxy chaining stay in each caller.
  */

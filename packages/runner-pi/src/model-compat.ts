@@ -3,11 +3,8 @@
 /**
  * The `compat` flags every model record the PLATFORM prices must carry.
  *
- * This exists as one constant because the reason below is one reason, and it
- * was previously spelled out three times, in three packages, as three
- * hand-written `supportsLongCacheRetention: false` literals with three long
- * comments — while two of the five model builders carried neither. A rule that
- * has to be remembered at each new construction site is a convention; a
+ * This exists as one constant because the reason below is one reason. A rule
+ * that has to be remembered at each new construction site is a convention; a
  * constant that every site spreads is a rule.
  *
  * ## Why long cache retention is refused

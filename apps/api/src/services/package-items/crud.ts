@@ -164,7 +164,7 @@ export interface CreateItemInput {
  * out of a ZIP/bundle). It used to be optional, and the `{version, name}` stub
  * synthesized in its absence was persisted as the draft and then snapshotted
  * verbatim into the immutable `package_versions.manifest` row, where no AFPS
- * schema had ever accepted it (issue #987).
+ * schema had ever accepted it.
  *
  * `manifest.type` MUST equal `cfg.type` — see {@link buildStoredManifest},
  * which stamps the stored copy and throws on divergence.

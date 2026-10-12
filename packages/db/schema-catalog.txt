@@ -863,6 +863,7 @@ constraint runs runs_model_credential_id_model_provider_credentials_id_fk FOREIG
 constraint runs runs_open_sink_has_secret CHECK (((sink_expires_at IS NULL) OR (sink_secret_encrypted IS NOT NULL)))
 constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
+constraint runs runs_payer_iff_user_source CHECK (((NOT ((model_source)::text IS DISTINCT FROM 'user'::text)) = (payer_user_id IS NOT NULL)))
 constraint runs runs_pkey PRIMARY KEY (id)
 constraint runs runs_proxy_route_has_model CHECK (((inference_route <> 'proxy'::inference_route) OR (model_id IS NOT NULL)))
 constraint runs runs_remote_has_no_platform_model CHECK (((run_origin = 'platform'::run_origin) OR ((model_source IS NULL) AND (model_id IS NULL) AND (inference_route IS NULL))))

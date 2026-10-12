@@ -8,7 +8,7 @@
  * channel (every `connect_url`/`auth_url` string is replaced by
  * {@link REDACTED_CONNECT_LINK}), and for the UI only in the typed
  * `connectOffers` field the splitters attach to the tool output — the connect
- * cards read that field, never the payload (issue #906). Redaction and
+ * cards read that field, never the payload. Redaction and
  * extraction are the SAME pass (`splitValue`), so the two cannot drift apart.
  *
  * A payload may carry SEVERAL connect URLs — a readiness error lists one per

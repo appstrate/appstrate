@@ -360,7 +360,7 @@ export function createRunsEventsRouter() {
   // startup. This replaces the old seed-via-helper-volume delivery, whose
   // correctness depended on the run volume's driver — a tmpfs-backed `local`
   // volume is not shared between the seed helper and the agent container, so
-  // the bundle silently vanished and skills never materialised (issue #549).
+  // the bundle silently vanished and skills never materialised.
   // All three carry the same HMAC auth as the event routes: the runner proves
   // it is the run via a signature over the (empty) GET body, so no user
   // principal is involved.

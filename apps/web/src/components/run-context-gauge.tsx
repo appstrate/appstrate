@@ -52,8 +52,8 @@ interface ContextGaugeReadoutProps {
  * NARROW VIEWPORTS — the header must not scroll horizontally at 375px, where it
  * also carries the tab list, the `$` pill and Re-run/Cancel. The gauge is
  * `shrink-0` and drops the bar and the percentage; the counts stay at every
- * width, because #1046 exists precisely because a header hid its primary figures
- * behind a breakpoint. The track collapses to `w-0` and NOT to `hidden`:
+ * width: a header must not hide its primary figures behind a
+ * breakpoint. The track collapses to `w-0` and NOT to `hidden`:
  * `display: none` would take the progressbar out of the accessibility tree, and
  * with it the `aria-valuetext` carrying the UNABBREVIATED counts that the
  * visible `128k / 200k` has compacted away.

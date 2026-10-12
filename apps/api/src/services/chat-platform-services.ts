@@ -13,7 +13,7 @@
  *     real upstream binding + a FRESH access token (server-side credential
  *     resolution; the real token only leaves as the returned in-memory string).
  *   - {@link recordChatUsage} — insert one `llm_usage` ledger row per turn (the
- *     inline engine meters here, since it no longer flows through the llm-proxy).
+ *     inline engine meters here, since it does not flow through the llm-proxy).
  *
  * Both live in apps/api (not the module) because they are wired to api-internal
  * infra — model resolution, credential/token resolution, the `llm_usage` table —
@@ -77,7 +77,7 @@ export async function resolveChatModel(
     return { subscription: false };
   }
 
-  // Fail-closed on an aliased oauth-subscription row (issue #727). Such a row
+  // Fail-closed on an aliased oauth-subscription row. Such a row
   // is an invalid state — alias creation AND update reject `aliased` for
   // oauth2 providers, and the run launcher fail-closes on it too
   // (`assertOauthRunNotAliased`) — but a legacy/hand-written row must not make

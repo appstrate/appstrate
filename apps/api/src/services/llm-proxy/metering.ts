@@ -511,7 +511,7 @@ export interface MeteredForwardContext {
 /** Per-call knobs of {@link forwardMeteredResponse}. */
 interface MeteredForwardOptions {
   /**
-   * Model-alias swap (issue #727). When set, the real upstream id echoed by the
+   * Model-alias swap. When set, the real upstream id echoed by the
    * upstream is rewritten back to the alias on the success branches (SSE
    * frames, JSON body), upstream error bodies are REPLACED with a synthetic
    * neutral envelope, and response headers are reduced to the shared allowlist

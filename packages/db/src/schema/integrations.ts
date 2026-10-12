@@ -356,7 +356,7 @@ export const integrationOauthClients = pgTable(
       sql`${table.tokenEndpointAuthMethod} IS NULL OR ${table.tokenEndpointAuthMethod} IN ('client_secret_post', 'client_secret_basic', 'none')`,
     ),
     // Public client IFF no stored ciphertext — the state this column exists to
-    // make unrepresentable: a row can no longer claim to be public while
+    // make unrepresentable: a row cannot claim to be public while
     // holding a secret, nor name a secret-based method while holding none.
     //
     // What it does NOT guarantee is anything about the PLAINTEXT: the check is

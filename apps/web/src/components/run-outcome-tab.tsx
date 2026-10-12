@@ -19,7 +19,7 @@
  *
  * The "Fichiers produits" card always lists what the run produced. Above it,
  * when the run produced exactly ONE file, that file's viewer is HOISTED out of
- * the card and is the first thing on the pane — the derived rule #1177 features
+ * the card and is the first thing on the pane — the derived rule features
  * a file only at exactly one, so several are listed and the reader picks.
  *
  * The single file therefore appears twice, and that is on purpose: the viewer

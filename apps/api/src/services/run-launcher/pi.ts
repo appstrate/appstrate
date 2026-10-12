@@ -305,7 +305,7 @@ async function runPlatformContainerImpl(
       // Propagate the resolved model's context window so the sidecar's
       // TokenBudget can spill `api_call` outputs that would push the
       // cumulative tool-output token count past the upstream model's
-      // hard limit (#464). Both values are nullable on `org_models`
+      // hard limit. Both values are nullable on `org_models`
       // rows; we forward whatever survives the catalog cascade — the
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
@@ -413,7 +413,7 @@ async function runPlatformContainerImpl(
     // delivery, whose correctness depended on the volume driver — a tmpfs-backed
     // `local` volume is NOT shared between the short-lived seed helper and the
     // agent container, so the bundle silently vanished and skills never
-    // materialised (issue #549). With the agent self-provisioning, the run
+    // materialised. With the agent self-provisioning, the run
     // volume is pure agent-local scratch again, so its backing (disk or tmpfs)
     // is a free performance choice. The upload must finish before
     // `startWorkload` (inside waitForWorkload) so the object exists when the

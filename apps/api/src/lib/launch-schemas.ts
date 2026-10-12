@@ -24,9 +24,9 @@
  *     so the readiness pass and the snapshot resolve the identical cascade.
  *     Accepting the field here without threading it would break that equality.
  *   - `dependency_overrides` — the remote surface and schedules take
- *     {@link dependencyOverridesSchema}. Inline declares it not at all: it was
- *     accepted and then silently dropped, so since #1187 `.strict()` turns it
- *     into a 400. The agent-run route declares it as a bare
+ *     {@link dependencyOverridesSchema}. Inline declares it not at all: it would be
+ *     silently dropped, so `.strict()` turns it into a 400. The agent-run route
+ *     declares it as a bare
  *     `z.record(z.string(), z.string())` on purpose and defers the VALUE gate
  *     to `input-parser.ts`, which is the only layer that can name the offending
  *     KEY and fill the RFC 9457 `param`. Adopting the shared schema there would
@@ -42,7 +42,7 @@ import {
   collectOverridableDependencyIds,
   parseManifestIntegrations,
 } from "@appstrate/core/dependencies";
-import type { ConnectionOverrideRefusalCode } from "@appstrate/core/integration";
+import type { OverrideRefusalCode } from "@appstrate/core/integration";
 import { ApiError, validationFailed, type ValidationFieldError } from "./errors.ts";
 import { connectionIdSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
@@ -106,13 +106,23 @@ export function assertDependencyOverrideKeysDeclared(
   const declared = collectOverridableDependencyIds(manifest);
   const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
   if (unknownKey === undefined) return;
-  throw new ApiError({
-    status: 400,
-    code: "invalid_request",
-    title: "Bad Request",
-    detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
-    param: "dependency_overrides",
-  });
+  throw overrideRefusal({
+    field: "dependency_overrides",
+    key: unknownKey,
+    code: "undeclared_dependency_override",
+    message: `${unknownKey} is not a skill or integration this agent declares — remove the key`,
+  }).error;
+}
+
+/** One refused override key: a `validation_failed` item on `<field>.<key>`, whatever the map. */
+function overrideRefusal(r: {
+  field: "connection_overrides" | "dependency_overrides";
+  key: string;
+  code: OverrideRefusalCode;
+  message: string;
+}): OverrideKeyRefusal {
+  const item = { field: `${r.field}.${r.key}`, code: r.code, message: r.message };
+  return { key: r.key, item, error: validationFailed([item]) };
 }
 
 /**
@@ -130,10 +140,10 @@ export function assertConnectionOverridesAllowed(
   if (first) throw first.error;
 }
 
-export interface ConnectionOverrideRefusal {
+interface OverrideKeyRefusal {
   key: string;
   /** The entry an accumulating validator collects. */
-  item: ValidationFieldError & { code: ConnectionOverrideRefusalCode };
+  item: ValidationFieldError & { code: OverrideRefusalCode };
   /** The 400 a fail-fast surface throws. */
   error: ApiError;
 }
@@ -142,18 +152,15 @@ export interface ConnectionOverrideRefusal {
 export function connectionOverrideRefusals(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, readonly unknown[]>> | null | undefined,
-): ConnectionOverrideRefusal[] {
+): OverrideKeyRefusal[] {
   if (!overrides) return [];
   const declared = parseManifestIntegrations(manifest);
   const ids = new Set(declared.map((entry) => entry.id));
-  const refusal = (r: { key: string; code: ConnectionOverrideRefusalCode; message: string }) => {
-    const item = { field: `connection_overrides.${r.key}`, code: r.code, message: r.message };
-    return { key: r.key, item, error: validationFailed([item]) };
-  };
   const undeclared = Object.keys(overrides)
     .filter((key) => !ids.has(key))
     .map((key) =>
-      refusal({
+      overrideRefusal({
+        field: "connection_overrides",
         key,
         code: "undeclared_connection_override",
         message: `${key} is not an integration this agent declares — remove the key`,
@@ -162,7 +169,8 @@ export function connectionOverrideRefusals(
   const emptiedRequired = declared
     .filter((entry) => entry.required === true && overrides[entry.id]?.length === 0)
     .map((entry) =>
-      refusal({
+      overrideRefusal({
+        field: "connection_overrides",
         key: entry.id,
         code: "required_integration_unbound",
         message: `The agent marks ${entry.id} \`required\`, so its set cannot be empty — name at least one connection, or omit the key`,

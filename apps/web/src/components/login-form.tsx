@@ -81,7 +81,7 @@ export function LoginForm({
       <div className="text-muted-foreground text-center text-sm">
         {switchAuthSlot ??
           (features.signupDisabled ? (
-            // Closed-mode self-host (issue #228) — no public registration.
+            // Closed-mode self-host — no public registration.
             // Existing accounts and invitees still sign in normally above.
             <span>{t("login.signupDisabled")}</span>
           ) : (

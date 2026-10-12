@@ -8,7 +8,7 @@
  * real filesystem. The command file wires `defaultSelfUpdateDeps` and
  * formats user-facing prompts; this module owns the algorithm.
  *
- * Channel handling (issue #249, phase 2):
+ * Channel handling:
  *   - `curl`: resolve the target (a `--release` pin, else the tag named by the
  *     minisign-signed channel manifest), download release asset + signed
  *     checksums + minisign sig, verify, atomic-rename over `process.execPath`.

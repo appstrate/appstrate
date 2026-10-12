@@ -20,8 +20,8 @@ import type { ListEnvelope } from "@appstrate/shared-types";
 // --- Notifications ---
 //
 // Notifications live in their own per-recipient table (`notifications`),
-// one row per recipient, with per-user read-state by construction (issue
-// #667). The recipient is a single polymorphic `(recipientType, recipientId)`
+// one row per recipient, with per-user read-state by construction.
+// The recipient is a single polymorphic `(recipientType, recipientId)`
 // tuple — the undistorted `Actor` shape. The caller's own rows are selected
 // with the generic `actorMatch`, which matches both the type and the id, so
 // correctness does not rest on the (unenforced) assumption that user ids and
@@ -49,7 +49,7 @@ interface NotificationDto {
  * Fan out notifications for a freshly finalized run. Called exactly once
  * per run from the `finalizeRun` CAS winner, so no dedupe is needed.
  *
- * Recipients (issue #667):
+ * Recipients:
  *  - run triggered by a dashboard user → that user
  *  - run triggered by an end-user      → that end-user
  *  - actor-less run (owner-less org / system schedule, where the scheduler

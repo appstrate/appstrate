@@ -79,8 +79,7 @@ interface RunExecutionTabProps {
  * That switch is ANNOUNCED, in words and in colour. Silently swapping the
  * denominator left a remote-origin run showing a full-width bar on its peak
  * turn under an unchanged header — read, by anyone who saw a windowed run
- * first, as "this turn filled the window", i.e. precisely the misreading #1046
- * exists to remove. The missing `%` column is not a cue: absence never is.
+ * first, as "this turn filled the window", a misreading. The missing `%` column is not a cue: absence never is.
  */
 function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
   const { t, i18n } = useTranslation("agents");
@@ -88,7 +87,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
   // The window comes from the turns, through the very call the header gauge
   // makes — not from a parallel scan of the same rows. One derivation is the
   // only thing that keeps the two surfaces from disagreeing about which turn's
-  // window applies, which is the drift #1046 exists to remove. It follows that
+  // window applies. It follows that
   // the table falls back whenever the gauge renders nothing, including on a run
   // whose turns all measured zero: that fallback is announced below, so the
   // reader is never left guessing which denominator they are looking at.

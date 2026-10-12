@@ -51,7 +51,7 @@ export interface RuntimeAdapterRunContext {
  * env vars + optional CA file delivery). `null` means the runner gets no
  * egress route.
  *
- * Egress is decoupled from credential injection (#543). `caCertHostPath`
+ * Egress is decoupled from credential injection. `caCertHostPath`
  * discriminates the listener kind:
  *   - non-null → a MITM listener (TLS terminate + inject) is in front; the
  *     runner must trust the run CA, so the adapter copies the PEM in and sets
@@ -89,7 +89,7 @@ export interface SpawnIntegrationOptions {
    * the runner's filesystem ONLY when the spec's referenced mcp-server
    * opted in via `_meta["dev.appstrate/workspace"]` (carried on
    * `spec.workspaceMount`). `null` when the launching orchestrator
-   * provided no workspace handle (legacy launch paths, custom
+   * provided no workspace handle (custom
    * orchestrators) — adapters then degrade to no-mount and the
    * opt-in mcp-server runs without workspace access (logged warning).
    */

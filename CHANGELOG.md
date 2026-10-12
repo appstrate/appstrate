@@ -181,14 +181,17 @@ integration_connections WHERE shared_with_org;` tells whether the step
 
 ### Changed
 
-- **BREAKING (API): an undeclared `connection_overrides` key has its own
-  code.** A run launch, an inline launch or validation, and a schedule create
-  or update that name an integration the agent does not declare answer
-  `400 validation_failed` with an `errors[]` item
-  `{ field: "connection_overrides.<id>", code: "undeclared_connection_override" }`,
-  the shape `required_integration_unbound` already has there. Before, the
-  answer was `400 invalid_request` with `param: "connection_overrides"` and the
-  key only in `detail`. (#1914)
+- **BREAKING (API): an undeclared override key has its own code, on both
+  maps.** A run launch, an inline launch or validation, a remote run and a
+  schedule create or update that name, in `connection_overrides` or
+  `dependency_overrides`, an id the agent does not declare answer
+  `400 validation_failed` with one `errors[]` item:
+  `{ field: "connection_overrides.<id>", code: "undeclared_connection_override" }`
+  or
+  `{ field: "dependency_overrides.<id>", code: "undeclared_dependency_override" }`,
+  the shape `required_integration_unbound` has there. Before, both answered
+  `400 invalid_request` with `param` naming the map and the key only in
+  `detail`. (#1914)
 - **`token_usage` and `integrations_unbound` of a run are read under one
   policy** by the REST reads, the `run_metric` stream and event ingestion: a
   stored value that does not match its schema reads as not recorded (`null`)
@@ -196,10 +199,11 @@ integration_connections WHERE shared_with_org;` tells whether the step
   and `GET /api/runs/{id}` answer 500, and such a `token_usage` was served as
   stored by REST while the stream dropped the whole metric frame. REST
   `token_usage` carries only the declared counters and `tiers`. (#1914)
-- **`llm_usage` refuses a payer without a member's own credential, and the
-  reverse** (migration `0090`, CHECK `llm_usage_payer_iff_user_source`:
-  `payer_user_id` is set iff `credential_source = 'user'`). Schema only; the
-  constraint validates the existing rows as it is added. (#1925)
+- **`llm_usage` and `runs` refuse a payer without a member's own credential,
+  and the reverse** (migration `0090`, CHECKs `llm_usage_payer_iff_user_source`
+  and `runs_payer_iff_user_source`: `payer_user_id` is set iff the row's
+  `credential_source` / `model_source` is `user`). Schema only; each constraint
+  validates the existing rows as it is added. (#1925)
 - **The starter agent's publication is audited**: a new organization's
   `hello-world` 1.0.0 writes a `package.version_created` line, actor `system`,
   in its default space. (#1914)

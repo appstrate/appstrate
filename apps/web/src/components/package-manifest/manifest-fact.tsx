@@ -8,7 +8,7 @@
  * there is one place in the codebase where a manifest string can turn into an
  * href, and it is not a JSX file.
  *
- * The row key carries the INDEX because the reader no longer dedupes: a
+ * The row key carries the INDEX because the reader does not dedupe: a
  * manifest declaring the same `privacy_policies` entry twice is legal jsonb and
  * produces two identical `labelKey:value` rows. Uniqueness is this component's
  * problem, not a reason to drop the author's second entry.

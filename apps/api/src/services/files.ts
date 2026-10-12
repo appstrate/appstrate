@@ -98,12 +98,9 @@ import {
  *
  * The VALUE and every stored `files.storage_key` must agree: a key is written
  * as `${FILES_BUCKET}/<path>` and `parseStorageKey` splits the bucket back out
- * of it at read time. The bucket was spelled `documents` until the #1177 rename
- * was finished at the physical layer; migration `0044_finish_file_rename` is
- * the data half of that move — it rewrote the `documents/` key prefix on every
- * `files` row in the same change that flipped this literal.
+ * of it at read time.
  *
- * Changing it again without a matching key rewrite points every download,
+ * Changing it without a matching key rewrite points every download,
  * deletion and orphan sweep at a bucket that holds nothing, with no error until
  * a download 404s on a file that is physically still there.
  */
@@ -775,7 +772,7 @@ async function commitFileRow(params: {
    * Per-run output ceiling ({@link createFileFromStream} only). When set,
    * the run's `agent_output` total is re-summed under the same org `FOR UPDATE`
    * lock and this file is rejected (413) if it would overrun the cap. This is
-   * the sole per-run cap enforcement point (the stream no longer pre-checks or
+   * the sole per-run cap enforcement point (the stream does not pre-check or
    * enforces it mid-stream), and the lock serialises concurrent publishes so
    * each observes the other's committed bytes rather than a stale total.
    */
@@ -1874,8 +1871,7 @@ export async function cleanupExpiredFiles(): Promise<number> {
           // `file_expired` is the expiry-sweep sibling of `file_deleted` (see
           // `storage_deletion_jobs.reason`) — one label per cause, so an
           // operator's `GROUP BY reason` separates a user delete from a
-          // retention sweep. Both were spelled `document_*` before the #1177
-          // rename was finished at the physical layer.
+          // retention sweep.
           .map((r) => storageKeyToDeletionJob(r.storageKey, "file_expired"))
           .filter((j): j is StorageDeletionJobInput => j !== null);
         await enqueueStorageDeletion(tx, jobs);

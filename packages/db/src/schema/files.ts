@@ -49,8 +49,7 @@ import { chatSessions } from "./chat.ts";
  * creator-only via `userId`). The `chk_files_single_container` CHECK allows
  * at most one container — both NULL is legal, both set is not.
  *
- * The row id prefix is `file_`, minted by `prefixedId("file")`. It was `doc_`
- * until the #1177 rename was finished at the physical layer; the id shape is
+ * The row id prefix is `file_`, minted by `prefixedId("file")`; the id shape is
  * pinned once in `FILE_ID_RE` (`@appstrate/core/file-uri`), which every
  * validator and URI parser reads.
  */

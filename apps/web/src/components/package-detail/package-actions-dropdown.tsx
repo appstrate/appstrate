@@ -204,7 +204,7 @@ export function PackageActionsDropdown({
     !!canActivate && !!onActivate && !showDeactivate && maySetPackageActive(spaceGrant, type, true);
   const showDelete = !isBuiltIn && isOwned && canDelete;
 
-  // The manifest is no longer reachable from here, and does not need to be:
+  // The manifest is not reachable from here, and does not need to be:
   // every page that mounts this dropdown carries both tabs — À propos renders
   // the manifest, the Contenu tab serves its raw `manifest.json`. That holds for
   // integrations too, which route to `pages/integration-detail.tsx` and have
