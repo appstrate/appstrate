@@ -79,6 +79,7 @@ export function submitModelForm(opts: {
 
     const failedModelIds: string[] = [];
     const duplicateModelIds: string[] = [];
+    let refusalCode: string | undefined;
     for (const entry of entries) {
       try {
         if (!("models" in data) && opts.editModelId) {
@@ -90,12 +91,14 @@ export function submitModelForm(opts: {
       } catch (err) {
         failedModelIds.push(entry.modelId);
         if (isDuplicate(err)) duplicateModelIds.push(entry.modelId);
+        else if (err instanceof ApiError) refusalCode ??= err.code;
       }
     }
     if (failedModelIds.length === 0) opts.onSuccess();
     return {
       failedModelIds,
       duplicateModelIds,
+      ...(refusalCode ? { refusalCode } : {}),
       ...(credentialId ? { credentialId } : {}),
     };
   };

@@ -85,11 +85,11 @@ function ChoiceDialog({
   const { apply, isPending } = useApplyModelChoice();
   // The key a refused submission already minted: a retry binds to it instead of minting a second.
   const [minted, setMinted] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string[]>([]);
+  const [failed, setFailed] = useState<{ ids: string[]; refusal: string | null } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
 
   const save = async () => {
-    setFailed([]);
+    setFailed(null);
     setRefusal(null);
     try {
       const outcome = await apply({
@@ -100,7 +100,7 @@ function ChoiceDialog({
       });
       if (outcome.credentialId) setMinted(outcome.credentialId);
       if (outcome.failedModelIds.length === 0) onClose();
-      else setFailed(outcome.failedModelIds);
+      else setFailed({ ids: outcome.failedModelIds, refusal: outcome.refusal });
     } catch (err) {
       // The key was refused: nothing was written.
       setRefusal(errorMessage(err));
@@ -158,9 +158,10 @@ function ChoiceDialog({
           }
         />
         {refusal && <div className="text-destructive text-sm">{refusal}</div>}
-        {failed.length > 0 && (
-          <div className="text-destructive text-sm">
-            {t("models.choice.failed", { ids: failed.join(", ") })}
+        {failed && (
+          <div className="text-destructive space-y-1 text-sm">
+            <p>{t("models.choice.failed", { ids: failed.ids.join(", ") })}</p>
+            {failed.refusal && <p>{failed.refusal}</p>}
           </div>
         )}
       </fieldset>

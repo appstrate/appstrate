@@ -45,7 +45,7 @@ export function useCreateModel() {
   });
 }
 
-function useUpdateModel() {
+export function useUpdateModel() {
   const invalidate = useInvalidateModels();
   return $api.useMutation("patch", "/api/models/{id}", {
     meta: { errorHandledByCaller: true },
@@ -53,9 +53,13 @@ function useUpdateModel() {
   });
 }
 
+/** `errorHandledByCaller`: deleting a key's models reports its partial failures itself. */
 export function useDeleteModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
+  return $api.useMutation("delete", "/api/models/{id}", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: invalidate,
+  });
 }
 
 export function useSetDefaultModel() {

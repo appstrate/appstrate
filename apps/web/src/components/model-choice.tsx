@@ -2,7 +2,7 @@
 
 /**
  * « Choose the models » of a provider: the checklist of the models its service offers, the
- * ones already there ticked, a star on the organization's default.
+ * ones the organization has access to ticked, a star on its default.
  *
  * `useModelChoice` (`hooks/use-model-choice-state.ts`) holds the state (what is ticked, starred,
  * searched, detected) and hands back the plan it amounts to; `ModelChoiceList` draws it. The three dialogs that choose
@@ -69,12 +69,13 @@ export function ModelChoiceList({
         grouped={source === "catalog"}
         defaultId={choice.star}
         onDefaultChange={choice.setStar}
+        lockedId={choice.lockedId}
         advancedIds={advanced?.ids}
         onAdvanced={advanced?.onOpen}
       />
-      {choice.plan.remove.length > 0 && (
+      {choice.plan.withdraw.length > 0 && (
         <p className="text-muted-foreground text-sm">
-          {t("models.choice.removing", { count: choice.plan.remove.length })}
+          {t("models.choice.withdrawing", { count: choice.plan.withdraw.length })}
         </p>
       )}
     </div>

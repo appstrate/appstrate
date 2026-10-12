@@ -31,6 +31,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { ErrorState, LoadingState } from "./page-states";
 import { ApiError } from "../api/errors";
+import { refusalMessage } from "../lib/mutation-error";
 import { getProviderById } from "@/lib/provider-registry-helpers";
 import { buildDiscoverBody, parsesAsUrl, type DiscoveryState } from "@/lib/model-discovery";
 import {
@@ -420,12 +421,16 @@ function ModelForm({
     const outcome = await onSubmit(result);
     if (outcome.failedModelIds.length > 0) {
       if (outcome.credentialId) setCreatedCredentialId(outcome.credentialId);
+      // A refusal the server names (« model_scheduled ») is said as it is, else the generic line.
+      const named = outcome.refusalCode ? refusalMessage({ code: outcome.refusalCode }) : null;
       setError("modelId", {
-        message: t(
-          outcome.duplicateModelIds.length > 0
-            ? "models.form.alreadyAdded"
-            : "models.form.saveFailed",
-        ),
+        message:
+          named ??
+          t(
+            outcome.duplicateModelIds.length > 0
+              ? "models.form.alreadyAdded"
+              : "models.form.saveFailed",
+          ),
       });
     }
   });

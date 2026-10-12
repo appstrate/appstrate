@@ -21,8 +21,8 @@ function row(id: string): ModelPickRow {
   };
 }
 
-const existing = (modelId: string, isDefault = false) =>
-  ({ id: `db_${modelId}`, modelId, is_default: isDefault }) as OrgModelInfo;
+const existing = (modelId: string, isDefault = false, enabled = true) =>
+  ({ id: `db_${modelId}`, modelId, is_default: isDefault, enabled }) as OrgModelInfo;
 
 const picked = (...ids: string[]) => new Map(ids.map((id) => [id, row(id)]));
 
@@ -34,17 +34,39 @@ describe("planModelChoice", () => {
       starred: null,
     });
     expect(plan.add.map((r) => r.id)).toEqual(["b"]);
-    expect(plan.remove).toEqual([]);
+    expect(plan.withdraw).toEqual([]);
   });
 
-  it("deletes the models left unticked", () => {
+  it("withdraws access from the models left unticked, it never deletes them", () => {
     const plan = planModelChoice({
       picked: picked("a"),
       existing: [existing("a"), existing("b")],
       starred: null,
     });
-    expect(plan.remove.map((m) => m.modelId)).toEqual(["b"]);
+    expect(plan.withdraw.map((m) => m.modelId)).toEqual(["b"]);
     expect(plan.add).toEqual([]);
+    expect(plan.grant).toEqual([]);
+  });
+
+  it("gives access back to a switched-off model that is ticked again, rather than creating it", () => {
+    const plan = planModelChoice({
+      picked: picked("a", "b"),
+      existing: [existing("a"), existing("b", false, false)],
+      starred: null,
+    });
+    expect(plan.grant.map((m) => m.modelId)).toEqual(["b"]);
+    expect(plan.add).toEqual([]);
+    expect(plan.withdraw).toEqual([]);
+  });
+
+  it("leaves a switched-off model that stays unticked alone", () => {
+    const plan = planModelChoice({
+      picked: picked("a"),
+      existing: [existing("a"), existing("b", false, false)],
+      starred: null,
+    });
+    expect(plan.grant).toEqual([]);
+    expect(plan.withdraw).toEqual([]);
   });
 
   it("changes the default only to a ticked model that is not already it", () => {

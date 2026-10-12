@@ -58,7 +58,8 @@ export function useModelChoice({
     return catalogRows(provider.models);
   }, [source, search.models, freshDiscovery, provider.models]);
 
-  // A model the organization has but the listing no longer offers stays in the list, ticked.
+  // A model the organization has but the listing no longer offers stays in the list (ticked while
+  // it has access, unticked once withdrawn).
   const allRows = useMemo(() => {
     const offered = new Set(listed.map((r) => r.id));
     const kept = existing.filter((m) => m.modelId !== null && !offered.has(m.modelId));
@@ -71,7 +72,9 @@ export function useModelChoice({
   const [touched, setTouched] = useState<Map<string, ModelPickRow> | null>(null);
   const initial = useMemo(() => {
     const map = new Map<string, ModelPickRow>();
-    for (const m of existing) if (m.modelId !== null) map.set(m.modelId, existingRow(m));
+    // Ticked is access: a row switched off is listed, unticked.
+    for (const m of existing)
+      if (m.modelId !== null && m.enabled) map.set(m.modelId, existingRow(m));
     // A search lists hundreds: the operator picks, nothing is ticked for them.
     if (tickAll && source !== "search") for (const row of listed) map.set(row.id, row);
     return map;
@@ -94,13 +97,19 @@ export function useModelChoice({
     : null;
 
   const plan = planModelChoice({ picked, existing, starred: star });
-  const canSave = plan.add.length + plan.remove.length > 0 || plan.defaultModelId !== null;
+  const canSave =
+    plan.add.length + plan.grant.length + plan.withdraw.length > 0 || plan.defaultModelId !== null;
+
+  // The server refuses to switch off the default model: its box stays ticked until another model
+  // is starred (in a list with no star, until another default is chosen elsewhere).
+  const lockedId =
+    currentDefault !== null && (!allowDefault || star === currentDefault) ? currentDefault : null;
 
   const change = (changed: ModelPickRow[], checked: boolean) => {
     const next = new Map(picked);
     for (const row of changed) {
       if (checked) next.set(row.id, row);
-      else next.delete(row.id);
+      else if (row.id !== lockedId) next.delete(row.id);
     }
     setTouched(next);
   };
@@ -146,6 +155,7 @@ export function useModelChoice({
     setStar: allowDefault ? setStarred : undefined,
     plan,
     canSave,
+    lockedId,
     discovery: freshDiscovery,
     detecting: discover.isPending,
     detect,

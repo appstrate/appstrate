@@ -108,9 +108,11 @@ export function useUpdateModelProviderCredential() {
   });
 }
 
-export function useDeleteModelProviderCredential() {
+/** `meta`: deleting an organization key with its models reports its own failures. */
+export function useDeleteModelProviderCredential(meta?: MutationMeta) {
   const invalidate = useInvalidateModelProviderCredentials();
   return $api.useMutation("delete", "/api/model-provider-credentials/{id}", {
+    meta,
     onSuccess: invalidate,
   });
 }

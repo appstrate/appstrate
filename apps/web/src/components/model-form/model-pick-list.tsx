@@ -21,6 +21,8 @@ interface RowExtras {
   /** The upstream id starred as the organization's default. */
   defaultId?: string | null;
   onDefaultChange?: (id: string) => void;
+  /** The row that cannot be unticked: the organization's default model keeps its access. */
+  lockedId?: string | null;
   /** The rows already saved, whose finer settings open in the model form. */
   advancedIds?: ReadonlySet<string>;
   onAdvanced?: (id: string) => void;
@@ -40,9 +42,17 @@ function PickRow({
   extras: RowExtras;
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const locked = extras.lockedId === row.id;
   return (
     <div className="flex items-center gap-2 px-3 py-2">
-      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onCheckedChange(Boolean(v))} />
+      <span title={locked ? t("models.choice.defaultLocked") : undefined} className="inline-flex">
+        <Checkbox
+          id={id}
+          checked={checked}
+          disabled={locked}
+          onCheckedChange={(v) => onCheckedChange(Boolean(v))}
+        />
+      </span>
       <Label htmlFor={id} className="min-w-0 flex-1 cursor-pointer font-normal">
         <span className="block truncate">{row.label ?? row.id}</span>
         {row.label && (

@@ -28,7 +28,6 @@ import {
 } from "../../hooks/use-models";
 import {
   useModelProviderCredentials,
-  useDeleteModelProviderCredential,
   useProvidersRegistry,
   useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
@@ -38,7 +37,7 @@ import { NoAccessState } from "../../components/route-gate";
 import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { ConfirmModal } from "../../components/confirm-modal";
+import { DeleteOrgKeyConfirm } from "../../components/delete-org-key-confirm";
 import { CollectionTabs } from "../../components/collection-tabs";
 import { PreferencesModelsLink } from "../../components/preferences-models-link";
 import { EmptyStateAction } from "../../components/page-states";
@@ -97,7 +96,6 @@ export function OrgSettingsModelsPage() {
     );
 
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
-  const deleteCredential = useDeleteModelProviderCredential();
   const updateCredential = useUpdateModelProviderCredential();
   const setDefault = useSetDefaultModel();
   const modelForm = useModelFormHandler({
@@ -122,12 +120,6 @@ export function OrgSettingsModelsPage() {
     personalServices.find((s) => !serviceRows.some((r) => r.id === s.providerId)) ??
     personalServices[0]
   )?.providerId;
-
-  // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`): the dialog
-  // says so before asking the server, and points to where the models are removed.
-  const modelsOnDeleted = confirmDelete
-    ? (models ?? []).filter((m) => m.credentialId === confirmDelete.id).length
-    : 0;
 
   const personalAllowed = orgSettings?.personal_model_credentials === true;
   // Known off: the table stays, greyed. Unknown (the setting did not load) is not off.
@@ -285,31 +277,13 @@ export function OrgSettingsModelsPage() {
         onSubmit={modelForm.onSubmit}
       />
 
-      <ConfirmModal
-        open={!!confirmDelete}
-        onClose={() => setConfirmDelete(null)}
-        title={t("credentials.deleteTitle")}
-        confirmLabel={t("btn.delete", { ns: "common" })}
-        description={
-          confirmDelete
-            ? modelsOnDeleted > 0
-              ? t("credentials.deleteInUse", {
-                  label: confirmDelete.label,
-                  count: modelsOnDeleted,
-                })
-              : t("credentials.deleteConfirm", { label: confirmDelete.label })
-            : ""
-        }
-        confirmDisabled={modelsOnDeleted > 0}
-        isPending={deleteCredential.isPending}
-        onConfirm={() => {
-          if (!confirmDelete) return;
-          deleteCredential.mutate(
-            { params: { path: { id: confirmDelete.id } } },
-            { onSuccess: () => setConfirmDelete(null) },
-          );
-        }}
-      />
+      {confirmDelete && (
+        <DeleteOrgKeyConfirm
+          credential={confirmDelete}
+          models={models ?? []}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </>
   );
 }

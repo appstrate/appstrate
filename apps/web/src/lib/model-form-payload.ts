@@ -121,6 +121,8 @@ export interface ModelFormSubmitOutcome {
    * Named apart because it is not a failure to retry: the model is there.
    */
   duplicateModelIds: string[];
+  /** The server's code for the first refusal that is not a duplicate: the form names it when it can. */
+  refusalCode?: string;
   credentialId?: string;
 }
 

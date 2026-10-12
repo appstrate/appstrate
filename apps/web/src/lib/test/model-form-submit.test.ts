@@ -163,6 +163,26 @@ describe("submitModelForm — single model", () => {
   });
 });
 
+describe("submitModelForm — a refusal the server names", () => {
+  it("reports the code of a refused edit, so the form can say it (model_scheduled)", async () => {
+    const h = harness();
+    const outcome = await submitModelForm({
+      writes: {
+        ...h.writes,
+        updateModel: async () => {
+          throw new ApiError("model_scheduled", "Enabled schedules run this model", 409);
+        },
+      },
+      editModelId: "mdl_1",
+      onSuccess: h.onSuccess,
+    })({ modelId: "gpt-6", credentialId: null, providerId: "openai" });
+
+    expect(outcome.failedModelIds).toEqual(["gpt-6"]);
+    expect(outcome.refusalCode).toBe("model_scheduled");
+    expect(h.successes).toBe(0);
+  });
+});
+
 describe("submitModelForm — each member's own credential (unbound)", () => {
   const unbound: ModelFormData = { modelId: "gpt-6", credentialId: null, providerId: "openai" };
 

@@ -333,7 +333,8 @@ its fixtures.
     otherwise), État, « … ». An organization key serves the models bound to it (`credentialId`);
     the instance row serves the built-in ones. A key the caller cannot read stays a row, named by
     its provider, with no menu. Menu: Renommer, Choisir les modèles, Changer la clé, Tester,
-    Supprimer; the instance, Choisir le modèle par défaut. A click on the row (name included)
+    Supprimer (the key and its models, in one gesture: see « Delete a key » below); the
+    instance, Choisir le modèle par défaut. A click on the row (name included)
     chooses its models. Actions menu: « Ajouter une clé org ».
   - **« Clés perso »** (`components/personal-services-table.tsx`, columns in
     `pages/org-settings/personal-service-columns.tsx`): first the organization's
@@ -360,14 +361,38 @@ its fixtures.
     is « Ajouter une clé perso ou un abonnement ». The
     menu: Renommer, Changer la clé (or Reconnecter), Tester, Supprimer; another person's, Tester.
   - **Choose the models** (`?models=<credentialId>`, `components/model-choice-dialog.tsx`,
-    state in `hooks/use-model-choice-state.ts`, the plan in `lib/model-choice.ts`): the checklist of
-    the provider's models, the ones already created ticked, a star on the default. « Enregistrer »
-    creates the ticked models bound to the key, deletes the unticked (the footer says how many),
-    sets the default. A saved model's finer settings (name, capabilities, prices) are the
+    state in `hooks/use-model-choice-state.ts`, the plan in `lib/model-choice.ts`): **the list
+    speaks of ACCESS, never of deleting a model.** A model exists at its provider; the
+    organization gives or withdraws its access. Ticked is access, unticked is none, a star on the
+    default. « Enregistrer » creates the ticked models that have no row yet, switches back on the
+    ones that were switched off (`PATCH enabled: true`, their settings intact), switches OFF the
+    unticked ones (`PATCH enabled: false`, never a `DELETE`; the footer says « Accès retiré pour N
+    modèles »), then sets the default, in that order, so a default that moves can leave the one
+    it replaces. A model switched off is listed UNTICKED, and the tables' Modèles column names only
+    the models with access. **The default model's box is locked** (disabled, tooltip « Choisissez
+    d'abord un autre modèle par défaut »: the server refuses `model_disabled`) until another model
+    is starred. The words « Supprimer » and « Désactiver » do not appear for a model in this
+    list nor in the model form (« Réglages avancés »): there is no model deletion in the
+    interface, a row only goes with its key. A refusal the server names (`model_disabled`,
+    `model_scheduled`, said by `refusalMessage`) is shown under the list or in the form. A saved
+    model's finer settings (name, capabilities, prices) are the
     « Réglages avancés » link on its line: the model form, `?editModel=<id>`, which replaces the
     list. « Ajouter une clé org » is the same list as its second step (provider and key first, every model
     ticked, nothing written until the last button, « Retour » keeps what was typed). The personal
-    keys' models are the same list per provider (`?personalModels=<providerId>`, no star).
+    keys' models are the same list per provider (`?personalModels=<providerId>`, no star, but the
+    organization's default keeps its lock when it is one of them).
+  - **Delete a key** (`components/delete-org-key-confirm.tsx`, the plan in `lib/key-deletion.ts`,
+    the writes in `hooks/use-delete-org-key.ts`): one confirmation, one gesture. The server
+    refuses a key that model rows still reference (`credential_in_use`, `ON DELETE RESTRICT`), so
+    the confirmation says what it costs (« Ses 3 modèles ne seront plus accessibles : A, B, C »),
+    and on confirmation the interface deletes the key's model rows (here they really go: they
+    point at the key), then the key. When the key serves the organization's default model, the
+    confirmation asks first for the model that replaces it (a select of the accessible models
+    that are not paid by each member; the button waits for the choice) and sets it before any
+    deletion; with no candidate it says so and offers only Annuler. A step that fails stops the
+    next ones and is said inline, with what was done (« Accès retiré pour : A. Impossible pour :
+    B. La clé n'est pas supprimée : réessayez. »); the list is re-read, so the retry starts from
+    what is left. This is the one place a model row is deleted.
 - **Packages** (agents, skills, MCP servers, the organisation catalogue) are one
   list: `components/package-collection.tsx`, with `PackageCard` and
   `packages-table.tsx`. Do not build another.

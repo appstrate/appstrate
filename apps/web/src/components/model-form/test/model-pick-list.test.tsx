@@ -101,6 +101,19 @@ describe("ModelPickList", () => {
   });
 });
 
+describe("ModelPickList, the default model's access", () => {
+  it("locks the box of the locked row and says why, and no other", () => {
+    const html = list({ selectedIds: [FROM_CATALOG.id], lockedId: FROM_CATALOG.id });
+    // The Radix box is a button, with a twin native input: both disabled, for that one row.
+    expect(html.split(' disabled=""').length - 1).toBe(2);
+    expect(list({ selectedIds: [FROM_CATALOG.id] })).not.toContain(' disabled=""');
+    expect(html).toContain(`title="${settingsFr["models.choice.defaultLocked"]}"`);
+    expect(list({ selectedIds: [FROM_CATALOG.id] })).not.toContain(
+      settingsFr["models.choice.defaultLocked"],
+    );
+  });
+});
+
 describe("ModelPickList — a catalog, in two groups", () => {
   const CURATED = pickRow({ id: "claude-opus-5", origin: "catalog", featured: true });
   const REST = pickRow({ id: "claude-3-opus-20240229", origin: "catalog" });
