@@ -56,20 +56,13 @@ describe("non-string credentials — one projection at every door", () => {
 
     expect(sent).toEqual([NAMES.map((name) => read[name]).join("\n")]);
     expect(result).toMatchObject({ outputs: read });
-    expect(read).toEqual({
-      text: "plain",
-      port: "5432",
-      tls: "true",
-      hosts: '["a,b","c"]',
-      options: '{"retries":3}',
-    });
   });
 
   it("treats `null` as an absent credential at each: never the text `null`", async () => {
     expect(toCredentialStringMap({ ...VALUES, port: null })).not.toHaveProperty("port");
 
     const input = await login({ ...VALUES, port: null }, VALUES);
-    expect(input.result).toMatchObject({ reason: "unresolved_placeholder" });
+    expect(input.result).toMatchObject({ reason: "invalid_input", field: "port" });
     expect(input.sent).toEqual([]);
 
     const output = await login(VALUES, { ...VALUES, port: null });

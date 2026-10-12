@@ -25,6 +25,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  proxyRequirement,
   rankByLeastPrivilege,
   resolveConnections as resolveConnectionsPure,
   servingCandidates,
@@ -44,8 +45,6 @@ import type {
 } from "@appstrate/db/schema";
 
 // ─────────────────────────── Fixtures ─────────────────────────────────────────
-
-type AgentRequirement = Extract<IntegrationRequirement, { kind: "agent" }>;
 
 const INTEG = "@vendor/test-integ";
 const ORG_ID = "org_test";
@@ -179,7 +178,7 @@ function req(
   manifest: IntegrationManifest,
   agentTools: string[] = [],
   agentScopes: string[] = [],
-): AgentRequirement {
+): IntegrationRequirement {
   return {
     kind: "agent",
     integrationId: INTEG,
@@ -192,7 +191,7 @@ function req(
 }
 
 /** {@link req} for an agent that marks the integration `required`: no run without it. */
-function requiredReq(...args: Parameters<typeof req>): AgentRequirement {
+function requiredReq(...args: Parameters<typeof req>): IntegrationRequirement {
   return { ...req(...args), required: true };
 }
 
@@ -973,7 +972,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     expect(result.errors).toEqual([]);
   });
 
-  const inertReq = (required: boolean): AgentRequirement => ({
+  const inertReq = (required: boolean): IntegrationRequirement => ({
     kind: "agent",
     integrationId: INTEG,
     manifest: oauth2Manifest(),
@@ -1018,7 +1017,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
     expect(pinnedNone.errors.map((e) => e.code)).toEqual(["required_integration_unbound"]);
   });
 
-  function requiredAuthReq(required: boolean): AgentRequirement {
+  function requiredAuthReq(required: boolean): IntegrationRequirement {
     return {
       kind: "agent",
       integrationId: INTEG,
@@ -1178,7 +1177,7 @@ describe("resolveConnections — fallback among own connections of one account",
 
   it("still asks without an agent selection (a credential-proxy call)", () => {
     const result = resolveConnections({
-      requirements: [{ kind: "proxy", integrationId: INTEG, manifest: oauth2Manifest() }],
+      requirements: [proxyRequirement(INTEG, oauth2Manifest())],
       accessibleConnections: [narrow(), broad()],
       pins: [],
     });
@@ -1691,7 +1690,7 @@ describe("resolveConnections — org default", () => {
 // ─────────────────────── AFPS §4.1 `auth_key` ─────────────────────────────
 
 describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
-  function reqWithAuthKey(authKey: string, required = true): AgentRequirement {
+  function reqWithAuthKey(authKey: string, required = true): IntegrationRequirement {
     return {
       kind: "agent",
       integrationId: INTEG,
@@ -1987,7 +1986,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
     } as unknown as IntegrationManifest;
   }
 
-  function reqPinned(manifest: IntegrationManifest, authKey: string): AgentRequirement {
+  function reqPinned(manifest: IntegrationManifest, authKey: string): IntegrationRequirement {
     return {
       kind: "agent",
       integrationId: INTEG,
@@ -2921,7 +2920,7 @@ describe("resolveConnections — a warning carries the code its state raises on 
   /** One degraded state, `required` aside; the explicit `[]` pair is covered per layer above. */
   const states: {
     code: ConnectionResolutionWarningCode;
-    requirement: AgentRequirement;
+    requirement: IntegrationRequirement;
     input: () => Partial<Parameters<typeof resolveConnections>[0]>;
   }[] = [
     { code: "not_connected", requirement: req(oauth2Manifest()), input: () => ({}) },

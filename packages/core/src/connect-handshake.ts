@@ -56,10 +56,7 @@ export interface IntegrationConnectCompletion {
   packageId?: string | undefined;
   /** User-facing failure reason; present only when `ok` is `false`. */
   error?: string | undefined;
-  /**
-   * OAuth scopes the flow requested that the consent did not grant; present only when `ok` is
-   * `true` and some were left out. The connection exists, narrower than asked.
-   */
+  /** Requested OAuth scopes a successful consent left out. */
   scopesDenied?: string[] | undefined;
 }
 

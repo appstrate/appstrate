@@ -14,7 +14,6 @@
  */
 
 import type { Context } from "hono";
-import { z } from "zod";
 import { invalidRequest } from "./errors.ts";
 
 interface ListPagination {
@@ -23,27 +22,30 @@ interface ListPagination {
 }
 
 /**
- * Parse `limit` / `offset` from the query string. An absent `limit` is `defaultLimit`; one that is
- * not an integer from 1 to `maxLimit` (default 100) is a 400 on `limit`: a page of another size
- * than asked would read as the whole list. A negative or non-numeric `offset` falls back to 0.
+ * Parse `limit` / `offset` from the query string. Absent, they are `defaultLimit` and 0. Supplied,
+ * `limit` is an integer from 1 to `maxLimit` (default 100) and `offset` a non-negative integer,
+ * else a 400 naming the parameter: a page other than the one asked would read as the list.
  */
 export function parseListPagination(
   c: Context,
   opts: { defaultLimit: number; maxLimit?: number },
 ): ListPagination {
-  const maxLimit = opts.maxLimit ?? 100;
-  const raw = c.req.query("limit");
-  const limit = raw === undefined ? opts.defaultLimit : /^\d+$/.test(raw) ? Number(raw) : NaN;
-  if (!(limit >= 1 && limit <= maxLimit)) {
-    throw invalidRequest(`limit must be an integer from 1 to ${maxLimit}`, "limit");
-  }
-  const offset = z.coerce
-    .number()
-    .int()
-    .min(0)
-    .catch(0)
-    .parse(c.req.query("offset") ?? 0);
-  return { limit, offset };
+  const supplied = (name: "limit" | "offset", min: number, max: number): number | undefined => {
+    const raw = c.req.query(name);
+    if (raw === undefined) return undefined;
+    const value = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    if (value >= min && value <= max) return value;
+    throw invalidRequest(
+      max === Infinity
+        ? `${name} must be an integer of at least ${min}`
+        : `${name} must be an integer from ${min} to ${max}`,
+      name,
+    );
+  };
+  return {
+    limit: supplied("limit", 1, opts.maxLimit ?? 100) ?? opts.defaultLimit,
+    offset: supplied("offset", 0, Infinity) ?? 0,
+  };
 }
 
 /** Slice an in-memory array into a page + report `total` / `hasMore`. */

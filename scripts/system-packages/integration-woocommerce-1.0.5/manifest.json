@@ -22,6 +22,7 @@
           "properties": {
             "site_url": {
               "type": "string",
+              "format": "uri",
               "description": "Full WooCommerce site URL with https:// and no query string (e.g. https://mystore.com)"
             },
             "consumer_key": {

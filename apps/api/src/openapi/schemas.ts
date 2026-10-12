@@ -2269,7 +2269,7 @@ export const schemas = {
       candidates: {
         type: "array",
         description:
-          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess, health, age, the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
+          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
         items: {
           type: "object",
           required: [

@@ -100,14 +100,11 @@ export function toLaunchOverrides(
   return ids ? { ids, source } : null;
 }
 
-interface RequirementTarget {
+export interface IntegrationRequirement {
+  /** `proxy`: a credential-proxy call, built by {@link proxyRequirement} alone. */
+  kind: "agent" | "proxy";
   integrationId: string;
   manifest: IntegrationManifest;
-}
-
-/** An agent's declared integration. */
-interface AgentRequirement extends RequirementTarget {
-  kind: "agent";
   /** The EFFECTIVE selection (below) is non-empty or `"*"` — what the spawn resolver starts. */
   hasSelectedTools: boolean;
   /** The agent's own tool selection; drives scope inference (`"*"` → the auth's default scopes). */
@@ -125,22 +122,22 @@ interface AgentRequirement extends RequirementTarget {
 }
 
 /**
- * A credential-proxy call. No agent selects anything: every declared auth serves, no scope is
- * required or tells own rows apart, and the call cannot proceed without a connection.
+ * The requirement of a credential-proxy call. No agent selects anything: every declared auth
+ * serves, no scope is required or tells own rows apart, and the call needs a connection.
  */
-interface ProxyRequirement extends RequirementTarget {
-  kind: "proxy";
-}
-
-export type IntegrationRequirement = AgentRequirement | ProxyRequirement;
-
-/** What the cascade reads of a requirement, a proxy call's being fixed. */
-type CascadeRequirement = Omit<AgentRequirement, "kind"> & Pick<IntegrationRequirement, "kind">;
-
-function cascadeRequirement(req: IntegrationRequirement): CascadeRequirement {
-  return req.kind === "agent"
-    ? req
-    : { ...req, hasSelectedTools: true, agentTools: [], agentScopes: [], required: true };
+export function proxyRequirement(
+  integrationId: string,
+  manifest: IntegrationManifest,
+): IntegrationRequirement {
+  return {
+    kind: "proxy",
+    integrationId,
+    manifest,
+    hasSelectedTools: true,
+    agentTools: [],
+    agentScopes: [],
+    required: true,
+  };
 }
 
 interface ResolveConnectionsInput {
@@ -184,7 +181,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
     if (result.kind === "unbound") warnings.push(result.warning);
   };
 
-  for (const req of input.requirements.map(cascadeRequirement)) {
+  for (const req of input.requirements) {
     // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
     if (
       !req.required &&
@@ -683,7 +680,7 @@ function connectTarget(args: ConnectTargetArgs): { authKey?: string; requiredSco
 
 /** The rows a requirement may bind or offer — the 409's candidates and the picker's alike. */
 export function servingCandidates<T>(
-  req: Pick<AgentRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
+  req: Pick<IntegrationRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
   rows: readonly T[],
   authKeyOf: (row: T) => string,
 ): T[] {
@@ -699,7 +696,7 @@ interface AuthFilter {
 }
 
 function authFilterOf(
-  req: Pick<AgentRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
+  req: Pick<IntegrationRequirement, "manifest" | "requiredAuthKey" | "effectiveTools">,
 ): AuthFilter {
   return {
     live: manifestAuthKeySet(req.manifest),
@@ -838,7 +835,6 @@ function checkHealth(
       // The FULL requirement, not the diff: some providers treat each consent as the whole grant.
       requiredScopes: oauthScopesForAuth(args, conn.authKey),
       ownedByActor,
-      remedy: scopeRemedy(source, ownedByActor),
       source,
       message: `Connection for ${args.integrationId} is missing required permissions: ${missing.join(", ")}.`,
     });
@@ -999,7 +995,7 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
       : {}),
     ...(e.code === "insufficient_scopes"
       ? {
-          ...(e.remedy ? { remedy: e.remedy } : {}),
+          ...(e.source ? { remedy: scopeRemedy(e.source, e.ownedByActor === true) } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.missingScopes && e.missingScopes.length > 0
             ? { missing_scopes: e.missingScopes }
@@ -1058,7 +1054,7 @@ async function buildRequirement(
 export function requirementOf(
   entry: ManifestIntegrationEntry,
   manifest: IntegrationManifest,
-): AgentRequirement {
+): IntegrationRequirement {
   const wildcard = entry.tools === "*";
   // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);

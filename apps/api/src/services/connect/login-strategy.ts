@@ -44,11 +44,7 @@ import { maskCredentialLabel } from "./mask-label.ts";
 import type { AfpsManifestAuth } from "../integration-manifest-helpers.ts";
 
 /** A login failure the submitter can act on, as its 4xx/5xx; any other stays the caller's 500. */
-function loginRefusal(
-  err: unknown,
-  ctx: ConnectContext,
-  inputs: Readonly<Record<string, unknown>>,
-): unknown {
+function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
   if (!(err instanceof LoginError)) return err;
   if (err.reason === "upstream_failed" || err.reason === "timeout") {
     // The cause the 502/504 body leaves out: a status, a delay or an error class, never an input.
@@ -66,11 +62,6 @@ function loginRefusal(
       );
     case "invalid_input":
       return loginInputUnencodable(err.field!);
-    case "unresolved_placeholder": {
-      // A placeholder the submitter left `null`; one no input names is the manifest's.
-      const submitted = err.fields?.find((field) => Object.hasOwn(inputs, field));
-      return submitted === undefined ? err : loginInputUnencodable(submitted);
-    }
     case "url_not_allowed":
       return err.fields?.length ? loginUrlRefused(err.fields) : err;
     case "upstream_failed":
@@ -105,7 +96,7 @@ export class LoginStrategy implements IntegrationConnectStrategy {
       authorizedUris: (auth.authorized_uris as string[] | undefined) ?? null,
       allowAllUris: (auth.allow_all_uris as boolean | undefined) ?? false,
     }).catch((err: unknown) => {
-      throw loginRefusal(err, ctx, inputs);
+      throw loginRefusal(err, ctx);
     });
 
     // Identity source = injectable outputs + engine-promoted identity claims,

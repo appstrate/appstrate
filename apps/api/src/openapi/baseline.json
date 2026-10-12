@@ -2210,7 +2210,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`)."
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3133,7 +3133,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`)."
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5517,7 +5517,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`)."
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5626,7 +5626,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry."
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -11031,7 +11031,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry."
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15773,7 +15773,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry."
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -29469,7 +29469,7 @@
         "name": "offset",
         "in": "query",
         "required": false,
-        "description": "Number of items to skip before the first returned item.",
+        "description": "Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`).",
         "schema": {
           "type": "integer",
           "minimum": 0,
@@ -32603,7 +32603,7 @@
           },
           "candidates": {
             "type": "array",
-            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess, health, age, the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
+            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
             "items": {
               "type": "object",
               "required": [

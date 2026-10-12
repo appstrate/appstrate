@@ -211,8 +211,8 @@ integration_connections WHERE shared_with_org;` tells whether the step
     `integration.connection.scopes_denied` (`scopesRequested`, `scopesDenied`).
     `integration.connection.created` records `scopesGranted`. A requested
     `offline_access` counts as granted when the token response carries a
-    refresh token, and `openid` when it carries an `id_token`, at connect and
-    at refresh: an authorization server that leaves them out of `scope`
+    refresh token, and `openid` when it carries an `id_token` (at refresh, the
+    stored one counts), at connect and at refresh: an authorization server that leaves them out of `scope`
     (Microsoft) no longer leaves such a connection short of its own defaults.
   - **`scopes` of a connect kickoff are RFC 6749 scope tokens.** A scope
     holding a space, a quote, a backslash or a non-ASCII character, or an empty
@@ -226,11 +226,16 @@ integration_connections WHERE shared_with_org;` tells whether the step
     end-users, files, webhook deliveries, and the sidecar's run history and
     memories): `0`, a negative, a fraction, text or a value above the maximum
     used to fall back to the default page size without saying so. An absent
-    `limit` is still the default.
+    `limit` is still the default. `offset` follows the same rule: one that is
+    not a non-negative integer is `400` on `offset` (it fell back to 0).
   - **`null` is an absent credential at every door.** A `connect.login` whose
     template names an input submitted as `null` is refused with
     `400 login_input_unencodable` on that field instead of sending the text
-    `null`, and an extracted output that is `null` is a missing output.
+    `null`, a `connect.tool` login likewise, and an extracted output that is
+    `null` is a missing output.
+  - **A token response's `scope` is split on spaces** (RFC 6749 §3.3), and on
+    `,` or a literal `%20` only when it holds no space: a scope containing a
+    comma is no longer read back as two.
 - **The connect form masks what the manifest marks secret** (#1913): a
   credential field is a password input when its schema says `writeOnly: true`
   or `format: "password"`, the rule the connection label already follows, and
@@ -241,10 +246,16 @@ integration_connections WHERE shared_with_org;` tells whether the step
   1.0.3, firecrawl 1.0.4, freshdesk 1.0.4, freshsales 1.0.3, github-mcp 1.1.4,
   loom 1.0.4, playwright-mcp 1.0.1, shopify 1.0.4, shortcut 1.0.3, ssh 1.0.2,
   stripe 1.0.4, teamwork 1.0.4, telegram 1.0.3, twenty-mcp 1.0.1, twilio 1.1.1,
-  webhooks 1.0.4, woocommerce 1.0.5, wordpress 1.0.5, zendesk 1.0.4. A
-  connection with no identity is labelled by the masked value of its one
-  non-secret required field (a Twilio Account SID, a Shopify domain), else by
-  the masked key of a key-only auth, as before; a password is never used.
+  webhooks 1.0.4, woocommerce 1.0.5, wordpress 1.0.5, zendesk 1.0.4. The
+  same manifests declare their addresses: `api_url` (activecampaign) and
+  `site_url` (woocommerce, wordpress) are `format: "uri"`, Shopify's
+  `shop_domain` is `format: "hostname"`, so a value that is not one is refused
+  at connect; `@appstrate/webhooks` marks `webhook_url` secret. A connection
+  with no identity is labelled by the masked value of its one required field
+  that is neither a secret nor an address (a Twilio Account SID, a Freshdesk
+  subdomain), else by the masked key of an auth with a single secret
+  (ActiveCampaign, Shopify, Firecrawl), else `Connexion N`; a
+  `format: "password"` field is never used.
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).

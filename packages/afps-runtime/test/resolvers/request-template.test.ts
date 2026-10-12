@@ -185,16 +185,15 @@ describe("substituteRequest — refusals name the field, never the value", () =>
     expect(render("X-Other", "x; y")).toBe("sid=x; y");
   });
 
-  it("renders a non-string input as its JSON text and leaves a null one's placeholder intact", () => {
-    const { body } = substituteRequest(
-      {
-        url: "https://h.example/",
-        headers: {},
-        body: "{{port}} {{hosts}} {{gone}}",
-        contentType: "text/plain",
-      },
-      { port: 5432, hosts: ["a,b"], gone: null },
+  it("refuses a null input its template names, and ignores one it does not", () => {
+    const render = (body: string) =>
+      substituteRequest(
+        { url: "https://h.example/", headers: {}, body, contentType: "text/plain" },
+        { port: 5432, gone: null },
+      ).body;
+    expect(render("{{port}}")).toBe("5432");
+    expect(() => render("{{port}} {{gone}}")).toThrow(
+      expect.objectContaining({ name: "UnencodableInputError", field: "gone" }),
     );
-    expect(body).toBe('5432 ["a,b"] {{gone}}');
   });
 });

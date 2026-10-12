@@ -5887,7 +5887,7 @@ export interface components {
             org_default_enforced: boolean;
             /** @description Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections. */
             can_add_connection: boolean;
-            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess, health, age, the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth. */
+            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth. */
             candidates: {
                 /** Format: uuid */
                 id: string;
@@ -7487,7 +7487,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Number of items to skip before the first returned item. */
+        /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
         Offset: number;
         /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
         IfMatch: string;
@@ -8759,7 +8759,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
             };
             header?: {
@@ -8796,7 +8796,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`). */
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -12601,7 +12601,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400. */
                 fields?: string;
@@ -12644,7 +12644,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry. */
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -16555,7 +16555,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400. */
                 fields?: string;
@@ -16623,7 +16623,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry. */
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22685,7 +22685,7 @@ export interface operations {
                 /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
@@ -23423,7 +23423,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`). */
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -24237,7 +24237,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
             };
             header?: {
@@ -24270,7 +24270,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`). */
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -27337,7 +27337,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry. */
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

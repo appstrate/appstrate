@@ -183,10 +183,7 @@ export function isMultipleFileField(prop: JSONSchema7): boolean {
   return resolveType(prop) === "array" && isSingleFileNode(resolveItems(prop));
 }
 
-/**
- * Whether a credential field is a secret: `writeOnly` or `format: "password"`. The one rule a
- * form masks its input by and a connection label leaves a value out by.
- */
+/** Whether a credential field is a secret: the rule a form masks by and a label reads. */
 export function isSecretField(prop: JSONSchema7): boolean {
   return prop.writeOnly === true || prop.format === "password";
 }

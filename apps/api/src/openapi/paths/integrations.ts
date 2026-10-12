@@ -3,7 +3,7 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
 
@@ -619,7 +619,7 @@ const integrationDetailSchema = {
 const connectKickoffRelayProperties = {
   scopes: {
     type: "array",
-    items: { type: "string", pattern: "^[\\x21\\x23-\\x5b\\x5d-\\x7e]+$" },
+    items: { type: "string", pattern: SCOPE_TOKEN_RE.source },
     description:
       "OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
   },
@@ -817,7 +817,7 @@ export const integrationsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "A `limit` that is not an integer from 1 to the maximum (`param: limit`), or an unknown `fields` entry.",
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

@@ -377,7 +377,8 @@ describe("runLogin — security limits", () => {
       ["-5", undefined],
       ["1.5", undefined],
       ["2026-01-01", undefined],
-      ["9".repeat(32), undefined],
+      ["9".repeat(32), 86_400],
+      ["9".repeat(400), 86_400],
     ] as const) {
       const { impl } = fakeFetch([{ status: 429, headers: { "Retry-After": header } }]);
       const err = await runLogin(

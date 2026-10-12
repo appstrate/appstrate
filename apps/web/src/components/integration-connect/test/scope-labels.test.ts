@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { IntegrationManifestView } from "../../../hooks/use-integrations";
-import { scopeLabels, summarizeScopes } from "../connection-scope-fit";
+import { scopeLabels, summarizeScopes } from "../scope-labels";
 
 const READ = "mail.read";
 const SEND = "mail.send";

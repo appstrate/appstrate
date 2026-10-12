@@ -7,7 +7,57 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fingerprintSecret, maskCredentialLabel } from "../../src/services/connect/mask-label.ts";
+
+const SOURCES_DIR = join(import.meta.dir, "../../../../scripts/system-packages");
+
+/** The `primary` credentials schema of a system integration, located by name. */
+function systemSchema(name: string): Record<string, unknown> {
+  const [dir] = readdirSync(SOURCES_DIR).filter((d) =>
+    new RegExp(`^integration-${name}-\\d+\\.\\d+\\.\\d+$`).test(d),
+  );
+  const manifest = JSON.parse(readFileSync(join(SOURCES_DIR, dir!, "manifest.json"), "utf8"));
+  return manifest.auths.primary.credentials.schema;
+}
+
+describe("maskCredentialLabel — system integrations", () => {
+  const label = (name: string, credentials: Record<string, string>) =>
+    maskCredentialLabel(systemSchema(name), credentials);
+
+  it("names a connection after its one identifying field", () => {
+    expect(label("twilio", { account_sid: "AC0123456789abcd", auth_token: "t".repeat(32) })).toBe(
+      "AC****abcd",
+    );
+  });
+
+  it("never names one after an address every account shares the shape of", () => {
+    expect(
+      label("activecampaign", {
+        api_url: "https://acme.api-us1.com",
+        api_key: "ackey-0123456789",
+      }),
+    ).toBe("ac****6789");
+    expect(
+      label("shopify", { shop_domain: "acme.myshopify.com", access_token: "shpat_0123456789" }),
+    ).toBe("sh****6789");
+    expect(
+      label("woocommerce", {
+        site_url: "https://shop.acme.test",
+        consumer_key: "ck_0123456789",
+        consumer_secret: "cs_0123456789",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("fingerprints the key of a key-only integration, a webhook URL included", () => {
+    expect(label("firecrawl", { api_key: "fc-xxxxxxxxf10b" })).toBe("fc****f10b");
+    expect(label("webhooks", { webhook_url: "https://hooks.acme.test/T0/B1/x9Zq" })).toBe(
+      "ht****x9Zq",
+    );
+  });
+});
 
 describe("fingerprintSecret", () => {
   it("masks the middle, keeping 2-char prefix + last 4", () => {

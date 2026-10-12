@@ -74,7 +74,6 @@ export interface ResolutionFieldError extends ValidationFieldError {
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
-  /** `insufficient_scopes` — how it clears; the one field to branch on. */
   remedy?: InsufficientScopesRemedy;
   /**
    * The connect-flow codes (`CONNECT_FLOW_CODES`) except `needs_reconnection` — OAuth scopes the

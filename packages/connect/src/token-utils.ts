@@ -245,9 +245,6 @@ export async function readTokenResponse(response: Response): Promise<TokenRespon
 /**
  * Parse a standard OAuth2 token endpoint response.
  *
- * Scope parsing is universal: splits by comma, space, or %20 to handle all
- * provider conventions (e.g. GitHub returns comma-separated, Google uses spaces).
- *
  * Scope comparison against the request is not done here: it needs the
  * manifest's `scope_catalog[].implies` aliases (e.g. Google echoing `email` as
  * `…/auth/userinfo.email`), which only the platform layer knows.
@@ -279,11 +276,9 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
-  // RFC 6749 §3.3 separates scopes with a space. The comma and the literal `%20` are a tolerance
-  // for authorization servers that answer otherwise (GitHub joins with commas), at a cost: `,` is
-  // a legal scope-token character, so a scope holding one is read back as several.
-  const scopes =
-    typeof tokenData.scope === "string" ? tokenData.scope.split(/[\s,]+|%20/).filter(Boolean) : [];
+  // Space-separated (RFC 6749 §3.3); only a response with no space is split on `,` or `%20`.
+  const scope = typeof tokenData.scope === "string" ? tokenData.scope : "";
+  const scopes = scope.split(/\s/.test(scope) ? /\s+/ : /,|%20/).filter(Boolean);
 
   return {
     accessToken,
@@ -293,11 +288,7 @@ export function parseTokenResponse(
   };
 }
 
-/**
- * `returned` plus the `expected` scopes (requested at connect, held at refresh) a token response
- * proves without listing them, as Microsoft's `scope` does: `offline_access` by a refresh token,
- * `openid` by an `id_token`.
- */
+/** `returned` plus the `expected` scopes the response proves unlisted: `offline_access` by a refresh token, `openid` by an `id_token`. */
 export function withProvenScopes(
   returned: readonly string[],
   expected: readonly string[],

@@ -8,7 +8,7 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
 import { Modal } from "../modal";
 import { useHostedConnectPopup } from "../integration-connect/use-integration-oauth-popup";
-import { scopeLabels } from "../integration-connect/connection-scope-fit";
+import { scopeLabels } from "../integration-connect/scope-labels";
 import { connectPopupInput, type ScopeChoice, type ScopeTarget } from "./connect-scope-choice";
 import { AgentQuickFill } from "./agent-quick-fill";
 

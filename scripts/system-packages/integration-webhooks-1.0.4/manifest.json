@@ -22,6 +22,7 @@
           "properties": {
             "webhook_url": {
               "type": "string",
+              "writeOnly": true,
               "description": "Full target webhook URL with https://, query string included (e.g. ?key=…&token=…) — calls may reach this exact URL only, redirect hops included (a webhook that redirects elsewhere, e.g. Google Apps Script /exec, is refused)"
             },
             "secret_header_name": {

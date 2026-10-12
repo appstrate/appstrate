@@ -364,7 +364,8 @@ const canonicalRunsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: "A `limit` that is not an integer from 1 to the maximum (`param: limit`).",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
@@ -1059,7 +1060,8 @@ const canonicalRunsPaths = {
         },
         "400": {
           $ref: "#/components/responses/ValidationError",
-          description: "A `limit` that is not an integer from 1 to the maximum (`param: limit`).",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

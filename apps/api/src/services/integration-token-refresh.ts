@@ -193,7 +193,7 @@ async function doRefresh(
     parsed.scopesReturned &&
     withProvenScopes(parsed.scopesReturned, heldScopes, {
       refreshToken: finalRefreshToken,
-      idToken: tokenData.id_token,
+      idToken: tokenData.id_token ?? current.id_token,
     });
 
   // The stored outputs, with what this response carries: a field the IdP does not

@@ -43,7 +43,7 @@ import {
   unresolvedPlaceholders,
 } from "@appstrate/afps-runtime/resolvers";
 import { isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonTextMap } from "@appstrate/afps-shared/json-text";
 import { decodeJwtPayload } from "@appstrate/core/jwt";
 import { evaluateJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { parseCredentialRef } from "@appstrate/afps-shared/credential-template";
@@ -157,8 +157,7 @@ interface LoginResult {
 /**
  * Structured failure — never the response body nor an input value. `rejected`, `upstream_failed`
  * (see {@link failedStatusReason}), `timeout`, `invalid_input` (`field`) and `url_not_allowed` with
- * `fields` are the submitter's or the target's; every other reason is a defect of the integration,
- * `unresolved_placeholder` included unless one of its `fields` is an input submitted as `null`.
+ * `fields` are the submitter's or the target's; every other reason is a defect of the integration.
  */
 export class LoginError extends Error {
   readonly upstreamStatus?: number;
@@ -341,7 +340,7 @@ function readJsonPointer(root: unknown, pointer: string): unknown {
 
 /** An extracted JSON value as the credential it is stored as; `null` is an absent one. */
 function outputText(v: unknown): string | undefined {
-  return v === null || v === undefined ? undefined : jsonText(v);
+  return jsonTextMap({ v }).v;
 }
 
 function parseSetCookie(headers: Headers, name: string): string | undefined {
@@ -517,10 +516,7 @@ function failedStatusReason(status: number, login: LoginRequestSpec): LoginError
 
 const RETRY_AFTER_MAX_SECONDS = 86_400;
 
-/**
- * RFC 9110 §10.2.3 `Retry-After` (delay-seconds or an IMF-fixdate) as whole seconds from `now`,
- * at most a day; `undefined` for any other value.
- */
+/** RFC 9110 §10.2.3 `Retry-After` (delay-seconds or IMF-fixdate) in whole seconds, at most a day. */
 function retryAfterSeconds(header: string | null, now: number): number | undefined {
   const value = header?.trim() ?? "";
   const seconds = /^\d+$/.test(value)
@@ -528,7 +524,7 @@ function retryAfterSeconds(header: string | null, now: number): number | undefin
     : /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(value)
       ? Math.max(0, Math.ceil((Date.parse(value) - now) / 1000))
       : NaN;
-  return Number.isSafeInteger(seconds) ? Math.min(seconds, RETRY_AFTER_MAX_SECONDS) : undefined;
+  return Number.isNaN(seconds) ? undefined : Math.min(seconds, RETRY_AFTER_MAX_SECONDS);
 }
 
 /** The inputs that fill the authority of URL template `url`. */
@@ -565,28 +561,20 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     );
   }
 
-  // A `null` input supplies nothing: it is an absent credential.
-  const inputs = Object.fromEntries(
-    Object.entries(ctx.inputs).filter(([, value]) => value !== null && value !== undefined),
-  );
   // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never be sent
   // literally upstream).
   const unresolved = [
     login.request.url,
     login.request.body ?? "",
     ...Object.values(login.request.headers ?? {}),
-  ].flatMap((template) => unresolvedPlaceholders(template, inputs));
+  ].flatMap((template) => unresolvedPlaceholders(template, ctx.inputs));
   if (unresolved.length > 0) {
-    const fields = [...new Set(unresolved)];
     throw new LoginError(
-      `unresolved placeholders: ${fields.join(", ")}`,
+      `unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,
       "unresolved_placeholder",
-      {
-        fields,
-      },
     );
   }
-  const { url, headers, body } = renderRequest(login.request, inputs);
+  const { url, headers, body } = renderRequest(login.request, ctx.inputs);
   const urlFields = authorityInputs(login.request.url);
   const urlRefused = (message: string, options?: ErrorOptions) =>
     new LoginError(message, "url_not_allowed", {

@@ -19,7 +19,8 @@ consumer's publish rather than the first user's `npm install`.
 - **`jsonText`** (`./json-text`): a string passes through, any other JSON
   value is `JSON.stringify`-ed — the one rule for rendering a JSON value as
   text. Its parameter is `NonNullable<unknown> | null`: `undefined` does not
-  typecheck.
+  typecheck. **`jsonTextMap`** applies it to each value of a bag, a `null` or
+  `undefined` one left out.
   (#1896, #1913)
 - **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
   `{ usage, tiersDropped }`. `usage` is null when the value is not an object or

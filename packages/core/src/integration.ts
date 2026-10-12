@@ -202,19 +202,13 @@ export interface AuthManifestIssue {
   message: string;
 }
 
-/**
- * One OAuth scope: an RFC 6749 §3.3 `scope-token` (`1*NQCHAR`). Scopes travel space-joined, so
- * one holding a space would be read as several.
- */
+/** One OAuth scope, an RFC 6749 §3.3 `scope-token`: space-joined, one holding a space reads as several. */
+export const SCOPE_TOKEN_RE = /^[\x21\x23-\x5b\x5d-\x7e]+$/;
 export const scopeTokenSchema = z
   .string()
-  .regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/, "must be one OAuth scope token (RFC 6749 §3.3)");
+  .regex(SCOPE_TOKEN_RE, "must be one OAuth scope token (RFC 6749 §3.3)");
 
-/**
- * List the scopes of a manifest that are not one {@link scopeTokenSchema} token: an auth's
- * `default_scopes` and `scope_catalog` values, and `tools_policy.*.required_scopes`. A WRITE-path
- * policy, like {@link findNonSnakeCaseIdentityClaimKeys}.
- */
+/** The scopes of a manifest that are not one {@link scopeTokenSchema} token: a WRITE-path policy. */
 export function findInvalidScopeTokens(manifest: unknown): AuthManifestIssue[] {
   if (typeof manifest !== "object" || manifest === null) return [];
   const { auths, tools_policy } = manifest as { auths?: unknown; tools_policy?: unknown };
@@ -1511,13 +1505,7 @@ export const CONNECTION_RESOLUTION_SOURCES = [
 /** The cascade layer that bound a set — drives the audit + UI badge. */
 export type ConnectionResolutionSource = (typeof CONNECTION_RESOLUTION_SOURCES)[number];
 
-/**
- * How an `insufficient_scopes` item clears: `new_connection` (connect one with the required
- * scopes and bind it), `upgrade_or_new` (the same, or upgrade the caller's own connection in
- * place, which widens every agent using it), `rebind_by_admin` (an admin pin or enforced org
- * default binds it: an admin switches that binding), `rebind_by_schedule_owner` (the schedule's
- * `connection_overrides` bind it: its owner switches them).
- */
+/** How an `insufficient_scopes` item clears (`ResolutionFieldError.remedy`). */
 export const INSUFFICIENT_SCOPES_REMEDIES = [
   "new_connection",
   "upgrade_or_new",
@@ -1527,12 +1515,7 @@ export const INSUFFICIENT_SCOPES_REMEDIES = [
 
 export type InsufficientScopesRemedy = (typeof INSUFFICIENT_SCOPES_REMEDIES)[number];
 
-/**
- * A connection's granted scopes against an agent's selection, least privilege first: `exact`
- * (covers it, nothing beyond it and the auth's `default_scopes`), `unjudged` (covers it on an
- * auth with no `scope_catalog`, or not `oauth2`: breadth is unknown), `broader` (covers it and
- * grants more), `missing` (does not cover it).
- */
+/** A connection's granted scopes against an agent's selection, least privilege first. */
 export const CONNECTION_SCOPE_FITS = ["exact", "unjudged", "broader", "missing"] as const;
 
 export type ConnectionScopeFit = (typeof CONNECTION_SCOPE_FITS)[number];
@@ -1630,9 +1613,8 @@ export interface ConnectionCandidate {
   ownedByActor: boolean;
   /** The row's credentials died: pickable, but a run needs it reconnected. */
   needsReconnection: boolean;
-  /** OAuth scopes the row holds (empty off `oauth2`). */
   scopesGranted: string[];
-  /** Scopes the agent's selection requires that the row lacks; empty when it covers it. */
+  /** Scopes the agent's selection requires that the row lacks. */
   missingScopes: string[];
 }
 
@@ -1654,8 +1636,6 @@ export interface ConnectionResolutionError {
   connectionId?: string;
   /** Scopes the agent needs that the connection lacks (insufficient_scopes). */
   missingScopes?: string[];
-  /** How it clears (insufficient_scopes), from {@link source} and {@link ownedByActor}. */
-  remedy?: InsufficientScopesRemedy;
   /**
    * The FULL set of oauth scopes the run's selected tools require on
    * {@link authKey} — not the diff. `insufficient_scopes` also carries

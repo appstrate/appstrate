@@ -166,6 +166,7 @@ import {
 import {
   actorIdentityOf,
   candidateOf,
+  proxyRequirement,
   resolveConnections,
   toLaunchOverrides,
   translateResolutionError,
@@ -466,7 +467,7 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    requirements: [{ kind: "proxy", integrationId: packageId, manifest }],
+    requirements: [proxyRequirement(packageId, manifest)],
     accessibleConnections: rows,
     pins: [],
     orgDefaults,

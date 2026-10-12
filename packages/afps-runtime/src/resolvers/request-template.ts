@@ -8,9 +8,13 @@
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonTextMap } from "@appstrate/afps-shared/json-text";
 import { normalizeMime } from "@appstrate/afps-shared/mime";
-import { substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
+import {
+  substituteVars,
+  unresolvedPlaceholders,
+  type PlaceholderEncoder,
+} from "./template-vars.ts";
 
 const CANNOT_CARRY = "contains a character this request cannot carry where it is placed";
 
@@ -119,9 +123,9 @@ function headerEncoder(name: string): PlaceholderEncoder {
 }
 
 /**
- * `request` with each `{{name}}` of `inputs` encoded in place (others left intact, a `null` or
- * `undefined` input's included: it is absent). The body's media type is its `Content-Type`
- * header's, else `contentType`. Throws {@link UnencodableInputError}.
+ * `request` with each `{{name}}` of `inputs` encoded in place (others left intact). The body's
+ * media type is its `Content-Type` header's, else `contentType`. Throws
+ * {@link UnencodableInputError}, for a `null` input a template names too.
  */
 export function substituteRequest<B extends string | null | undefined>(
   request: {
@@ -132,18 +136,20 @@ export function substituteRequest<B extends string | null | undefined>(
   },
   inputs: Readonly<Record<string, unknown>>,
 ): { url: string; headers: Record<string, string>; body: B extends string ? string : B } {
-  const text: Record<string, string> = {};
-  for (const [key, value] of Object.entries(inputs)) {
-    if (value !== null && value !== undefined) text[key] = jsonText(value);
-  }
-  const render = (template: string, encode: PlaceholderEncoder) =>
-    substituteVars(template, text, {
+  const text = jsonTextMap(inputs);
+  const render = (template: string, encode: PlaceholderEncoder) => {
+    const absent = unresolvedPlaceholders(template, text).find((name) =>
+      Object.hasOwn(inputs, name),
+    );
+    if (absent !== undefined) throw new UnencodableInputError(absent, "is null");
+    return substituteVars(template, text, {
       keepUnresolved: true,
       encode: (value, key, offset) => {
         if (!value.isWellFormed()) throw new UnencodableInputError(key, CANNOT_CARRY);
         return encode(value, key, offset);
       },
     });
+  };
   const contentType = headerNamed(request.headers, "content-type") ?? request.contentType;
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers)) {

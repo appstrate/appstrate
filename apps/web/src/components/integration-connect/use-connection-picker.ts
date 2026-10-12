@@ -18,7 +18,7 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution } from "./integration-run-readiness";
-import { scopeLabels } from "./connection-scope-fit";
+import { scopeLabels } from "./scope-labels";
 import {
   requiredScopesForAgent,
   MAX_CONNECTIONS_PER_INTEGRATION,

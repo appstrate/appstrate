@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { IntegrationManifestView } from "../../hooks/use-integrations";
-import { summarizeScopes } from "./connection-scope-fit";
+import { summarizeScopes } from "./scope-labels";
 
 /** A grant in one line, its raw scopes on hover; nothing for an empty grant. */
 export function ScopeSummaryText({

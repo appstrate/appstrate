@@ -69,11 +69,7 @@ function page(
 </script></body></html>`;
 }
 
-/**
- * Success: signal the opener/channel, then close (popup) or confirm (tab). `scopesDenied` (the
- * requested scopes the consent left out) is named on the page, which then stays long enough to
- * be read, and rides the signal as `scopesDenied`.
- */
+/** Success: signal the opener/channel, then close (popup) or confirm (tab); `scopesDenied` is shown long enough to be read. */
 export function popupHtmlClose(
   detail: OAuthCallbackDetail = {},
   scopesDenied: readonly string[] = [],

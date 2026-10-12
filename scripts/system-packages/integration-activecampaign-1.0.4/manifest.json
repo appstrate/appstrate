@@ -26,6 +26,7 @@
             },
             "api_url": {
               "type": "string",
+              "format": "uri",
               "description": "API URL from Settings → Developer, with https:// (e.g. https://youraccount.api-us1.com)"
             },
             "api_key": {

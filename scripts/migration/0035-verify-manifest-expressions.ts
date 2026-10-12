@@ -74,11 +74,10 @@ function literalPlaceholders(node: unknown, path: string[] = []): Issue[] {
   return Object.entries(node).flatMap(([k, v]) => literalPlaceholders(v, [...path, k]));
 }
 
-/** The names the connect form masked before it read the schema; a multi-line field never was. */
+/** A field name that reads as a single-line secret (multi-line key material is a textarea). */
 const SECRET_NAME = /password|secret|token|key/i;
 const NEVER_MASKED_NAME = /^host_key$|cert|private_key|public_key|^(?:client_key|key)$/i;
 
-/** Credential fields named like a secret that the schema does not mark as one. */
 function unmarkedSecrets(manifest: unknown): Issue[] {
   const auths = (manifest as { auths?: Record<string, unknown> } | null)?.auths ?? {};
   return Object.entries(auths).flatMap(([authKey, auth]) => {
@@ -99,10 +98,7 @@ function unmarkedSecrets(manifest: unknown): Issue[] {
   });
 }
 
-/**
- * One line per issue: `<id>@<version> [<kind>] <path>: <message>`. `advisories` counts the
- * `[scope]` and `[clear-secret]` lines, which no connect or run refuses.
- */
+/** One line per issue: `<id>@<version> [<kind>] <path>: <message>`. */
 export function manifestIssues(rows: readonly StoredManifest[]): {
   lines: string[];
   expressions: number;
