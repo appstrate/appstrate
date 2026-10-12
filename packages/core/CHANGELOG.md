@@ -17,6 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refused over at the write, `undeclared_connection_override` (new) and
   `required_integration_unbound`, each a 400 item on
   `connection_overrides.<id>`. (#1914)
+- **`INSUFFICIENT_SCOPES_REMEDIES`** / **`InsufficientScopesRemedy`**
+  (`@appstrate/core/integration`): how an `insufficient_scopes` item clears,
+  `new_connection` | `upgrade_or_new` | `rebind_by_admin` |
+  `rebind_by_schedule_owner`, carried as `ResolutionFieldError.remedy`
+  (`@appstrate/core/api-errors`). (#1913)
+- **`CONNECTION_SCOPE_FITS`** / **`ConnectionScopeFit`**
+  (`@appstrate/core/integration`): a connection's grant against an agent's
+  selection, least privilege first: `exact` | `unjudged` | `broader` |
+  `missing`. (#1913)
+- **`SCOPE_TOKEN_RE`**, **`scopeTokenSchema`** and **`findInvalidScopeTokens`**
+  (`@appstrate/core/integration`): one OAuth scope as an RFC 6749 §3.3
+  `scope-token`, and the write-path rule listing a manifest's scopes that are
+  not one (`default_scopes`, `scope_catalog` values,
+  `tools_policy.*.required_scopes`). `validateAgentIntegrationScopes` applies
+  the same rule to an agent's `scopes`, reporting `invalid_format`
+  (added to `AgentIntegrationScopeError.code`). (#1913)
+- **`isSecretField`** (`@appstrate/core/form`): whether a credential field is a
+  secret, `writeOnly` or `format: "password"`. (#1913)
+- **`IntegrationConnectCompletion.scopesDenied`**
+  (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
+  that the consent left out, on a successful completion. (#1913)
 
 - **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
   ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
@@ -105,6 +126,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
+  `scopesGranted` and `missingScopes`, and a
+  `ResolutionFieldError.candidate_connections` item
+  (`@appstrate/core/api-errors`) `scopes_granted` and `missing_scopes`: what
+  each candidate holds and what the agent's selection misses on it. (#1913)
+
+- **BREAKING: `findUnevaluableExpressions`** (`@appstrate/core/integration`)
+  refuses a `connect.login` request `body` holding a `{{name}}` with no
+  `content_type` / `Content-Type` an encoder covers (JSON, form, XML,
+  multipart with a boundary, `text/plain`) and written without a `{{name}}`,
+  and a login header name written twice in different case, through
+  afps-shared's `loginBlockIssues`. (#1915)
 - **Breaking for module consumers:** the `credentialSource` unions in
   `BeforeUsageParams`, `LlmUsageLedgerRow` and `PlatformServices.usage.list`,
   and `RunStatusChangeParams.modelSource`, now take `ModelPayer`, which adds

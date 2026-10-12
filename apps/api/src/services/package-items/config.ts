@@ -7,6 +7,7 @@ import {
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
 import {
+  findInvalidScopeTokens,
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
@@ -94,6 +95,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     checkManifest: (manifest) => [
       ...findSelfReferencedServer(manifest),
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
+      ...findInvalidScopeTokens(manifest),
       ...findUnboundedInjectedCredentials(manifest),
       ...findUnevaluableExpressions(manifest),
     ],

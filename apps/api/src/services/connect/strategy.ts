@@ -130,26 +130,52 @@ export function assertCredentialsMatchSchema(
 
 /** Credentials the service refused: a 400 naming the remedy. `diagnostic` never holds a value. */
 export function loginRejected(diagnostic: string): ApiError {
-  return invalidRequest(
-    `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
-    "credentials",
-  );
+  return new ApiError({
+    status: 400,
+    code: "login_rejected",
+    title: "Login Rejected",
+    detail: `${diagnostic} Check the credentials you submitted and try again.`,
+    param: "credentials",
+  });
 }
 
-/** A login input the login request cannot carry where it sits (a line break in a header value). */
-export function loginInputRefused(field: string): ApiError {
-  return invalidRequest(
-    `The value of '${field}' contains a character this request cannot carry where it is placed.`,
-    `credentials.${field}`,
-  );
+/** A login input the login request cannot carry where it sits (a line break in a header value, a `null`). */
+export function loginInputUnencodable(field: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "login_input_unencodable",
+    title: "Login Input Unencodable",
+    detail: `The value of '${field}' is one this request cannot carry where it is placed.`,
+    param: `credentials.${field}`,
+  });
 }
 
 /** Submitted values that put the login URL's host somewhere the auth's `authorized_uris` refuse. */
 export function loginUrlRefused(fields: readonly string[]): ApiError {
-  return invalidRequest(
-    `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`,
-    fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
-  );
+  const detail = `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`;
+  return new ApiError({
+    status: 400,
+    code: "login_url_refused",
+    title: "Login URL Refused",
+    detail,
+    param: fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
+    errors: fields.map((f) => ({
+      field: `credentials.${f}`,
+      code: "login_url_refused",
+      message: detail,
+    })),
+  });
+}
+
+/** A login target that is unreachable, throttling or failing; `retryAfter` is its own, in seconds. */
+export function loginUpstreamUnavailable(retryAfter: number | undefined): ApiError {
+  return new ApiError({
+    status: 502,
+    code: "login_upstream_unavailable",
+    title: "Login Upstream Unavailable",
+    detail: "The service could not complete the login. Try again later.",
+    ...(retryAfter !== undefined ? { retryAfter } : {}),
+  });
 }
 
 /** A login the service did not finish in time: not a server bug, retrying is the remedy. */

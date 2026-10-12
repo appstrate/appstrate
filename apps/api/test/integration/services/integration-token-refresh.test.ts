@@ -240,13 +240,18 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     token.stop();
   });
 
-  async function seedConnection(initialScopes: string[], expiresAt?: Date): Promise<string> {
+  async function seedConnection(
+    initialScopes: string[],
+    expiresAt?: Date,
+    extraOutputs: Record<string, string> = {},
+  ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "old-access",
         accessToken: "old-access",
         refresh_token: "rt-1",
         refreshToken: "rt-1",
+        ...extraOutputs,
       },
     });
     const [row] = await db
@@ -380,6 +385,22 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
     expect(row!.needsReconnection).toBe(false);
+  });
+
+  it("keeps a held offline_access the refresh response's `scope` leaves out", async () => {
+    const connId = await seedConnection(["Mail.Read", "offline_access"]);
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "Mail.Read" });
+
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["Mail.Read", "offline_access"]);
+  });
+
+  it("keeps a held openid when the refresh sends no new id_token, the stored one proving it", async () => {
+    const connId = await seedConnection(["Mail.Read", "openid"], undefined, { id_token: "a.b.c" });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "Mail.Read" });
+
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["Mail.Read", "openid"]);
   });
 
   it("persists a widened grant (scope creep)", async () => {

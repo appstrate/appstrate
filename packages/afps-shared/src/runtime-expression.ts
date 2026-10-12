@@ -8,6 +8,7 @@
 
 import { parseCredentialRef, templateExpressions } from "./credential-template.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "./jsonpath.ts";
+import { headerNamed, placeholderBodyEncoding, placeholderKeys } from "./request-template.ts";
 
 export type ResponseExpression =
   { kind: "status" } | { kind: "body"; pointer?: string } | { kind: "header"; name: string };
@@ -122,7 +123,12 @@ const SELECTOR_FIELDS = ["context", "selector", "type"] as const;
 
 /** The subset of an AFPS `connect.login` block {@link loginBlockIssues} reads. */
 export interface LoginBlockView {
-  request?: { url?: string; body?: string; headers?: Record<string, string> };
+  request?: {
+    url?: string;
+    body?: string;
+    headers?: Record<string, string>;
+    content_type?: string;
+  };
   outputs?: Record<string, unknown>;
   success_criteria?: readonly { condition?: string; type?: string; context?: string }[];
 }
@@ -164,6 +170,20 @@ export function loginBlockIssues(login: LoginBlockView): LoginBlockIssue[] {
     for (const expr of templateExpressions(template ?? "")) {
       report(`'${expr}' is not evaluated in a login request; login inputs are {{name}}`, path);
     }
+  }
+
+  const headerNames = new Set<string>();
+  for (const name of Object.keys(request.headers ?? {})) {
+    if (headerNames.has(name.toLowerCase())) {
+      report(`header '${name}' is written twice`, ["request", "headers", name]);
+    }
+    headerNames.add(name.toLowerCase());
+  }
+  if (placeholderKeys(request.body ?? "").length > 0) {
+    const encoded = placeholderBodyEncoding(
+      headerNamed(request.headers ?? {}, "content-type") ?? request.content_type,
+    );
+    if ("issue" in encoded) report(encoded.issue, ["request", "body"]);
   }
 
   const outputs = login.outputs ?? {};

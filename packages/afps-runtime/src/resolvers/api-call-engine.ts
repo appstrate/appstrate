@@ -136,7 +136,8 @@ function redactCredentialValues(value: string, fields: Readonly<Record<string, s
   for (const [name, fieldValue] of Object.entries(fields)) {
     if (fieldValue.length === 0) continue;
     needles.push([fieldValue, name]);
-    const encoded = encodeURIComponent(fieldValue);
+    // `encodeURIComponent` throws on a lone surrogate.
+    const encoded = fieldValue.isWellFormed() ? encodeURIComponent(fieldValue) : fieldValue;
     if (encoded !== fieldValue) needles.push([encoded, name]);
   }
   needles.sort((a, b) => b[0].length - a[0].length);

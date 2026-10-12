@@ -32,6 +32,8 @@ const CHOICES: ConnectionChoice[] = [
         account_id: "bob@acme.test",
         owned_by_actor: true,
         needs_reconnection: false,
+        scopes_granted: [],
+        missing_scopes: [],
       },
       {
         id: "c_team",
@@ -39,6 +41,8 @@ const CHOICES: ConnectionChoice[] = [
         account_id: "team@acme.test",
         owned_by_actor: false,
         needs_reconnection: true,
+        scopes_granted: [],
+        missing_scopes: [],
       },
     ],
   },

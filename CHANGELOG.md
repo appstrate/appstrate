@@ -205,6 +205,81 @@ integration_connections WHERE shared_with_org;` tells whether the step
   in its default space. (#1914)
 - **The launch-warning toast offers "Connecter" on the agent page's route
   access alone**, without a second `integrations:read` test beside it. (#1914)
+- **BREAKING (API): connect and scopes** (#1913).
+  - **Login refusals carry their own code.** A `connect.login` or
+    `connect.tool` login the service refused is `400 login_rejected` on
+    `credentials` (was `invalid_request`, told apart by a `detail` starting
+    `Login failed:`; that prefix is gone). A value the login request cannot
+    carry is `400 login_input_unencodable` on `credentials.<field>`, a
+    submitted base URL it may not reach `400 login_url_refused` with one
+    `errors[]` entry per field, and a service that is unreachable, throttling
+    or failing `502 login_upstream_unavailable` (was `bad_gateway`), relaying
+    the service's `Retry-After` as the header and `retry_after`, in whole
+    seconds and at most a day.
+  - **`insufficient_scopes` names its remedy.** The item carries `remedy`:
+    `new_connection`, `upgrade_or_new`, `rebind_by_admin` or
+    `rebind_by_schedule_owner`. The MCP instructions and the OpenAPI
+    description branch on it instead of restating the decision from `source`
+    and `owned_by_actor`.
+  - **`must_choose_connection` candidates carry their scopes**:
+    `scopes_granted` and `missing_scopes` on every `candidate_connections`
+    item.
+  - **The picker's least-privilege order is the server's.** Each
+    `candidates[]` item of `GET /api/agents/{scope}/{name}/connection-readiness`
+    carries `scope_fit` (`exact`, `unjudged`, `broader`, `missing`), and the
+    list is served least privilege first, the order the resolver's fallback
+    binds by. The dashboard lists it as served and no longer ranks on its own.
+  - **A partial OAuth consent is reported.** The callback page names the
+    requested scopes the consent left out, its completion message carries them
+    as `scopesDenied`, the dashboard shows them, and the audit records
+    `integration.connection.scopes_denied` (`scopesRequested`, `scopesDenied`).
+    `integration.connection.created` records `scopesGranted`. A requested
+    `offline_access` counts as granted when the token response carries a
+    refresh token, and `openid` when it carries an `id_token` (at refresh, the
+    stored one counts), at connect and at refresh: an authorization server that leaves them out of `scope`
+    (Microsoft) no longer leaves such a connection short of its own defaults.
+  - **`scopes` of a connect kickoff are RFC 6749 scope tokens.** A scope
+    holding a space, a quote, a backslash or a non-ASCII character, or an empty
+    one, is refused with `400 validation_failed` on `scopes[n]`. Writing an
+    integration manifest applies the same rule to `default_scopes`,
+    `scope_catalog` values and `tools_policy.*.required_scopes`, and writing an
+    agent to its `integrations_configuration.<id>.scopes` (`invalid_format`).
+  - **A `limit` that is not an integer from 1 to the maximum is
+    `400 invalid_request` on `limit`** on every list that takes it (runs, run
+    logs, schedule runs, integrations, the provider registry, notifications,
+    end-users, files, webhook deliveries, and the sidecar's run history and
+    memories): `0`, a negative, a fraction, text or a value above the maximum
+    used to fall back to the default page size without saying so. An absent
+    `limit` is still the default. `offset` follows the same rule: one that is
+    not a non-negative integer is `400` on `offset` (it fell back to 0).
+  - **`null` is an absent credential at every door.** A `connect.login` whose
+    template names an input submitted as `null` is refused with
+    `400 login_input_unencodable` on that field instead of sending the text
+    `null`, a `connect.tool` login likewise, and an extracted output that is
+    `null` is a missing output.
+  - **A token response's `scope` is split on spaces** (RFC 6749 §3.3), and on
+    `,` or a literal `%20` only when it holds no space: a scope containing a
+    comma is no longer read back as two.
+- **The connect form masks what the manifest marks secret** (#1913): a
+  credential field is a password input when its schema says `writeOnly: true`
+  or `format: "password"`, the rule the connection label already follows, and
+  never because of its name. An integration whose manifest marks nothing shows
+  every field in clear: mark each secret. The 24 system integrations that take
+  a pasted secret mark it and move one patch version: activecampaign 1.0.4,
+  brevo 1.0.3, browser-use 1.0.1, browserless 1.0.1, coolify-mcp 1.0.1, fathom
+  1.0.3, firecrawl 1.0.4, freshdesk 1.0.4, freshsales 1.0.3, github-mcp 1.1.4,
+  loom 1.0.4, playwright-mcp 1.0.1, shopify 1.0.4, shortcut 1.0.3, ssh 1.0.2,
+  stripe 1.0.4, teamwork 1.0.4, telegram 1.0.3, twenty-mcp 1.0.1, twilio 1.1.1,
+  webhooks 1.0.4, woocommerce 1.0.5, wordpress 1.0.5, zendesk 1.0.4. The
+  same manifests declare their addresses: `api_url` (activecampaign) and
+  `site_url` (woocommerce, wordpress) are `format: "uri"`, Shopify's
+  `shop_domain` is `format: "hostname"`, so a value that is not one is refused
+  at connect; `@appstrate/webhooks` marks `webhook_url` secret. A connection
+  with no identity is labelled by the masked value of its one required field
+  that is neither a secret nor an address (a Twilio Account SID, a Freshdesk
+  subdomain), else by the masked key of an auth with a single secret
+  (ActiveCampaign, Shopify, Firecrawl), else `Connexion N`; a
+  `format: "password"` field is never used.
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
@@ -966,6 +1041,64 @@ integration_connections WHERE shared_with_org;` tells whether the step
   does not know yet** (#1848).
 
 ### Security
+
+- **BREAKING: an `api_call` encodes each `{{field}}` for the place it takes**
+  (#1915), on the three paths (platform credential proxy, sidecar, CLI), through
+  one request preparation shared with `connect.login`. A credential value was
+  inserted raw: one holding `&`, `#`, `/`, `?`, `"` or a line break added a
+  query parameter, a path segment, a JSON member or a header line to the call.
+  - Target: a `{{field}}` that starts it is a base URL, inserted as is
+    (`{{site_url}}/wp-json/…`); every other one is percent-encoded as one
+    component. A path segment its placeholders render empty, `.` or `..` is
+    refused (an unset optional field in `/x/{{field}}` included). A field holding several path segments, a whole query string or a
+    `host:port` no longer spreads over the URL: write the `/`, `?`, `&` and
+    `:` in the target.
+  - Text body (`substituteBody`): by the call's `Content-Type`.
+    JSON (`+json` and `application/x-ndjson` included) escapes a value inside
+    a string literal and renders a bare `{{field}}` as a JSON string; form
+    bodies get a form component; XML gets entities; `text/plain` takes the
+    value as is. A multipart value holding a line break or the boundary
+    delimiter is refused. In a multipart part header a placeholder must sit
+    inside a quoted string (`filename="{{field}}"`), where a value holding
+    `"` or `\` is refused; outside one (`name={{field}}`) the call is
+    refused whatever the value. Under any other `Content-Type`, under none,
+    or under one that holds a placeholder, a body holding a placeholder is
+    refused as `invalid_request` (400 on `/api/credential-proxy/proxy`):
+    declare the media type. A body with no placeholder is sent untouched.
+  - Headers: the value as is; a line break, another control character or a
+    character above U+00FF is refused, and in a `Cookie` header any character
+    outside RFC 6265 `cookie-octet` is refused too, never encoded. Headers
+    holding one name twice in different case are an `invalid_request`.
+  - A refused value is a `credential_unusable` (502 on
+    `/api/credential-proxy/proxy`) naming the placeholder (`{{field}}`), never
+    its value; nothing is sent. The three paths word it the same way. The
+    sidecar now codes the calls its preparation refuses
+    (`[api_call status=0 code=…]`: `unresolved_placeholder`,
+    `invalid_header`, `invalid_body`), which carried no code. The CLI resolver answers `credential_unusable`
+    too for a line break a credential puts in a header
+    (`RESOLVER_HEADER_INVALID` stays the agent's own header value). The
+    rendered URL is what `authorized_uris` and the egress checks judge.
+  - The CLI resolver (`appstrate run --integrations=local`) substitutes a
+    string body only under `substituteBody: true`, as the two other paths do;
+    it substituted every string body.
+  - On a 401, the platform proxy renders the caller's headers and text body
+    again from the refreshed credentials before the replay, as the sidecar
+    does; a refreshed set that no longer fits them is not replayed, and
+    both log it.
+  - The same rules reach `connect.login` and the requests of a `connect.tool`
+    login tool: the empty, `.` or `..` path segment, the multipart rules, and
+    the media type. **BREAKING for manifest authors:** a `connect.login`
+    request `body` holding a `{{name}}` needs a `content_type` (or
+    `Content-Type` header) among the above. A manifest without one is
+    refused when it is written (create, save, publish, import; a dependency
+    imported in a bundle gets a warning), and an already published one fails
+    at connect start as `invalid_config`: declare the media type and
+    republish. A `Content-Type` holding a `{{name}}` beside such a body,
+    and a header name written twice in different case, are refused the same
+    way. The sidecar answers such a request of a login tool 400.
+  - `@appstrate/connect` and `@appstrate/connect/proxy-primitives` no longer
+    export `substituteVars`: import it from
+    `@appstrate/afps-runtime/resolvers`.
 
 - **A self-registered OAuth client no longer names the platform's pages and
   emails** (#1825). An `instance`-level client took its own `name` as the

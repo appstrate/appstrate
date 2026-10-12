@@ -1358,15 +1358,11 @@ describe("Runs API", () => {
         expect(body.data).toHaveLength(5);
         expect(body.hasMore).toBe(true);
 
-        // Lenient posture: a malformed limit falls back to the default
-        // 1000 (returning everything here) instead of a 400.
         const resBad = await app.request(`/api/runs/${run.id}/logs?limit=abc`, {
           headers: authHeaders(ctx),
         });
-        expect(resBad.status).toBe(200);
-        const bodyBad = (await resBad.json()) as { data: unknown[]; hasMore: boolean };
-        expect(bodyBad.data).toHaveLength(6);
-        expect(bodyBad.hasMore).toBe(false);
+        expect(resBad.status).toBe(400);
+        expect(((await resBad.json()) as { param?: string }).param).toBe("limit");
       });
     });
   });

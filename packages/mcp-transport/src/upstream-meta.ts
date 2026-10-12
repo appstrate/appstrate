@@ -116,7 +116,7 @@ export interface UpstreamMeta {
 /** `_meta` key of the code of an `api_call` the sidecar answered itself (beside status 0). */
 export const API_CALL_ERROR_META_KEY = "dev.appstrate/api-call-error";
 
-/** Serialised proxy failure. `code` is afps-runtime's `ApiCallFailureCode`. */
+/** Serialised proxy failure. `code` is afps-runtime's `ApiCallFailureCode`, or the kind of a request the preparation refused. */
 export interface ApiCallErrorMeta {
   code: string;
 }

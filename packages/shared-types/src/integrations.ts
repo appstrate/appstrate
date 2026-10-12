@@ -10,6 +10,7 @@
 import type {
   ConnectionResolutionErrorCode,
   ConnectionResolutionSource,
+  ConnectionScopeFit,
   IntegrationManifest,
   IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
@@ -255,11 +256,13 @@ export interface ConsumingAgentSummary {
 
 /**
  * One accessible connection annotated for the agent-page picker — adds the
- * scopes the agent's selected tools require that the connection lacks, and
- * whether the calling actor owns it.
+ * scopes the agent's selected tools require that the connection lacks, how its
+ * grant fits that selection, and whether the calling actor owns it. Listed
+ * least privilege first.
  */
 export interface IntegrationCandidate extends AccessibleIntegrationConnection {
   missing_scopes: string[];
+  scope_fit: ConnectionScopeFit;
   is_own: boolean;
 }
 

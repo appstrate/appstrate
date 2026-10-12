@@ -166,6 +166,7 @@ import {
 import {
   actorIdentityOf,
   candidateOf,
+  proxyRequirement,
   resolveConnections,
   toLaunchOverrides,
   translateResolutionError,
@@ -432,7 +433,7 @@ export async function selectAccessibleConnection(
   let named = namedConnectionId?.toLowerCase() ?? null;
   const identity = actorIdentityOf(context.actor);
   const candidatesOf = (rows: readonly SelectableRow[]) =>
-    rows.map((r) => candidateOf(identity, r));
+    rows.map((r) => candidateOf(identity, r, []));
   const { run } = context;
   let bound: readonly { connectionId: string }[] = [];
   if (run) {
@@ -466,19 +467,7 @@ export async function selectAccessibleConnection(
     );
   }
   const { resolved, errors } = resolveConnections({
-    // No agent selection: every declared auth serves, no scope is required. `required`: a proxy
-    // call cannot proceed without a connection, so nothing usable is an error (→ null below).
-    requirements: [
-      {
-        integrationId: packageId,
-        manifest,
-        hasSelectedTools: true,
-        agentTools: [],
-        agentScopes: [],
-        required: true,
-        noAgentSelection: true,
-      },
-    ],
+    requirements: [proxyRequirement(packageId, manifest)],
     accessibleConnections: rows,
     pins: [],
     orgDefaults,

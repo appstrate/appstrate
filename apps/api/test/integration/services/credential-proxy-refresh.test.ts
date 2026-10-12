@@ -11,7 +11,8 @@
  * `authRefreshed: true` escape-hatch (cannot be replayed server-side).
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -240,6 +241,74 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     const refreshBody = new URLSearchParams(tokenReqs[0]!.body);
     expect(refreshBody.get("grant_type")).toBe("refresh_token");
     expect(refreshBody.get("refresh_token")).toBe("rt_valid");
+  });
+
+  /** A 401 then a 200, recording what each attempt carried in `X-Tok`, `Cookie` and its body. */
+  function replayWire() {
+    const sent: Array<{ tok: string | null; cookie: string | null; body: string }> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      const headers = new Headers(init.headers);
+      sent.push({
+        tok: headers.get("x-tok"),
+        cookie: headers.get("cookie"),
+        body: init.body == null ? "" : await new Response(init.body).text(),
+      });
+      return new Response("{}", { status: sent.length === 1 ? 401 : 200 });
+    }) as unknown as typeof fetch;
+    return { sent, fakeFetch };
+  }
+
+  it("renders the caller's templates again from the refreshed credentials on the replay", async () => {
+    const packageId = "@cprefreshorg/gmail";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    mockServer.setTokenResponse({ access_token: 'fresh"token', token_type: "Bearer" });
+    const { sent, fakeFetch } = replayWire();
+
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "POST",
+      target: "https://gmail.googleapis.com/gmail/v1/x",
+      headers: { "X-Tok": "{{access_token}}", "Content-Type": "application/json" },
+      body: '{"t":"{{access_token}}"}',
+      substituteBody: true,
+      fetch: fakeFetch,
+    });
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual([
+      { tok: "stale_token", cookie: null, body: '{"t":"stale_token"}' },
+      { tok: 'fresh"token', cookie: null, body: '{"t":"fresh\\"token"}' },
+    ]);
+  });
+
+  it("does not replay when the refreshed credentials no longer fit the caller's templates", async () => {
+    const packageId = "@cprefreshorg/gmail";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    mockServer.setTokenResponse({ access_token: "fresh token", token_type: "Bearer" });
+    const { sent, fakeFetch } = replayWire();
+    const warn = spyOn(logger, "warn");
+
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      integrationId: packageId,
+      method: "GET",
+      target: "https://gmail.googleapis.com/gmail/v1/x",
+      headers: { Cookie: "sid={{access_token}}" },
+      fetch: fakeFetch,
+    });
+
+    expect(res.status).toBe(401);
+    expect(sent).toEqual([{ tok: null, cookie: "sid=stale_token", body: "" }]);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain("{{access_token}}");
+    expect(logged).not.toContain("fresh token");
+    warn.mockRestore();
   });
 
   it("refreshes the connection the call used, even when a fresh selection would now be ambiguous", async () => {

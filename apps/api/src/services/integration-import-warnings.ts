@@ -3,7 +3,7 @@
 import { META_NAMESPACE_KEY_REGEX } from "@appstrate/core/validation";
 import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
 import { normalizeMime } from "@appstrate/core/mime";
-import { headerNamed } from "@appstrate/afps-runtime/resolvers";
+import { headerNamed } from "@appstrate/afps-shared/request-template";
 
 /**
  * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0

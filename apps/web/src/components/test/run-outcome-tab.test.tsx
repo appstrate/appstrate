@@ -132,7 +132,7 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
   });
 
   it("says so when the PRODUCED list itself was cut, not merely the page", () => {
-    // `GET /api/files` clamps `limit` to 100 and answers `hasMore`; discarding
+    // `GET /api/files` takes a `limit` of 100 at most and answers `hasMore`; discarding
     // it truncated a >100-file run with nothing on screen saying so.
     // Several files, because that is the only shape the notice can occur in: a
     // truncated page holds at least 100 rows, never the exactly-1 that hoists

@@ -519,7 +519,9 @@ export async function validateAgentIntegrationSelections(
             ? "Unknown integration tool"
             : issue.code === "wildcard_not_authorized"
               ? "Wildcard tools not permitted by integration"
-              : "Scope outside integration catalog",
+              : issue.code === "invalid_format"
+                ? "Scope is not one OAuth scope token"
+                : "Scope outside integration catalog",
         message: issue.message,
       });
     }

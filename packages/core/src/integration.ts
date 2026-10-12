@@ -202,6 +202,48 @@ export interface AuthManifestIssue {
   message: string;
 }
 
+/** One OAuth scope, an RFC 6749 §3.3 `scope-token`: space-joined, one holding a space reads as several. */
+export const SCOPE_TOKEN_RE = /^[\x21\x23-\x5b\x5d-\x7e]+$/;
+export const scopeTokenSchema = z
+  .string()
+  .regex(SCOPE_TOKEN_RE, "must be one OAuth scope token (RFC 6749 §3.3)");
+
+/** The scopes of a manifest that are not one {@link scopeTokenSchema} token: a WRITE-path policy. */
+export function findInvalidScopeTokens(manifest: unknown): AuthManifestIssue[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const { auths, tools_policy } = manifest as { auths?: unknown; tools_policy?: unknown };
+  const found: AuthManifestIssue[] = [];
+  const check = (authKey: string, scopes: unknown, path: IssuePath, leaf: string[] = []) => {
+    if (!Array.isArray(scopes)) return;
+    scopes.forEach((scope, index) => {
+      if (scopeTokenSchema.safeParse(scope).success) return;
+      found.push({
+        authKey,
+        path: [...path, index, ...leaf],
+        message: `scope ${JSON.stringify(scope)} is not one OAuth scope token (RFC 6749 §3.3): no space, quote or backslash`,
+      });
+    });
+  };
+  for (const [authKey, auth] of Object.entries(auths ?? {})) {
+    const a = (auth ?? {}) as { default_scopes?: unknown; scope_catalog?: unknown };
+    check(authKey, a.default_scopes, ["auths", authKey, "default_scopes"]);
+    const catalog = Array.isArray(a.scope_catalog) ? a.scope_catalog : [];
+    check(
+      authKey,
+      catalog.map((entry: { value?: unknown } | null) => entry?.value),
+      ["auths", authKey, "scope_catalog"],
+      ["value"],
+    );
+  }
+  for (const [tool, policy] of Object.entries(tools_policy ?? {})) {
+    const required = (policy as { required_scopes?: unknown } | null)?.required_scopes;
+    for (const [authKey, scopes] of Object.entries(required ?? {})) {
+      check(authKey, scopes, ["tools_policy", tool, "required_scopes", authKey]);
+    }
+  }
+  return found;
+}
+
 /**
  * List the auths that inject a credential over HTTP without an `authorized_uris` allowlist that
  * names their hosts — the write-path twin of the run-time `credentialUrlPolicy`.
@@ -1341,7 +1383,7 @@ export interface AgentIntegrationScopeError {
   /** Dotted JSON path into the agent manifest (`integrations.<id>.<field>`). */
   field: string;
   /** Stable machine-readable code consumed by route layer / UI. */
-  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized";
+  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized" | "invalid_format";
   /** Human-readable detail for surfaces that don't translate `code`. */
   message: string;
 }
@@ -1404,6 +1446,15 @@ export function validateAgentIntegrationScopes(
     }
   }
 
+  for (const scope of selection.scopes ?? []) {
+    if (scopeTokenSchema.safeParse(scope).success) continue;
+    errors.push({
+      field: `integrations_configuration.${selection.id}.scopes`,
+      code: "invalid_format",
+      message: `Scope ${JSON.stringify(scope)} is not one OAuth scope token (RFC 6749 §3.3): no space, quote or backslash`,
+    });
+  }
+
   if (selection.scopes && selection.scopes.length > 0) {
     const catalog = getAvailableScopes(integrationManifest);
     if (catalog.length > 0) {
@@ -1453,6 +1504,21 @@ export const CONNECTION_RESOLUTION_SOURCES = [
 
 /** The cascade layer that bound a set — drives the audit + UI badge. */
 export type ConnectionResolutionSource = (typeof CONNECTION_RESOLUTION_SOURCES)[number];
+
+/** How an `insufficient_scopes` item clears (`ResolutionFieldError.remedy`). */
+export const INSUFFICIENT_SCOPES_REMEDIES = [
+  "new_connection",
+  "upgrade_or_new",
+  "rebind_by_admin",
+  "rebind_by_schedule_owner",
+] as const;
+
+export type InsufficientScopesRemedy = (typeof INSUFFICIENT_SCOPES_REMEDIES)[number];
+
+/** A connection's granted scopes against an agent's selection, least privilege first. */
+export const CONNECTION_SCOPE_FITS = ["exact", "unjudged", "broader", "missing"] as const;
+
+export type ConnectionScopeFit = (typeof CONNECTION_SCOPE_FITS)[number];
 
 /** Per-integration resolution result. */
 export interface ResolvedConnection {
@@ -1563,6 +1629,9 @@ export interface ConnectionCandidate {
   ownedByActor: boolean;
   /** The row's credentials died: pickable, but a run needs it reconnected. */
   needsReconnection: boolean;
+  scopesGranted: string[];
+  /** Scopes the agent's selection requires that the row lacks. */
+  missingScopes: string[];
 }
 
 /** One unresolved integration plus structured detail. */

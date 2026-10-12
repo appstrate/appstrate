@@ -385,8 +385,8 @@ export function createWebhooksRouter() {
   router.get("/api/webhooks/:id/deliveries", rateLimit(300), async (c) => {
     await loadWebhookForAction(c, "read");
     // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
-    // would otherwise reach the query and 500. Out-of-range / unparseable
-    // falls back to 20 — `parseListPagination` owns that idiom.
+    // would otherwise reach the query and 500. Anything but 1..100 is a 400 —
+    // `parseListPagination` owns that rule.
     const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
     const { data, hasMore } = await listDeliveries(webhookScope(c), c.req.param("id")!, {

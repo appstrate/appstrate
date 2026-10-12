@@ -3,7 +3,7 @@
 import { packageSourceValues } from "@appstrate/db/schema";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { MAX_CONNECTIONS_PER_INTEGRATION, SCOPE_TOKEN_RE } from "@appstrate/core/integration";
 import { CONNECTION_LABEL_MAX } from "../../lib/connection-label.ts";
 import { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "@appstrate/shared-types";
 
@@ -619,9 +619,9 @@ const integrationDetailSchema = {
 const connectKickoffRelayProperties = {
   scopes: {
     type: "array",
-    items: { type: "string" },
+    items: { type: "string", pattern: SCOPE_TOKEN_RE.source },
     description:
-      "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
+      "OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise).",
   },
   connection_id: {
     type: "string",
@@ -672,9 +672,13 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer.";
+  "A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer.";
 const CONNECT_LOGIN_502 =
-  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).";
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`.";
+const connectLogin502Headers = {
+  ...STD_RESPONSE_HEADERS,
+  "Retry-After": { $ref: "#/components/headers/RetryAfter" },
+} as const;
 const problemJson = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
@@ -809,6 +813,11 @@ export const integrationsPaths = {
               },
             },
           },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1154,7 +1163,11 @@ export const integrationsPaths = {
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "502": { description: CONNECT_LOGIN_502, content: problemJson },
+        "502": {
+          description: CONNECT_LOGIN_502,
+          headers: connectLogin502Headers,
+          content: problemJson,
+        },
         ...connectRunResponses,
       },
     },
@@ -1469,6 +1482,7 @@ export const integrationsPaths = {
         },
         "502": {
           description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives.`,
+          headers: connectLogin502Headers,
           content: problemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },

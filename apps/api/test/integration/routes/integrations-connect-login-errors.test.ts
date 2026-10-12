@@ -6,7 +6,7 @@
  *
  * The login target is a real HTTP server on loopback, reached through the operator's
  * `EGRESS_ALLOW_INTERNAL_HOSTS` opt-in: it accepts one username/password pair and
- * answers 401 otherwise, or fails with a 503 when told to.
+ * answers 401 otherwise, or fails with a 503 (and a `Retry-After`) when told to.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, spyOn } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
@@ -48,7 +48,9 @@ beforeAll(() => {
       const form = new URLSearchParams(await req.text());
       received.push(form.getAll("password"));
       if (slow) await Bun.sleep(1_000);
-      if (failing) return new Response("maintenance", { status: 503 });
+      if (failing) {
+        return new Response("maintenance", { status: 503, headers: { "Retry-After": "17" } });
+      }
       if (form.get("username") === USERNAME && form.get("password") === PASSWORD) {
         return new Response("ok", { headers: { "Set-Cookie": "sid=session-1; Path=/" } });
       }
@@ -148,15 +150,14 @@ describe("declarative connect.login at the route boundary", () => {
       expect(received).toEqual([[PASSWORD]]);
     });
 
-    it(`${surface}: answers a refused login like a refused connect.tool login, echoing nothing`, async () => {
+    it(`${surface}: answers a refused login with 400 login_rejected, echoing nothing`, async () => {
       const res = await submit(ctx, { username: USERNAME, password: "wrong&password" });
 
       expect(res.status).toBe(400);
       const raw = await res.text();
       const body = JSON.parse(raw) as ProblemBody;
-      expect(body.code).toBe("invalid_request");
+      expect(body.code).toBe("login_rejected");
       expect(body.param).toBe("credentials");
-      expect(body.detail).toStartWith("Login failed:");
       expect(body.detail).toContain("HTTP 401");
       expect(body.detail).toContain("Check the credentials you submitted");
       expect(raw).not.toContain("wrong&password");
@@ -220,14 +221,17 @@ describe("declarative connect.login at the route boundary", () => {
     expect(received).toEqual([]);
   });
 
-  it("connect/submit: answers a failing target with 502 bad_gateway", async () => {
+  it("connect/submit: answers a failing target with 502 login_upstream_unavailable, relaying its Retry-After", async () => {
     failing = true;
 
     const res = await submitHosted(ctx, { username: USERNAME, password: PASSWORD });
 
     expect(res.status).toBe(502);
+    expect(res.headers.get("Retry-After")).toBe("17");
     const raw = await res.text();
-    expect((JSON.parse(raw) as ProblemBody).code).toBe("bad_gateway");
+    const body = JSON.parse(raw) as ProblemBody & { retry_after?: number };
+    expect(body.code).toBe("login_upstream_unavailable");
+    expect(body.retry_after).toBe(17);
     expect(raw).not.toContain(PASSWORD);
     expect(raw).not.toContain("maintenance");
   });
@@ -251,13 +255,13 @@ describe("declarative connect.login at the route boundary", () => {
 
       expect(res.status).toBe(400);
       const body = (await res.json()) as ProblemBody;
-      expect(body.code).toBe("invalid_request");
+      expect(body.code).toBe("login_url_refused");
       expect(body.param).toBe("credentials.base_url");
     }
     expect(received).toEqual([]);
   });
 
-  it("connect/fields: answers an unreachable target with 502 bad_gateway", async () => {
+  it("connect/fields: answers an unreachable target with 502 login_upstream_unavailable", async () => {
     // A listener that drops every connection as it opens: the login request gets no answer.
     const dropper = Bun.listen({
       hostname: "127.0.0.1",
@@ -271,7 +275,8 @@ describe("declarative connect.login at the route boundary", () => {
       const res = await submitFields(ctx, { username: USERNAME, password: PASSWORD });
 
       expect(res.status).toBe(502);
-      expect(((await res.json()) as ProblemBody).code).toBe("bad_gateway");
+      expect(res.headers.get("Retry-After")).toBeNull();
+      expect(((await res.json()) as ProblemBody).code).toBe("login_upstream_unavailable");
       // The cause the 502 body leaves out reaches the operator's log, without the input.
       const logged = warn.mock.calls.find(([msg]) => msg === "connect.login did not complete");
       expect(logged?.[1]).toMatchObject({ reason: "upstream_failed" });
@@ -295,10 +300,26 @@ describe("declarative connect.login at the route boundary", () => {
     expect(res.status).toBe(400);
     const raw = await res.text();
     const body = JSON.parse(raw) as ProblemBody;
-    expect(body.code).toBe("invalid_request");
+    expect(body.code).toBe("login_input_unencodable");
     expect(body.param).toBe("credentials.username");
     expect(body.detail).toContain("cannot carry where it is placed");
     expect(raw).not.toContain("X-Admin");
+    expect(received).toEqual([]);
+  });
+
+  it("connect/fields: refuses a null value the login request needs, naming the field", async () => {
+    await reseed(
+      loginManifest(server.url.origin, (auth) => {
+        auth.credentials.schema.properties.password = { type: ["string", "null"] };
+      }),
+    );
+
+    const res = await submitFields(ctx, { username: USERNAME, password: null });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as ProblemBody;
+    expect(body.code).toBe("login_input_unencodable");
+    expect(body.param).toBe("credentials.password");
     expect(received).toEqual([]);
   });
 

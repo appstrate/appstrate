@@ -139,7 +139,11 @@ import {
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
-import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
+import {
+  partitionScopesByAuthCatalog,
+  scopesNotCovered,
+  scopeTokenSchema,
+} from "@appstrate/core/integration";
 import { connectionIdSetSchema, nonEmptyConnectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
@@ -211,7 +215,7 @@ export const importConnectionSchema = z
 
 export const connectOAuthSchema = z
   .object({
-    scopes: z.array(z.string()).optional(),
+    scopes: z.array(scopeTokenSchema).optional(),
     force_account_select: z.boolean().optional(),
     connection_id: z.uuid().optional(),
     variables: connectionVariablesSchema.optional(),
@@ -223,7 +227,7 @@ export const connectOAuthSchema = z
 // server dispatches OAuth vs credential-form when the URL is opened.
 export const connectSessionSchema = z
   .object({
-    scopes: z.array(z.string()).optional(),
+    scopes: z.array(scopeTokenSchema).optional(),
     force_account_select: z.boolean().optional(),
     connection_id: z.uuid().optional(),
   })
@@ -588,9 +592,10 @@ function assertScopesInAuthCatalog(
 }
 
 /**
- * Complete a connect door's write and build its audit events. A reconnect renews the credential in
- * place and records the granted scopes when it changed them, since they reach every agent the
- * connection serves; one that moved a space-scoped row onto an org-tier client records the widening.
+ * Complete a connect door's write and build its audit events. A creation records the granted
+ * scopes. A reconnect renews the credential in place and records them when it changed them, since
+ * they reach every agent the connection serves; one that moved a space-scoped row onto an org-tier
+ * client records the widening.
  */
 async function completeConnect(
   strategy: IntegrationConnectStrategy,
@@ -606,12 +611,19 @@ async function completeConnect(
       scopesGranted: [[...target.scopesGranted].sort(), [...conn.scopes_granted].sort()],
     });
   const audits: Parameters<typeof recordAuditAs>[2][] = [
-    {
-      action: target ? "integration.connection.reconnected" : "integration.connection.created",
-      resourceType: "integration_connection",
-      resourceId: conn.id,
-      ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
-    },
+    target
+      ? {
+          action: "integration.connection.reconnected",
+          resourceType: "integration_connection",
+          resourceId: conn.id,
+          ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
+        }
+      : {
+          action: "integration.connection.created",
+          resourceType: "integration_connection",
+          resourceId: conn.id,
+          after: { ...after, scopesGranted: [...conn.scopes_granted].sort() },
+        },
   ];
   if (target && target.spaceId !== null && conn.spaceId === null) {
     audits.push({
@@ -881,6 +893,7 @@ export function createIntegrationsRouter() {
     // actor/scope context from the signed state; the strategy does identity
     // extraction (token response + id_token + userinfo) + persist through the
     // single credential writer.
+    let scopesDenied: string[];
     try {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
@@ -898,7 +911,25 @@ export function createIntegrationsRouter() {
         ...(result.delegated ? { delegated: true } : {}),
         ...(result.variables ? { variables: result.variables } : {}),
       };
-      const { audits } = await completeConnect(strategy, ctx, { kind: "oauth2-result", result });
+      const { conn, audits } = await completeConnect(strategy, ctx, {
+        kind: "oauth2-result",
+        result,
+      });
+      // A partial consent: the connection stands, short of what the flow asked for.
+      scopesDenied = scopesNotCovered(
+        result.scopesRequested,
+        result.scopesGranted,
+        manifest,
+        result.authKey,
+      );
+      if (scopesDenied.length > 0) {
+        audits.push({
+          action: "integration.connection.scopes_denied",
+          resourceType: "integration_connection",
+          resourceId: conn.id,
+          after: { scopesRequested: [...result.scopesRequested].sort(), scopesDenied },
+        });
+      }
       for (const audit of audits) {
         await recordAuditAs(
           c,
@@ -909,12 +940,7 @@ export function createIntegrationsRouter() {
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        scopeShortfall: scopesNotCovered(
-          result.scopesRequested,
-          result.scopesGranted,
-          manifest,
-          result.authKey,
-        ),
+        scopesDenied,
       });
     } catch (err) {
       logger.error("Integration OAuth callback persistence failed", {
@@ -929,7 +955,7 @@ export function createIntegrationsRouter() {
         popupHtmlError("Could not save the connection.", { state, packageId: result.packageId }),
       );
     }
-    return c.html(popupHtmlClose({ state, packageId: result.packageId }));
+    return c.html(popupHtmlClose({ state, packageId: result.packageId }, scopesDenied));
   };
   router.get("/callback", (c) => oauthCallback(c, null));
   router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));

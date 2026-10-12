@@ -17,7 +17,11 @@ consumer's publish rather than the first user's `npm install`.
 ### Added
 
 - **`jsonText`** (`./json-text`): a string passes through, any other JSON
-  value is `JSON.stringify`-ed (`""` when absent) — the one rule for rendering a JSON value as text. (#1896)
+  value is `JSON.stringify`-ed — the one rule for rendering a JSON value as
+  text. Its parameter is `NonNullable<unknown> | null`: `undefined` does not
+  typecheck. **`jsonTextMap`** applies it to each value of a bag, a `null` or
+  `undefined` one left out.
+  (#1896, #1913)
 - **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
   `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
   a counter fails `isTokenCount`; keys other than the four counters and `tiers`
@@ -41,8 +45,22 @@ consumer's publish rather than the first user's `npm install`.
   is IPv4-only) is reported in `invalid`. Hosts match `URL.hostname`
   exactly. (#1912)
 
+- **`./request-template`**: what the `{{name}}` request substitution
+  (`@appstrate/afps-runtime`) and `loginBlockIssues` share. `PLACEHOLDER` and
+  `placeholderKeys` (the grammar), `headerNamed`, `urlTemplateAuthority`
+  (what precedes a URL template's path), and `placeholderBodyEncoding`: how a
+  text body's values are encoded under a `Content-Type` (`BodyEncoding`:
+  `json`, `form`, `xml`, `multipart` with its boundary, `text` for
+  `text/plain`), or the issue when it has no encoder or holds a placeholder
+  itself. (#1915)
+
 ### Changed
 
+- **BREAKING: `loginBlockIssues`** (`./runtime-expression`) reports a
+  `request.body` holding a `{{name}}` whose `Content-Type` header, else
+  `content_type`, `placeholderBodyEncoding` refuses (absent, no encoder, or
+  holding a `{{name}}`), and a header name written twice in different case.
+  `LoginBlockView.request` reads `content_type`. (#1915)
 - **BREAKING: `isTokenCount`** (`./token-usage`) accepts only a non-negative
   safe integer (was any finite non-negative number), the `integer` the AFPS
   spec and the `llm_usage` columns declare. `isTokenUsageTiers` follows: a band

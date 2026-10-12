@@ -78,7 +78,7 @@ export function RunOutcomeTab(props: RunOutcomeProps) {
       {...props}
       filesDenied={!can("files:read")}
       files={data?.data ?? []}
-      // The route clamps `limit` to 100 and answers `hasMore` with no cursor
+      // The route takes a `limit` of 100 at most and answers `hasMore` with no cursor
       // field (paging is `startingAfter=<last id>`). It describes the run's
       // whole CONTAINER, inputs included — see `pageCutProducedFiles` below for
       // why this pane cannot show a notice off it alone.

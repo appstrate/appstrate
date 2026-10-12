@@ -26,6 +26,7 @@ import * as nodePath from "node:path";
 
 import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
+import { PLACEHOLDER } from "@appstrate/afps-shared/request-template";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { ResolverError } from "../errors.ts";
 
@@ -282,7 +283,7 @@ const responseModeSchema = z
 
 const httpUrl = z.url({ protocol: /^https?$/ });
 /** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…` (#1627). */
-const URL_FIELD_TARGET = /^\{\{\s*\w+\s*\}\}(?:\/.*)?$/;
+const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:/.*)?$`);
 
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
@@ -295,7 +296,7 @@ export const apiCallRequestSchema = z.object({
       error: "target must be an absolute http(s) URL or start with a {{field}} holding one",
     })
     .describe(
-      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path",
+      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path. Any other {{field}} is percent-encoded as one URL component: write the URL's own `/`, `?` and `&` in the target",
     ),
   headers: z
     .record(z.string(), z.string())
@@ -312,7 +313,7 @@ export const apiCallRequestSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream. Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
+      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream, each value escaped for the body's Content-Type: JSON, form, XML, multipart or text/plain (as is). Under any other Content-Type, or none, a body holding a placeholder is refused. Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
     ),
   responseMode: responseModeSchema,
 });
@@ -927,7 +928,6 @@ export async function resolveWorkspaceFile(
 
 export interface ResolveBodyStreamOptions {
   allowFromFile?: boolean;
-  transformString?: (input: string) => string;
   /**
    * Workspace root used to resolve `{ fromFile }` references. Required
    * when `allowFromFile` is true — the resolver refuses references that
@@ -1150,10 +1150,7 @@ export async function resolveBodyForFetch(
     return { kind: "bytes", bytes: undefined };
   }
   if (typeof body === "string") {
-    return {
-      kind: "bytes",
-      bytes: opts.transformString ? opts.transformString(body) : body,
-    };
+    return { kind: "bytes", bytes: body };
   }
   if (body instanceof Uint8Array) {
     return { kind: "bytes", bytes: toArrayBufferUint8(body) };

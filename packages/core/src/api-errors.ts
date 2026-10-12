@@ -10,7 +10,7 @@
  * @see https://www.rfc-editor.org/rfc/rfc9457
  */
 
-import type { ConnectionResolutionSource } from "./integration.ts";
+import type { ConnectionResolutionSource, InsufficientScopesRemedy } from "./integration.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,8 +53,8 @@ export interface ResolutionFieldError extends ValidationFieldError {
   /**
    * `must_choose_connection` — the connections the caller may pick from, each
    * carrying the fields that tell them apart (`label`, `account_id`,
-   * `owned_by_actor`) and `needs_reconnection` — a dead one is listed but must
-   * be reconnected before a run can use it. Pick some and send their `id`s back
+   * `owned_by_actor`, `scopes_granted`, `missing_scopes`) and `needs_reconnection` — a dead one
+   * is listed but must be reconnected before a run can use it. Pick some and send their `id`s back
    * in the request's `connection_overrides` map. Ids alone would force a second
    * round-trip through the connection list before the caller could choose.
    * On the credential proxy the candidates are the `X-Run-Id` run's bound set
@@ -67,11 +67,14 @@ export interface ResolutionFieldError extends ValidationFieldError {
     account_id: string;
     owned_by_actor: boolean;
     needs_reconnection: boolean;
+    scopes_granted: string[];
+    missing_scopes: string[];
   }[];
   /** `needs_reconnection`: the row to reconnect in place; `insufficient_scopes`: the under-scoped row; `auth_serves_no_selected_tool`: the member to remove. */
   connection_id?: string;
   /** `insufficient_scopes` — OAuth scopes the selected tools require that the connection lacks. */
   missing_scopes?: string[];
+  remedy?: InsufficientScopesRemedy;
   /**
    * The connect-flow codes (`CONNECT_FLOW_CODES`) except `needs_reconnection` — OAuth scopes the
    * run's selected tools require on `auth_key`. Forward as `scopes` when starting a new connection.

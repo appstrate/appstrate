@@ -177,6 +177,13 @@ async function consentAndCallback(authUrl: string): Promise<string> {
   return res.text();
 }
 
+/** The completion message the callback page posts to the surface that opened it. */
+function completionOf(html: string): Record<string, unknown> {
+  const literal = /var detail = (.*);\n/.exec(html);
+  expect(literal).not.toBeNull();
+  return JSON.parse(literal![1]!) as Record<string, unknown>;
+}
+
 /**
  * Refresh the connection the way the live resolvers do after an upstream 401: resolve the pinned
  * minting client from the DB, build the refresh context off the manifest, then POST the
@@ -345,7 +352,62 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.orgId, r.spaceId])).toEqual([
       ["integration.connection.created", "user", ctx.user.id, ctx.orgId, ctx.defaultSpaceId],
     ]);
+    expect(trail[0]!.after).toMatchObject({ scopesGranted: SCOPES });
     expect(JSON.stringify(trail)).not.toContain(provider.issuedAccessTokens[0]!);
+  });
+
+  it("reports the scopes a partial consent left out, to the waiting surface and the audit", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      declinedScopes: ["files.write"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx, { scopes: ["files.write"] }));
+
+    // The connection exists, narrower than asked.
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+    expect(completionOf(html)).toMatchObject({ ok: true, scopesDenied: ["files.write"] });
+    expect(html).toContain("files.write");
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id))
+      .orderBy(auditEvents.id);
+    expect(trail.map((r) => [r.action, r.after])).toEqual([
+      ["integration.connection.created", expect.objectContaining({ scopesGranted: SCOPES })],
+      [
+        "integration.connection.scopes_denied",
+        { scopesRequested: ["files.read", "files.write"], scopesDenied: ["files.write"] },
+      ],
+    ]);
+  });
+
+  it("reports no denied scope on a full consent", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx));
+
+    expect(completionOf(html)).toEqual(expect.objectContaining({ ok: true }));
+    expect(completionOf(html)).not.toHaveProperty("scopesDenied");
   });
 
   // #1871: scopes added in place reach every agent bound to the connection.

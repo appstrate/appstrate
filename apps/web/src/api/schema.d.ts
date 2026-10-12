@@ -1186,7 +1186,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1201,7 +1201,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1216,7 +1216,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1231,7 +1231,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -1248,7 +1248,7 @@ export interface paths {
          *
          *     Optional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).
          *
-         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).
+         *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
@@ -2205,7 +2205,7 @@ export interface paths {
         get?: never;
         /**
          * Pin connections for the caller's runs of an agent
-         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin one whose `scopes_granted` covers what the agent needs, rather than upgrading one other agents use.
+         * @description Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin a candidate whose `missing_scopes` is empty, rather than upgrading one other agents use.
          */
         put: operations["upsertMyIntegrationPin"];
         post?: never;
@@ -5887,7 +5887,7 @@ export interface components {
             org_default_enforced: boolean;
             /** @description Whether the caller may create a connection for this integration: holds `integrations:connect`, and either holds `integrations:configure` or the space does not block member connections. */
             can_add_connection: boolean;
-            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth. */
+            /** @description Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth. */
             candidates: {
                 /** Format: uuid */
                 id: string;
@@ -5914,6 +5914,11 @@ export interface components {
                 origin_space_id?: string | null;
                 needs_reconnection: boolean;
                 missing_scopes: string[];
+                /**
+                 * @description The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`).
+                 * @enum {string}
+                 */
+                scope_fit: "exact" | "unjudged" | "broader" | "missing";
                 is_own: boolean;
             }[];
         };
@@ -6528,11 +6533,20 @@ export interface components {
                 owned_by_actor: boolean;
                 /** @description True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected. */
                 needs_reconnection: boolean;
+                /** @description OAuth scopes the connection holds; empty off `oauth2`. */
+                scopes_granted: string[];
+                /** @description Scopes the agent's selected tools require that the connection lacks; empty when it covers them. A run naming a candidate with a non-empty list fails with `insufficient_scopes`. Always empty on the credential proxy, which selects no tool. */
+                missing_scopes: string[];
             }[];
-            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
+            /** @description Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow. */
             connection_id?: string;
-            /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names. When `source` is `admin_pin`, `org_default_enforced` or `schedule_override`, an admin, or the schedule's owner, must switch that binding instead. */
+            /** @description Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. */
             missing_scopes?: string[];
+            /**
+             * @description Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.
+             * @enum {string}
+             */
+            remedy?: "new_connection" | "upgrade_or_new" | "rebind_by_admin" | "rebind_by_schedule_owner";
             /** @description Populated on `insufficient_scopes` and `needs_reconnection`. True when the connection belongs to the calling actor, who alone may reconnect or upgrade it; false for another member's shared row. */
             owned_by_actor?: boolean;
             /** @description Populated on `not_connected`, `auth_key_mismatch` and `insufficient_scopes` (never on `needs_reconnection`, whose reconnect re-consents what the connection holds plus the auth's `default_scopes`). OAuth scopes the run's selected tools require on `auth_key`. Forward as `scopes` when starting a new connection so the consent covers them. */
@@ -7473,7 +7487,7 @@ export interface components {
         };
     };
     parameters: {
-        /** @description Number of items to skip before the first returned item. */
+        /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
         Offset: number;
         /** @description Optional optimistic-concurrency precondition (RFC 9110 §13.1.1): the `ETag` of the representation the write is based on. When it no longer matches the current version the write is refused with `412 precondition_failed` and nothing changes. Omitted: last write wins. */
         IfMatch: string;
@@ -7540,7 +7554,7 @@ export interface components {
         RateLimit: string;
         /** @description IETF RateLimit-Policy header describing the rate limit window (e.g. 20;w=60). */
         RateLimitPolicy: string;
-        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down`. */
+        /** @description Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down` or a 502 `login_upstream_unavailable` relaying the service's own. */
         RetryAfter: number;
         /** @description RFC 6750 Bearer challenge, present on every 401. `Bearer error="invalid_token"` when a credential was presented but rejected, bare `Bearer` when no credential was presented. Resources registered for RFC 9728 discovery (e.g. MCP) answer with a richer challenge carrying `resource_metadata="…"`. */
         WWWAuthenticate: string;
@@ -8745,7 +8759,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
             };
             header?: {
@@ -8782,6 +8796,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -11029,7 +11045,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11132,7 +11148,7 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
-            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`). */
             502: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11190,7 +11206,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11298,7 +11314,7 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
-            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`). */
             502: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11356,7 +11372,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11464,7 +11480,7 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
-            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`). */
             502: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11522,7 +11538,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11625,7 +11641,7 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
-            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`). */
             502: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11683,7 +11699,7 @@ export interface operations {
                 "X-Target": string;
                 /** @description Caller-chosen session id; scopes the cookie jar. Fresh UUID per CLI invocation is typical. */
                 "X-Session-Id": string;
-                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE). */
+                /** @description When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE). */
                 "X-Substitute-Body"?: "0" | "1";
                 /** @description Impersonation header — scopes the call to this end-user's connection. */
                 "Appstrate-User"?: string;
@@ -11791,7 +11807,7 @@ export interface operations {
             };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
-            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`). */
+            /** @description `upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`). */
             502: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12585,7 +12601,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per item (`id` is always included). Allowed: id, manifest, orgId, source, active, block_user_connections. An unknown field is a 400. */
                 fields?: string;
@@ -12628,6 +12644,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -12907,7 +12925,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
+            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
             400: components["responses"]["ValidationError"];
             /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. */
             403: {
@@ -12921,9 +12939,12 @@ export interface operations {
             /** @description No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
-            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). The page session survives. */
+            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. The page session survives. */
             502: {
                 headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    "Retry-After": components["headers"]["RetryAfter"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -13267,13 +13288,16 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body or credentials. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer. */
+            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. */
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). */
+            /** @description A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. */
             502: {
                 headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    "Retry-After": components["headers"]["RetryAfter"];
                     [name: string]: unknown;
                 };
                 content: {
@@ -13340,7 +13364,7 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
+                    /** @description OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
@@ -13398,7 +13422,7 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    /** @description OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
+                    /** @description OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise). */
                     scopes?: string[];
                     force_account_select?: boolean;
                     /**
@@ -16531,7 +16555,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
                 /** @description Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400. */
                 fields?: string;
@@ -16599,6 +16623,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -22659,7 +22685,7 @@ export interface operations {
                 /** @description Filter runs by user. `me` is the only accepted value and returns strictly the runs the caller launched — even for a caller who may read the whole space — composed with every other filter on this operation. Omit (or send an empty value) for all org runs the caller may see. Any other value — an arbitrary user id, for instance — is rejected with `400`; it is never ignored, so a filtered response is never silently widened to the whole org. */
                 user?: "me";
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
                 /** @description Filter runs by kind. Omit (or send an empty value) for every kind. Any value outside the enum is rejected with `400`; it is never ignored, so a filtered response is never silently widened. */
                 kind?: "all" | "package" | "inline";
@@ -23397,6 +23423,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -24209,7 +24237,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Number of items to skip before the first returned item. */
+                /** @description Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`). */
                 offset?: components["parameters"]["Offset"];
             };
             header?: {
@@ -24242,6 +24270,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it). */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
         };
@@ -26022,7 +26052,7 @@ export interface operations {
     listWebhookDeliveries: {
         parameters: {
             query?: {
-                /** @description Page size. Out-of-range or non-numeric values fall back to 20. */
+                /** @description Page size. A value that is not an integer from 1 to the maximum is refused with 400 (`param: limit`). */
                 limit?: number;
                 /** @description Keyset cursor — the `id` of the last delivery of the previous page. Supplied by the `Link: rel="next"` header. An id that is not a delivery of this webhook is a 400. */
                 startingAfter?: string;
@@ -27307,6 +27337,8 @@ export interface operations {
                     };
                 };
             };
+            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
