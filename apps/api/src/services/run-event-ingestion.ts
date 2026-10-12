@@ -52,13 +52,11 @@ import {
   updateRun,
   appendRunLog,
   computeRunSpend,
+  readIntegrationsUnbound,
   readLastEmittedOutput,
+  readTokenUsage,
   runAgentIdentity,
 } from "./state/runs.ts";
-import {
-  runIntegrationsUnboundSchema,
-  type RunIntegrationUnbound,
-} from "@appstrate/core/integration";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -79,7 +77,6 @@ import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { runResultSchema } from "../lib/jsonb-schemas.ts";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
@@ -987,8 +984,7 @@ function tokenUsageIsNonZero(usage: TokenUsage): boolean {
 /**
  * Last-known cumulative usage snapshot for a run — the value the
  * `appstrate.metric` side-channel wrote onto `runs.tokenUsage` during the
- * run. Parsed through the token-usage schema so a corrupt JSONB value
- * degrades to `null`, never a throw. Used by finalize
+ * run, read under the column's one policy. Used by finalize
  * to avoid erasing real usage when a run dies without posting a terminal
  * `result.usage`, and by {@link synthesiseFinalize} to reconstruct the
  * terminal usage for platform-synthesised closures.
@@ -999,9 +995,7 @@ async function readLastKnownUsage(runId: string): Promise<TokenUsage | null> {
     .from(runs)
     .where(eq(runs.id, runId))
     .limit(1);
-  if (!row?.tokenUsage) return null;
-  const parsed = tokenUsageSchema.safeParse(row.tokenUsage);
-  return parsed.success ? parsed.data : null;
+  return readTokenUsage(row?.tokenUsage, runId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1156,7 +1150,7 @@ async function persistEventAndAdvance(
   // row-insert time (run-creation.ts) — that fired before the DB
   // transition and never again when it actually happened.
   if (firstEvent && run.runOrigin === "remote") {
-    const integrationsUnbound = parseSinkIntegrationsUnbound(run);
+    const integrationsUnbound = readIntegrationsUnbound(run.integrationsUnbound, run.id);
     void emitEvent("onRunStatusChange", {
       orgId: run.orgId,
       runId: run.id,
@@ -1170,17 +1164,6 @@ async function persistEventAndAdvance(
   }
 
   return "claimed";
-}
-
-/** The run's recorded `integrations_unbound`; a drifted row is logged and omitted, never thrown. */
-function parseSinkIntegrationsUnbound(run: RunSinkContext): RunIntegrationUnbound[] | null {
-  if (run.integrationsUnbound === null || run.integrationsUnbound === undefined) return null;
-  const parsed = runIntegrationsUnboundSchema.safeParse(run.integrationsUnbound);
-  if (parsed.success) return parsed.data;
-  logger.warn("run.started: runs.integrations_unbound does not parse; emitted without it", {
-    runId: run.id,
-  });
-  return null;
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {

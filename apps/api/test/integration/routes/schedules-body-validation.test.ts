@@ -276,10 +276,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       connection_overrides: { "@schedbodyorg/typo": await ownConnections(1) },
     });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; param?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.param).toBe("connection_overrides");
-    expect(problem.detail).toContain("@schedbodyorg/typo");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@schedbodyorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
@@ -364,9 +368,14 @@ describe("PATCH /api/schedules/:id — body validation", () => {
   it("rejects a connection_overrides key the fired agent does not declare, and keeps the row", async () => {
     const res = await put({ connection_overrides: { "@schedputorg/typo": [crypto.randomUUID()] } });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.detail).toContain("@schedputorg/typo");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@schedputorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
     expect(row!.connectionOverrides).toBeNull();
   });

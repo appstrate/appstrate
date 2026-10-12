@@ -769,6 +769,13 @@ export const llmUsage = pgTable(
     // being bypassed. Added validated in migration 0029 — see the sibling floor
     // on `runs.cost` for why it is not split into `NOT VALID` + `VALIDATE`.
     check("llm_usage_cost_usd_non_negative", sql`cost_usd >= 0`),
+    // A payer is recorded iff the member's own credential paid. Compared as text: the enum
+    // label `user` is unusable in the transaction that adds it, and drizzle applies every
+    // pending migration in one.
+    check(
+      "llm_usage_payer_iff_user_source",
+      sql`(credential_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)`,
+    ),
     // Closed vocabulary — same NULL-friendly semantics as the run-level twin
     // (`runs_cost_pricing_status_valid`): a pre-feature row carries no verdict.
     check(

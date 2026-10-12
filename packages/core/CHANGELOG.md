@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
+  (`@appstrate/core/integration`): every code an `errors[]` item of the
+  connection-readiness read carries, the resolver's error codes plus
+  `agent_not_active`. **`CONNECTION_OVERRIDE_REFUSAL_CODES`** /
+  **`ConnectionOverrideRefusalCode`**: what a `connection_overrides` key is
+  refused over at the write, `undeclared_connection_override` (new) and
+  `required_integration_unbound`, each a 400 item on
+  `connection_overrides.<id>`. (#1914)
+
 - **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
   ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
   over the org role resolved later. Absent, the caller is uncapped. (#1911)

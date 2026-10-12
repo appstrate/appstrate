@@ -3,12 +3,18 @@
 // A launch's integration items (a 201's `warnings`, a 409's `errors`), one line each — shared
 // by `--remote` and `--report`, whose routes answer the same item shape.
 
-/** Codes and sources stay open strings: a newer server may send ones this CLI does not know. */
+import type {
+  ConnectionResolutionSource,
+  ConnectionResolutionWarningCode,
+  MissingIntegrationConnectionCode,
+} from "@appstrate/core/integration";
+
+/** The server's vocabulary, left open: a newer server may send a code or source this CLI does not know. */
 export interface LaunchItem {
   field?: string;
-  code: string;
+  code: MissingIntegrationConnectionCode | ConnectionResolutionWarningCode | (string & {});
   message?: string;
-  source?: string;
+  source?: ConnectionResolutionSource | (string & {});
 }
 
 const optionalString = (value: unknown): boolean =>

@@ -1758,7 +1758,7 @@ describe("Runs API", () => {
       ]);
     });
 
-    it("GET /api/runs/:id refuses to serve an integrations_unbound row that drifted from its shape", async () => {
+    it("GET /api/runs/:id reads a drifted integrations_unbound or token_usage as not recorded", async () => {
       await seedAgent({ id: "@runorg/drift-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/drift-agent",
@@ -1767,12 +1767,15 @@ describe("Runs API", () => {
         userId: ctx.user.id,
         status: "success",
         integrationsUnbound: ["@acme/slack"] as never,
+        tokenUsage: { input_tokens: "many" } as never,
       });
 
       const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
 
-      // Parsed, never trusted as typed: a drifted row fails loudly, not as a half-shaped item.
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.integrations_unbound).toBeNull();
+      expect(body.token_usage).toBeNull();
     });
 
     it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {

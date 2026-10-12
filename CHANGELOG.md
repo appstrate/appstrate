@@ -181,6 +181,31 @@ integration_connections WHERE shared_with_org;` tells whether the step
 
 ### Changed
 
+- **BREAKING (API): an undeclared `connection_overrides` key has its own
+  code.** A run launch, an inline launch or validation, and a schedule create
+  or update that name an integration the agent does not declare answer
+  `400 validation_failed` with an `errors[]` item
+  `{ field: "connection_overrides.<id>", code: "undeclared_connection_override" }`,
+  the shape `required_integration_unbound` already has there. Before, the
+  answer was `400 invalid_request` with `param: "connection_overrides"` and the
+  key only in `detail`. (#1914)
+- **`token_usage` and `integrations_unbound` of a run are read under one
+  policy** by the REST reads, the `run_metric` stream and event ingestion: a
+  stored value that does not match its schema reads as not recorded (`null`)
+  and is logged. Before, such an `integrations_unbound` made `GET /api/runs`
+  and `GET /api/runs/{id}` answer 500, and such a `token_usage` was served as
+  stored by REST while the stream dropped the whole metric frame. REST
+  `token_usage` carries only the declared counters and `tiers`. (#1914)
+- **`llm_usage` refuses a payer without a member's own credential, and the
+  reverse** (migration `0090`, CHECK `llm_usage_payer_iff_user_source`:
+  `payer_user_id` is set iff `credential_source = 'user'`). Schema only; the
+  constraint validates the existing rows as it is added. (#1925)
+- **The starter agent's publication is audited**: a new organization's
+  `hello-world` 1.0.0 writes a `package.version_created` line, actor `system`,
+  in its default space. (#1914)
+- **The launch-warning toast offers "Connecter" on the agent page's route
+  access alone**, without a second `integrations:read` test beside it. (#1914)
+
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
   - A refused tool call is a tool result with `isError: true` and JSON text

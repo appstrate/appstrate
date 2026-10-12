@@ -733,10 +733,11 @@ async function getLatestVersionIntegrity(packageId: string): Promise<string | nu
 
 type CreateVersionError = "invalid_version" | "invalid_bundle" | "no_changes" | "version_exists";
 type CreateVersionResult =
-  { id: number; version: string } | { error: CreateVersionError; detail?: string };
+  | { ok: true; id: number; version: string }
+  | { ok: false; error: CreateVersionError; detail?: string };
 
 /** Create an immutable version snapshot from the current draft (packages table).
- *  Uses manifest.version as-is — no auto-bump. Returns an error object if version is missing,
+ *  Uses manifest.version as-is — no auto-bump. Returns `ok: false` if version is missing,
  *  invalid, fails forward-only validation, or content is identical to the latest version.
  *  A draft whose content changed but whose version was not bumped yields `version_exists`
  *  (published versions are immutable — the old silent-success path overwrote the stored
@@ -778,7 +779,7 @@ export async function createVersionFromDraft(params: {
     );
     return { pkg, storedFiles };
   });
-  if (!snapshot) return { error: "invalid_version" };
+  if (!snapshot) return { ok: false, error: "invalid_version" };
   const { pkg, storedFiles } = snapshot;
   params.assertVersion?.(pkg.lockVersion);
 
@@ -789,7 +790,7 @@ export async function createVersionFromDraft(params: {
   const version =
     params.version ?? (typeof baseManifest.version === "string" ? baseManifest.version : undefined);
 
-  if (!version || !isValidVersion(version)) return { error: "invalid_version" };
+  if (!version || !isValidVersion(version)) return { ok: false, error: "invalid_version" };
 
   const manifest = { ...baseManifest, version };
 
@@ -885,7 +886,7 @@ export async function createVersionFromDraft(params: {
     try {
       parsePackageZip(new Uint8Array(zipBuffer), { retiredRuntimeTools: "drop" });
     } catch (err) {
-      return { error: "invalid_bundle", detail: getErrorMessage(err) };
+      return { ok: false, error: "invalid_bundle", detail: getErrorMessage(err) };
     }
   }
 
@@ -909,7 +910,7 @@ export async function createVersionFromDraft(params: {
     await withPackageDraftLock(packageId, (tx) =>
       settleDraftAgainstLatest(tx, packageId, orgId, pkg.lockVersion),
     );
-    return { error: "no_changes" };
+    return { ok: false, error: "no_changes" };
   }
 
   const result = await createVersionAndUpload({
@@ -919,11 +920,11 @@ export async function createVersionFromDraft(params: {
     zipBuffer,
     manifest: finalManifest,
   });
-  if (!result) return { error: "invalid_version" };
+  if (!result) return { ok: false, error: "invalid_version" };
   // Same version, different content (the identical-content case returned
   // `no_changes` above): refuse loudly instead of silently keeping the old
   // artifact — the caller must bump the version to publish the new content.
-  if (result.outcome === "exists") return { error: "version_exists" };
+  if (result.outcome === "exists") return { ok: false, error: "version_exists" };
 
   await finalizeDraftPublication({
     packageId,
@@ -932,7 +933,7 @@ export async function createVersionFromDraft(params: {
     versionId: result.id,
     manifest: params.version && params.version !== baseManifest.version ? finalManifest : undefined,
   });
-  return { id: result.id, version: result.version };
+  return { ok: true, id: result.id, version: result.version };
 }
 
 /**

@@ -67,6 +67,8 @@ import {
   type ResolvedConnectionMap,
   type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
+import type { z } from "zod";
+import { tokenUsageSchema, type TokenUsage } from "@appstrate/core/token-usage";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -313,7 +315,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     cost: row.cost,
     cost_pricing_status: row.costPricingStatus,
     runNumber: row.runNumber,
-    token_usage: row.tokenUsage,
+    token_usage: readTokenUsage(row.tokenUsage, row.id),
     version_label: row.versionLabel,
     version_ref: row.versionRef,
     proxy_label: row.proxyLabel,
@@ -360,14 +362,43 @@ export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | n
   return raw === null || raw === undefined ? null : resolvedConnectionMapSchema.parse(raw);
 }
 
-/** `runs.integrations_unbound` as read back from jsonb; null = not recorded. */
-function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
-  return raw === null || raw === undefined ? null : runIntegrationsUnboundSchema.parse(raw);
+/**
+ * The read policy of the `runs` jsonb columns a run only reports (`integrations_unbound`,
+ * `token_usage`), shared by REST, realtime and ingestion: a stored value that fails its
+ * schema reads as not recorded (`null`) and is logged, never thrown.
+ */
+function readReportedColumn<T>(
+  column: string,
+  schema: z.ZodType<T>,
+  raw: unknown,
+  runId: string,
+): T | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  logger.warn("runs jsonb column does not parse; read as not recorded", { runId, column });
+  return null;
 }
 
-function projectIntegrationsUnbound(raw: unknown): RunIntegrationUnboundWire[] | null {
+/** `runs.integrations_unbound`; null = not recorded. */
+export function readIntegrationsUnbound(
+  raw: unknown,
+  runId: string,
+): RunIntegrationUnbound[] | null {
+  return readReportedColumn("integrations_unbound", runIntegrationsUnboundSchema, raw, runId);
+}
+
+/** `runs.token_usage`; null = not recorded. */
+export function readTokenUsage(raw: unknown, runId: string): TokenUsage | null {
+  return readReportedColumn("token_usage", tokenUsageSchema, raw, runId);
+}
+
+function projectIntegrationsUnbound(
+  raw: unknown,
+  runId: string,
+): RunIntegrationUnboundWire[] | null {
   return (
-    readIntegrationsUnbound(raw)?.map((u) => ({
+    readIntegrationsUnbound(raw, runId)?.map((u) => ({
       integration_package_id: u.integrationId,
       code: u.code,
       source: u.source ?? null,
@@ -389,7 +420,7 @@ function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): Enriched
     api_key_name: r.apiKeyName ?? null,
     schedule_name: r.scheduleName ?? null,
     connections_used: projectConnectionsUsed(snapshot),
-    integrations_unbound: projectIntegrationsUnbound(r.run.integrationsUnbound),
+    integrations_unbound: projectIntegrationsUnbound(r.run.integrationsUnbound, r.run.id),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
     // INPUT = distinct `appfile://` ids referenced in the run's persisted

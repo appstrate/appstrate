@@ -200,6 +200,34 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     const text = `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
     expect(text).toContain("context_single");
   });
+
+  it("stores a payer only on a row a member's own credential paid", async () => {
+    const entry = (credentialSource: "org" | "user" | null, payerUserId: string | null) => ({
+      source: "proxy" as const,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      credentialSource,
+      payerUserId,
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0.0001,
+      pricingStatus: "priced" as const,
+      requestId: `req_ledger_payer_${credentialSource}_${payerUserId}`,
+    });
+    const refusal = async (...args: Parameters<typeof entry>) => {
+      const error = await recordLlmUsage(entry(...args)).catch((err: unknown) => err);
+      const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+      return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+    };
+
+    expect(typeof (await recordLlmUsage(entry("user", ctx.user.id)))).toBe("number");
+    expect(typeof (await recordLlmUsage(entry("org", null)))).toBe("number");
+    expect(typeof (await recordLlmUsage(entry(null, null)))).toBe("number");
+
+    expect(await refusal("org", ctx.user.id)).toContain("llm_usage_payer_iff_user_source");
+    expect(await refusal(null, ctx.user.id)).toContain("llm_usage_payer_iff_user_source");
+    expect(await refusal("user", null)).toContain("llm_usage_payer_iff_user_source");
+  });
 });
 
 describe("recordLlmUsage — runner birth invariant", () => {

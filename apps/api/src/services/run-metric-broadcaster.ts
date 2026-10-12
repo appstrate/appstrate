@@ -38,7 +38,7 @@ import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { notifyRunMetric, type RunMetricNotifyPayload } from "@appstrate/db/notify";
-import { computeRunSpend } from "./state/runs.ts";
+import { computeRunSpend, readTokenUsage } from "./state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -278,7 +278,7 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
     user_id: runRow.userId,
     end_user_id: runRow.endUserId,
     package_id: runRow.packageId,
-    token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
+    token_usage: readTokenUsage(runRow.tokenUsage, runId),
     cost_so_far: costUsd,
     cost_pricing_status: pricingStatus,
   };

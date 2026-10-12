@@ -27,6 +27,7 @@ import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_SOURCES,
   CONNECTION_RESOLUTION_WARNING_CODES,
+  READINESS_ERROR_CODES,
   CONNECT_FLOW_CODES,
   INTEGRATION_MANIFEST_FAILURE_CODES,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -2310,7 +2311,7 @@ export const schemas = {
               properties: {
                 code: {
                   type: "string",
-                  enum: [...CONNECTION_RESOLUTION_ERROR_CODES, "agent_not_active"],
+                  enum: [...READINESS_ERROR_CODES],
                 },
               },
             },

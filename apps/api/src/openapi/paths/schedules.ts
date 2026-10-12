@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { REQUEST_ID_ONLY_HEADERS, STD_RESPONSE_HEADERS } from "../headers.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  CONNECTION_OVERRIDE_REFUSAL_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { connectionConflictContent } from "../responses.ts";
 
@@ -155,7 +158,7 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY; \`[]\` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise \`must_choose_connection\` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (\`[]\` included), which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and \`[]\` on an integration it marks \`required\` (400 \`invalid_request\`, \`param: connection_overrides\`).`,
+                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY; \`[]\` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise \`must_choose_connection\` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (\`[]\` included), which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and \`[]\` on an integration it marks \`required\`: 400 \`validation_failed\`, an \`errors[]\` item on \`connection_overrides.<id>\` whose \`code\` is ${CONNECTION_OVERRIDE_REFUSAL_CODES.map((c) => `\`${c}\``).join(" or ")}.`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {

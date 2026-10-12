@@ -66,6 +66,7 @@ import {
 import type {
   ConnectionResolutionResult,
   ConnectionResolutionWarning,
+  ReadinessErrorCode,
 } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
@@ -785,7 +786,7 @@ export async function resolveAgentConnectionReadiness(args: {
     // and none of it can run while the space has the agent switched off.
     errors.unshift({
       field: "agent",
-      code: "agent_not_active",
+      code: "agent_not_active" satisfies ReadinessErrorCode,
       title: "Agent Not Active",
       message: `Agent '${agent.id}' is not active in this space.`,
     });

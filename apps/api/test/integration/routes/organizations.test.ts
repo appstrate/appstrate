@@ -87,10 +87,19 @@ describe("Organizations API", () => {
       const { org: gamma } = await createTestOrg(ctx.user.id, { name: "Gamma" });
       // Gamma is the oldest membership although its row was written last, so
       // the expected order is not the insertion order an unordered scan returns.
-      await db
-        .update(organizationMembers)
-        .set({ joinedAt: new Date("2020-01-01T00:00:00Z") })
-        .where(eq(organizationMembers.orgId, gamma.id));
+      // Each membership gets its own instant: two written in one millisecond
+      // tie, and the route then orders them by organization id.
+      const joined = {
+        [gamma.id]: "2020-01-01",
+        [ctx.orgId]: "2021-01-01",
+        [beta.id]: "2022-01-01",
+      };
+      for (const [orgId, day] of Object.entries(joined)) {
+        await db
+          .update(organizationMembers)
+          .set({ joinedAt: new Date(`${day}T00:00:00Z`) })
+          .where(eq(organizationMembers.orgId, orgId));
+      }
       const listed = async () => {
         const res = await app.request("/api/orgs", { headers: { Cookie: ctx.cookie } });
         return ((await res.json()) as { data: { id: string }[] }).data.map((o) => o.id);

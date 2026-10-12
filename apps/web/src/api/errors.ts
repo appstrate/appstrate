@@ -1,5 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { components } from "./schema";
+
+type Schemas = components["schemas"];
+
+/** RFC 9457 §3.2 extension members: typed where a problem schema declares them, open otherwise. */
+type ProblemExtensions = Partial<
+  Omit<Schemas["MissingIntegrationConnectionProblem"], keyof Schemas["ProblemDetail"]>
+> &
+  Record<string, unknown>;
+
 /**
  * RFC 9457 problem-details error thrown by the typed OpenAPI client
  * (`src/api/client.ts`) on any non-2xx response, so React Query errors are
@@ -13,7 +23,7 @@ export class ApiError extends Error {
     /** RFC 9457 `errors` — the field-level items, polymorphic by `code`. */
     public errors?: unknown[],
     /** RFC 9457 §3.2 extension members (`member_count`, `active_version`, `version_ref`). */
-    public details?: Record<string, unknown>,
+    public details?: ProblemExtensions,
     public requestId?: string,
     /**
      * RFC 9457 `param` — the request member the error is about, dotted from the

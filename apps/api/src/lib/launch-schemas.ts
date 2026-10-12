@@ -42,6 +42,7 @@ import {
   collectOverridableDependencyIds,
   parseManifestIntegrations,
 } from "@appstrate/core/dependencies";
+import type { ConnectionOverrideRefusalCode } from "@appstrate/core/integration";
 import { ApiError, validationFailed, type ValidationFieldError } from "./errors.ts";
 import { connectionIdSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
@@ -101,17 +102,23 @@ export function assertDependencyOverrideKeysDeclared(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, string>> | null | undefined,
 ): void {
-  assertKeysDeclared(
-    "dependency_overrides",
-    collectOverridableDependencyIds(manifest),
-    overrides,
-    "skill or integration dependency",
-  );
+  if (!overrides) return;
+  const declared = collectOverridableDependencyIds(manifest);
+  const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
+  if (unknownKey === undefined) return;
+  throw new ApiError({
+    status: 400,
+    code: "invalid_request",
+    title: "Bad Request",
+    detail: `\`dependency_overrides["${unknownKey}"]\` is not a declared skill or integration dependency of this agent`,
+    param: "dependency_overrides",
+  });
 }
 
 /**
- * The same refusal for a `connection_overrides` KEY the EFFECTIVE manifest does not
- * declare: the resolver would drop it and bind a lower cascade layer instead. Also `[]`
+ * Refuses a `connection_overrides` KEY the EFFECTIVE manifest does not declare
+ * (`undeclared_connection_override`): the resolver would drop it and bind a lower cascade layer
+ * instead. Also `[]`
  * on an integration the manifest marks `required`, which no launch could ever satisfy —
  * the `required_integration_unbound` a pin's `[]` raises, refused here at the write.
  */
@@ -126,7 +133,7 @@ export function assertConnectionOverridesAllowed(
 export interface ConnectionOverrideRefusal {
   key: string;
   /** The entry an accumulating validator collects. */
-  item: ValidationFieldError;
+  item: ValidationFieldError & { code: ConnectionOverrideRefusalCode };
   /** The 400 a fail-fast surface throws. */
   error: ApiError;
 }
@@ -139,52 +146,27 @@ export function connectionOverrideRefusals(
   if (!overrides) return [];
   const declared = parseManifestIntegrations(manifest);
   const ids = new Set(declared.map((entry) => entry.id));
+  const refusal = (r: { key: string; code: ConnectionOverrideRefusalCode; message: string }) => {
+    const item = { field: `connection_overrides.${r.key}`, code: r.code, message: r.message };
+    return { key: r.key, item, error: validationFailed([item]) };
+  };
   const undeclared = Object.keys(overrides)
     .filter((key) => !ids.has(key))
-    .map((key) => {
-      const error = undeclaredKeyError("connection_overrides", key, "integration dependency");
-      const item = {
-        field: "connection_overrides",
-        code: error.code,
-        title: error.title,
-        message: error.message,
-      };
-      return { key, item, error };
-    });
+    .map((key) =>
+      refusal({
+        key,
+        code: "undeclared_connection_override",
+        message: `${key} is not an integration this agent declares — remove the key`,
+      }),
+    );
   const emptiedRequired = declared
     .filter((entry) => entry.required === true && overrides[entry.id]?.length === 0)
-    .map((entry) => {
-      const item = {
-        field: `connection_overrides.${entry.id}`,
+    .map((entry) =>
+      refusal({
+        key: entry.id,
         code: "required_integration_unbound",
         message: `The agent marks ${entry.id} \`required\`, so its set cannot be empty — name at least one connection, or omit the key`,
-      };
-      return { key: entry.id, item, error: validationFailed([item]) };
-    });
+      }),
+    );
   return [...undeclared, ...emptiedRequired];
-}
-
-function assertKeysDeclared(
-  field: "dependency_overrides" | "connection_overrides",
-  declared: ReadonlySet<string>,
-  overrides: Readonly<Record<string, unknown>> | null | undefined,
-  noun: string,
-): void {
-  if (!overrides) return;
-  const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
-  if (unknownKey !== undefined) throw undeclaredKeyError(field, unknownKey, noun);
-}
-
-function undeclaredKeyError(
-  field: "dependency_overrides" | "connection_overrides",
-  key: string,
-  noun: string,
-): ApiError {
-  return new ApiError({
-    status: 400,
-    code: "invalid_request",
-    title: "Bad Request",
-    detail: `\`${field}["${key}"]\` is not a declared ${noun} of this agent`,
-    param: field,
-  });
 }

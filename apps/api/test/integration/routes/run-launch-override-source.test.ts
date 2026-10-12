@@ -192,10 +192,14 @@ describe("launch override — the bound set names the launch it came from", () =
       }),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { code: string; param?: string; detail: string };
-    expect(body.code).toBe("invalid_request");
-    expect(body.param).toBe("connection_overrides");
-    expect(body.detail).toContain("@launchorg/typo");
+    const body = (await res.json()) as { code: string; errors: unknown[] };
+    expect(body.code).toBe("validation_failed");
+    expect(body.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@launchorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
 
@@ -222,18 +226,20 @@ describe("launch override — the bound set names the launch it came from", () =
 
     const launched = await request("/api/runs/inline");
     expect(launched.status).toBe(400);
-    expect(((await launched.json()) as { code: string }).code).toBe("invalid_request");
+    const UNDECLARED = {
+      field: "connection_overrides.@launchorg/typo",
+      code: "undeclared_connection_override",
+    };
+    const refused = (await launched.json()) as { code: string; errors: unknown[] };
+    expect(refused.code).toBe("validation_failed");
+    expect(refused.errors).toEqual([expect.objectContaining(UNDECLARED)]);
     expect(await db.select().from(runs)).toHaveLength(0);
 
     const validated = await request("/api/runs/inline/validate");
     expect(validated.status).toBe(400);
-    const body = (await validated.json()) as {
-      code: string;
-      errors: { field: string; message: string }[];
-    };
+    const body = (await validated.json()) as { code: string; errors: unknown[] };
     expect(body.code).toBe("validation_failed");
-    const item = body.errors.find((e) => e.field === "connection_overrides");
-    expect(item?.message).toContain("@launchorg/typo");
+    expect(body.errors).toContainEqual(expect.objectContaining(UNDECLARED));
   });
 
   it("a schedule fire's frozen picks bind as schedule_override", async () => {

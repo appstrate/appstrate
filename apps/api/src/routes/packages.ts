@@ -1331,7 +1331,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
         }),
     });
 
-    if ("error" in result) {
+    if (!result.ok) {
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
       }

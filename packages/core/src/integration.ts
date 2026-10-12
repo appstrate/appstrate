@@ -1525,6 +1525,22 @@ export const MISSING_INTEGRATION_CONNECTION_CODES = [
 export type MissingIntegrationConnectionCode =
   (typeof MISSING_INTEGRATION_CONNECTION_CODES)[number];
 
+/** Every code an `errors[]` item of the connection-readiness read carries. */
+export const READINESS_ERROR_CODES = [
+  ...CONNECTION_RESOLUTION_ERROR_CODES,
+  "agent_not_active",
+] as const;
+
+export type ReadinessErrorCode = (typeof READINESS_ERROR_CODES)[number];
+
+/** What a `connection_overrides` key is refused over at the write: a 400 item on `connection_overrides.<id>`. */
+export const CONNECTION_OVERRIDE_REFUSAL_CODES = [
+  "undeclared_connection_override",
+  "required_integration_unbound",
+] as const;
+
+export type ConnectionOverrideRefusalCode = (typeof CONNECTION_OVERRIDE_REFUSAL_CODES)[number];
+
 /**
  * One connection carried by `must_choose_connection`.
  *

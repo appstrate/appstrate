@@ -89,10 +89,10 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
 }
 
 /** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
-const OWN_PICK_REFUSALS: ReadonlySet<string> = new Set([
+const OWN_PICK_REFUSALS: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "override_outranked",
   "override_connection_unavailable",
-] satisfies MissingIntegrationConnectionCode[]);
+]);
 
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
@@ -135,8 +135,7 @@ export interface LaunchRefusal {
 export function launchRefusal(err: unknown): LaunchRefusal | null {
   const errors = missingConnectionErrors(err);
   if (!errors || !(err instanceof ApiError)) return null;
-  const version = err.details?.version_ref;
-  return { errors, version: typeof version === "string" ? version : undefined };
+  return { errors, version: err.details?.version_ref };
 }
 
 /**
