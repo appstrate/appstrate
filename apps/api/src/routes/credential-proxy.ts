@@ -69,6 +69,8 @@ import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitive
 import { reportPermissionDenial } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
+import { listResponse } from "../lib/list-response.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { readProxyCaller } from "../lib/proxy-caller.ts";
@@ -114,11 +116,8 @@ export function createCredentialProxyRouter() {
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
   router.get("/connections", requirePermission("credential-proxy", "direct"), async (c) => {
-    const data = await listDirectProxyConnections(
-      { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
-      getActor(c),
-    );
-    return c.json({ object: "list", data, hasMore: false });
+    const data = await listDirectProxyConnections(getSpaceScope(c), getActor(c));
+    return c.json(listResponse(data));
   });
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
@@ -361,9 +360,7 @@ export function createCredentialProxyRouter() {
           responseBody = await new Response(result.body).arrayBuffer().catch((err: unknown) => {
             // A read failing after the headers is the upstream's, never the proxy's own 500, and
             // what the caller is answered is what the journal keeps, not the status that came first.
-            const failure = bodyReadError(err, result.redactedHost);
-            journal(result.connectionId, failure.code);
-            throw failure;
+            throw bodyReadError(err, result.redactedHost, result.connectionId);
           });
         }
         journal(result.connectionId, String(result.status));
@@ -421,8 +418,7 @@ export function createCredentialProxyRouter() {
         // every non-Proxy* error as a 500 below.
         if (err instanceof ApiError) throw err;
         if (err instanceof ProxyCallError) {
-          // Set by `proxyCall` on a failure after dispatch; the body-read failure above carries
-          // none and wrote its own row.
+          // Named on a failure after dispatch: the call may have sent the credential.
           if (err.connectionId) journal(err.connectionId, err.code);
           const problem = proxyProblem(err.code, err.message);
           if (problem.status === 403) {

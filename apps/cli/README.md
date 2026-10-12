@@ -886,7 +886,7 @@ On the second path the CLI says so once on stderr before the run starts (nothing
 `GET /api/credential-proxy/connections` lists what is callable outside a run — your connections usable in the pinned space, each with the `authorized_uris` a target must match, and `run_required` and `needs_reconnection` on the entries a call would still refuse. It requires `credential-proxy:direct` too:
 
 ```sh
-appstrate api GET /api/credential-proxy/connections | jq '.data[] | {integration_id, connection_id, label, run_required}'
+appstrate api GET /api/credential-proxy/connections | jq '.data[] | {integration_package_id, connection_id, label, run_required}'
 ```
 
 A run executed on the instance (`--remote`, the default for a package id) involves none of this: its integrations are reached from inside its sandbox.

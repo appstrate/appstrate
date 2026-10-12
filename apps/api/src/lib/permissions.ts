@@ -151,11 +151,8 @@ const ADMIN_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = SPACE_LEVEL_
 const BUILDER_EXCLUDED_PREFIXES = ["space-settings:", "space-members:", "api-keys:"] as const;
 
 /**
- * `builder`: author and operate — admin minus the governance surfaces, and
- * minus `credential-proxy:direct`. Authoring and running agents takes the proxy
- * for a run (`credential-proxy:call`, which a builder holds), not outside one:
- * `credential-proxy:direct` is held by the `admin` preset alone, and reaches
- * anyone else through a custom role or an API key.
+ * `builder`: author and operate — admin minus the governance surfaces and
+ * `credential-proxy:direct`, which `admin` alone holds among the presets.
  */
 const BUILDER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
   [...ADMIN_PRESET_PERMISSIONS].filter(
@@ -340,15 +337,11 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Credential proxy for a run — `/api/credential-proxy/proxy` with `X-Run-Id`,
-  // the BYOI ("Bring Your Own Instance") path of remote AFPS runs, reaching the
-  // connections the run bound. A key minted with `scopes` omitted or empty
-  // carries it when its creator holds it; a non-empty `scopes` mints a narrower key.
+  // Credential proxy for a run (`X-Run-Id`) — BYOI ("Bring Your Own Instance")
+  // for remote AFPS runs. A key minted with `scopes` omitted or empty carries
+  // it when its creator holds it; a non-empty `scopes` mints a narrower key.
   "credential-proxy:call",
-  // Credential proxy outside a run — no `X-Run-Id`, on the caller's own
-  // connections. `admin` is the one preset holding it, so a key carries it from
-  // a creator who is a space admin or whose custom role holds it, under the same
-  // `scopes` rule.
+  // Credential proxy outside a run, under the same `scopes` rule.
   "credential-proxy:direct",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered

@@ -279,7 +279,7 @@ its owner included.
   another member shared: that one, and every connection of an integration under
   an enforced organization default (`run_required` in the listing), is reached
   by an agent run (`run_and_wait`). `list_connections` returns, per connection,
-  the `integration_id` and `connection_id` to pass, the `authorized_uris` a
+  the `integration_package_id` and `connection_id` to pass, the `authorized_uris` a
   target must match, and `needs_reconnection`. It never carries a credential
   value: an entry that depends on one reads `{$credential.<field>}`, and you
   target it by writing `{{<field>}}` at that place in `target`
@@ -287,7 +287,7 @@ its owner included.
   `https://{{host}}/v1/items` for `https://{$credential.host}/**`); the
   platform fills it in.
 - **A call.** `requests` holds 1 to 50 requests, each naming an
-  `integration_id`, a `method` and a `target`, with optional `headers`, `body`,
+  `integration_package_id`, a `method` and a `target`, with optional `headers`, `body`,
   `substitute_body` and `connection_id` (which of your connections, when you
   hold several of the integration). The platform injects the credential: a
   header of your own platform request (`Authorization`, `Cookie`, …) or one of
@@ -304,10 +304,8 @@ its owner included.
   (`run_required`, `credential_not_found`, `must_choose_connection`,
   `needs_reconnection`, `unauthorized_target`, `rate_limited`, …) and does not
   stop the others. The result is `isError` only when no request succeeded.
-- **Sessions and runs.** Pass a previous result's `session_id` to keep the
-  cookies the upstream set; omit it to start a session. `run_id` makes the
-  calls for one of your own in-flight remote runs instead: they then reach the
-  connections that run bound and require `credential-proxy:call`.
+- **Sessions.** Pass a previous result's `session_id` to keep the cookies the
+  upstream set; omit it to start a session.
 
 The exact argument and result schemas are the tools' own; the access rule is in
 `docs/architecture/INTEGRATIONS_RUNTIME.md`, "Platform credential proxy".

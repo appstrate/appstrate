@@ -29,9 +29,9 @@ const proxySharedDescription =
   "(API key or JWT user) that used it.\n\n" +
   "A call takes one of two paths, each with its own permission. **For a run** (`X-Run-Id`): " +
   "requires `credential-proxy:call` — launching runs (`agents:run`) does not open it; the " +
-  "header names the caller's own in-flight run that the caller " +
-  "executes itself (a remote run), and the call reaches the connections that run bound, a " +
-  "connection another member shared into the space included. **Outside a run** (no " +
+  "header names the caller's own in-flight run that the caller executes itself (a remote " +
+  "run), and the call reaches the connections that run bound, a connection another member " +
+  "shared into the space included. **Outside a run** (no " +
   "`X-Run-Id`): requires `credential-proxy:direct`, and reaches the caller's OWN connections " +
   "only — `GET /api/credential-proxy/connections` lists them. A connection another member " +
   "shared into the space, and every connection of an integration governed by an enforced " +
@@ -173,11 +173,10 @@ const proxyParameters = [
     description:
       "Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it " +
       "(`appstrate run --report`). Requires `credential-proxy:call`. Must name an in-flight " +
-      "run of the " +
-      "calling actor in this space, executed by the caller (`runOrigin: remote`): an unknown id " +
-      "or one of another space is a `404`, another actor's run or a run the platform executes " +
-      "a `403`, a finished run a `400`. It binds the call to the run's snapshot: the call " +
-      "reaches ONLY the " +
+      "run of the calling actor in this space, executed by the caller (`runOrigin: remote`): an " +
+      "unknown id or one of another space is a `404`, another actor's run or a run the " +
+      "platform executes a `403`, a finished run a `400`. It binds the call to the run's " +
+      "snapshot: the call reaches ONLY the " +
       "connections the run's kickoff bound to the integration (every layer applied, agent-level " +
       "ones included — admin pins, enforced defaults, launch overrides, member pins): one bound " +
       "connection is used; several require `X-Connection-Id` naming one of them " +
@@ -410,7 +409,7 @@ function makeProxyOperation(verb: ProxyVerb) {
 const directProxyConnectionSchema = {
   type: "object",
   required: [
-    "integration_id",
+    "integration_package_id",
     "connection_id",
     "label",
     "auth_key",
@@ -421,7 +420,7 @@ const directProxyConnectionSchema = {
     "run_required",
   ],
   properties: {
-    integration_id: {
+    integration_package_id: {
       type: "string",
       description: "Integration package id: the `X-Integration-Id` of a call.",
     },
@@ -446,8 +445,7 @@ const directProxyConnectionSchema = {
         "call such a target, write `{{<field>}}` in `X-Target` where the entry has " +
         "`{$credential.<field>}`: `{{webhook_url}}` for an entry that is " +
         "`{$credential.webhook_url}` alone (the field holds the whole URL), " +
-        "`https://{{host}}/v1/items` for " +
-        "`https://{$credential.host}/**`.",
+        "`https://{{host}}/v1/items` for `https://{$credential.host}/**`.",
     },
     allow_all_uris: {
       type: "boolean",

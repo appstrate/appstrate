@@ -967,7 +967,6 @@ index CREATE INDEX idx_chat_sessions_space_user ON public.chat_sessions USING bt
 index CREATE INDEX idx_cli_refresh_tokens_family ON public.cli_refresh_tokens USING btree (family_id)
 index CREATE INDEX idx_cli_refresh_tokens_user ON public.cli_refresh_tokens USING btree (user_id)
 index CREATE INDEX idx_connection_calls_connection_id ON public.connection_calls USING btree (connection_id, id)
-index CREATE INDEX idx_connection_calls_run ON public.connection_calls USING btree (run_id)
 index CREATE INDEX idx_connection_calls_space_id ON public.connection_calls USING btree (space_id, id)
 index CREATE INDEX idx_end_users_org_id ON public.end_users USING btree (org_id)
 index CREATE INDEX idx_end_users_space_id ON public.end_users USING btree (space_id)

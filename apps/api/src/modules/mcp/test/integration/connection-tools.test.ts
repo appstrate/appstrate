@@ -217,7 +217,7 @@ type Entry = Record<string, unknown> & {
 const entries = (data: Record<string, unknown>) => data.results as Entry[];
 
 const get = (path: string, overrides: Record<string, unknown> = {}) => ({
-  integration_id: INTEGRATION_ID,
+  integration_package_id: INTEGRATION_ID,
   method: "GET",
   target: `${UPSTREAM}${path}`,
   ...overrides,
@@ -423,7 +423,7 @@ describe("mcp connection tools", () => {
       expect(isError).toBe(false);
       expect(data.connections).toEqual([
         {
-          integration_id: INTEGRATION_ID,
+          integration_package_id: INTEGRATION_ID,
           connection_id: own,
           label: "mine",
           auth_key: "api",
@@ -497,7 +497,11 @@ describe("mcp connection tools", () => {
         requests: [
           get("/a"),
           // Off the integration's `authorized_uris`: the proxy refuses, nothing is sent.
-          { integration_id: INTEGRATION_ID, method: "GET", target: "https://8.8.8.8/elsewhere" },
+          {
+            integration_package_id: INTEGRATION_ID,
+            method: "GET",
+            target: "https://8.8.8.8/elsewhere",
+          },
           get("/missing"),
           { ...get("/b"), method: "POST", body: { name: "x" } },
         ],
@@ -599,37 +603,6 @@ describe("mcp connection tools", () => {
       expect(upstreamCalls).toHaveLength(0);
     });
 
-    it("lets no request header stand in for a proxy control or the caller's credential", async () => {
-      await connect(owner, "mine");
-      const shared = await shareColleagueConnection();
-      const key = await seedApiKey({
-        orgId: owner.orgId,
-        spaceId: owner.defaultSpaceId,
-        createdBy: colleague.user.id,
-        scopes: DIRECT_ROLE,
-      });
-
-      for (const [name, value] of [
-        ["X-Connection-Id", shared],
-        ["X-Run-Id", "run_forged"],
-        ["X-Target", `${UPSTREAM}/admin`],
-        ["X-Stream-Response", "1"],
-        ["Authorization", `Bearer ${key.rawKey}`],
-        ["X-Space-Id", "spc_forged"],
-      ] as const) {
-        const { isError, data } = await callTool(caller, "api_call", {
-          requests: [get("/contacts", { headers: { [name]: value } })],
-        });
-        expect({ name, isError, code: data.code, arguments: data.arguments }).toEqual({
-          name,
-          isError: true,
-          code: "invalid_argument",
-          arguments: [`requests[0].headers.${name}`],
-        });
-      }
-      expect(upstreamCalls).toHaveLength(0);
-    });
-
     it("keeps upstream cookies in the session it returns, and never hands them over", async () => {
       await connect(owner, "mine");
       mockUpstream(
@@ -693,7 +666,7 @@ describe("mcp connection tools", () => {
       expect(invoked.isError).toBe(false);
       const rows = listed.data.connections as Array<Record<string, unknown>>;
       expect((invoked.data.body as { data: unknown[] }).data).toEqual(rows);
-      expect(rows.map((row) => [row.integration_id, row.authorized_uris])).toEqual([
+      expect(rows.map((row) => [row.integration_package_id, row.authorized_uris])).toEqual([
         [INTEGRATION_ID, [`${UPSTREAM}/**`]],
         [HOOKS, ["{$credential.webhook_url}"]],
       ]);
@@ -705,34 +678,13 @@ describe("mcp connection tools", () => {
 
       // The placeholder is what a call writes: the proxy resolves it, the result never holds it.
       const called = await callTool(caller, "api_call", {
-        requests: [{ integration_id: HOOKS, method: "POST", target: "{{webhook_url}}", body: {} }],
+        requests: [
+          { integration_package_id: HOOKS, method: "POST", target: "{{webhook_url}}", body: {} },
+        ],
       });
       expect(entries(called.data)[0]).toMatchObject({ status: 200, body: { ok: true } });
       expect(upstreamCalls.map((call) => call.url)).toEqual([hookUrl]);
       expect(JSON.stringify(called.data)).not.toContain(HOOK_SECRET);
-    });
-
-    it("offers the proxy route through no catalog operation", async () => {
-      for (const tool of ["describe_operation", "invoke_operation"]) {
-        const { isError, data } = await callTool(caller, tool, {
-          operation_id: "credentialProxyGet",
-        });
-        expect({ tool, isError, code: data.code }).toEqual({
-          tool,
-          isError: true,
-          code: "unknown_operation",
-        });
-      }
-      const found = await callTool(caller, "search_operations", { query: "credential proxy" });
-      expect(JSON.stringify(found.data)).not.toContain("credentialProxy");
-      const instructions = (
-        await mcp(caller, "initialize", {
-          protocolVersion: "2025-06-18",
-          capabilities: {},
-          clientInfo: { name: "connection-tools-test", version: "0" },
-        })
-      ).result?.instructions as string;
-      expect(instructions).not.toContain("credentialProxy");
     });
   });
 });

@@ -11142,7 +11142,7 @@ export interface operations {
                         object: "list";
                         data: {
                             /** @description Integration package id: the `X-Integration-Id` of a call. */
-                            integration_id: string;
+                            integration_package_id: string;
                             /**
                              * Format: uuid
                              * @description The `X-Connection-Id` that names this connection.
@@ -12902,9 +12902,6 @@ export interface operations {
             query?: {
                 /** @description Only the calls made with this connection. */
                 connection_id?: string;
-                /** @description Only the calls made through this integration (`@scope/name`). */
-                integration_package_id?: string;
-                actor_type?: "user" | "end_user";
                 /** @description Only the calls this principal made. */
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
@@ -12968,11 +12965,11 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`session`, `api_key`, an OAuth token kind, …). */
+                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …). */
                             auth_method: string;
                             /** @description The run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
-                            /** @description HTTP method, upper case. */
+                            /** @description The call's HTTP method. */
                             method: string;
                             /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
                             host: string;
@@ -16063,9 +16060,6 @@ export interface operations {
     listMyConnectionCalls: {
         parameters: {
             query?: {
-                /** @description Only the calls made through this integration (`@scope/name`). */
-                integration_package_id?: string;
-                actor_type?: "user" | "end_user";
                 /** @description Only the calls this principal made. */
                 actor_id?: string;
                 /** @description Only the calls that declared this run. */
@@ -16126,11 +16120,11 @@ export interface operations {
                             actor_id: string;
                             /** @description The API key the actor acted through, if any. */
                             apiKeyId: string | null;
-                            /** @description How the caller authenticated (`session`, `api_key`, an OAuth token kind, …). */
+                            /** @description How the caller authenticated (`api_key`, an OAuth token kind, …). */
                             auth_method: string;
                             /** @description The run the call declared (`X-Run-Id`), if any. */
                             runId: string | null;
-                            /** @description HTTP method, upper case. */
+                            /** @description The call's HTTP method. */
                             method: string;
                             /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
                             host: string;

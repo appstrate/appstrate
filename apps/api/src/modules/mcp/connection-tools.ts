@@ -16,13 +16,20 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { renderFieldPath } from "@appstrate/core/api-errors";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../services/credential-proxy/session.ts";
-import { asRecord, jsonResult, refusalResult, trySetHeader, type Refusal } from "./tool-results.ts";
+import {
+  asRecord,
+  dispatchHeaders,
+  jsonResult,
+  refusalResult,
+  trySetHeader,
+  type Refusal,
+} from "./tool-results.ts";
 import type { Dispatch, McpObserver } from "./tools.ts";
 
 interface ConnectionToolContext {
@@ -68,17 +75,11 @@ const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
 const BODILESS_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 
 /**
- * What a request's `headers` may not carry beyond the platform's own request headers
- * (`isPlatformRequestHeader`) and the proxy's controls (`PROXY_CONTROL_HEADERS`), neither of which
- * names these: the framing of the dispatched request, which this layer derives from the body it
- * builds, and the client-source headers the pipeline reads the audited IP from.
+ * The framing of the dispatched request, which this layer derives from the body it builds: what a
+ * request's `headers` may not carry beyond the platform's own request headers
+ * (`isPlatformRequestHeader`) and the proxy's controls (`PROXY_CONTROL_HEADERS`).
  */
-const DISPATCH_OWNED_HEADERS: ReadonlySet<string> = new Set([
-  "host",
-  "content-length",
-  "x-forwarded-for",
-  "x-real-ip",
-]);
+const DISPATCH_OWNED_HEADERS: ReadonlySet<string> = new Set(["host", "content-length"]);
 
 /**
  * A header a request may not set: the caller's identity and context are forwarded from the MCP
@@ -105,7 +106,7 @@ const RESPONSE_HEADERS = [
 ] as const;
 
 const requestSchema = z.strictObject({
-  integration_id: z.string().min(1),
+  integration_package_id: z.string().min(1),
   method: z.enum(METHODS),
   target: z.string().min(1),
   headers: z.record(z.string(), z.string()).optional(),
@@ -116,7 +117,6 @@ const requestSchema = z.strictObject({
 
 const apiCallSchema = z.strictObject({
   requests: z.array(requestSchema).min(1).max(MAX_REQUESTS),
-  run_id: z.string().min(1).optional(),
   session_id: z.string().refine(isValidSessionId, "must be a UUID v4").optional(),
   max_response_bytes: z.number().int().min(1).max(MAX_RESULT_BYTES).optional(),
   concurrency: z.number().int().min(1).max(MAX_CONCURRENCY).optional(),
@@ -145,13 +145,6 @@ type Outcome =
 /** Bytes, so `Request` derives no Content-Type from the body: the caller's is the only one. */
 function encodeBody(text: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(new TextEncoder().encode(text));
-}
-
-/** The caller's auth context and the trusted re-entry marker, as `invoke_operation` sends them. */
-function dispatchHeaders(ctx: ConnectionToolContext, into = new Headers()): Headers {
-  ctx.authHeaders.forEach((value, name) => into.set(name, value));
-  into.set(...internalDispatchHeader());
-  return into;
 }
 
 function argumentsRefusal(error: z.ZodError): Refusal {
@@ -184,7 +177,7 @@ function prepareCall(
   ctx: ConnectionToolContext,
   request: ApiCallRequest,
   index: number,
-  shared: { sessionId: string; runId: string | undefined; maxResponseBytes: number },
+  shared: { sessionId: string; maxResponseBytes: number },
 ): PreparedCall | Refusal {
   const at = (argument: string) => `requests[${index}].${argument}`;
   const invalid = (argument: string, error: string): Refusal => ({
@@ -203,7 +196,7 @@ function prepareCall(
           `${name} cannot be set: the platform sets its own request headers, the proxy ` +
             "injects the connection's credential, and its controls are this tool's arguments.",
         ),
-        hint: "Drop it; connection_id, run_id, session_id and substitute_body say what it meant.",
+        hint: "Drop it; connection_id, session_id and substitute_body say what it meant.",
       };
     }
     if (!trySetHeader(headers, name, value)) {
@@ -224,12 +217,11 @@ function prepareCall(
     }
   }
 
-  dispatchHeaders(ctx, headers);
+  dispatchHeaders(ctx.authHeaders, headers);
   const controls: Array<[header: string, value: string | undefined, argument: string]> = [
-    ["X-Integration-Id", request.integration_id, at("integration_id")],
+    ["X-Integration-Id", request.integration_package_id, at("integration_package_id")],
     ["X-Target", request.target, at("target")],
     ["X-Connection-Id", request.connection_id, at("connection_id")],
-    ["X-Run-Id", shared.runId, "run_id"],
     ["X-Session-Id", shared.sessionId, "session_id"],
     ["X-Substitute-Body", request.substitute_body ? "1" : undefined, at("substitute_body")],
     ["X-Max-Response-Size", String(shared.maxResponseBytes), "max_response_bytes"],
@@ -287,29 +279,6 @@ async function dispatchCall(
 }
 
 /**
- * `run` over `items`, at most `limit` at once, results in input order. An abort stops every
- * worker before its next item; `run` itself must throw for nothing else.
- */
-async function mapBounded<T, R>(
-  items: readonly T[],
-  limit: number,
-  signal: AbortSignal | undefined,
-  run: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      if (signal?.aborted) throw signal.reason ?? new Error("Aborted");
-      const index = next++;
-      results[index] = await run(items[index]!);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
-
-/**
  * The entries of a result, in request order. Text bodies draw on one budget
  * ({@link MAX_RESULT_BYTES}) in that order, so a batch is bounded whatever each response's cap.
  */
@@ -362,7 +331,7 @@ function buildListConnectionsTool(ctx: ConnectionToolContext): AppstrateToolDefi
     name: "list_connections",
     description:
       "List what api_call reaches in this space outside a run: your OWN connections, each with " +
-      "the `integration_id` and `connection_id` to pass, the `authorized_uris` a target must " +
+      "the `integration_package_id` and `connection_id` to pass, the `authorized_uris` a target must " +
       "match (unless `allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy " +
       "alone resolves, see api_call's `target`), its `scopes_granted`, and what a direct call " +
       "would still refuse: `needs_reconnection`, and `run_required` (an enforced organization " +
@@ -383,7 +352,7 @@ function buildListConnectionsTool(ctx: ConnectionToolContext): AppstrateToolDefi
     const response = await ctx.dispatch(
       new Request(new URL(CONNECTIONS_PATH, ctx.origin).toString(), {
         method: "GET",
-        headers: dispatchHeaders(ctx),
+        headers: dispatchHeaders(ctx.authHeaders),
       }),
     );
     const body = asRecord(await response.json().catch(() => undefined));
@@ -428,7 +397,7 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "does not stop the other requests: `run_required`, `credential_not_found`, " +
       "`must_choose_connection` (retry with one `errors[0].candidate_connections[].id` as " +
       "`connection_id`), `needs_reconnection`, `unauthorized_target`, `rate_limited`. A " +
-      "`detail` naming `X-Connection-Id` or `X-Run-Id` means `connection_id` or `run_id`.",
+      "`detail` naming `X-Connection-Id` means `connection_id`.",
     annotations: {
       title: "Call an API through a connection",
       readOnlyHint: false,
@@ -449,9 +418,9 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["integration_id", "method", "target"],
+            required: ["integration_package_id", "method", "target"],
             properties: {
-              integration_id: {
+              integration_package_id: {
                 type: "string",
                 description: "Integration package id (`@scope/name`), from list_connections.",
               },
@@ -490,12 +459,6 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
               },
             },
           },
-        },
-        run_id: {
-          type: "string",
-          description:
-            "Make the calls for one of your own in-flight remote runs: they reach the " +
-            "connections that run bound, not your own. Requires `credential-proxy:call`.",
         },
         session_id: {
           type: "string",
@@ -544,26 +507,27 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
     }
     const parsed = apiCallSchema.safeParse(args);
     if (!parsed.success) return refuse(argumentsRefusal(parsed.error));
-    const { requests, run_id: runId } = parsed.data;
+    const { requests } = parsed.data;
     // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
     const sessionId = parsed.data.session_id ?? crypto.randomUUID();
     const maxResponseBytes = parsed.data.max_response_bytes ?? DEFAULT_MAX_RESPONSE_BYTES;
 
     const calls: PreparedCall[] = [];
     for (const [index, request] of requests.entries()) {
-      const call = prepareCall(ctx, request, index, { sessionId, runId, maxResponseBytes });
+      const call = prepareCall(ctx, request, index, { sessionId, maxResponseBytes });
       if ("code" in call) return refuse(call);
       calls.push(call);
     }
 
     const signal: AbortSignal | undefined = extra.signal;
-    const outcomes = await mapBounded(
+    const outcomes = await mapWithConcurrency(
       calls,
       parsed.data.concurrency ?? DEFAULT_CONCURRENCY,
-      signal,
-      (call) =>
+      (call) => {
+        // An abort sends nothing more and fails the call.
+        signal?.throwIfAborted();
         // One request failing below the proxy's own error handling must not lose the others.
-        dispatchCall(ctx, call, signal).catch((err: unknown): Outcome => {
+        return dispatchCall(ctx, call, signal).catch((err: unknown): Outcome => {
           if (signal?.aborted) throw err;
           logger.error("mcp: api_call dispatch failed", {
             error: err instanceof Error ? err.name : typeof err,
@@ -571,7 +535,8 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
           return {
             error: { status: 500, code: "internal_error", detail: "The proxy did not answer." },
           };
-        }),
+        });
+      },
     );
     const { results, failed, budgetSpent } = projectOutcomes(outcomes);
     ctx.observe({

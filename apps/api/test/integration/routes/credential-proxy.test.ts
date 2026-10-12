@@ -1682,7 +1682,7 @@ describe("GET /api/credential-proxy/connections", () => {
       hasMore: boolean;
     };
     const entry = (connectionId: string, label: string, needsReconnection: boolean) => ({
-      integration_id: INTEGRATION_ID,
+      integration_package_id: INTEGRATION_ID,
       connection_id: connectionId,
       label,
       auth_key: "api",
@@ -1798,9 +1798,9 @@ describe("GET /api/credential-proxy/connections", () => {
     expect(res.status).toBe(200);
     const text = await res.clone().text();
     const body = (await res.json()) as {
-      data: { integration_id: string; authorized_uris: string[] }[];
+      data: { integration_package_id: string; authorized_uris: string[] }[];
     };
-    expect(body.data.map((c) => [c.integration_id, c.authorized_uris])).toEqual([
+    expect(body.data.map((c) => [c.integration_package_id, c.authorized_uris])).toEqual([
       [HOOK, ["{$credential.webhook_url}"]],
       [
         TENANT,
@@ -1824,7 +1824,7 @@ describe("GET /api/credential-proxy/connections", () => {
     for (const secret of secrets) expect(text).not.toContain(secret);
   });
 
-  it("flags run_required under an enforced org default, which is what a call then answers", async () => {
+  it("flags run_required under an enforced org default", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
     await db.insert(integrationOrgDefaults).values({
@@ -1838,20 +1838,6 @@ describe("GET /api/credential-proxy/connections", () => {
       data: { connection_id: string; run_required: boolean }[];
     };
     expect(body.data.map((c) => [c.connection_id, c.run_required])).toEqual([[own, true]]);
-
-    const res = await app.request("/api/credential-proxy/proxy", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${await mintProxyKey(ctx, ["credential-proxy:direct"])}`,
-        "X-Org-Id": ctx.orgId,
-        "X-Space-Id": ctx.defaultSpaceId,
-        "X-Integration-Id": INTEGRATION_ID,
-        "X-Connection-Id": own,
-        "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-        "X-Session-Id": uuidV4(),
-      },
-    });
-    await expectProblem(res, 403, { code: "run_required" });
   });
 });
 

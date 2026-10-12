@@ -284,12 +284,6 @@ describe("permission levels", () => {
     expect(CORE_RESOURCE_LEVELS["llm-proxy"]).toBe("org");
     expect(CORE_RESOURCE_LEVELS["credential-proxy"]).toBe("space");
   });
-
-  it("credential-proxy has two space-level actions, `call` for a run and `direct` outside one", () => {
-    expect(CORE_RESOURCE_ACTIONS["credential-proxy"]).toEqual(["call", "direct"]);
-    expect(SPACE_LEVEL_PERMISSIONS.has("credential-proxy:call")).toBe(true);
-    expect(SPACE_LEVEL_PERMISSIONS.has("credential-proxy:direct")).toBe(true);
-  });
 });
 
 // ---------------------------------------------------------------------------

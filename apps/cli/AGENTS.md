@@ -158,7 +158,7 @@ echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
 # `{$credential.<field>}`, write `{{<field>}}` at that place in X-Target and the
 # platform fills it in.
 appstrate api GET /api/credential-proxy/connections \
-  | jq '.data[] | {integration_id, connection_id, label, authorized_uris, run_required}'
+  | jq '.data[] | {integration_package_id, connection_id, label, authorized_uris, run_required}'
 
 # One call: integration and target ride in headers, the method and the body are
 # the upstream's. X-Session-Id is a UUID v4 you choose (it scopes the cookie jar).

@@ -15,7 +15,7 @@ import {
   type ConnectionCallRow,
 } from "@appstrate/db/schema";
 import type { ListEnvelope } from "@appstrate/shared-types";
-import { actorFilter, type Actor } from "../lib/actor.ts";
+import { actorFilter } from "../lib/actor.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import { listResponse } from "../lib/list-response.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -45,8 +45,6 @@ export interface ConnectionCallView {
 
 export interface ConnectionCallFilters {
   connectionId?: string;
-  integrationId?: string;
-  actorType?: Actor["type"];
   actorId?: string;
   runId?: string;
   /** Inclusive bounds on `created_at`. */
@@ -95,10 +93,6 @@ async function listCalls(
       and(
         reach,
         filters.connectionId ? eq(connectionCalls.connectionId, filters.connectionId) : undefined,
-        filters.integrationId
-          ? eq(connectionCalls.integrationId, filters.integrationId)
-          : undefined,
-        filters.actorType ? eq(connectionCalls.actorType, filters.actorType) : undefined,
         filters.actorId ? eq(connectionCalls.actorId, filters.actorId) : undefined,
         filters.runId ? eq(connectionCalls.runId, filters.runId) : undefined,
         filters.startDate ? gte(connectionCalls.createdAt, filters.startDate) : undefined,

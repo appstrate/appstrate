@@ -57,13 +57,13 @@ const connectionCallSchema = {
     },
     auth_method: {
       type: "string",
-      description: "How the caller authenticated (`session`, `api_key`, an OAuth token kind, …).",
+      description: "How the caller authenticated (`api_key`, an OAuth token kind, …).",
     },
     runId: {
       type: ["string", "null"],
       description: "The run the call declared (`X-Run-Id`), if any.",
     },
-    method: { type: "string", description: "HTTP method, upper case." },
+    method: { type: "string", description: "The call's HTTP method." },
     host: {
       type: "string",
       description:
@@ -89,19 +89,6 @@ const connectionCallSchema = {
 } as const;
 
 const filterParameters = [
-  {
-    name: "integration_package_id",
-    in: "query",
-    required: false,
-    schema: { type: "string" },
-    description: "Only the calls made through this integration (`@scope/name`).",
-  },
-  {
-    name: "actor_type",
-    in: "query",
-    required: false,
-    schema: { type: "string", enum: ["user", "end_user"] },
-  },
   {
     name: "actor_id",
     in: "query",

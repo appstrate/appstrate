@@ -1,8 +1,6 @@
--- 0091 — the credential proxy's call journal: one row per call that may have sent a connection's
--- credential. No foreign keys, like `audit_events`: the journal outlives the organization, space,
--- connection, run and key it names. `host` and `path` are the caller's target before
--- substitution, without its query string. The two composite indexes serve the reads' `id DESC`
--- paging: a space's calls, and one connection's.
+-- 0091 — the credential proxy's call journal (`packages/db/src/schema/connection-calls.ts`).
+-- No foreign keys, like `audit_events`: the journal outlives what it names. The two composite
+-- indexes serve the reads' `id DESC` paging: a space's calls, and one connection's.
 CREATE TABLE "connection_calls" (
 	"id" bigserial PRIMARY KEY NOT NULL,
 	"org_id" uuid NOT NULL,
@@ -26,5 +24,4 @@ CREATE TABLE "connection_calls" (
 );
 --> statement-breakpoint
 CREATE INDEX "idx_connection_calls_space_id" ON "connection_calls" USING btree ("space_id","id");--> statement-breakpoint
-CREATE INDEX "idx_connection_calls_connection_id" ON "connection_calls" USING btree ("connection_id","id");--> statement-breakpoint
-CREATE INDEX "idx_connection_calls_run" ON "connection_calls" USING btree ("run_id");
+CREATE INDEX "idx_connection_calls_connection_id" ON "connection_calls" USING btree ("connection_id","id");

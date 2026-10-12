@@ -47,6 +47,5 @@ export const connectionCalls = pgTable(
     // Both reads page on `id DESC`: a space's calls, and one connection's.
     index("idx_connection_calls_space_id").on(table.spaceId, table.id),
     index("idx_connection_calls_connection_id").on(table.connectionId, table.id),
-    index("idx_connection_calls_run").on(table.runId),
   ],
 );

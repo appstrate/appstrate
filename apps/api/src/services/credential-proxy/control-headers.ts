@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The control headers of `/api/credential-proxy/proxy`: what the call is made with (integration,
- * connection, target, session) and how its body travels. The route consumes them and never sends
- * one upstream; a caller that builds the request from typed arguments sets them itself and lets no
- * free-form header carry one. Lower case, as `Headers` yields names. The headers of the platform's
- * own request (`X-Run-Id` among them) are `isPlatformRequestHeader`'s
- * (`@appstrate/connect/platform-request-headers`), not repeated here.
+ * The control headers of `/api/credential-proxy/proxy`, lower case. The route consumes them and
+ * never sends one upstream; the MCP `api_call` tool sets them from typed arguments and lets no
+ * free-form header carry one. `X-Run-Id` is among the platform's own request headers
+ * (`isPlatformRequestHeader`, `@appstrate/connect/platform-request-headers`).
  */
 export const PROXY_CONTROL_HEADERS: ReadonlySet<string> = new Set([
   "x-integration-id",

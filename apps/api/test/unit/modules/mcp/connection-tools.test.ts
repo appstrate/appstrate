@@ -118,7 +118,7 @@ function parseResult(result: CallToolResult): Record<string, unknown> {
 }
 
 const get = (overrides: Record<string, unknown> = {}) => ({
-  integration_id: INTEGRATION,
+  integration_package_id: INTEGRATION,
   method: "GET",
   target: TARGET,
   ...overrides,
@@ -148,8 +148,8 @@ describe("connection tools — declaration", () => {
   });
 
   it("withholds both from a caller who only holds the run path's permission", () => {
-    // `credential-proxy:call` opens the proxy route for a call made FOR a run. `run_id` is an
-    // argument of the declared tool, never a reason to declare it.
+    // `credential-proxy:call` opens the proxy route for a call made FOR a run, which the tools
+    // never make.
     const declared = names([
       "mcp:read",
       "mcp:invoke",
@@ -201,7 +201,7 @@ describe("connection tools — declaration", () => {
 
 describe("list_connections", () => {
   const row = {
-    integration_id: INTEGRATION,
+    integration_package_id: INTEGRATION,
     connection_id: "8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11",
     label: "acct-1",
     auth_key: "api",
@@ -280,7 +280,7 @@ describe("api_call — arguments", () => {
       arguments: ["requests[1].method"],
     });
     expect(
-      await refused({ requests: [{ integration_id: INTEGRATION, method: "GET" }] }),
+      await refused({ requests: [{ integration_package_id: INTEGRATION, method: "GET" }] }),
     ).toMatchObject({ code: "invalid_argument", arguments: ["requests[0].target"] });
     expect(await refused({ requests: [get({ body: 42 })] })).toMatchObject({
       code: "invalid_argument",
@@ -374,7 +374,6 @@ describe("api_call — dispatch", () => {
           connection_id: "8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11",
         }),
       ],
-      run_id: "run_abc",
       max_response_bytes: 1000,
       concurrency: 1,
     });
@@ -385,7 +384,7 @@ describe("api_call — dispatch", () => {
       expect(new URL(req.url).pathname).toBe("/api/credential-proxy/proxy");
       expect(req.headers.get("X-Integration-Id")).toBe(INTEGRATION);
       expect(req.headers.get("X-Session-Id")).toBe(payload.session_id as string);
-      expect(req.headers.get("X-Run-Id")).toBe("run_abc");
+      expect(req.headers.has("X-Run-Id")).toBe(false);
       expect(req.headers.get("X-Max-Response-Size")).toBe("1000");
       // The caller's auth context and the trusted re-entry marker, as every dispatched tool.
       expect(req.headers.get("authorization")).toBe("Bearer tok");
@@ -406,9 +405,8 @@ describe("api_call — dispatch", () => {
     expect(second.headers.get("X-Connection-Id")).toBe("8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11");
   });
 
-  it("names no run and asks for the default cap unless told otherwise", async () => {
+  it("asks for the default cap unless told otherwise", async () => {
     const { calls } = await apiCall({ requests: [get()] });
-    expect(calls[0]!.headers.has("X-Run-Id")).toBe(false);
     expect(calls[0]!.headers.get("X-Max-Response-Size")).toBe(String(32 * 1024));
   });
 

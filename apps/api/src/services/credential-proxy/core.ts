@@ -517,9 +517,13 @@ function unusableCredential(
 }
 
 /** A relayed body whose read failed after its headers arrived, as the proxy's typed error. */
-export function bodyReadError(err: unknown, redactedHost: string): ProxyCallError {
+export function bodyReadError(
+  err: unknown,
+  redactedHost: string,
+  connectionId: string,
+): ProxyCallError {
   const code = transportFailureCode(err);
-  return new ProxyCallError(code, upstreamFailureDetail(redactedHost, code));
+  return new ProxyCallError(code, upstreamFailureDetail(redactedHost, code), connectionId);
 }
 
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */

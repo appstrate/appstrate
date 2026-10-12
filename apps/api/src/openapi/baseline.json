@@ -25296,7 +25296,7 @@
                       "items": {
                         "type": "object",
                         "required": [
-                          "integration_id",
+                          "integration_package_id",
                           "connection_id",
                           "label",
                           "auth_key",
@@ -25307,7 +25307,7 @@
                           "run_required"
                         ],
                         "properties": {
-                          "integration_id": {
+                          "integration_package_id": {
                             "type": "string",
                             "description": "Integration package id: the `X-Integration-Id` of a call."
                           },
@@ -27203,24 +27203,6 @@
             }
           },
           {
-            "name": "integration_package_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Only the calls made through this integration (`@scope/name`)."
-          },
-          {
-            "name": "actor_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["user", "end_user"]
-            }
-          },
-          {
             "name": "actor_id",
             "in": "query",
             "required": false,
@@ -27384,7 +27366,7 @@
                           },
                           "auth_method": {
                             "type": "string",
-                            "description": "How the caller authenticated (`session`, `api_key`, an OAuth token kind, …)."
+                            "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
                           },
                           "runId": {
                             "type": ["string", "null"],
@@ -27392,7 +27374,7 @@
                           },
                           "method": {
                             "type": "string",
-                            "description": "HTTP method, upper case."
+                            "description": "The call's HTTP method."
                           },
                           "host": {
                             "type": "string",
@@ -27474,24 +27456,6 @@
             "description": "Only the calls made with this connection."
           },
           {
-            "name": "integration_package_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Only the calls made through this integration (`@scope/name`)."
-          },
-          {
-            "name": "actor_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["user", "end_user"]
-            }
-          },
-          {
             "name": "actor_id",
             "in": "query",
             "required": false,
@@ -27655,7 +27619,7 @@
                           },
                           "auth_method": {
                             "type": "string",
-                            "description": "How the caller authenticated (`session`, `api_key`, an OAuth token kind, …)."
+                            "description": "How the caller authenticated (`api_key`, an OAuth token kind, …)."
                           },
                           "runId": {
                             "type": ["string", "null"],
@@ -27663,7 +27627,7 @@
                           },
                           "method": {
                             "type": "string",
-                            "description": "HTTP method, upper case."
+                            "description": "The call's HTTP method."
                           },
                           "host": {
                             "type": "string",

@@ -240,9 +240,9 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   - a named `X-Connection-Id` that is not one of the caller's own (another
     member's connection, shared into the space or not, or an unknown id)
     answers one and the same `404 credential_not_found`;
-  - with nothing named: the caller's single own connection, `404
-credential_not_found` for none, `409 must_choose_connection` for several,
-    listing those and no one else's.
+  - with nothing named: the caller's single own connection,
+    `404 credential_not_found` for none, `409 must_choose_connection` for
+    several, listing those and no one else's.
 
   `400 connection_not_in_org_default` no longer exists. The `403` of a caller
   without the permission names `credential-proxy:direct` and the run path. A
@@ -293,8 +293,9 @@ credential_not_found` for none, `409 must_choose_connection` for several,
 
 - **`appstrate run` says when its integration calls are made outside a run**
   (#1894). A run executed locally with no run registered on the instance
-  (`--report=false`, or a registration that failed under `--report-fallback
-console`) prints once, before it starts, that its integration calls require
+  (`--report=false`, or a registration that failed under
+  `--report-fallback console`) prints once, before it starts, that its
+  integration calls require
   `credential-proxy:direct` and reach the caller's own connections only, and
   that with `--report` they go through the run (`credential-proxy:call`).
   Nothing is printed under `--json`. A refused call reaches the agent as the
@@ -875,7 +876,7 @@ console`) prints once, before it starts, that its integration calls require
 
 - **`GET /api/credential-proxy/connections`** (#1894): what the caller can
   call through the credential proxy outside a run, read with the rule the
-  proxy applies. Per connection: the `integration_id` and `connection_id` to
+  proxy applies. Per connection: the `integration_package_id` and `connection_id` to
   send, its label and auth, `scopes_granted`, the auth's `authorized_uris`,
   `allow_all_uris`, and the two flags a call would still be refused on,
   `needs_reconnection` and `run_required`. It decrypts nothing: an
@@ -918,8 +919,8 @@ console`) prints once, before it starts, that its integration calls require
   `max_response_bytes`, or the platform's refusal of that request, which does
   not stop the others. One result carries a bounded total of body bytes. The
   tool generates the proxy session and returns its `session_id`, to pass back
-  to keep the upstream's cookies; `run_id` makes the calls for one of the
-  caller's own remote runs, which requires `credential-proxy:call`. Guide:
+  to keep the upstream's cookies. It names no run: a connection another
+  member shared is reached by delegating to an agent run. Guide:
   `docs/guides/connecting-mcp-clients.md`.
 
 - **Boot warning for environment keys this version does not read.** One `warn`
@@ -1124,8 +1125,8 @@ console`) prints once, before it starts, that its integration calls require
 - **An `Idempotency-Key` sent to the credential proxy reaches the upstream**
   (#1894). On `/api/credential-proxy/proxy` the header is the upstream's
   (Stripe's, for one): it is relayed with the caller's other headers,
-  whatever the verb, where a mutating call carrying one was refused `400
-idempotency_not_supported`. The platform de-duplicates nothing on it.
+  whatever the verb, where a mutating call carrying one was refused
+  `400 idempotency_not_supported`. The platform de-duplicates nothing on it.
 
 - **A session is refused for a user with no user row.** The session hook throws
   instead of creating a session without a realm.

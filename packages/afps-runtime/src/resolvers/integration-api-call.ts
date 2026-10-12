@@ -686,11 +686,8 @@ interface RemoteAppstrateIntegrationResolverOptions {
  * the resolved connection's `authorized_uris` and injects the configured
  * header, identically across every `{ns}__api_call` surface.
  *
- * Which connection a call resolves depends on `extraHeaders`: with `X-Run-Id`
- * it is one the run bound; without, the call is made outside a run and
- * resolves one of the caller's own connections only. A refusal (the
- * permission of the path taken, `403 run_required` for an integration under
- * an enforced org default, `404 credential_not_found`) comes back as the
+ * With `X-Run-Id` in `extraHeaders` a call resolves a connection the run
+ * bound; without, one of the caller's own. A refusal comes back as the
  * platform's problem document, serialised like any upstream response.
  */
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {

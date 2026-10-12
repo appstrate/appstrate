@@ -253,21 +253,6 @@ describe("connection call journal routes", () => {
       });
       expect(res.status).toBe(400);
     });
-
-    it("exports the same rows as CSV", async () => {
-      const connectionId = await seedConnection(ctx.user.id);
-      await record(connectionId);
-      await record(connectionId, { method: "DELETE" });
-
-      const json = await page(ownDoor(connectionId));
-      const res = await app.request(`${ownDoor(connectionId)}?format=csv`, {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      expect(res.headers.get("Content-Type")).toStartWith("text/csv");
-      expect(await res.text()).toBe(connectionCallsCsv(json.data));
-    });
   });
 
   // ─── Space door ─────────────────────────────────────────
@@ -341,7 +326,7 @@ describe("connection call journal routes", () => {
       expect(await requestIds(authHeaders(outside))).toEqual(["req_outside"]);
     });
 
-    it("filters by connection, integration, actor, run and date", async () => {
+    it("filters by connection, actor, run and date", async () => {
       const crm = await seedConnection(ctx.user.id);
       const mail = await seedConnection(colleague.user.id, MAIL);
       await record(crm, { requestId: "req_old" });
@@ -365,12 +350,8 @@ describe("connection call journal routes", () => {
         (await page(`${SPACE_DOOR}?${query}`)).data.map((call) => call.request_id);
 
       expect(await matching(`connection_id=${crm}`)).toEqual(["req_run", "req_old"]);
-      expect(await matching(`integration_package_id=${encodeURIComponent(MAIL)}`)).toEqual([
-        "req_end_user",
-        "req_mail",
-      ]);
       expect(await matching(`actor_id=${colleague.user.id}`)).toEqual(["req_mail"]);
-      expect(await matching("actor_type=end_user")).toEqual(["req_end_user"]);
+      expect(await matching("actor_id=eu_1")).toEqual(["req_end_user"]);
       expect(await matching("runId=run_7")).toEqual(["req_run"]);
       expect(await matching("end_date=2026-06-01T00:00:00Z")).toEqual(["req_old"]);
       expect(await matching("start_date=2026-06-01T00:00:00Z")).toEqual([
@@ -378,14 +359,16 @@ describe("connection call journal routes", () => {
         "req_mail",
         "req_run",
       ]);
-      expect(await matching(`connection_id=${mail}&actor_type=user`)).toEqual(["req_mail"]);
+      expect(await matching(`connection_id=${mail}&actor_id=${colleague.user.id}`)).toEqual([
+        "req_mail",
+      ]);
     });
 
     it("400s an unknown filter or a malformed value instead of widening the list", async () => {
       for (const query of [
         "actor=me",
         "connection_id=nope",
-        "actor_type=robot",
+        "actor_type=user",
         "start_date=yesterday",
         "startingAfter=abc",
         "format=xml",

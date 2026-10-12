@@ -13,7 +13,7 @@
  *
  * Three modes:
  *   - `auto` — on when a profile or API key is available, off otherwise
- *   - `true` — force on; fail if no profile / app / token
+ *   - `true` — force on; fail if no profile or API key
  *   - `false` — always off, console-only
  *
  * Failure handling is separated from the sink itself:

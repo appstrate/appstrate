@@ -209,7 +209,7 @@ export async function forceRefreshIntegrationProxyCredentials(
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
 interface DirectProxyConnection {
-  integration_id: string;
+  integration_package_id: string;
   connection_id: string;
   label: string;
   auth_key: string;
@@ -249,7 +249,7 @@ export async function listDirectProxyConnections(
     if (!authDef) return [];
     return [
       {
-        integration_id: row.integrationId,
+        integration_package_id: row.integrationId,
         connection_id: row.id,
         label: row.label,
         auth_key: row.authKey,
@@ -262,7 +262,7 @@ export async function listDirectProxyConnections(
     ];
   });
   // Grouped by integration; within one, oldest first.
-  return listed.sort((a, b) => a.integration_id.localeCompare(b.integration_id));
+  return listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
 }
 
 // ─────────────────────────────────────────────

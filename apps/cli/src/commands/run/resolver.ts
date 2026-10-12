@@ -14,14 +14,10 @@
  *     either an `apst_…` API key (headless CI / GitHub Action) or a
  *     device-flow JWT access token from `appstrate login` (interactive
  *     CLI), sent as a single `Authorization: Bearer <token>` header — see
- *     `apps/cli/src/commands/run.ts` for the resolution priority. What it
- *     must grant depends on the path the call takes:
- *       * for a run registered on the instance (`X-Run-Id` in
- *         `extraHeaders`): `credential-proxy:call`, which registering
- *         the run (`agents:run`) does not carry, and the call reaches
- *         the connections that run bound;
- *       * outside a run (no `X-Run-Id`): `credential-proxy:direct`, and
- *         the call reaches the caller's own connections only.
+ *     `apps/cli/src/commands/run.ts` for the resolution priority. It must
+ *     grant `credential-proxy:call` when `extraHeaders` names a registered
+ *     run (`X-Run-Id`), `credential-proxy:direct` otherwise: the call then
+ *     reaches the caller's own connections only.
  *
  *   - `local`  — reads a local JSON creds file (integration-keyed) for
  *     offline runs. Credentials are plaintext on disk; the CLI never

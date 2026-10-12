@@ -113,11 +113,8 @@ export interface CoreResources {
   "api-keys": "read" | "create" | "revoke";
   spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  // `/api/credential-proxy/proxy`. `call` = for a run (`X-Run-Id`), reaching the
-  // connections that run bound; held by the `admin` and `builder` presets.
-  // `direct` = outside a run, on the caller's own connections; `admin` is the
-  // one preset holding it, and a personal space grants it to nobody. Below
-  // `admin` a custom space role grants either.
+  // `/api/credential-proxy/proxy`: `call` for a run (`X-Run-Id`), reaching the
+  // connections that run bound; `direct` outside a run, on the caller's own.
   "credential-proxy": "call" | "direct";
   "llm-proxy": "call";
   // AFPS integrations (marketplace UI).

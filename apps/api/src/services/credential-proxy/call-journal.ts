@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The credential proxy's call journal (`connection_calls`): one row per call that may have sent a
- * connection's credential, whatever its outcome. `routes/credential-proxy.ts` writes it for a call
- * the upstream answered and for one that failed after dispatch, never for a refusal decided before
- * anything was sent. Best-effort like `recordAudit`: a fault is logged and swallowed, so a proxied
- * call never depends on the journal; the route hands the promise to `trackAudit`
- * (`services/audit.ts`), off its response path, and graceful shutdown drains it.
+ * The writer of the credential proxy's call journal (`connection_calls`, described on the table).
+ * Best-effort like `recordAudit`: a fault is logged and swallowed, so a proxied call never depends
+ * on the journal; the route hands the promise to `trackAudit` (`services/audit.ts`), off its
+ * response path, and graceful shutdown drains it.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -17,12 +15,10 @@ import { templateLocation } from "@appstrate/afps-runtime/resolvers";
 import { actorFromIds, type Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 
+// Caps on the text a caller writes.
 const MAX_METHOD_LENGTH = 16;
 const MAX_HOST_LENGTH = 255;
 const MAX_PATH_LENGTH = 2048;
-const MAX_OUTCOME_LENGTH = 64;
-/** The `integer` column's upper bound. */
-const MAX_DURATION_MS = 2_147_483_647;
 
 interface ConnectionCall {
   orgId: string;
@@ -53,13 +49,17 @@ export async function recordConnectionCall(input: ConnectionCall): Promise<void>
         endUserId: integrationConnections.endUserId,
       })
       .from(integrationConnections)
-      .where(eq(integrationConnections.id, input.connectionId))
+      .where(
+        and(
+          eq(integrationConnections.id, input.connectionId),
+          eq(integrationConnections.orgId, input.orgId),
+        ),
+      )
       .limit(1);
     const owner = connection ? actorFromIds(connection.userId, connection.endUserId) : null;
     // Read on the template, never the substituted URL: no userinfo, query string or fragment, a
     // placeholder as written, so neither half holds a decrypted credential value.
     const { host, path } = templateLocation(input.target);
-    const durationMs = Number.isFinite(input.durationMs) ? Math.round(input.durationMs) : 0;
     await db.insert(connectionCalls).values({
       orgId: input.orgId,
       spaceId: input.spaceId,
@@ -72,11 +72,12 @@ export async function recordConnectionCall(input: ConnectionCall): Promise<void>
       apiKeyId: input.apiKeyId,
       authMethod: input.authMethod,
       runId: input.runId,
-      method: input.method.toUpperCase().slice(0, MAX_METHOD_LENGTH),
+      method: input.method.slice(0, MAX_METHOD_LENGTH),
       host: host.slice(0, MAX_HOST_LENGTH),
       path: path.slice(0, MAX_PATH_LENGTH),
-      outcome: input.outcome.slice(0, MAX_OUTCOME_LENGTH),
-      durationMs: Math.min(Math.max(durationMs, 0), MAX_DURATION_MS),
+      outcome: input.outcome,
+      // A wall-clock difference: a clock stepped back mid-call reads negative.
+      durationMs: Math.max(input.durationMs, 0),
       requestId: input.requestId,
     });
   } catch (err) {

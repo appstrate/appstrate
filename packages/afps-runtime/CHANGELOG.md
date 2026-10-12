@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the host and path a target template names (#1894)
+
+- `templateLocation` (`./resolvers`) returns the `host` and `path` a URL
+  template names, each `{{key}}` written as `{{key}}`, without userinfo, query
+  string or fragment: what a journal keeps of a target. `templateHost` is its
+  `host`.
+
 ### Changed — `api_call` values encoded for their place (#1915, BREAKING)
 
 - `prepareApiCallRequest` (`./resolvers`) renders the target, the headers and

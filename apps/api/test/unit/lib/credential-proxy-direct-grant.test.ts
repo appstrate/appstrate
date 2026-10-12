@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Issue #1894: the credential proxy has two permissions. `credential-proxy:call`,
+ * The credential proxy has two permissions. `credential-proxy:call`,
  * the call for a run, is held by `admin` and `builder`. `credential-proxy:direct`,
  * the call outside a run, is held by `admin` alone: below it a custom space role
  * grants it, and an API key carries it only from a creator who holds it.

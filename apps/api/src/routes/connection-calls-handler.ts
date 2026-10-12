@@ -31,8 +31,6 @@ const CSV_PAGE = { defaultLimit: 10_000, maxLimit: 10_000 };
 
 // Strict: an unknown or misspelled filter is a 400, never a silently widened journal.
 const ownCallsQueryShape = {
-  integration_package_id: z.string().min(1).optional(),
-  actor_type: z.enum(["user", "end_user"]).optional(),
   actor_id: z.string().min(1).optional(),
   runId: z.string().min(1).optional(),
   start_date: z.iso.datetime({ offset: true }).optional(),
@@ -61,8 +59,6 @@ function readQuery(
   return {
     filters: {
       connectionId: query.connection_id?.toLowerCase(),
-      integrationId: query.integration_package_id,
-      actorType: query.actor_type,
       actorId: query.actor_id,
       runId: query.runId,
       startDate: query.start_date ? new Date(query.start_date) : undefined,

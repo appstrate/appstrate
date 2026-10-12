@@ -79,6 +79,7 @@ import { filePurposeValues } from "@appstrate/db/schema";
 import {
   asRecord,
   asString,
+  dispatchHeaders,
   RESOURCE_BLOB_MAX_BYTES,
   jsonResult,
   refusalResult,
@@ -1238,8 +1239,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     // marker (same as invoke_operation), and route the launch and poll fetches
     // back through the platform app. `launchRunAndWait` (shared with the chat
     // paths) owns the launch body construction + validation for both kinds.
-    const dispatchHeaders = new Headers(ctx.authHeaders);
-    dispatchHeaders.set(...internalDispatchHeader());
+    const forwarded = dispatchHeaders(ctx.authHeaders);
     const dispatchFetch = ((input, init) => {
       const request =
         input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
@@ -1248,7 +1248,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
 
     const launched = await launchRunAndWait(args, {
       origin: ctx.origin,
-      headers: dispatchHeaders,
+      headers: forwarded,
       fetch: dispatchFetch,
       signal,
       // The external MCP surface hands the link to the human driving its
@@ -1297,7 +1297,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const stopHeartbeat = startProgressHeartbeat(extra, runId);
     const waitOpts = {
       origin: ctx.origin,
-      headers: dispatchHeaders,
+      headers: forwarded,
       fetch: dispatchFetch,
       signal,
     };
@@ -1351,9 +1351,9 @@ const MAX_FILE_LIST_LIMIT = 100;
 
 /** Dispatch an in-process GET, forwarding the caller's auth + trusted marker. */
 function dispatchGet(ctx: McpToolContext, url: URL): Promise<Response> {
-  const headers = new Headers(ctx.authHeaders);
-  headers.set(...internalDispatchHeader());
-  return ctx.dispatch(new Request(url.toString(), { method: "GET", headers }));
+  return ctx.dispatch(
+    new Request(url.toString(), { method: "GET", headers: dispatchHeaders(ctx.authHeaders) }),
+  );
 }
 
 /** Project a `FileDto` onto the compact row the list tool returns. */
@@ -1666,13 +1666,11 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (): Promise<CallToolResult> => {
     const start = performance.now();
-    const headers = new Headers(ctx.authHeaders);
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
     // org-pinned MCP token reach a space-scoped route, in the space it entered.
-    headers.set(...internalDispatchHeader());
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",
-      headers,
+      headers: dispatchHeaders(ctx.authHeaders),
     });
     const response = await ctx.dispatch(request);
     emit(ctx, {
@@ -1737,11 +1735,9 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
-    // `credential-proxy:direct`, read off the listing's route: the proxy
-    // route's own guard also opens on `credential-proxy:call`, the permission
-    // of a call made for a run, and `run_id` is an argument of the declared
-    // tool, never a reason to declare it. `mcp:invoke` is checked here and nowhere else:
-    // `api_call` acts on third parties.
+    // `credential-proxy:direct`, read off the listing's route: the proxy route
+    // also opens on `credential-proxy:call`, which declares nothing here.
+    // `mcp:invoke` is checked here and nowhere else.
     proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
   };
 }
