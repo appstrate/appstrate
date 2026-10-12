@@ -179,6 +179,33 @@ integration_connections WHERE shared_with_org;` tells whether the step
   The dry run prints that number. A second `--apply` promotes nothing.
   Details: `scripts/migration/README.md`.
 
+- **After the deploy, run `scripts/migration/0045-pin-space-connection.ts`,
+  dry, then with `--apply`, right after `0041 --apply` and `0043 --apply`**
+  (#1929). Those two widen members' connections to the organization, so a
+  member who connected one integration from two spaces owns two connections
+  in each, and a run binds by default only its actor's one own connection (see
+  Changed). Where such a member made exactly one of them in a space, `0045`
+  pins it for them (a member pin, audited `integration.member_pin.upserted` by
+  the `system` actor) on each agent one of their runs in that space bound to
+  it by default, unless a pin of theirs, an admin pin or an org default
+  already names a set there. With the app up and a `pg_dump` taken, run the
+  dry run
+  (`set -a && . ./.env && set +a && bun scripts/migration/0045-pin-space-connection.ts`),
+  which writes nothing, read the pins it lists per organization and the
+  enabled schedules whose next fire binds through one, then run it again with
+  `--apply`. It commits one transaction per organization and exits 1 if a pin
+  is left to write; a second run finds nothing to pin. Without it, those
+  members' agents in those spaces answer `must_choose_connection` from the
+  widening on, scheduled fires included. Details:
+  `scripts/migration/README.md`.
+
+- **API clients that write schedules must name their connection sets**
+  (#1929). The write of an enabled schedule is refused (`409`) for an
+  integration its actor owns a connection for and no pin, org default or
+  `connection_overrides` entry covers; schedules already stored keep firing
+  and are refused at their next enabled write until the set is named (see
+  Changed).
+
 ### Changed
 
 - **BREAKING (API): connect and scopes** (#1913).
@@ -203,8 +230,9 @@ integration_connections WHERE shared_with_org;` tells whether the step
   - **The picker's least-privilege order is the server's.** Each
     `candidates[]` item of `GET /api/agents/{scope}/{name}/connection-readiness`
     carries `scope_fit` (`exact`, `unjudged`, `broader`, `missing`), and the
-    list is served least privilege first, the order the resolver's fallback
-    binds by. The dashboard lists it as served and no longer ranks on its own.
+    list is served least privilege first, the order a `must_choose_connection`
+    item lists its `candidate_connections` in (#1929). The dashboard lists it
+    as served and no longer ranks on its own.
   - **A partial OAuth consent is reported.** The callback page names the
     requested scopes the consent left out, its completion message carries them
     as `scopesDenied`, the dashboard shows them, and the audit records
@@ -423,9 +451,10 @@ integration_connections WHERE shared_with_org;` tells whether the step
   which client mints its new connections, never which existing ones serve
   it. The owner shares a connection with chosen spaces; losing access to a space
   withdraws that share only, and deleting a space withdraws it from every
-  share. With several of their own connections, a member's run binds the one
-  made in the run's space. Promoting a space OAuth client to the org widens
-  its connections.
+  share. With several of their own connections serving an integration, a
+  member's run answers `must_choose_connection`, wherever each was made, until
+  a pin, an org default or `connection_overrides` names the set (#1929).
+  Promoting a space OAuth client to the org widens its connections.
 - **Remote MCP clients registered by DCR/CIMD live at the org tier**
   (#1870): one client per organization, integration, auth and authorization
   server, reused by every space. A client registered in a space before this
@@ -484,19 +513,44 @@ integration_connections WHERE shared_with_org;` tells whether the step
   agent selecting `create_draft` gets `gmail.compose` from its tool; one with
   `tools: "*"` declares it the same way. Existing connections keep what they
   were granted.
-- **The fallback binds among your own connections of one account** (#1871):
-  when every own connection serving an integration is an `oauth2` one of the
-  same known account, auth and instance (connection variables), the run binds
-  the least-privileged one covering the agent's scopes plus the auth's
-  `default_scopes` (else the closest, which answers `insufficient_scopes`)
-  instead of answering `must_choose_connection`, whether or not the agent
-  declares scopes. Grants beyond what the agent and the defaults need weigh
-  before a missing default and before health: a narrow connection short of a
-  newer default is not swapped for a write-capable one, and a dead narrow one
-  is reported `needs_reconnection`, never swapped for a live broader one. A new
-  connection made for one agent no longer breaks the others. Several
-  accounts, auths or instances, an unknown identity, and a credential-proxy
-  call without an agent selection still ask.
+- **With no pin, default or override, a run binds its actor's one own
+  connection and asks among several** (#1871, #1929). The cascade's last
+  layer binds the actor's one own connection on an auth serving the agent's
+  selection (`source: fallback_auto`); several answer
+  `must_choose_connection`, whatever their accounts, their scopes and the
+  space each was made in. A member's connection is usable in every space of
+  its organization (#1870), so a member who connected one integration from
+  two spaces owns two in each: their agents there ask until an admin pin, an
+  org default, a member pin or `connection_overrides` names the set, and a
+  second connection made later opens the same choice for every agent no layer
+  names a set for. Health never changes the answer: an only own connection
+  that is dead is bound and reported `needs_reconnection`. A connection
+  another member shares is never bound without an explicit pick. The item's
+  `title` is `Connection Choice Required` and, over the actor's own
+  connections, its message is
+  `Integration '<id>' needs a connection choice — pick one.` Its
+  `candidate_connections` list every serving connection, own and shared,
+  least privilege first: the order of readiness `candidates[]` (#1913), so a
+  connection's scopes order the list and choose nothing. The credential proxy
+  outside a run follows the same rule, `X-Connection-Id` naming one among
+  several.
+
+- **BREAKING (API): the write of an enabled schedule names its connection
+  sets** (#1929). Creating a schedule, or updating one it leaves enabled (a
+  rename included), answers `409 missing_integration_connection` with one
+  `must_choose_connection` item per integration whose set nothing names (no
+  admin pin, org default, member pin of the schedule's actor or
+  `connection_overrides` entry) while the actor owns a connection serving it,
+  a single one included: the write takes no default. Nobody answers at a fire
+  the choice a second connection made later would open, so the set is named
+  at the write. Remedy: name one of the item's `candidate_connections` in the
+  schedule's `connection_overrides`, or have the actor pin one for the agent
+  (an end-user actor holds no pin). A caller writing for another member is
+  offered only the connections shared in the space. Fires are unchanged: a
+  schedule stored without a set keeps firing as before, and its next enabled
+  write is refused until the set is named; a write that leaves the schedule
+  disabled is not refused over it. The dashboard's schedule form names the
+  caller's own default connection when it saves a schedule running as them.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -750,6 +804,19 @@ integration_connections WHERE shared_with_org;` tells whether the step
   version while readiness reads the draft for a writer, so re-check readiness
   with `version=<version_ref>`. The dashboard's recovery modal reads it
   instead of remembering the version itself.
+- **`POST /api/runs/remote` takes `connection_overrides`** (#1929), the
+  per-run connection sets of the other launch routes, for both source shapes:
+  applied to the readiness check and to the run's binding, and stored on the
+  run. It is how a remote launch answers `must_choose_connection`. A set of
+  several is refused with `409 missing_integration_connection` and a
+  `remote_binds_one_connection` item, since a remote run binds one connection
+  per integration.
+- **`appstrate run --connection <integration>=<connection id>`** (#1929),
+  repeatable; several values for one integration form its set. The picks are
+  sent as the launch's `connection_overrides`, by `--remote` and by a local
+  run reporting to the instance; a run that registers nothing on the instance
+  refuses the flag. A `must_choose_connection` refusal prints each candidate
+  on its own line with the flag naming it.
 
 - **Expo — EAS builds, submissions, Workflows and store feedback over Expo's
   hosted MCP server (#1834).** `@appstrate/expo-mcp@1.0.0` joins the fixed-host
@@ -1099,11 +1166,13 @@ integration_connections WHERE shared_with_org;` tells whether the step
 - **An `insufficient_scopes` item no longer carries a `connect_url`** (#1871).
   The link upgraded the existing connection in place, which widens every agent
   that uses it. MCP clients are pointed at a new connection with the item's
-  `required_scopes`, bound by the layer its `source` names. The OpenAPI
-  descriptions of the connect kickoffs, `connection_id`, pins and space
-  defaults state the same rule, and an `integration.connection.reconnected`
-  audit event that changed a connection's granted scopes carries them before
-  and after (`scopesGranted`).
+  `required_scopes`, which the retry names in `connection_overrides` or a
+  pin: a retry naming none answers `must_choose_connection` when the item's
+  `source` is `fallback_auto` (#1929). The OpenAPI descriptions of the connect
+  kickoffs, `connection_id`, pins and space defaults state the same rule, and
+  an `integration.connection.reconnected` audit event that changed a
+  connection's granted scopes carries them before and after
+  (`scopesGranted`).
 - **A reconnect no longer adds the current agent's scopes** (#1871): a
   `needs_reconnection` item carries no `required_scopes`, and its link
   re-consents what the connection holds plus the auth's `default_scopes`. It
