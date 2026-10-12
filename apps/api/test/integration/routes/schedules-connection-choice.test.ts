@@ -15,12 +15,13 @@
  * judged with nothing to report.
  */
 
-import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { eq, sql } from "drizzle-orm";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
+import { eq, like, sql } from "drizzle-orm";
 import {
   integrationConnections,
   integrationOrgDefaults,
   integrationPins,
+  oauthResource,
   runs,
   schedules,
 } from "@appstrate/db/schema";
@@ -33,7 +34,20 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedEndUser, seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
+import {
+  seedApiKey,
+  seedEndUser,
+  seedPackage,
+  seedPackageVersion,
+  seedSchedule,
+} from "../../helpers/seed.ts";
+import { flushRedis } from "../../helpers/redis.ts";
+import { inSpace, mcpRpc } from "../../helpers/mcp.ts";
+import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
+import { getMcpOrgResourceUri } from "../../../src/lib/audiences.ts";
+import { resetOidcGuardsLimiters } from "../../../src/modules/oidc/auth/guards.ts";
+import { authorizationCodeFlow } from "../../../src/modules/oidc/test/helpers/authorization-code-flow.ts";
+import mcpModule from "../../../src/modules/mcp/index.ts";
 import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 import {
   createFakeOrchestrator,
@@ -53,6 +67,8 @@ import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/i
 import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
+// `invoke_operation` dispatches in-process to the registered app.
+await registerTestPlatformApp();
 
 const AGENT = "@schedchoice/agent";
 const INTEGRATION = "@schedchoice/svc";
@@ -888,6 +904,117 @@ describe("schedule writes for an end user — the caller picks among its connect
     const named = await createForEndUser({ connection_overrides: { [INTEGRATION]: [only] } });
     expect(named.status).toBe(201);
   });
+});
+
+describe("schedule writes — one rule whatever the door", () => {
+  const REDIRECT_URI = "http://localhost:9917/callback";
+  let ctx: TestContext;
+  let only: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    resetOidcGuardsLimiters();
+    ctx = await createTestContext({ orgSlug: "schedchoice" });
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(true),
+    });
+    only = await seedIntegrationConnection(ctx, INTEGRATION);
+  });
+
+  // `oauth_resources` sits outside `truncateAll`.
+  afterEach(async () => {
+    await db
+      .delete(oauthResource)
+      .where(like(oauthResource.identifier, `${getMcpOrgResourceUri(ctx.orgId)}%`));
+  });
+
+  /** `createSchedule` through one door: the HTTP status and the JSON body. */
+  type Create = (body: Record<string, unknown>) => Promise<{ status: number; body: unknown }>;
+
+  const doors: Record<string, () => Promise<Create>> = {
+    "an API key of the member": async () => {
+      const key = await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["schedules:read", "schedules:write"],
+      });
+      return async (body) => {
+        const res = await app.request(`/api/agents/${AGENT}/schedules`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        return { status: res.status, body: await res.json() };
+      };
+    },
+    "invoke_operation with a minted MCP instance token": async () => {
+      await mcpModule.events!.onOrgCreate!(ctx.orgId, ctx.user.email);
+      const registered = await app.request("/api/auth/oauth2/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_name: "MCP client (schedule write)",
+          redirect_uris: [REDIRECT_URI],
+          grant_types: ["authorization_code", "refresh_token"],
+          response_types: ["code"],
+          token_endpoint_auth_method: "none",
+        }),
+      });
+      const { token } = await authorizationCodeFlow(app, {
+        cookie: ctx.cookie,
+        clientId: ((await registered.json()) as { client_id: string }).client_id,
+        redirectUri: REDIRECT_URI,
+        scope: "openid mcp:read mcp:invoke",
+        resource: getMcpOrgResourceUri(ctx.orgId),
+      });
+      const headers = inSpace(
+        { Authorization: `Bearer ${String(token.access_token)}`, "X-Org-Id": ctx.orgId },
+        ctx.defaultSpaceId,
+      );
+      return async (body) => {
+        const [scope, name] = AGENT.split("/");
+        const { envelope } = await mcpRpc(app)(headers, {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "invoke_operation",
+            arguments: { operation_id: "createSchedule", path_params: { scope, name }, body },
+          },
+        });
+        const content = envelope.result!.content as { text: string }[];
+        return JSON.parse(content[0]!.text) as { status: number; body: unknown };
+      };
+    },
+  };
+
+  for (const [door, open] of Object.entries(doors)) {
+    it(`asks ${door} to name the actor's one connection, and stores the schedule once named`, async () => {
+      const create = await open();
+
+      const refused = await create({ cron_expression: "0 9 * * *" });
+      expect(refused.status).toBe(409);
+      expect(refused.body).toMatchObject({
+        code: "missing_integration_connection",
+        errors: [{ code: "must_choose_connection", candidate_connections: [{ id: only }] }],
+      });
+      expect(await db.select().from(schedules)).toHaveLength(0);
+
+      const named = await create({
+        cron_expression: "0 9 * * *",
+        connection_overrides: { [INTEGRATION]: [only] },
+      });
+      expect(named.status).toBe(201);
+      expect(await db.select().from(schedules)).toHaveLength(1);
+    });
+  }
 });
 
 describe("schedule fires — a named set binds, an unnamed one takes the fallback", () => {

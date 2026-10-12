@@ -35,6 +35,7 @@ interface AgentReadinessParams {
   actor: Actor;
   /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
+  /** The resolver's `noFallback`: the actor's own connections are a choice, one included. */
   noFallback?: boolean;
   /**
    * Per-call-graph memo for integration manifest fetches. The run kickoff
