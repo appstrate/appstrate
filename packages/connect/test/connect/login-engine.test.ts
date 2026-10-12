@@ -74,7 +74,12 @@ describe("runLogin — declarative login (AFPS)", () => {
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
     const config: LoginConfig = {
       login: {
-        request: { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
+        request: {
+          method: "POST",
+          url: "https://idp.example.com/token",
+          content_type: "text/plain",
+          body: "p={{password}}",
+        },
         outputs: { access_token: "$response.body#/access_token" },
       },
     };
@@ -248,7 +253,10 @@ describe("runLogin — security limits", () => {
   it("fails closed on an unresolved placeholder", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
-      login: { ...baseLogin, request: { ...baseLogin.request, body: "x={{missing}}" } },
+      login: {
+        ...baseLogin,
+        request: { ...baseLogin.request, content_type: "text/plain", body: "x={{missing}}" },
+      },
     };
     await expect(
       runLogin(config, {
@@ -301,7 +309,10 @@ describe("runLogin — security limits", () => {
   it("sends an input value containing {$…} as data, not as an expression", async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
     const config: LoginConfig = {
-      login: { ...baseLogin, request: { ...baseLogin.request, body: "p={{password}}" } },
+      login: {
+        ...baseLogin,
+        request: { ...baseLogin.request, content_type: "text/plain", body: "p={{password}}" },
+      },
     };
     await runLogin(config, {
       inputs: { password: "a{$b}c" },
@@ -311,6 +322,23 @@ describe("runLogin — security limits", () => {
       resolveHost: TEST_RESOLVE,
     });
     expect(calls[0]!.init.body).toBe("p=a{$b}c");
+  });
+
+  it("refuses, as the integration's defect, a body with placeholders and no media type to encode them by", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      login: { ...baseLogin, request: { ...baseLogin.request, body: '{"p":"{{password}}"}' } },
+    };
+    const err = await runLogin(config, {
+      inputs: { password: '","admin":true,"z":"' },
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ reason: "invalid_config" });
+    expect((err as Error).message).not.toContain("admin");
+    expect(calls).toHaveLength(0);
   });
 
   it("rejects a non-OK status without echoing the body", async () => {
@@ -359,6 +387,42 @@ describe("runLogin — security limits", () => {
       },
     ).catch((e: unknown) => e);
     expect(err).toMatchObject({ reason: "upstream_failed", upstreamStatus: 503 });
+  });
+
+  it("carries a throttling target's Retry-After as seconds, from either form of the header", async () => {
+    const now = Date.parse("2026-01-01T00:00:00Z");
+    for (const [header, seconds] of [
+      ["42", 42],
+      ["0", 0],
+      ["Thu, 01 Jan 2026 00:01:30 GMT", 90],
+      // A date already past.
+      ["Wed, 31 Dec 2025 23:00:00 GMT", 0],
+      // Capped at a day.
+      ["999999", 86_400],
+      ["Fri, 01 Jan 2027 00:00:00 GMT", 86_400],
+      // Neither delay-seconds nor an HTTP-date.
+      ["soon", undefined],
+      ["-5", undefined],
+      ["1.5", undefined],
+      ["2026-01-01", undefined],
+      ["9".repeat(32), 86_400],
+      ["9".repeat(400), 86_400],
+    ] as const) {
+      const { impl } = fakeFetch([{ status: 429, headers: { "Retry-After": header } }]);
+      const err = await runLogin(
+        { login: baseLogin },
+        {
+          inputs: {},
+          authorizedUris: ALLOW,
+          allowAllUris: false,
+          fetchImpl: impl,
+          resolveHost: TEST_RESOLVE,
+          now: () => now,
+        },
+      ).catch((e: unknown) => e);
+      expect(err).toMatchObject({ reason: "upstream_failed", upstreamStatus: 429 });
+      expect((err as LoginError).retryAfterSeconds).toBe(seconds);
+    }
   });
 
   it("classifies a request that never reached the target as `upstream_failed`", async () => {

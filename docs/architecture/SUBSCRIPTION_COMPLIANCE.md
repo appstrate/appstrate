@@ -18,8 +18,7 @@ credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 > (`@earendil-works/pi-coding-agent`). API-key providers **and** OAuth
 > subscription providers (Claude Pro/Max, ChatGPT Codex) all execute on it —
 > there is no "official binary" run path, no Claude Agent SDK engine, no
-> `RunEngine` / `subscriptionEngine` provider→engine binding (that vocabulary
-> was removed). Both subscription providers (`claude-code`, `codex`) are
+> `RunEngine` / `subscriptionEngine` provider→engine binding. Both subscription providers (`claude-code`, `codex`) are
 > **executable** for agent runs and share the **identical** delivery mechanism
 > (below). They remain **opt-in** modules — not in the `MODULES` default.
 
@@ -156,7 +155,7 @@ true for the test/discovery paths, not just the run path. The earlier hand-built
 platform process) have been **deleted**, along with the now-unused
 `buildInferenceProbe` / `InferenceProbeRequest` / `runInferenceProbe` machinery.
 
-### 1.5 Subscription credentials are personal, by construction (#1875)
+### 1.5 Subscription credentials are personal, by construction
 
 For any credential whose provider has `authMode: "oauth2"` (a subscription):
 

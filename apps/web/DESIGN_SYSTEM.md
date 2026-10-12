@@ -188,7 +188,8 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   ticking one moves the mode to « Choisir »), ( ) **Aucune connexion** / « L'agent s'exécute
   sans cette intégration » (absent for a required integration); then « Ajouter une
   connexion » and « Gérer les connexions ». Each connection row is a name and one line of the
-  same form (« Clé API · connectée depuis Default »). What is ticked is what is CHOSEN, never a
+  same form (« Clé API · connectée depuis Default »), listed in the order the SERVER ranked them (`scope_fit`
+  then least privilege: the client never sorts them again). What is ticked is what is CHOSEN, never a
   second tick for what the cascade would give. A mode a usage cannot answer is left out; with
   the list alone the menu shows the boxes without a radio. Where it serves, and how it writes:
   - the **agent's** and a **schedule's** Connexions (`PickerMenu`, fed by the readiness verdict):

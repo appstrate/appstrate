@@ -129,35 +129,39 @@ describe("CredentialFields — values belong to the caller", () => {
   });
 });
 
-describe("CredentialFields — widget per field name", () => {
-  const WIDGETS: Record<string, "password" | "textarea" | "text"> = {
-    api_key: "password",
-    consumer_key: "password",
-    consumer_secret: "password",
-    password: "password",
-    bot_token: "password",
-    client_key: "textarea",
-    private_key: "textarea",
-    client_cert: "textarea",
-    certificate: "textarea",
-    key: "textarea",
-    host_key: "text",
-    ssh_public_key: "textarea",
-    ssh_private_key: "textarea",
-    host: "text",
-    username: "text",
+describe("CredentialFields — widget per field", () => {
+  type Widget = "password" | "textarea" | "text";
+  const SECRET = { type: "string", writeOnly: true };
+  const PLAIN = { type: "string" };
+  // Masking follows the manifest; a multi-line widget follows the name.
+  const FIELDS: Record<string, [schema: Record<string, unknown>, widget: Widget]> = {
+    api_key: [SECRET, "password"],
+    passcode: [SECRET, "password"],
+    pin: [{ type: "string", format: "password" }, "password"],
+    // A secret-sounding name the manifest does not mark stays readable.
+    secret_header_name: [PLAIN, "text"],
+    consumer_key: [PLAIN, "text"],
+    host_key: [PLAIN, "text"],
+    host: [PLAIN, "text"],
+    username: [PLAIN, "text"],
+    client_key: [SECRET, "textarea"],
+    private_key: [SECRET, "textarea"],
+    client_cert: [PLAIN, "textarea"],
+    certificate: [PLAIN, "textarea"],
+    key: [PLAIN, "textarea"],
+    ssh_public_key: [PLAIN, "textarea"],
   };
   const auth = {
     type: "custom",
     credentials: {
       schema: {
         type: "object",
-        properties: Object.fromEntries(Object.keys(WIDGETS).map((f) => [f, { type: "string" }])),
+        properties: Object.fromEntries(Object.entries(FIELDS).map(([f, [schema]]) => [f, schema])),
       },
     },
   } as unknown as IntegrationManifestAuth;
 
-  function expectWidget(markup: string, field: string, widget: "password" | "textarea" | "text") {
+  function expectWidget(markup: string, field: string, widget: Widget) {
     const tag = inputTag(markup, field);
     if (widget === "textarea") {
       expect(tag).toStartWith("<textarea");
@@ -167,13 +171,19 @@ describe("CredentialFields — widget per field name", () => {
     }
   }
 
-  for (const [field, widget] of Object.entries(WIDGETS)) {
+  for (const [field, [, widget]] of Object.entries(FIELDS)) {
     it(`renders ${field} as ${widget}`, () => expectWidget(html(auth), field, widget));
   }
 
-  it("masks the api_key field of an api_key auth with no declared schema", () => {
-    const bare = { type: "api_key" } as unknown as IntegrationManifestAuth;
-    expectWidget(html(bare), "api_key", "password");
+  it("masks the secret of an api_key or basic auth with no declared schema", () => {
+    expectWidget(
+      html({ type: "api_key" } as unknown as IntegrationManifestAuth),
+      "api_key",
+      "password",
+    );
+    const basic = html({ type: "basic" } as unknown as IntegrationManifestAuth);
+    expectWidget(basic, "username", "text");
+    expectWidget(basic, "password", "password");
   });
 
   it("renders the PEM fields of an mtls auth with no declared schema as textareas", () => {

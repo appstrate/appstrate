@@ -115,7 +115,7 @@ export interface CoreResources {
   "end-users": "read" | "write" | "delete";
   "credential-proxy": "call";
   "llm-proxy": "call";
-  // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
+  // AFPS integrations (marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
   // Write/delete = author/edit/remove the integration manifest (JSON-body
   // editor, parity with agents/skills). Install/uninstall = manage per-space

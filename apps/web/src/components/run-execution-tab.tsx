@@ -101,8 +101,8 @@ function InfoSection({
  * charting dependency is worth it. The proportional bar behind the context
  * column is pure CSS.
  *
- * The bar is normalized on the run's context WINDOW, not on the run's own peak
- * (#1046). Peak-relative made every run look equally full — the widest bar was
+ * The bar is normalized on the run's context WINDOW, not on the run's own peak.
+ * Peak-relative made every run look equally full — the widest bar was
  * always 100 % whether the run had used 5 % or 95 % of what it was given, which
  * is the one thing the column exists to tell apart. This is the same reading
  * the header gauge shows, computed by the same helper so the two cannot drift.
@@ -116,8 +116,7 @@ function InfoSection({
  * That switch is ANNOUNCED, in words and in colour. Silently swapping the
  * denominator left a remote-origin run showing a full-width bar on its peak
  * turn under an unchanged header — read, by anyone who saw a windowed run
- * first, as "this turn filled the window", i.e. precisely the misreading #1046
- * exists to remove. The missing `%` column is not a cue: absence never is.
+ * first, as "this turn filled the window", a misreading. The missing `%` column is not a cue: absence never is.
  */
 function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
   const { t, i18n } = useTranslation("agents");
@@ -125,7 +124,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
   // The window comes from the turns, through the very call the header gauge
   // makes — not from a parallel scan of the same rows. One derivation is the
   // only thing that keeps the two surfaces from disagreeing about which turn's
-  // window applies, which is the drift #1046 exists to remove. It follows that
+  // window applies. It follows that
   // the table falls back whenever the gauge renders nothing, including on a run
   // whose turns all measured zero: that fallback is announced below, so the
   // reader is never left guessing which denominator they are looking at.

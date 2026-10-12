@@ -52,7 +52,7 @@ export class FieldsStrategy implements IntegrationConnectStrategy {
       auth as unknown as AfpsManifestAuth,
       ctx.variables,
     );
-    // #1627: an `authorized_uris` entry the submitted fields cannot render would refuse every
+    // An `authorized_uris` entry the submitted fields cannot render would refuse every
     // later call, so the connection is refused now. Never echoes the value. Judged on the
     // projection every read renders from, so a typed field (`port: 8443`) passes here as there.
     const unrenderable = unrenderableAuthorizedUriFields(

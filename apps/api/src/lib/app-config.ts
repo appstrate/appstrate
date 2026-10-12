@@ -39,7 +39,7 @@ export function buildAppConfig(): AppConfig {
       googleAuth: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
       githubAuth: !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
       smtp: isSmtpConfigured(),
-      // Self-hosting closed mode (issue #228) — flag exposed so the SPA
+      // Self-hosting closed mode — flag exposed so the SPA
       // can hide signup affordances when the platform is locked down (who
       // may create an org is per user: `can_create_org` on the profile). Who is named stays server-side.
       signupDisabled: env.AUTH_DISABLE_SIGNUP,

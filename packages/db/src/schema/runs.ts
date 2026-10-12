@@ -215,7 +215,7 @@ export const runs = pgTable(
     // detail. NULL = not recorded. Read back through `runIntegrationsUnboundSchema`.
     integrationsUnbound: jsonb("integrations_unbound").$type<RunIntegrationUnbound[]>(),
     // Snapshot of the integration manifest VERSION resolved per declared
-    // integration at run kickoff (#686). Shape:
+    // integration at run kickoff. Shape:
     // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.
     // Frozen here so every manifest read for THIS run — the kickoff spawn
     // spec AND the long-lived runtime credential/MITM-refresh path — resolves
@@ -236,7 +236,7 @@ export const runs = pgTable(
      */
     chatSessionId: text("chat_session_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    // Per-run dependency version overrides (#666). Shape:
+    // Per-run dependency version overrides. Shape:
     // { "@scope/skill": "draft" | "<semver|dist-tag>" }. Run-scoped escape
     // hatch out of the published-only resolution: `"draft"` pulls that
     // dependency's mutable working copy (skill edit loop), any other value
@@ -331,7 +331,8 @@ export const runs = pgTable(
      * The member whose own credential pays this run's inference: set iff
      * `model_source = 'user'`, stamped at launch, the one fact every later
      * door compares against. No FK: it outlives the member and the credential.
-     * NULL = not recorded.
+     * NULL = no member pays (an organization or platform credential does), or
+     * the run records no model source at all.
      */
     payerUserId: text("payer_user_id"),
   },
@@ -425,6 +426,12 @@ export const runs = pgTable(
     // and holds ACCESS EXCLUSIVE until it commits either way. The scan is why a
     // pre-existing negative row aborts the deploy — see `docs/architecture/RUN_COST.md`.
     check("runs_cost_non_negative", sql`cost >= 0`),
+    // The runner ledger row copies both columns, so the pair holds the rule
+    // `llm_usage_payer_iff_user_source` states (compared as text, same reason).
+    check(
+      "runs_payer_iff_user_source",
+      sql`(model_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)`,
+    ),
     // Closed vocabulary for the terminal provenance cache. NULL-friendly by
     // standard CHECK semantics (`NULL IN (…)` is NULL, which passes), which is
     // exactly the intent: pre-feature rows carry no verdict at all.
@@ -648,7 +655,7 @@ export const llmUsage = pgTable(
     // is append-only and a credential can be deleted after the fact.
     credentialId: uuid("credential_id"),
     // The member whose own credential paid the call: set iff `credential_source
-    // = 'user'`. No FK, same reason as `credentialId`. NULL = not recorded.
+    // = 'user'`. No FK, same reason as `credentialId`. NULL = no member pays, or no source is recorded.
     payerUserId: text("payer_user_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
@@ -769,6 +776,13 @@ export const llmUsage = pgTable(
     // being bypassed. Added validated in migration 0029 — see the sibling floor
     // on `runs.cost` for why it is not split into `NOT VALID` + `VALIDATE`.
     check("llm_usage_cost_usd_non_negative", sql`cost_usd >= 0`),
+    // A payer is recorded iff the member's own credential paid. Compared as text: the enum
+    // label `user` is unusable in the transaction that adds it, and drizzle applies every
+    // pending migration in one.
+    check(
+      "llm_usage_payer_iff_user_source",
+      sql`(credential_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)`,
+    ),
     // Closed vocabulary — same NULL-friendly semantics as the run-level twin
     // (`runs_cost_pricing_status_valid`): a pre-feature row carries no verdict.
     check(
@@ -821,8 +835,8 @@ export const schedules = pgTable(
     // default at fire time.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Per-schedule dependency version overrides — frozen at schedule
-    // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`
-    // (#666/#686). Shape: { "@scope/dep": "draft" | "<semver|dist-tag>" }.
+    // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`.
+    // Shape: { "@scope/dep": "draft" | "<semver|dist-tag>" }.
     // Keys may name a declared skill OR integration dependency; `"draft"` opts
     // that dependency into its working copy for the dev edit loop, any other
     // value replaces the manifest pin. Mirrors `runs.dependencyOverrides`.

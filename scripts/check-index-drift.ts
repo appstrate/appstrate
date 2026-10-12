@@ -17,7 +17,7 @@
  * but a production connection string can run it. Paths are derived from
  * `import.meta.dir`, so the working directory does not matter either.
  *
- * Why this exists (issue #1182): `packages/db/drizzle/0000_init.sql` is a
+ * Why this exists: `packages/db/drizzle/0000_init.sql` is a
  * SQUASH, and production predates it. Anything the squash introduced rather
  * than a forward migration therefore never ran against production — two of the
  * declared indexes turned out to be missing there. The same hole reopens at

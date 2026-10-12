@@ -7,6 +7,7 @@ import { authStore } from "../stores/auth-store";
 import { useIntegrationNames } from "./use-integrations";
 import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
+import { agentConnectionsTabVisible } from "../lib/route-access";
 import { packageDetailPath } from "../lib/package-paths";
 import {
   isViewersLaunch,
@@ -37,8 +38,8 @@ export function useLaunchWarningsToast() {
       const canConnect =
         content.connectable &&
         isViewersLaunch(target, authStore.getState().user?.id) &&
-        can("integrations:read") &&
-        canReach(agentPath);
+        canReach(agentPath) &&
+        agentConnectionsTabVisible(can);
       toast.warning(content.message, {
         description: content.description,
         ...(canConnect

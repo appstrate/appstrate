@@ -7,6 +7,7 @@ import {
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
 import {
+  findInvalidScopeTokens,
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
@@ -86,7 +87,6 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     validateContent: checkSkillMarkdown,
     manifestIsStoredFile: false,
   },
-  // Phase 1.0 — INTEGRATIONS_PROPOSAL §4.1.
   integration: {
     type: "integration",
     storageFolder: "integrations",
@@ -94,6 +94,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
     checkManifest: (manifest) => [
       ...findSelfReferencedServer(manifest),
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
+      ...findInvalidScopeTokens(manifest),
       ...findUnboundedInjectedCredentials(manifest),
       ...findUnevaluableExpressions(manifest),
     ],

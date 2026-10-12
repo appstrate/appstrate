@@ -245,9 +245,6 @@ export async function readTokenResponse(response: Response): Promise<TokenRespon
 /**
  * Parse a standard OAuth2 token endpoint response.
  *
- * Scope parsing is universal: splits by comma, space, or %20 to handle all
- * provider conventions (e.g. GitHub returns comma-separated, Google uses spaces).
- *
  * Scope comparison against the request is not done here: it needs the
  * manifest's `scope_catalog[].implies` aliases (e.g. Google echoing `email` as
  * `…/auth/userinfo.email`), which only the platform layer knows.
@@ -279,8 +276,9 @@ export function parseTokenResponse(
     expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
   }
 
-  const scopes =
-    typeof tokenData.scope === "string" ? tokenData.scope.split(/[\s,]+|%20/).filter(Boolean) : [];
+  // Space-separated (RFC 6749 §3.3); only a response with no space is split on `,` or `%20`.
+  const scope = typeof tokenData.scope === "string" ? tokenData.scope : "";
+  const scopes = scope.split(/\s/.test(scope) ? /\s+/ : /,|%20/).filter(Boolean);
 
   return {
     accessToken,
@@ -288,6 +286,19 @@ export function parseTokenResponse(
     expiresAt,
     scopesReturned: scopes.length > 0 ? scopes : null,
   };
+}
+
+/** `returned` plus the `expected` scopes the response proves unlisted: `offline_access` by a refresh token, `openid` by an `id_token`. */
+export function withProvenScopes(
+  returned: readonly string[],
+  expected: readonly string[],
+  proof: { refreshToken: unknown; idToken: unknown },
+): string[] {
+  const proven = [
+    ...(typeof proof.refreshToken === "string" ? ["offline_access"] : []),
+    ...(typeof proof.idToken === "string" ? ["openid"] : []),
+  ].filter((scope) => expected.includes(scope) && !returned.includes(scope));
+  return [...returned, ...proven];
 }
 
 /**

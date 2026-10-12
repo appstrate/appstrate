@@ -135,15 +135,14 @@ export interface LogEntry {
  *
  * Shape is **MCP-aligned / JSON-RPC-inspired** — `code` / `message` /
  * supplementary data via `context` mirror the JSON-RPC 2.0 error object so
- * AFPS-runtime consumers can adopt MCP/JSON-RPC tooling with minimal glue
- * (#276 alignment). It is NOT a strict JSON-RPC error: `code` here is an
+ * AFPS-runtime consumers can adopt MCP/JSON-RPC tooling with minimal glue.
+ * It is NOT a strict JSON-RPC error: `code` here is an
  * optional string identifier (e.g. `"timeout"`, `"manifest_invalid"`),
  * whereas JSON-RPC mandates a required integer code. Runtime callers that
  * need wire-compatible JSON-RPC errors must map `code` themselves.
  *
- * All fields beyond `message` are optional and additive — runners that
- * previously emitted `{ message, stack? }` continue to round-trip through
- * the type unchanged.
+ * All fields beyond `message` are optional and additive — a runner that
+ * emits `{ message, stack? }` round-trips through the type unchanged.
  */
 export interface RunError {
   /**

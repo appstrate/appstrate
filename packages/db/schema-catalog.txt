@@ -739,6 +739,7 @@ constraint llm_usage llm_usage_chat_session_id_org_id_fk FOREIGN KEY (chat_sessi
 constraint llm_usage llm_usage_context_single CHECK (((run_id IS NULL) OR (chat_session_id IS NULL)))
 constraint llm_usage llm_usage_cost_usd_non_negative CHECK ((cost_usd >= (0)::double precision))
 constraint llm_usage llm_usage_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint llm_usage llm_usage_payer_iff_user_source CHECK (((NOT ((credential_source)::text IS DISTINCT FROM 'user'::text)) = (payer_user_id IS NOT NULL)))
 constraint llm_usage llm_usage_pkey PRIMARY KEY (id)
 constraint llm_usage llm_usage_pricing_status_valid CHECK ((pricing_status = ANY (ARRAY['priced'::text, 'partial'::text, 'unpriced'::text])))
 constraint llm_usage llm_usage_principal_single CHECK (((api_key_id IS NULL) OR (user_id IS NULL)))
@@ -863,6 +864,7 @@ constraint runs runs_model_credential_id_model_provider_credentials_id_fk FOREIG
 constraint runs runs_open_sink_has_secret CHECK (((sink_expires_at IS NULL) OR (sink_secret_encrypted IS NOT NULL)))
 constraint runs runs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint runs runs_package_id_packages_id_fk FOREIGN KEY (package_id) REFERENCES packages(id) ON DELETE SET NULL
+constraint runs runs_payer_iff_user_source CHECK (((NOT ((model_source)::text IS DISTINCT FROM 'user'::text)) = (payer_user_id IS NOT NULL)))
 constraint runs runs_pkey PRIMARY KEY (id)
 constraint runs runs_proxy_route_has_model CHECK (((inference_route <> 'proxy'::inference_route) OR (model_id IS NOT NULL)))
 constraint runs runs_remote_has_no_platform_model CHECK (((run_origin = 'platform'::run_origin) OR ((model_source IS NULL) AND (model_id IS NULL) AND (inference_route IS NULL))))

@@ -131,13 +131,11 @@ function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string)
  * Build the immutable deps object from the module init context. Called once in
  * `chatModule.init(ctx)`.
  *
- * `ctx` is REQUIRED. It used to be optional, for the apps/api test harness,
- * which mounted this router without ever running `init()`. That fallback
- * silently degraded two post-incident guards — the #968/#971 admission gate
- * (fail-open `null`) and the #965 file teardown (no-op) — so any test that
- * believed it exercised them exercised nothing (issue #989). The harness now
- * runs the real `init()` pipeline, so nothing needs the degraded baseline and
- * a missing context can no longer be mistaken for a working one.
+ * `ctx` is REQUIRED. An optional one would silently degrade two guards — the
+ * admission gate (fail-open `null`) and the file teardown (no-op) — so a test
+ * believing it exercised them would exercise nothing. The test harness runs
+ * the real `init()` pipeline, and a missing context cannot be mistaken for a
+ * working one.
  */
 export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps {
   const inProcess = ctx.services.inProcess ?? null;

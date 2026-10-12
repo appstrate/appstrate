@@ -53,6 +53,7 @@ function candidate(isOwn: boolean): Candidate {
     origin_space_id: null,
     needs_reconnection: false,
     missing_scopes: [],
+    scope_fit: "unjudged",
     is_own: isOwn,
   };
 }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Release plan: this section ships as `16.0.0`.** Order, each step waiting for
+the one before it to be on npm:
+
+1. `@appstrate/afps-shared` **0.13.0**. Core requires `^0.13.0`, which carries
+   the `./request-template` and `./json-text` subpaths (`jsonText`,
+   `jsonTextMap`), `parseTokenUsage` and the `./ssrf` egress helpers.
+2. `@appstrate/core` **16.0.0** (tag `core@16.0.0`).
+3. `connect-helper` moves its range to `^16.0.0`, right after the tag.
+
+Procedure: `docs/deployment/RELEASING_CORE.md`.
+
 ### Added
 
 - **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
@@ -16,6 +27,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`mcp_package`, `manifest`, `appstrate`), its `exposure` (`available`,
   `hidden`, `not_in_catalog`) and why it is hidden. Read by an integration's
   Outils tab; never an agent allowlist.
+- **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
+  (`@appstrate/core/integration`): every code an `errors[]` item of the
+  connection-readiness read carries, the resolver's error codes plus
+  `agent_not_active`. **`OVERRIDE_REFUSAL_CODES`** / **`OverrideRefusalCode`**:
+  what a launch override key is refused over at the write,
+  `undeclared_connection_override` and `undeclared_dependency_override` (both
+  new) and `required_integration_unbound`, each a 400 item on
+  `connection_overrides.<id>` or `dependency_overrides.<id>`. (#1914)
+- **`INSUFFICIENT_SCOPES_REMEDIES`** / **`InsufficientScopesRemedy`**
+  (`@appstrate/core/integration`): how an `insufficient_scopes` item clears,
+  `new_connection` | `upgrade_or_new` | `rebind_by_admin` |
+  `rebind_by_schedule_owner`, carried as `ResolutionFieldError.remedy`
+  (`@appstrate/core/api-errors`). (#1913)
+- **`CONNECTION_SCOPE_FITS`** / **`ConnectionScopeFit`**
+  (`@appstrate/core/integration`): a connection's grant against an agent's
+  selection, least privilege first: `exact` | `unjudged` | `broader` |
+  `missing`. (#1913)
+- **`SCOPE_TOKEN_RE`**, **`scopeTokenSchema`** and **`findInvalidScopeTokens`**
+  (`@appstrate/core/integration`): one OAuth scope as an RFC 6749 §3.3
+  `scope-token`, and the write-path rule listing a manifest's scopes that are
+  not one (`default_scopes`, `scope_catalog` values,
+  `tools_policy.*.required_scopes`). `validateAgentIntegrationScopes` applies
+  the same rule to an agent's `scopes`, reporting `invalid_format`
+  (added to `AgentIntegrationScopeError.code`). (#1913)
+- **`isSecretField`** (`@appstrate/core/form`): whether a credential field is a
+  secret, `writeOnly` or `format: "password"`. (#1913)
+- **`IntegrationConnectCompletion.scopesDenied`**
+  (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
+  that the consent left out, on a successful completion. (#1913)
+
 - **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
   ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
   over the org role resolved later. Absent, the caller is uncapped. (#1911)
@@ -102,6 +143,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
+  `scopesGranted` and `missingScopes`, and a
+  `ResolutionFieldError.candidate_connections` item
+  (`@appstrate/core/api-errors`) `scopes_granted` and `missing_scopes`: what
+  each candidate holds and what the agent's selection misses on it. (#1913)
+
+- **BREAKING: `findUnevaluableExpressions`** (`@appstrate/core/integration`)
+  refuses a `connect.login` request `body` holding a `{{name}}` with no
+  `content_type` / `Content-Type` an encoder covers (JSON, form, XML,
+  multipart with a boundary, `text/plain`) and written without a `{{name}}`,
+  and a login header name written twice in different case, through
+  afps-shared's `loginBlockIssues`. (#1915)
 - **Breaking for module consumers:** the `credentialSource` unions in
   `BeforeUsageParams`, `LlmUsageLedgerRow` and `PlatformServices.usage.list`,
   and `RunStatusChangeParams.modelSource`, now take `ModelPayer`, which adds
@@ -170,6 +223,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MAX_TOKEN_USAGE_TIERS` (16) entries with unique thresholds. Such a card
   would otherwise have every band of its usage dropped and price at the base
   rate. (#1552)
+
+- **BREAKING (types): `keyof TokenUsage` includes `tiers`**
+  (`@appstrate/core/token-usage`, re-exported from afps-shared). `TokenUsage`
+  is the four counters plus the optional `tiers` bands, so a
+  `Record<keyof TokenUsage, number>` or a loop over its keys that treats every
+  key as a counter does not typecheck. Iterate `TOKEN_USAGE_COUNTERS`
+  (`@appstrate/afps-shared/token-usage`) for the counters.
 
 - **Requires `@appstrate/afps-shared` `^0.13.0`** (was `^0.12.0`): the
   `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`

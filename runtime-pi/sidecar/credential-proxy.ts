@@ -30,7 +30,6 @@
 import {
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
-  substituteVars,
   INTEGRATION_ID_RE,
   type CredentialsResponse,
   type HostResolver,
@@ -40,6 +39,7 @@ import { isOperatorTrustedEgressHost } from "./ssrf.ts";
 import {
   classifyApiCallFailure,
   cookieScope,
+  credentialUnusableMessage,
   credentialUrlPolicy,
   fetchApiCall,
   prepareApiCallRequest,
@@ -74,7 +74,7 @@ export type ApiCallRequestBody =
   | { kind: "buffered"; bytes: ArrayBuffer; text?: string }
   | {
       kind: "formData";
-      build: (activeCreds: Record<string, string>) => FormData;
+      build: (renderPart: PreparedApiCallRequest["renderPart"]) => FormData;
       /**
        * Field-part templates that will undergo `{{var}}` substitution
        * when `substituteBody: true`. Used by the pre-flight check to
@@ -121,13 +121,15 @@ interface ApiCallSuccess {
 
 interface ApiCallFailure {
   ok: false;
-  /**
-   * Absent on a failure before the call is judged (bad integration id, credential fetch,
-   * request preparation).
-   */
-  code?: ApiCallFailureCode;
+  /** Absent on a bad integration id or a failed credential fetch. */
+  code?: ApiCallFailureCode | PreparationRefusal["kind"];
   error: string;
 }
+
+type PreparationRefusal = Extract<
+  ReturnType<typeof prepareApiCallRequest>,
+  { ok: false }
+>["refusal"];
 
 type ApiCallResult = ApiCallSuccess | ApiCallFailure;
 
@@ -180,27 +182,19 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
   reportUpstreamSuccess?: (answered: CredentialsResponse) => void;
 }
 
-/**
- * Recursively apply `{{var}}` substitution to the string leaves of a
- * JSON value, returning a NEW value (input untouched). When `creds` is
- * undefined the value is returned structurally unchanged (no
- * substitution requested). Substituting on the structured leaves — then
- * letting `JSON.stringify` escape — is what makes the `json` body shape
- * injection-safe: a credential containing `"`/`\`/newline is escaped by
- * the serializer instead of corrupting the surrounding JSON.
- */
-function deepSubstituteJson(value: unknown, creds: Record<string, string> | undefined): unknown {
-  if (typeof value === "string") return creds ? substituteVars(value, creds) : value;
-  if (Array.isArray(value)) return value.map((v) => deepSubstituteJson(v, creds));
+/** `value` with `render` applied to its string leaves: `JSON.stringify` then escapes each. */
+function mapJsonStrings(value: unknown, render: (leaf: string) => string): unknown {
+  if (typeof value === "string") return render(value);
+  if (Array.isArray(value)) return value.map((v) => mapJsonStrings(v, render));
   if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = deepSubstituteJson(v, creds);
-    return out;
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, mapJsonStrings(v, render)]),
+    );
   }
   return value;
 }
 
-/** The string leaves of a JSON value: what {@link deepSubstituteJson} substitutes. */
+/** The string leaves of a JSON value: what {@link mapJsonStrings} renders. */
 function* jsonStringLeaves(value: unknown): Generator<string> {
   if (typeof value === "string") yield value;
   else if (Array.isArray(value)) for (const v of value) yield* jsonStringLeaves(v);
@@ -224,13 +218,12 @@ export function credentialScope(integrationId: string, connectionId: string): st
   return `${integrationId}\u0000${connectionId}`;
 }
 
-/** Strings substituted in a `substituteBody: true` body (JSON escaping would hide `{{\tkey}}`). */
-function substitutedBodyStrings(body: ApiCallRequestBody): Iterable<string> {
+/** Strings a structured body substitutes itself, read before JSON escaping hides `{{\tkey}}`. */
+function structuredBodyStrings(body: ApiCallRequestBody): Iterable<string> {
   switch (body.kind) {
     case "none":
-      return [];
     case "buffered":
-      return body.text !== undefined ? [body.text] : [];
+      return [];
     case "formData":
       return body.fieldTemplates ?? [];
     case "json":
@@ -267,17 +260,27 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     return { ok: false, error: `Credential fetch failed: ${getErrorMessage(err)}` };
   }
 
-  // 3. Substitute {{vars}} in the target and the caller's headers; refuse an unresolved one, there
-  //    or in a string the body substitutes (text, multipart fields, JSON leaves).
+  // 3. Substitute {{vars}} in the target, the caller's headers and a text body.
   const prepareFor = (fields: Record<string, string>) =>
     prepareApiCallRequest({
       target: targetUrl,
       headers: args.callerHeaders,
-      bodyTemplates: substituteBody ? [...substitutedBodyStrings(body)] : [],
+      body: substituteBody && body.kind === "buffered" ? (body.text ?? null) : null,
+      bodyParts: substituteBody ? [...structuredBodyStrings(body)] : [],
       fields,
     });
   const prepared = prepareFor(creds.credentials);
-  if (!prepared.ok) return { ok: false, error: prepared.refusal.message };
+  if (!prepared.ok) {
+    const { kind, message } = prepared.refusal;
+    return {
+      ok: false,
+      code: kind,
+      error:
+        kind === "credential_unusable"
+          ? credentialUnusableMessage(integrationId, message)
+          : message,
+    };
+  }
   const resolvedUrl = prepared.request.url;
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
@@ -306,38 +309,31 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //     connection's credential scope. Siblings are gated per URL, whatever gated the initial target.
   const cookies = cookieScope(cookieJar, scope, policy.allowAllUris ? null : deps.declaredUris);
 
-  /** Build the request body with credential substitution applied. */
   const buildBody = (
-    activeCreds: Record<string, string>,
+    caller: Pick<PreparedApiCallRequest, "body" | "renderPart">,
   ): ArrayBuffer | string | FormData | undefined => {
+    const renderPart = substituteBody ? caller.renderPart : (part: string) => part;
     switch (body.kind) {
       case "none":
         return undefined;
       case "formData":
-        return body.build(activeCreds);
+        return body.build(renderPart);
       case "json":
-        // Substitute on the structured leaves first, THEN serialize so
-        // every value is escaped by `JSON.stringify` (injection-safe).
-        return JSON.stringify(
-          deepSubstituteJson(body.value, substituteBody ? activeCreds : undefined),
-        );
+        return JSON.stringify(mapJsonStrings(body.value, renderPart));
       case "buffered":
-        return substituteBody && body.text !== undefined
-          ? substituteVars(body.text, activeCreds)
-          : body.bytes;
+        return caller.body ?? body.bytes;
       default:
         return assertNever(body);
     }
   };
 
   /**
-   * One outbound attempt, from the caller's headers as prepared for `activeCreds`; the body is
-   * substituted here. Returns
+   * One outbound attempt, from the call as prepared for `activeCreds`. Returns
    * the upstream `Response` and the logical URL of the terminal hop.
    */
   const doUpstreamRequest = async (
     activeCreds: CredentialsResponse,
-    caller: Pick<PreparedApiCallRequest, "headers" | "credentialHeaders">,
+    caller: PreparedApiCallRequest,
   ): Promise<{
     response: Response;
     finalUrl: string;
@@ -388,7 +384,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     const init: RequestInit & Record<string, unknown> = {
       method,
       headers: resolvedHeaders,
-      body: buildBody(activeCreds.credentials),
+      body: buildBody(caller),
       proxy: args.proxyUrl || undefined,
     };
     const sent = await fetchApiCall({
@@ -461,6 +457,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     // Headers and body are substituted again from the refreshed set; the target keeps its first
     // rendering. A set that no longer fills the call is not replayed: the 401 stands.
     const again = fresh ? prepareFor(fresh.credentials) : null;
+    if (again && !again.ok) {
+      logger.warn("Refreshed credential does not fit the call, 401 relayed", {
+        integrationId,
+        connectionId: args.connectionId,
+        reason: again.refusal.message,
+      });
+    }
     if (fresh && again?.ok) {
       redactFields = redactionFields(policy, fresh.credentials);
       try {
@@ -491,7 +494,7 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   if (upstream.ok && answered) deps.reportUpstreamSuccess?.(answered);
 
-  // 7. Success-path diagnostic envelope (#404). One structured line per
+  // 7. Success-path diagnostic envelope. One structured line per
   //    completed call — resolved auth mode, hop count, status, duration,
   //    and the request/response header *names* (values redacted). Only
   //    emitted at LOG_LEVEL=debug, so it is silent in default production
@@ -539,7 +542,7 @@ function wrapRequestError(err: unknown, integrationId: string, host: string): Ap
       error = `Integration "${integrationId}": ${failure.message}`;
       break;
     case "credential_unusable":
-      error = `Integration "${integrationId}": the connection's credential is unusable (${failure.message} once substituted or injected); nothing was sent`;
+      error = credentialUnusableMessage(integrationId, failure.message);
       break;
     case "upstream_timeout":
       error = `Upstream timeout: ${host} did not answer in time`;

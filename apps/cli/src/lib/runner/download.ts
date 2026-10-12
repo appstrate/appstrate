@@ -152,7 +152,7 @@ export function daemonUrls(
  *
  * Streaming (not buffering the whole ~70 MB into memory) gives a live progress
  * spinner and a stall watchdog: a wedged GitHub→CDN redirect aborts with an
- * actionable error instead of hanging forever (issue #821).
+ * actionable error instead of hanging forever.
  *
  * minisign is REQUIRED (fail-closed, matching `self-update` and
  * `scripts/bootstrap-runner.sh`): a signed-checksum check the host cannot

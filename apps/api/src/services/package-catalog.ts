@@ -27,7 +27,7 @@ interface DbPackageRow {
  * Every DECLARED skill gets an entry — `resolved: false` marks one the
  * declaring package cannot reach. Callers that filter (readiness, run
  * paths) and callers that display (detail DTOs, missing ones included) read
- * the same array; absence is a flag, never a shorter list (#878).
+ * the same array; absence is a flag, never a shorter list.
  */
 interface DeclaredSkill {
   id: string;
@@ -86,7 +86,7 @@ function dbRowToLoadedPackage(row: DbPackageRow): LoadedPackage {
  * the DECLARING package may reach it. The manifest handed in is the single
  * input for what is declared — the projection is recomputed per call and never
  * cached on a package object, so it cannot go stale when a caller swaps the
- * draft manifest for a published snapshot (#878). Returns one entry per
+ * draft manifest for a published snapshot. Returns one entry per
  * declared skill, in manifest order.
  *
  * PLACEMENT is part of the question, not a gate applied afterwards (RBAC spec
@@ -183,7 +183,7 @@ export async function getPackage(
 
   // Deliberately does NOT resolve the skill closure. That projection depends on
   // the manifest, and a `LoadedPackage` whose manifest can later be swapped for
-  // a published snapshot must not carry a projection of the draft's (#878).
+  // a published snapshot must not carry a projection of the draft's.
   // Callers that need it derive it explicitly via `resolveDeclaredSkills`.
   return dbRowToLoadedPackage({
     id: pkgRow.id,

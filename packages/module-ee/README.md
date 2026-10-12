@@ -297,9 +297,9 @@ These seven tables live in the **platform** database (`DATABASE_URL`). `migrateE
 | --------- | ---------------------------------------------------------------------- |
 | `billing` | The billing surface exists — the dashboard renders plan/usage/checkout |
 
-> **Custom space roles are not EE-owned.** `/api/roles` — defining, editing, deleting a bundle, and every path that grants one — is Apache-2.0 platform code, gated by the `roles:*` permissions and by nothing else (RBAC spec §9). The `custom_roles` flag this module used to contribute was removed with the gate it fed; do not reintroduce a flag for it.
+> **Custom space roles are not EE-owned.** `/api/roles` — defining, editing, deleting a bundle, and every path that grants one — is Apache-2.0 platform code, gated by the `roles:*` permissions and by nothing else (RBAC spec §9). This module contributes no `custom_roles` flag; do not introduce one.
 
-> **Signup gating is no longer EE-owned.** Domain allowlist (`AUTH_ALLOWED_SIGNUP_DOMAINS`), invitation-only signup (`AUTH_DISABLE_SIGNUP`), platform-admin allowlist (`AUTH_PLATFORM_ADMIN_EMAILS`), and bootstrap-owner auto-org (`AUTH_BOOTSTRAP_OWNER_EMAIL`) all live natively in the platform's `evaluateSignupPolicy` since PR #282. The `beforeSignup` hook + `DomainNotAllowedError` were removed from EE in this PR.
+> **Signup gating is not EE-owned.** Domain allowlist (`AUTH_ALLOWED_SIGNUP_DOMAINS`), invitation-only signup (`AUTH_DISABLE_SIGNUP`), platform-admin allowlist (`AUTH_PLATFORM_ADMIN_EMAILS`), and bootstrap-owner auto-org (`AUTH_BOOTSTRAP_OWNER_EMAIL`) all live natively in the platform's `evaluateSignupPolicy`. This module contributes no `beforeSignup` hook.
 
 ## Stack
 

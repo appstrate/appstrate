@@ -12,7 +12,7 @@
  * Key invariants:
  *
  * 1. `{ns}__api_call` calls {@link executeApiCall} directly via
- *    `proxyDeps`. There is no longer a `/proxy` HTTP envelope — the
+ *    `proxyDeps`. There is no `/proxy` HTTP envelope — the
  *    same credential-isolation invariants (cred fetch, URL allowlist,
  *    server-side header injection, 401-retry, cookie jar, persistent-
  *    auth-failure reporting) are enforced inside the credential-proxy
@@ -93,7 +93,6 @@ import {
   API_CALL_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
-  substituteVars,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
 import type { LimitFunction } from "p-limit";
@@ -304,7 +303,7 @@ function bodyPreflightError(
  * checks — the right tool for external, tag-less data — so the handler
  * stays linear and this logic is unit-testable in isolation.
  *
- * Invariant (#765): a body that is PRESENT but cannot be turned into a
+ * Invariant: a body that is PRESENT but cannot be turned into a
  * sendable shape returns an error result — it is NEVER silently dropped
  * to `{ kind: "none" }` and shipped as an empty request.
  *
@@ -334,12 +333,12 @@ function resolveRequestBody(
       body: {
         kind: "formData",
         fieldTemplates: wants ? fields.map((f) => f.value) : [],
-        build: (activeCreds: Record<string, string>): FormData => {
+        build: (renderPart): FormData => {
           const fd = new FormData();
           // Field parts honour {{var}} substitution when opted in; binary
           // parts pass through (substituting into bytes would corrupt them).
           for (const f of fields) {
-            fd.append(f.name, wants ? substituteVars(f.value, activeCreds) : f.value);
+            fd.append(f.name, renderPart(f.value));
           }
           for (const file of files) {
             // Slice into a fresh ArrayBuffer so the Blob owns a copy
@@ -438,7 +437,7 @@ function resolveRequestBody(
     };
   }
 
-  // Present but not a usable shape (number, boolean, …). Per #765 this must
+  // Present but not a usable shape (number, boolean, …). This must
   // error — never silently fall through to an empty-bodied request.
   return bodyPreflightError(
     label,
@@ -777,7 +776,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // Per the MCP spec `structuredContent` is a structured MIRROR of
   // `content` — so a client that prefers it (Claude Code, VS Code)
   // handed the model `{"status":200}` and discarded the response body
-  // sitting in `content`. See issue #876.
+  // sitting in `content`.
   //
   // The upstream status/headers ride on `_meta`
   // (`UPSTREAM_META_KEY`); the agent-side shaper re-renders the status
@@ -1009,7 +1008,7 @@ function buildSidecarTools(options: MountMcpOptions): {
 
       // Resolve the loosely-typed body argument into the internal
       // discriminated `ApiCallRequestBody`. All shape narrowing + the
-      // silent-drop guard (#765) live in `resolveRequestBody`, keeping
+      // silent-drop guard live in `resolveRequestBody`, keeping
       // this handler linear and the logic unit-testable in isolation.
       const resolved = resolveRequestBody(args.body, {
         label: ctx.label,
@@ -1344,7 +1343,7 @@ async function responseToToolResult(
   //
   // No `structuredContent` is attached here. The response body owns
   // `content`, and a `structuredContent` that does not mirror it makes
-  // spec-compliant clients drop the body (#876). The status and headers
+  // spec-compliant clients drop the body. The status and headers
   // travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side shaper
   // reads back into a model-visible `[api_call status=…]` line.
   const withMeta = (r: Result): Result => {
@@ -1725,8 +1724,8 @@ interface MountMcpOptions {
    * Credential-proxy core deps. `api_call` calls
    * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
-   * reach the platform upstream. Required: there is no longer a legacy
-   * HTTP-route fallback. The per-connection credential pair is layered
+   * reach the platform upstream. Required: there is no HTTP-route
+   * fallback. The per-connection credential pair is layered
    * on top of these by `makeApiCallTool`.
    */
   proxyDeps: ApiCallBaseDeps;
@@ -1744,7 +1743,7 @@ interface MountMcpOptions {
    * Without a cap, an agent that fetches N items in parallel (8 Gmail
    * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
    * over-sized JSON dump and blow past the upstream model's TPM
-   * window. See issue #427 for the reference incident.
+   * window.
    *
    * Optional only so tests / embedders can omit it; production wires a
    * `pLimit` instance unconditionally via `createApp` (see `app.ts`).
@@ -1755,7 +1754,7 @@ interface MountMcpOptions {
    * the first-party sidecar tools (run_history, recall_memory).
    * Called on EVERY `/mcp` request so the sidecar's HTTP surface comes up
    * before integration MCP servers finish their initial handshake. The
-   * integration runtime (Phase 1.4) wires `McpHost.buildTools` here:
+   * integration runtime wires `McpHost.buildTools` here:
    * tools registered after the sidecar started serving become visible on
    * the next `tools/list` without restarting anything. First-party
    * names take precedence.
@@ -1774,7 +1773,7 @@ interface MountMcpOptions {
 
 /**
  * Cap on how long the first `/mcp` request waits for integrations to
- * register their tools before responding. Tuned for the Phase 1.5 path
+ * register their tools before responding. Tuned for the MITM path
  * on Docker Desktop / macOS: per-connection spawn pays for `docker
  * create` + `docker cp bundle` + `docker cp ca.pem` (MITM) +
  * `docker start` + Python/Node runner cold-start + MCP handshake, each
@@ -1803,7 +1802,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     bootReady = Promise.race([
       bootReady.then(() => {
         // Disarm the deadline: a boot that finished in time must not log
-        // "exceeded" 30 s later on every run that outlives it (#1548).
+        // "exceeded" 30 s later on every run that outlives it.
         clearTimeout(deadline);
         bootReady = undefined; // resolved — skip the race on later requests
       }),

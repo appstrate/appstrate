@@ -18,7 +18,7 @@ const router = new Hono<AppEnv>();
 
 // POST /api/welcome/setup — set display name after invitation
 router.post("/welcome/setup", async (c) => {
-  // Issue #172 (extension) — same-class as PATCH /api/profile: this mutates
+  // Same-class as PATCH /api/profile: this mutates
   // the BA-owned `user.name`, so it answers to the person's own credential
   // only; a delegate must not be able to rename them.
   if (!isUserPrincipal(c)) {

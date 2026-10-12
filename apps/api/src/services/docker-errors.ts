@@ -67,7 +67,7 @@ export function classifyDockerNetworkError(
  * The honest answer to "how did it end?" is then *unknown*. The previous
  * behaviour — synthesising exit code 137 — asserted SIGKILL, which reads
  * downstream (and in the UI) as an OOM kill, sending every investigation
- * after a memory ceiling that was never reached (#1130). A container can
+ * after a memory ceiling that was never reached. A container can
  * disappear for reasons that have nothing to do with its process: a host
  * `docker container prune`, an infra-level image/container GC, a daemon
  * restart, or another Appstrate instance's boot sweep.

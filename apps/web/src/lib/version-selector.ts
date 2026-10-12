@@ -9,7 +9,7 @@ export const VERSION_DRAFT = "draft";
 
 /**
  * The version carrying the `latest` dist-tag. Identical in effect to sending
- * no selector at all (#636); spelled out where a control needs a value to
+ * no selector at all; spelled out where a control needs a value to
  * hold — a `<Select>` cannot hold absence — and never as a rewrite of an
  * omitted selector on a surface that has no such control.
  */
@@ -20,7 +20,7 @@ export const VERSION_PUBLISHED = "published";
  *
  * `undefined` is the meaningful answer and must reach the query param as an
  * ABSENT `?version=`: an omitted selector is what resolves the latest
- * published version (#636). The draft is offered only to a caller who can
+ * published version. The draft is offered only to a caller who can
  * WRITE the package in its home space — the server refuses everyone else with
  * `403 draft_not_writable`, so proposing it elsewhere would be proposing a
  * button that cannot work.
@@ -41,7 +41,7 @@ export function defaultRunVersion(homeWritable: boolean | undefined): string | u
 /**
  * The selector that replays the definition a past run executed.
  *
- * `runs.version_ref` is unambiguous (#636): a concrete semver, or `"draft"`
+ * `runs.version_ref` is unambiguous: a concrete semver, or `"draft"`
  * when the run executed a working copy. A semver replays for anyone who can
  * launch the agent at all. A draft does not — it is the author's working copy,
  * it has moved since, and the server refuses it to anyone who cannot write the

@@ -163,10 +163,9 @@ export function requirePackageInOrg(action: "write" | "delete" = "write") {
  *  param does not match the key's bound org. Sessions are passed through
  *  unchanged — they legitimately see every org they belong to.
  *
- *  Why: issue #172. API keys carry an `orgId` scope but `/api/orgs/*`
- *  handlers historically resolved membership from the creator's `user.id`,
- *  letting a key issued in org A read/mutate other orgs the creator is a
- *  member of. Pin every `:orgId` route to the key's bound org. */
+ *  Why: an API key carries an `orgId` scope, while a `/api/orgs/*` handler
+ *  that resolves membership from the creator's `user.id` would let a key
+ *  issued in org A read/mutate other orgs the creator is a member of. Pin every `:orgId` route to the key's bound org. */
 export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   if (c.get("authMethod") !== "api_key") return next();
   const paramOrgId = c.req.param("orgId");
@@ -189,7 +188,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
  *  end-user token pins a space too, and carries no `orgRole`, so
  *  `applySpacePermissions` returns early for it (RBAC spec §7.2) and nothing
  *  downstream compares the path space to the pinned one — an end-user of space
- *  A read space B's `run-config`, private spaces included (issue #1313). Both
+ *  A read space B's `run-config`, private spaces included. Both
  *  pinned kinds are confined here, once, instead of per route. */
 export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
   const pinnedSpaceId = c.get("spaceId");

@@ -57,7 +57,7 @@ interface ProxyCallInputs {
   payerUserId: string | null;
   /** A run's own inference: the credential it launched with (`runs.model_credential_id`). */
   runCredentialId?: string | null;
-  /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
+  /** Forwarded to `llm_usage.run_id`. Populated from the `X-Run-Id` header. */
   runId: string | null;
   /**
    * Forwarded to `llm_usage.chat_session_id`. Read from the VALIDATED loopback
@@ -182,7 +182,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     inputs.adapter.prepareRequest?.(body),
   );
 
-  // Model-alias swap (issue #727). When the resolved preset is an alias, the
+  // Model-alias swap. When the resolved preset is an alias, the
   // upstream echoes the REAL id in its response `model` field (and may name it
   // in error prose). Rewrite it back to the alias on every response branch —
   // and on the cached body — so a caller of `/api/llm-proxy/*` (incl. a

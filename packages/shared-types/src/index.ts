@@ -118,7 +118,7 @@ export interface RunWireDto {
   token_usage: TokenUsage | null;
   version_label: string | null;
   /**
-   * Unambiguous reference to the agent definition the run executed (#636):
+   * Unambiguous reference to the agent definition the run executed:
    * `"draft"` when the mutable draft ran with unpublished changes (or no
    * version was ever published), the concrete semver (e.g. `"2.1.0"`) when
    * the run executed that published definition (or a draft identical to it).
@@ -139,7 +139,7 @@ export interface RunWireDto {
   modelCredentialId: string | null;
   connection_overrides: unknown;
   /**
-   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft" |
+   * Per-run dependency version overrides — `{ "@scope/name": "draft" |
    * "<spec>" }`. Present when the caller opted a dependency out of the
    * published-only resolution; a non-null map (esp. with a `"draft"` value)
    * means the run is NOT reproducible from its `version_ref` alone.
@@ -183,8 +183,8 @@ export type EnrichedRun = RunWireDto & {
   /** In declaration order; null when the run recorded none (no connection resolution ran). */
   integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
-   * True when the requesting recipient has an unread notification for this run
-   * (issue #667). Per-recipient: derived from the `notifications` table for the
+   * True when the requesting recipient has an unread notification for this run.
+   * Per-recipient: derived from the `notifications` table for the
    * current actor, so a dashboard user and an end-user see independent state.
    * Drives the unread dot on run rows and the per-schedule unread count.
    */
@@ -225,7 +225,7 @@ export interface AppConfigFeatures {
   /** AUTH_DISABLE_SIGNUP — webapp hides "Create account" links and copy. */
   signupDisabled: boolean;
   /**
-   * AUTH_BOOTSTRAP_TOKEN is set and unredeemed (#344 Layer 2b). The webapp
+   * AUTH_BOOTSTRAP_TOKEN is set and unredeemed. The webapp
    * routes the user to `/claim` instead of `/login`, where they paste the
    * token + their owner credentials to seize ownership of a freshly-
    * installed unattended instance. Flips back to false once the token is
@@ -1026,7 +1026,7 @@ export interface ModelProviderCredentialInfo {
   label: string;
   /**
    * Protocol family + endpoint. Both `null` for a **built-in** credential
-   * whose every backing model is a model alias (issue #727): exposing the
+   * whose every backing model is a model alias: exposing the
    * endpoint host (e.g. `api.anthropic.com`) would reveal the hidden backing
    * provider to an org admin who can read credentials but did not configure
    * the env key. Custom credentials always carry them (the admin configured

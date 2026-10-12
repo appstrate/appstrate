@@ -8,12 +8,12 @@
  * channel (every `connect_url`/`auth_url` string is replaced by
  * {@link REDACTED_CONNECT_LINK}), and for the UI only in the typed
  * `connectOffers` field the splitters attach to the tool output — the connect
- * cards read that field, never the payload (issue #906). Redaction and
+ * cards read that field, never the payload. Redaction and
  * extraction are the SAME pass (`splitValue`), so the two cannot drift apart.
  *
  * A payload may carry SEVERAL connect URLs — a readiness error lists one per
  * unconnected integration — so the walk captures every one, in walk order,
- * deduped by normalized URL (issue #1207).
+ * deduped by normalized URL.
  *
  * `ui/auth-offer.ts` (bundled into the SPA) imports from here, so this module
  * may only pull in client-safe leaf imports — never server-only ones (MCP
@@ -70,7 +70,7 @@ export interface ConnectOffer {
   expiresAt?: string;
   /**
    * Integration the link connects (`@scope/name`). A run-kickoff 409 item
-   * (#1207) pairs it with `connect_url`; the card uses it for the integration's
+   * pairs it with `connect_url`; the card uses it for the integration's
    * icon and display name, and to claim the resume append.
    */
   packageId?: string;

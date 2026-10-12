@@ -139,7 +139,11 @@ import {
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
-import { partitionScopesByAuthCatalog, scopesNotCovered } from "@appstrate/core/integration";
+import {
+  partitionScopesByAuthCatalog,
+  scopesNotCovered,
+  scopeTokenSchema,
+} from "@appstrate/core/integration";
 import { connectionIdSetSchema, nonEmptyConnectionIdSetSchema } from "../lib/connection-set.ts";
 import { CONNECTION_LABEL_MAX, connectionLabelProblem } from "../lib/connection-label.ts";
 import {
@@ -211,19 +215,19 @@ export const importConnectionSchema = z
 
 export const connectOAuthSchema = z
   .object({
-    scopes: z.array(z.string()).optional(),
+    scopes: z.array(scopeTokenSchema).optional(),
     force_account_select: z.boolean().optional(),
     connection_id: z.uuid().optional(),
     variables: connectionVariablesSchema.optional(),
   })
   .strict();
 
-// Mint a hosted-connect-portal session — auth-type-agnostic (issue #769). The
+// Mint a hosted-connect-portal session — auth-type-agnostic. The
 // caller scopes the connect (optional OAuth scopes + reconnect target); the
 // server dispatches OAuth vs credential-form when the URL is opened.
 export const connectSessionSchema = z
   .object({
-    scopes: z.array(z.string()).optional(),
+    scopes: z.array(scopeTokenSchema).optional(),
     force_account_select: z.boolean().optional(),
     connection_id: z.uuid().optional(),
   })
@@ -588,9 +592,10 @@ function assertScopesInAuthCatalog(
 }
 
 /**
- * Complete a connect door's write and build its audit events. A reconnect renews the credential in
- * place and records the granted scopes when it changed them, since they reach every agent the
- * connection serves; one that moved a space-scoped row onto an org-tier client records the widening.
+ * Complete a connect door's write and build its audit events. A creation records the granted
+ * scopes. A reconnect renews the credential in place and records them when it changed them, since
+ * they reach every agent the connection serves; one that moved a space-scoped row onto an org-tier
+ * client records the widening.
  */
 async function completeConnect(
   strategy: IntegrationConnectStrategy,
@@ -606,12 +611,19 @@ async function completeConnect(
       scopesGranted: [[...target.scopesGranted].sort(), [...conn.scopes_granted].sort()],
     });
   const audits: Parameters<typeof recordAuditAs>[2][] = [
-    {
-      action: target ? "integration.connection.reconnected" : "integration.connection.created",
-      resourceType: "integration_connection",
-      resourceId: conn.id,
-      ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
-    },
+    target
+      ? {
+          action: "integration.connection.reconnected",
+          resourceType: "integration_connection",
+          resourceId: conn.id,
+          ...(scopes ? { before: scopes.before, after: { ...after, ...scopes.after } } : { after }),
+        }
+      : {
+          action: "integration.connection.created",
+          resourceType: "integration_connection",
+          resourceId: conn.id,
+          after: { ...after, scopesGranted: [...conn.scopes_granted].sort() },
+        },
   ];
   if (target && target.spaceId !== null && conn.spaceId === null) {
     audits.push({
@@ -667,7 +679,7 @@ type ConnectSessionClaims = NonNullable<ReturnType<typeof readConnectToken>>;
  * The scopes a connect requests: the manifest's `default_scopes`, the caller's, and — on a reconnect
  * — those already granted on the target connection, so an upgrade never silently shrinks.
  * `default_scopes` is the baseline of every connection of the auth (identity, refresh, least
- * capability); `requested` only widens it (afps-spec/afps-spec#34).
+ * capability); `requested` only widens it.
  */
 function connectScopes(
   auth: IntegrationAuthDef,
@@ -690,7 +702,7 @@ type HostedOAuthBegin =
 
 /**
  * Begin the oauth2 flow of a hosted-connect session whose jti the caller spent; the caller renders
- * the outcome. An auto-provisioned client may have registered upstream before refusing (#1344).
+ * the outcome. An auto-provisioned client may have registered upstream before refusing.
  */
 async function beginHostedOAuth(
   claims: ConnectSessionClaims,
@@ -738,7 +750,7 @@ async function beginHostedOAuth(
     return { redirectUrl: result.redirectUrl };
   } catch (err) {
     if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-      // The detail names operator artefacts (#1345): logged, never rendered.
+      // The detail names operator artefacts: logged, never rendered.
       logger.warn("Hosted connect OAuth begin refused", {
         status: err.status,
         code: err.code,
@@ -868,7 +880,7 @@ export function createIntegrationsRouter() {
       }
       // Not an `OAuthCallbackError`, so nothing authored this message for a
       // reader: it is a DB fault, a TypeError, an SSRF refusal. Same rule as
-      // the branch above and as `/connect/start` (issue #1345) — this page is
+      // the branch above and as `/connect/start` — this page is
       // session-less, so the text goes to the log and the user gets the
       // generic sentence.
       logger.error("Integration OAuth callback threw", { err: String(err) });
@@ -881,6 +893,7 @@ export function createIntegrationsRouter() {
     // actor/scope context from the signed state; the strategy does identity
     // extraction (token response + id_token + userinfo) + persist through the
     // single credential writer.
+    let scopesDenied: string[];
     try {
       const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { manifest, auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
@@ -898,7 +911,25 @@ export function createIntegrationsRouter() {
         ...(result.delegated ? { delegated: true } : {}),
         ...(result.variables ? { variables: result.variables } : {}),
       };
-      const { audits } = await completeConnect(strategy, ctx, { kind: "oauth2-result", result });
+      const { conn, audits } = await completeConnect(strategy, ctx, {
+        kind: "oauth2-result",
+        result,
+      });
+      // A partial consent: the connection stands, short of what the flow asked for.
+      scopesDenied = scopesNotCovered(
+        result.scopesRequested,
+        result.scopesGranted,
+        manifest,
+        result.authKey,
+      );
+      if (scopesDenied.length > 0) {
+        audits.push({
+          action: "integration.connection.scopes_denied",
+          resourceType: "integration_connection",
+          resourceId: conn.id,
+          after: { scopesRequested: [...result.scopesRequested].sort(), scopesDenied },
+        });
+      }
       for (const audit of audits) {
         await recordAuditAs(
           c,
@@ -909,12 +940,7 @@ export function createIntegrationsRouter() {
       logger.info("Integration OAuth callback success", {
         packageId: result.packageId,
         authKey: result.authKey,
-        scopeShortfall: scopesNotCovered(
-          result.scopesRequested,
-          result.scopesGranted,
-          manifest,
-          result.authKey,
-        ),
+        scopesDenied,
       });
     } catch (err) {
       logger.error("Integration OAuth callback persistence failed", {
@@ -929,7 +955,7 @@ export function createIntegrationsRouter() {
         popupHtmlError("Could not save the connection.", { state, packageId: result.packageId }),
       );
     }
-    return c.html(popupHtmlClose({ state, packageId: result.packageId }));
+    return c.html(popupHtmlClose({ state, packageId: result.packageId }, scopesDenied));
   };
   router.get("/callback", (c) => oauthCallback(c, null));
   router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
@@ -1129,7 +1155,7 @@ export function createIntegrationsRouter() {
     },
   );
 
-  // ─── Hosted connect portal (issue #769) ────
+  // ─── Hosted connect portal ────
   //
   // Unified, auth-type-agnostic connect surface. The agent (or any client)
   // mints a session here and receives ONE `connect_url`; opening it dispatches
@@ -1183,7 +1209,7 @@ export function createIntegrationsRouter() {
   //
   // Rate-limited per IP: no session, the signed token is the only credential,
   // and a refusal that hands the jti back leaves the link replayable for its
-  // 10-minute TTL (issue #1344). The 429 is the platform's standard
+  // 10-minute TTL. The 429 is the platform's standard
   // problem+json, not a popup page: it answers abuse, not a flow failure.
   router.get("/connect/start", rateLimitByIp(60), async (c) => {
     // The single-use capability token rides this request's query string. Strip
@@ -1197,8 +1223,8 @@ export function createIntegrationsRouter() {
     const claims = readConnectToken(token);
     if (!claims) return c.html(popupHtmlError("This connect link is invalid or expired.", {}), 410);
     const scope = scopeFromClaims(claims);
-    // Every completion this handler emits must name the integration (issue
-    // #1346): a completion identifying nothing matches every card by contract
+    // Every completion this handler emits must name the integration:
+    // a completion identifying nothing matches every card by contract
     // (`completionMatches`), and `packageId` is the only identifier a
     // hosted-connect page holds — the OAuth `state` is minted later.
     const completionDetail = { packageId: claims.package_id };
@@ -1238,7 +1264,7 @@ export function createIntegrationsRouter() {
         );
       }
       if ("refused" in begun) {
-        // Rendered generically, with the refusal's own status (#1263, #1345).
+        // Rendered generically, with the refusal's own status.
         if (begun.reusable) await releaseJti(claims.jti);
         const retry = begun.reusable ? "open this link again" : "request a new connection link";
         return c.html(
@@ -1249,7 +1275,7 @@ export function createIntegrationsRouter() {
           begun.refused.status as ContentfulStatusCode,
         );
       }
-      // Nothing sent upstream yet: the very same link works once the fault passes (#1352).
+      // Nothing sent upstream yet: the very same link works once the fault passes.
       // Otherwise the flow may have gone half way, and the burn stops a replay re-entering it.
       if (begun.beforeEgress) await releaseJti(claims.jti);
       return c.html(
@@ -1457,7 +1483,7 @@ export function createIntegrationsRouter() {
       });
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
-      // resource (`block_user_connections`), not an operation scrap (#657).
+      // resource (`block_user_connections`), not an operation scrap.
       const detail = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
       return c.json(detail);
     },
@@ -1547,7 +1573,7 @@ export function createIntegrationsRouter() {
       const scope = getSpaceScope(c);
       const item = await getOrgDefault(scope, packageId);
       // Bare resource, or 204 when no default is set — same contract as
-      // PUT (bare resource) and the models/proxies default endpoints (#657).
+      // PUT (bare resource) and the models/proxies default endpoints.
       if (!item) return c.body(null, 204);
       return c.json(item);
     },

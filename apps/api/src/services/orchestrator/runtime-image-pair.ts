@@ -4,7 +4,7 @@
  * Runtime-image build-stamp drift — the half of the `PI_IMAGE` /
  * `SIDECAR_IMAGE` version contract that only a live Docker host can answer.
  *
- * Why the pair is a contract at all, and the #1195 worked example, live with
+ * Why the pair is a contract at all, and its worked example, live with
  * the rule itself in `@appstrate/core/image-ref`. The *configuration* half —
  * both refs pinned to the same tag — is enforced fail-fast by the env schema
  * before anything starts, for every backend.

@@ -100,7 +100,11 @@ describe("launchFlight", () => {
 });
 
 describe("launchRefusal", () => {
-  const ITEM = { field: "integrations.@acme/crm", code: "not_connected", message: "connect" };
+  const ITEM = {
+    field: "integrations.@acme/crm",
+    code: "not_connected",
+    message: "connect",
+  } as const;
   const refusal = (extensions?: Record<string, unknown>) =>
     new ApiError("missing_integration_connection", "refused", 409, [ITEM], extensions);
 

@@ -155,18 +155,14 @@ describe("Internal API", () => {
       expect(body.data).toHaveLength(2);
     });
 
-    it("clamps limit to valid range (min 1, max 50)", async () => {
-      // limit=0 should be clamped to 1
-      const res = await app.request("/internal/run-history?limit=0", {
-        headers: { Authorization: `Bearer ${runningToken}` },
-      });
-      expect(res.status).toBe(200);
-
-      // limit=999 should be clamped to 50
-      const res2 = await app.request("/internal/run-history?limit=999", {
-        headers: { Authorization: `Bearer ${runningToken}` },
-      });
-      expect(res2.status).toBe(200);
+    it("refuses a limit outside 1..50, naming it", async () => {
+      for (const limit of ["0", "999"]) {
+        const res = await app.request(`/internal/run-history?limit=${limit}`, {
+          headers: { Authorization: `Bearer ${runningToken}` },
+        });
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { param?: string }).param).toBe("limit");
+      }
     });
 
     it("excludes the current running run from results", async () => {

@@ -1,5 +1,5 @@
 {
-  "id": "0f7c6d18-69c5-4b3b-bc0c-1c39763981ad",
+  "id": "f7556afa-06cd-4fc6-88cd-c353f98fb92c",
   "prevId": "cfc088dd-ec7c-4844-a1c2-0f997d8b1c6e",
   "version": "7",
   "dialect": "postgresql",
@@ -1577,12 +1577,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "logo": {
-          "name": "logo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -3436,6 +3430,10 @@
           "name": "llm_usage_cost_usd_non_negative",
           "value": "cost_usd >= 0"
         },
+        "llm_usage_payer_iff_user_source": {
+          "name": "llm_usage_payer_iff_user_source",
+          "value": "(credential_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)"
+        },
         "llm_usage_pricing_status_valid": {
           "name": "llm_usage_pricing_status_valid",
           "value": "pricing_status IN ('priced', 'partial', 'unpriced')"
@@ -4556,6 +4554,10 @@
         "runs_cost_non_negative": {
           "name": "runs_cost_non_negative",
           "value": "cost >= 0"
+        },
+        "runs_payer_iff_user_source": {
+          "name": "runs_payer_iff_user_source",
+          "value": "(model_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)"
         },
         "runs_cost_pricing_status_valid": {
           "name": "runs_cost_pricing_status_valid",

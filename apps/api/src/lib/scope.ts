@@ -8,9 +8,8 @@ import type { AppEnv } from "../types/index.ts";
  * Scope objects for multi-tenant DB queries. Carried through the service
  * layer so every DB access is explicitly scoped at the type level.
  *
- * Why: issue #172 and its 4 sibling bugs all shared the same root cause —
- * a service filtered by `orgId` only, while the resource actually lived
- * under a `spaceId`. A key in Space A could therefore reach Space B
+ * Why: a service that filters by `orgId` only, while the resource lives
+ * under a `spaceId`, lets a key in Space A reach Space B
  * rows in the same org. Making space-scoped services take `SpaceScope` (which
  * structurally requires both fields) turns the "forgot to pass
  * spaceId" bug class into a TypeScript error at the call site.

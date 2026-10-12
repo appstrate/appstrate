@@ -186,6 +186,14 @@ export const ROUTE_ACCESS = {
 
 export type RoutePath = keyof typeof ROUTE_ACCESS;
 
+/**
+ * The agent page's Connexions (the Paramètres section `?agentSettings=connections`, and the
+ * launch toast's « Connecter » link to it): its integration reads are not implied by the route.
+ */
+export function agentConnectionsTabVisible(can: (permission: Permission) => boolean): boolean {
+  return can("integrations:read");
+}
+
 /** `absent`: the route does not exist here (module not loaded, or team-space route in a personal space). */
 type RouteVerdict = "absent" | "granted" | "denied";
 

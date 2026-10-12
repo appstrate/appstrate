@@ -37,7 +37,7 @@ export interface RunLaunch {
   /** Per-run temperature/reasoning override (wire `generation`). */
   generation?: ModelGenerationSettings;
   /**
-   * Per-run dependency version overrides (#666) — `{ "@scope/skill": "draft"
+   * Per-run dependency version overrides — `{ "@scope/skill": "draft"
    * | "<semver|dist-tag>" }`. From the run-with-options modal. "draft" runs a
    * dependency's working copy; any other value replaces the manifest pin.
    */
@@ -89,15 +89,15 @@ export function launchFlight(onBusyChange: (busy: boolean) => void): {
 }
 
 /** Codes refusing the launch's own pick itself: replayed, it would be refused again. */
-const OWN_PICK_REFUSALS: ReadonlySet<string> = new Set([
+const OWN_PICK_REFUSALS: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "override_outranked",
   "override_connection_unavailable",
-] satisfies MissingIntegrationConnectionCode[]);
+]);
 
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
  * recovery modal's picks. Everything else the user chose rides along — the
- * input typed in the run modal above all (#1539). The launch's own pick for an
+ * input typed in the run modal above all. The launch's own pick for an
  * integration is dropped only when the 409 refuses that pick itself
  * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
  * of it). Under any other code — a connection to repair, above all — the pick

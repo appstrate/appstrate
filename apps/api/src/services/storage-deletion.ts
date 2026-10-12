@@ -150,7 +150,7 @@ interface ProcessStorageDeletionResult {
   claimed: number;
   /** Jobs settled as done, `reclaimed` ones included. */
   completed: number;
-  /** Completed without deleting: a live row owns the key again (#1612). */
+  /** Completed without deleting: a live row owns the key again. */
   reclaimed: number;
   failed: number;
 }
@@ -208,7 +208,7 @@ async function deleteStorageTarget(
  *  2. **Execute** (no transaction): attempt each `deleteFile`. A package key
  *     alone is checked and deleted inside its own short transaction, under its
  *     writers' lock, and kept if a live row claims it again
- *     (`deleteUnlessReclaimed`, #1612); no completion is ever written there.
+ *     (`deleteUnlessReclaimed`); no completion is ever written there.
  *  3. **Settle** (one autocommit UPDATE per job): success → `completed_at`;
  *     failure → `last_error` + backoff.
  *
@@ -222,7 +222,7 @@ async function deleteStorageTarget(
  *
  * Both settles are guarded on `attempts = <the value this pass claimed with>`,
  * so a pass whose lease expired mid-flight (and whose job was re-claimed by
- * another instance, bumping `attempts`) can no longer overwrite the new owner's
+ * another instance, bumping `attempts`) cannot overwrite the new owner's
  * counter or backoff with its own stale computation.
  *
  * `storage.deleteFile` is idempotent on a missing object (FS tolerates ENOENT;

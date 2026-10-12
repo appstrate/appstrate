@@ -63,13 +63,13 @@ export async function buildPlatformSystemPrompt(
 ): Promise<string> {
   const executionMode = getExecutionMode();
   // `./files/` — the ONE directory `runtime-pi/provision.ts` streams the run's
-  // input files into, since #1177. This announcement and that layout must stay
+  // input files into. This announcement and that layout must stay
   // spelled the same: a divergence is a prompt-level miss, not an error — the
   // bytes are provisioned either way, the agent is simply pointed at a
   // directory that is not there and nothing reports a fault. It is kept true by
   // the env schema, which fails boot unless `PI_IMAGE` carries the platform's
-  // own version, so the image reading this prompt is never a different #1177
-  // side than the platform writing it.
+  // own version, so the image reading this prompt lays files out as the
+  // platform writing it does.
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./files/${f.workspaceName}`,
@@ -77,7 +77,7 @@ export async function buildPlatformSystemPrompt(
     ...(f.type ? { type: f.type } : {}),
   }));
 
-  // Phase 1.4 — inline each resolved integration's manifest description +
+  // Inline each resolved integration's manifest description +
   // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
   // API contract alongside the `{ns}__*` tools advertised via MCP
   // `tools/list`. Docs are pulled from `packages.draftContent` (captured
@@ -103,7 +103,7 @@ export async function buildPlatformSystemPrompt(
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
     // The runtime knows the workspace is capped; without this the agent
-    // does not, and a dependency install dies with ENOSPC mid-run (#1019).
+    // does not, and a dependency install dies with ENOSPC mid-run.
     workspaceTmpfsSizeMb: promptWorkspaceTmpfsSizeMb(executionMode),
     workspaceTmpfsSizePercent: plan.resources.writableRootTmpfsPercent,
     ...(plan.resources.semantics
@@ -114,7 +114,7 @@ export async function buildPlatformSystemPrompt(
           },
         }
       : {}),
-    // Deliverables convention (Phase 2): files the agent writes under
+    // Deliverables convention: files the agent writes under
     // `./outputs/` are swept and published as durable run files at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
@@ -127,7 +127,7 @@ export async function buildPlatformSystemPrompt(
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
   // integration tools, and the platform runtime tools (output/log/note/
   // pin) — are all advertised to the model via MCP `tools/list`
-  // (name + description + input schema), so the prompt no longer lists
+  // (name + description + input schema), so the prompt does not list
   // them. The Communication contract (rendered above) is the only
   // tool-related instruction the model can't infer from `tools/list`, and
   // it stays. This keeps a single source of truth for each tool's

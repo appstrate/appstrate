@@ -162,7 +162,7 @@ export interface McpToolContext {
    * requests carry). Lets the file resource provider call the files
    * service DIRECTLY — no in-process HTTP round-trip, so it works identically
    * across FS / S3-proxy / S3-presigned storage (the 307-redirect a fetch
-   * cannot follow no longer degrades the read).
+   * cannot follow does not degrade the read).
    */
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
@@ -1204,8 +1204,9 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
             "integration and its `candidate_connections`, each with a `label`, an " +
-            "`account_id`, `owned_by_actor` and `needs_reconnection`; pick the candidates the " +
-            "task needs — never one with `needs_reconnection: true`, the run fails on it — and " +
+            "`account_id`, `owned_by_actor`, `needs_reconnection`, `scopes_granted` and " +
+            "`missing_scopes`; pick the candidates the task needs — never one with " +
+            "`needs_reconnection: true` or a non-empty `missing_scopes`, the run fails on it — and " +
             "retry the SAME call with their `id`s here. Those fields are what tells the candidates " +
             "apart, so read them rather than listing connections separately. Each key is the " +
             "integration id itself (`@scope/integration`) — NOT the " +

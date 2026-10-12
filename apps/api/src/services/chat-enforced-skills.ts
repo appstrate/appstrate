@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Skills a space imposes on its chat (#1586): platform authority, since members
+// Skills a space imposes on its chat: platform authority, since members
 // without `skills:*` are bound too; `latest` published, never the draft.
 
 import { and, eq } from "drizzle-orm";

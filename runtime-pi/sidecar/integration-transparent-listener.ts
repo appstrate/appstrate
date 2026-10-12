@@ -2,7 +2,7 @@
 
 /**
  * Transparent (proxy-unaware) egress listener for `delivery.env`
- * integrations (issue #779).
+ * integrations.
  *
  * The plain CONNECT egress listener assumes a cooperative HTTP client
  * that honours `HTTPS_PROXY` and speaks CONNECT. Surveying popular
@@ -24,7 +24,7 @@
  *   - apply the exact same SSRF floor as the CONNECT listener (literal
  *     layer + resolve-and-pin DNS-rebind layer, fail closed) and the same
  *     egress allowlist, that of the runner the peer belongs to
- *     (`policyForPeer`, an unknown peer is refused — #1458);
+ *     (`policyForPeer`, an unknown peer is refused);
  *   - dial the upstream at the PINNED resolved address — never at the
  *     kernel-level original destination, which is always our own IP and,
  *     more importantly, is attacker-controlled ordering: the hostname the
@@ -329,7 +329,7 @@ export interface TransparentEgressPlane {
 }
 
 /**
- * Mount the per-run transparent egress plane (#779): the DNS responder that
+ * Mount the per-run transparent egress plane: the DNS responder that
  * resolves every external name to `ipv4`, and the SNI-passthrough splicers on
  * :443/:80 at that same address. Shared by the docker adapter (the sidecar's
  * IP on the per-run bridge) and the process adapter (127.0.0.1 in the guest).

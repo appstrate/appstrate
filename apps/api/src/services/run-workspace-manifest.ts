@@ -44,8 +44,7 @@ export interface RunFileMeta {
 /**
  * The files manifest served at `GET /api/runs/:runId/files`.
  *
- * ONE key. The pre-#1177 `documents` twin is gone from both the written object
- * and the reader: the platform validates its runtime image tags against its own
+ * ONE key, written and read: the platform validates its runtime image tags against its own
  * version at boot, so the container reading this manifest is never older than
  * the platform that wrote it.
  */
@@ -64,8 +63,7 @@ export const runWorkspaceManifestKey = (runId: string): string => `${runId}/mani
  *
  * The `files/` segment is a STORAGE LAYOUT: every input object of every
  * provisioned run lives under it, and the deletion index resolves teardown keys
- * through this same builder. It was spelled `documents/` until the #1177 rename
- * was finished at the physical layer. Changing it again strands the objects of
+ * through this same builder. Changing it strands the objects of
  * every in-flight run — with no error until a fetch 404s mid-provisioning — so
  * it moves only alongside a pass over the objects already stored.
  */
@@ -97,7 +95,7 @@ function isSafeSegment(name: string): boolean {
 
 /**
  * Parse + validate a files manifest read from storage. `files` is the only key
- * read: an object still carrying the pre-#1177 `documents` spelling throws
+ * read: an object carrying any other key (a `documents` spelling) throws
  * here — an explicit `Invalid run workspace manifest` on both the serve path
  * (500) and the deletion path (retry, then dead letter) rather than an agent
  * booting with an empty workspace or a teardown silently skipping every input

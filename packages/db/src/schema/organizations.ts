@@ -244,8 +244,7 @@ export const orgProxies = pgTable(
 /**
  * Unified credentials table for LLM model providers (API-key + OAuth alike).
  *
- * Sole credential store as of Phase 5 — the legacy `org_system_provider_keys`
- * table was dropped. `provider_id` is a free-text registry key (e.g. "openai",
+ * The sole credential store. `provider_id` is a free-text registry key (e.g. "openai",
  * "anthropic") — NOT a FK to `packages.id`. Inference wire format and default
  * base URL are read from the platform registry
  * (`apps/api/src/services/model-providers/registry.ts`) keyed by

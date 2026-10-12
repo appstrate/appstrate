@@ -7,7 +7,7 @@
  * spawn/credentials resolvers and the sidecar's MITM listener.
  */
 
-import { jsonText } from "@appstrate/afps-shared/json-text";
+import { jsonTextMap } from "@appstrate/afps-shared/json-text";
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // `HttpDeliveryPlan` lives once in @appstrate/afps-runtime (the dependency-free
@@ -51,23 +51,12 @@ export interface IntegrationCredentialsPayload {
 }
 
 /**
- * The ONE rule turning a credential bag into the flat `Record<string, string>`
- * that templates substitute (`{$credential.<field>}`) and login tools read.
- * Credentials may hold any JSON type (JSON Schema 2020-12, AFPS §7.5): a string
- * passes through, any other value is JSON-encoded (`5432` → `"5432"`, `true` →
- * `"true"`, `["a","b"]` → `'["a","b"]'`), so a declared non-string credential
- * is delivered rather than silently lost (#1897). `null` and `undefined` are an
- * absent credential and are left out — never rendered as the text `"null"`.
- * Pure (no crypto dependency) so the sidecar can import this module without
- * pulling in the encryption keyring.
+ * A credential bag as the flat `Record<string, string>` templates substitute
+ * (`{$credential.<field>}`) and login tools read: `jsonTextMap`, so a non-string credential
+ * (JSON Schema 2020-12, AFPS §7.5) is its JSON text and a `null` one is absent.
  */
 export function toCredentialStringMap(raw: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (v === null || v === undefined) continue;
-    out[k] = jsonText(v);
-  }
-  return out;
+  return jsonTextMap(raw);
 }
 
 /**

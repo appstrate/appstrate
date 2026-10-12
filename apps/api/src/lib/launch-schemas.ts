@@ -1,40 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Wire-shape rules shared by every surface that can launch a run.
+ * Wire-shape rules shared by every surface that can launch a run: the agent run,
+ * the inline run (+ validate), the remote run and schedule create/update. A
+ * surface that accepts a map imports its rule from here.
  *
- * There are four: `POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline`
- * (+ `/inline/validate`), `POST /api/runs/remote`, and schedule create/update.
- * They do NOT all accept both maps — see the breakdown below. What this module
- * is for is that the surfaces which DO accept a given map import its rule from
- * here rather than restating it.
- * Until it existed the rules lived in comments instead of in code: `runs.ts`
- * noted `.min(1)` was set "for the same reason it is set on the inline schema
- * below", `schedules.ts` noted it was "for the same reason the run route sets
- * it" and that a second `dependency_overrides` predicate "would be a second
- * opinion", and then wrote one anyway. Three copies of the value rule and two
- * byte-identical refinement messages is how the surfaces stop agreeing.
- *
- * What each surface actually declares, and why the split is correct:
- *
- *   - `connection_overrides` — agent run, inline (+ validate) and schedules all
- *     take {@link connectionOverridesSchema}. The remote surface declares none,
- *     and `run-creation.ts` relies on that: it passes `launchOverrides: null` to
- *     the connection cascade and stamps `connectionOverrides: null` on the row,
- *     so the readiness pass and the snapshot resolve the identical cascade.
- *     Accepting the field here without threading it would break that equality.
- *   - `dependency_overrides` — the remote surface and schedules take
- *     {@link dependencyOverridesSchema}. Inline declares it not at all: it was
- *     accepted and then silently dropped, so since #1187 `.strict()` turns it
- *     into a 400. The agent-run route declares it as a bare
- *     `z.record(z.string(), z.string())` on purpose and defers the VALUE gate
- *     to `input-parser.ts`, which is the only layer that can name the offending
- *     KEY and fill the RFC 9457 `param`. Adopting the shared schema there would
- *     replace a message that points at the bad entry with one that points at
- *     the whole map — a worse error, not a tighter one.
- *
- * So the `input-parser.ts` gate is not a fourth copy of the value rule: it is
- * that rule's only owner on the one path that can afford a better message.
+ *   - `connection_overrides`: agent run, inline and schedules. The remote
+ *     surface declares none (`run-creation.ts` resolves the cascade without).
+ *   - `dependency_overrides`: remote and schedules take
+ *     {@link dependencyOverridesSchema}; inline declares none; the agent run
+ *     declares a bare record and leaves the VALUE gate to `input-parser.ts`,
+ *     the one layer that can name the offending key.
  */
 
 import { z } from "zod";
@@ -42,6 +18,7 @@ import {
   collectOverridableDependencyIds,
   parseManifestIntegrations,
 } from "@appstrate/core/dependencies";
+import type { OverrideRefusalCode } from "@appstrate/core/integration";
 import { ApiError, validationFailed, type ValidationFieldError } from "./errors.ts";
 import { connectionIdSetSchema } from "./connection-set.ts";
 import { isValidDependencyOverride } from "../services/input-parser.ts";
@@ -101,17 +78,33 @@ export function assertDependencyOverrideKeysDeclared(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, string>> | null | undefined,
 ): void {
-  assertKeysDeclared(
-    "dependency_overrides",
-    collectOverridableDependencyIds(manifest),
-    overrides,
-    "skill or integration dependency",
-  );
+  if (!overrides) return;
+  const declared = collectOverridableDependencyIds(manifest);
+  const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
+  if (unknownKey === undefined) return;
+  throw overrideRefusal({
+    field: "dependency_overrides",
+    key: unknownKey,
+    code: "undeclared_dependency_override",
+    message: `${unknownKey} is not a skill or integration this agent declares — remove the key`,
+  }).error;
+}
+
+/** One refused override key: a `validation_failed` item on `<field>.<key>`, whatever the map. */
+function overrideRefusal(r: {
+  field: "connection_overrides" | "dependency_overrides";
+  key: string;
+  code: OverrideRefusalCode;
+  message: string;
+}): OverrideKeyRefusal {
+  const item = { field: `${r.field}.${r.key}`, code: r.code, message: r.message };
+  return { key: r.key, item, error: validationFailed([item]) };
 }
 
 /**
- * The same refusal for a `connection_overrides` KEY the EFFECTIVE manifest does not
- * declare: the resolver would drop it and bind a lower cascade layer instead. Also `[]`
+ * Refuses a `connection_overrides` KEY the EFFECTIVE manifest does not declare
+ * (`undeclared_connection_override`): the resolver would drop it and bind a lower cascade layer
+ * instead. Also `[]`
  * on an integration the manifest marks `required`, which no launch could ever satisfy —
  * the `required_integration_unbound` a pin's `[]` raises, refused here at the write.
  */
@@ -123,10 +116,10 @@ export function assertConnectionOverridesAllowed(
   if (first) throw first.error;
 }
 
-export interface ConnectionOverrideRefusal {
+interface OverrideKeyRefusal {
   key: string;
   /** The entry an accumulating validator collects. */
-  item: ValidationFieldError;
+  item: ValidationFieldError & { code: OverrideRefusalCode };
   /** The 400 a fail-fast surface throws. */
   error: ApiError;
 }
@@ -135,56 +128,29 @@ export interface ConnectionOverrideRefusal {
 export function connectionOverrideRefusals(
   manifest: Record<string, unknown>,
   overrides: Readonly<Record<string, readonly unknown[]>> | null | undefined,
-): ConnectionOverrideRefusal[] {
+): OverrideKeyRefusal[] {
   if (!overrides) return [];
   const declared = parseManifestIntegrations(manifest);
   const ids = new Set(declared.map((entry) => entry.id));
   const undeclared = Object.keys(overrides)
     .filter((key) => !ids.has(key))
-    .map((key) => {
-      const error = undeclaredKeyError("connection_overrides", key, "integration dependency");
-      const item = {
+    .map((key) =>
+      overrideRefusal({
         field: "connection_overrides",
-        code: error.code,
-        title: error.title,
-        message: error.message,
-      };
-      return { key, item, error };
-    });
+        key,
+        code: "undeclared_connection_override",
+        message: `${key} is not an integration this agent declares — remove the key`,
+      }),
+    );
   const emptiedRequired = declared
     .filter((entry) => entry.required === true && overrides[entry.id]?.length === 0)
-    .map((entry) => {
-      const item = {
-        field: `connection_overrides.${entry.id}`,
+    .map((entry) =>
+      overrideRefusal({
+        field: "connection_overrides",
+        key: entry.id,
         code: "required_integration_unbound",
         message: `The agent marks ${entry.id} \`required\`, so its set cannot be empty — name at least one connection, or omit the key`,
-      };
-      return { key: entry.id, item, error: validationFailed([item]) };
-    });
+      }),
+    );
   return [...undeclared, ...emptiedRequired];
-}
-
-function assertKeysDeclared(
-  field: "dependency_overrides" | "connection_overrides",
-  declared: ReadonlySet<string>,
-  overrides: Readonly<Record<string, unknown>> | null | undefined,
-  noun: string,
-): void {
-  if (!overrides) return;
-  const unknownKey = Object.keys(overrides).find((key) => !declared.has(key));
-  if (unknownKey !== undefined) throw undeclaredKeyError(field, unknownKey, noun);
-}
-
-function undeclaredKeyError(
-  field: "dependency_overrides" | "connection_overrides",
-  key: string,
-  noun: string,
-): ApiError {
-  return new ApiError({
-    status: 400,
-    code: "invalid_request",
-    title: "Bad Request",
-    detail: `\`${field}["${key}"]\` is not a declared ${noun} of this agent`,
-    param: field,
-  });
 }

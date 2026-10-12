@@ -11,7 +11,7 @@
 # container unhealthy. The socket then appears at that path inside the SAME
 # running container, and the background retry of the orchestrator's
 # initialization must bring /health and Docker health back to healthy with no
-# restart (#1129).
+# restart.
 #
 # HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
 # enabled and adds the "EE module" phase below (loaded, sweeping). The "EE
@@ -43,7 +43,7 @@ export PORT="$E2E_PORT"
 if [ "$E2E_EE" = "1" ]; then
   # Derived from the schema, never restated: pinning the other members here
   # would leave this job booting yesterday's module set the day one is added
-  # (#513, one level down — the same reason the compose file pins no MODULES).
+  # (the same reason the compose file pins no MODULES).
   default_modules=$(bun -e '
     import { envSchema } from "./packages/env/src/index.ts";
     console.log(envSchema.shape.MODULES.parse(undefined));

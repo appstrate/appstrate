@@ -75,7 +75,7 @@ There is deliberately no command that rebuilds one of the two. `PI_IMAGE` and
 `SIDECAR_IMAGE` are a version contract — the agent runtime and the sidecar speak
 a wire protocol that changes in the same commit — and a pair built from two
 different commits starts normally, passes every health check, then fails runs
-with an error that names neither image (#1195). Both images are stamped with the
+with an error that names neither image. Both images are stamped with the
 git revision they were built from, and the platform warns at boot when the two
 stamps disagree.
 

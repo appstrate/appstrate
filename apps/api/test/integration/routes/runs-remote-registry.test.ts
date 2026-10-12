@@ -860,6 +860,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
     });
 
     expect(res.status).toBe(400);
+    expect(((await res.json()) as { errors?: unknown[] }).errors).toEqual([
+      expect.objectContaining({
+        field: "dependency_overrides.@acme/not-a-dep",
+        code: "undeclared_dependency_override",
+      }),
+    ]);
   });
 
   it("rejects a malformed dependency_overrides value (400)", async () => {

@@ -12,7 +12,7 @@
  * `https://www.googleapis.com/auth/userinfo.email`. A manifest that requests
  * `email` without a catalog entry mapping the echoed form back to it reports
  * `email` as missing on EVERY connection — a reconnect loop the user cannot
- * escape, and a 412 at run launch for any agent with `tools: "*"` (#1131).
+ * escape, and a 412 at run launch for any agent with `tools: "*"`.
  *
  * Nothing at authoring time sees the echo, so this check encodes the known
  * rewrites per issuer ({@link ISSUER_SCOPE_ECHOES}) and requires that the

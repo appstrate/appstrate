@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.2a — per-run CA + tmpfs planner for the HTTPS credential
+ * Per-run CA + tmpfs planner for the HTTPS credential
  * proxy (proposal §5.4.1).
  *
  * Pure planner: given the orchestrator-supplied `runId` + an injectable

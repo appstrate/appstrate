@@ -86,6 +86,11 @@ export function redactionFields(
   return policy.substitutesCredential ? fields : {};
 }
 
+/** The `credential_unusable` message of the three `api_call` doors; `problem` names no value. */
+export function credentialUnusableMessage(integrationId: string, problem: string): string {
+  return `Integration "${integrationId}": a value of the connection cannot be sent where the call places it (${problem}); nothing was sent.`;
+}
+
 /**
  * The refusal's message. Names no value: a field that failed to render may be a secret, so
  * `targetHost` is the target's host as its template names it (`templateHost`).

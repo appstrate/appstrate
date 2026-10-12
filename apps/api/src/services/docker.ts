@@ -51,7 +51,7 @@ export const WORKSPACE_VOLUME_PREFIX = "appstrate-ws-";
  * `shutdown()` nor by the boot orphan sweep — several API processes may
  * share one Docker daemon (dev server + integration test app, blue/green
  * deploys), and any of them deleting the network breaks every run of the
- * others until their cached state is refreshed (#834). Docker itself
+ * others until their cached state is refreshed. Docker itself
  * refuses to delete a network with attached endpoints, but the network is
  * empty between runs, so a name-based sweep still races; the only safe
  * policy is to never delete it at all.
@@ -264,7 +264,7 @@ export async function ensureImagePin(
     Entrypoint: ["sleep"],
     Cmd: ["infinity"],
     // A pin runs `sleep`, so the image's HEALTHCHECK would probe a process
-    // that isn't there (#1521).
+    // that isn't there.
     Healthcheck: { Test: ["NONE"] },
     HostConfig: {
       // No network, no privileges, minimal resources: this process must be
@@ -334,7 +334,7 @@ interface CreateContainerOptions {
   /**
    * Docker `HostConfig.Binds` entries (`/host/path:/container/path[:ro]`).
    * Used by the sidecar to receive the host's Docker socket so it can
-   * `docker run` per-integration runner containers (Phase 1.4+). Empty by
+   * `docker run` per-integration runner containers. Empty by
    * default for every other workload — agent containers never get this.
    */
   binds?: string[];
@@ -347,7 +347,7 @@ interface CreateContainerOptions {
   /**
    * Namespaced `HostConfig.Sysctls` entries. Used by the sidecar to get
    * `net.ipv4.ip_unprivileged_port_start=0` so its transparent egress
-   * plane (#779) can bind :53/:443/:80 inside its own netns despite the
+   * plane can bind :53/:443/:80 inside its own netns despite the
    * unconditional `CapDrop: ["ALL"]` — a netns-scoped knob, granting no
    * capability. Empty by default for every other workload.
    */
@@ -690,7 +690,7 @@ export async function createNetwork(
  * `appstrate-egress`): resolving **by name at use time** instead of caching
  * an ID at boot means the platform self-heals when the network disappears
  * under a live process — `docker network prune`, a daemon restart, or a
- * concurrent Appstrate instance tearing it down (#834). The next run simply
+ * concurrent Appstrate instance tearing it down. The next run simply
  * recreates it instead of failing every container create with
  * `network <staleId> not found` until the API is restarted.
  *
@@ -951,10 +951,9 @@ async function removeVolumesMatching(predicate: (name: string) => boolean): Prom
  * WHICH instance owns it: every Appstrate process on the host — a second
  * `bun run dev` from another worktree, the new container of a rolling
  * redeploy that boots before the old one is drained — writes the same label.
- * A sweep keyed on that label alone force-removed live agents and sidecars
- * out from under a sibling instance mid-run, and the victim's `waitForExit`
- * then reported the disappearance as exit code 137 (#1130). Same class of
- * bug as #834, which fixed it for the shared egress network.
+ * A sweep keyed on that label alone would force-remove live agents and
+ * sidecars out from under a sibling instance mid-run, and the victim's
+ * `waitForExit` would report the disappearance as exit code 137.
  *
  * So the sweep reclaims only what it can prove is finished, without needing
  * to prove ownership:
@@ -1038,7 +1037,7 @@ export async function cleanupOrphanedContainers(): Promise<{
 /**
  * Remove orphan per-run networks (`appstrate-exec-*`) without touching the
  * shared infra networks — {@link EGRESS_NETWORK_NAME} is durable and never
- * swept (#834: a second API process booting against the same daemon used to
+ * swept (a second API process booting against the same daemon would
  * delete it out from under the first one's live runs). Safe to call
  * mid-operation: Docker refuses to delete networks that still have attached
  * endpoints (live runs), so only truly abandoned networks from crashed runs
@@ -1073,7 +1072,7 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * Returns null when running outside Docker (local dev).
  * A 5xx, a transport error or an unreadable body throws uncached,
  * so an outage at boot is retried rather than falling back to `PLATFORM_API_URL`
- * / host-gateway for the process lifetime (#1129). Any other status is
+ * / host-gateway for the process lifetime. Any other status is
  * definitive (404 = not a container, 401/403 = proxy ACL): null is cached.
  */
 export async function detectPlatformNetwork(): Promise<{

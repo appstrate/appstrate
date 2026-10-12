@@ -82,7 +82,7 @@ export const authPaths = {
         "400": { description: "Validation error", content: betterAuthError },
         "403": {
           description:
-            "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
+            "Sign-up blocked by the platform signup gate: signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
           content: betterAuthError,
         },
         "422": {
@@ -190,7 +190,7 @@ export const authPaths = {
       tags: ["Auth"],
       summary: "Claim ownership of an unattended install",
       description:
-        "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
+        "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance. Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
       security: [],
       requestBody: {
         required: true,

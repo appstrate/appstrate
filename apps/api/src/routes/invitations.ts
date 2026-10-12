@@ -189,8 +189,8 @@ router.post("/:token/accept", async (c) => {
     userAgent: c.req.header("user-agent") ?? null,
   });
 
-  // Bare joined-org resource — same shape as the items in GET /api/orgs
-  // (issue #657). The web accept page reads `id` to pin the org store.
+  // Bare joined-org resource — same shape as the items in GET /api/orgs.
+  // The web accept page reads `id` to pin the org store.
   return c.json({
     id: org.id,
     name: org.name,

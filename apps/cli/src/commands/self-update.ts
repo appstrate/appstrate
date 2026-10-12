@@ -3,8 +3,8 @@
 /**
  * `appstrate self-update` — bring the running CLI to a newer release.
  *
- * Channel dispatch follows the build-time stamp from `INSTALL_SOURCE`
- * (issue #249, phase 1). Only the curl channel can self-update; other
+ * Channel dispatch follows the build-time stamp from `INSTALL_SOURCE`.
+ * Only the curl channel can self-update; other
  * channels exit non-zero with a hint so the user invokes the right
  * package manager. See `docs/cli/upgrades.md` for the full matrix.
  */
@@ -171,13 +171,13 @@ export async function selfUpdateCommand(
   io: CommandIO = DEFAULT_IO,
 ): Promise<never> {
   intro(`Appstrate self-update`, io);
-  // Live download progress so a 113 MB binary is not a silent multi-minute gap
-  // (issue #821). The spinner starts on the first byte-tick and stops once the
+  // Live download progress so a 113 MB binary is not a silent multi-minute gap.
+  // The spinner starts on the first byte-tick and stops once the
   // run finishes; it degrades to a static line on a non-TTY (piped installs).
   // Not `withSpinner`: the start is conditional (no ticks, no spinner — a
   // no-op update must not paint a download line). The `finally` carries the
   // same obligation the helper would: a spinner that outlives its scope keeps
-  // painting from a `setInterval` for the rest of the process (issue #1180).
+  // painting from a `setInterval` for the rest of the process.
   const spin = spinner(io);
   let spinning = false;
   const onProgress: ProgressFn = (p) => {
@@ -200,7 +200,7 @@ export async function selfUpdateCommand(
   if (result.exitCode !== SELF_UPDATE_EXIT.OK) {
     // `exitWithError` renders through `io.cancel` (production: `clack.cancel`)
     // and exits with the channel-specific code, so the two-line
-    // "cancel then exit" pair no longer has to be repeated here.
+    // "cancel then exit" pair does not have to be repeated here.
     exitWithError(result.message, io, result.exitCode);
   }
   outro(result.message, io);

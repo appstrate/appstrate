@@ -27,9 +27,7 @@
  *
  * The first line reconciles the `files/` object namespace against
  * `files.storage_key` values, which all begin with `files/`; the run-workspace
- * bucket's per-run input objects are keyed `{runId}/files/<name>`. Both were
- * spelled `documents` until the #1177 rename was finished at the physical layer
- * (migration `0044_finish_file_rename` moved the stored keys). A bucket literal
+ * bucket's per-run input objects are keyed `{runId}/files/<name>`. A bucket literal
  * that disagrees with the stored keys makes every object in it read as an
  * orphan here — which is why the two only ever move together.
  *

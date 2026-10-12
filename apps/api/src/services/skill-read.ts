@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// MCP `read_skill` (#1586): the file explorer's readers, with its own access rule.
+// MCP `read_skill`: the file explorer's readers, with its own access rule.
 
 import type { Context } from "hono";
 import { packagePermission } from "@appstrate/core/permissions";

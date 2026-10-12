@@ -108,7 +108,7 @@ function RunWithOptionsForm({
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
   const inputFormRef = useRef<AgentInputFormHandle>(null);
-  // Deps follow the selected version (#770): the input / integrations / skills
+  // Deps follow the selected version: the input / integrations / skills
   // the modal renders match what the run will execute, not the draft.
   const { deps } = useScheduleFormDeps(agent.id, version);
 

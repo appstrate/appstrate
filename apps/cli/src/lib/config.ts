@@ -43,7 +43,7 @@ export interface Profile {
  * A `syncSpaces` that is not a list of space IDs, carried verbatim instead of
  * thrown. `readConfig` runs at the first line of every command for every
  * profile, so throwing there turned one typo in one profile into a CLI with no
- * way left to repair or even log out of it (#1363). The value stays on the
+ * way left to repair or even log out of it. The value stays on the
  * profile so a write that touches another key round-trips the typo rather than
  * silently deleting it — deleting it would turn a narrowed sync back into
  * "every space" without saying so. Read the list through `syncSpaceIds`, which

@@ -9,14 +9,17 @@
  * exports helpers breaks fast refresh.
  */
 
+import type { JSONSchema7 } from "@appstrate/core/form";
 import type { IntegrationManifestAuth } from "../../hooks/use-integrations";
 
-/** The `title` / `description` / `default` an auth declares for one credential. */
-export interface CredentialFieldSchema {
-  title?: string;
-  description?: string;
-  default?: string;
-}
+const SECRET: JSONSchema7 = { type: "string", writeOnly: true };
+
+/** The fields of an auth that declares no `credentials.schema`, by auth type (AFPS §7.5). */
+const CANONICAL_FIELDS: Record<string, Record<string, JSONSchema7>> = {
+  api_key: { api_key: SECRET },
+  basic: { username: { type: "string" }, password: SECRET },
+  mtls: { client_cert: { type: "string" }, client_key: SECRET },
+};
 
 /** The declared `credentials.schema.properties` — present-but-empty names no field. */
 function declared(auth: IntegrationManifestAuth): Record<string, unknown> | undefined {
@@ -24,11 +27,13 @@ function declared(auth: IntegrationManifestAuth): Record<string, unknown> | unde
   return props && typeof props === "object" ? (props as Record<string, unknown>) : undefined;
 }
 
-/** Per-field presentation, keyed by credential name. */
-export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, CredentialFieldSchema> {
+/** Each field's schema, keyed by credential name: the declared one, else the auth type's own. */
+export function fieldSchemas(auth: IntegrationManifestAuth): Record<string, JSONSchema7> {
   return Object.fromEntries(
-    Object.entries(declared(auth) ?? {}).filter(([, raw]) => raw && typeof raw === "object"),
-  ) as Record<string, CredentialFieldSchema>;
+    Object.entries(declared(auth) ?? CANONICAL_FIELDS[auth.type] ?? {}).filter(
+      ([, raw]) => raw && typeof raw === "object",
+    ),
+  ) as Record<string, JSONSchema7>;
 }
 
 /**
@@ -49,11 +54,7 @@ export function deriveFieldNames(auth: IntegrationManifestAuth): string[] {
     const first = new Set(required);
     return [...first, ...Object.keys(props).filter((f) => !first.has(f))];
   }
-  if (auth.type === "api_key") return ["api_key"];
-  if (auth.type === "basic") return ["username", "password"];
-  // AFPS §7.5 — an mtls schema SHOULD describe a client cert and private key.
-  if (auth.type === "mtls") return ["client_cert", "client_key"];
-  return [];
+  return Object.keys(CANONICAL_FIELDS[auth.type] ?? {});
 }
 
 /**

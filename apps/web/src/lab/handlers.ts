@@ -1215,6 +1215,64 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: () => ({ status: 200, body: f.connectionTest, delayMs: 800 }),
   },
   {
+    // The hosted connect form (`/connect`): a field is masked by what its schema declares
+    // (`writeOnly`, `format: "password"`), not by what its name looks like. `consumer_key` and
+    // `host_key` carry « key » in the name and stay readable; `passcode` and `pin` do not and
+    // are masked. Before this route the server-rendered form was out of the lab's reach.
+    method: "GET",
+    pattern: /^\/api\/integrations\/connect\/context$/,
+    handler: () => ({ status: 200, body: f.hostedConnectContext }),
+  },
+  {
+    // The hosted form's submit. The login refusals the server types are reached by the passcode
+    // typed: `rejet` (the service refused the login), `adresse` (the login URL is not one the
+    // integration may reach), `panne` (the service could not complete it). Any other value stores.
+    method: "POST",
+    pattern: /^\/api\/integrations\/connect\/submit$/,
+    handler: (_u, _s, _h, body) => {
+      const passcode = (body as { credentials?: Record<string, string> } | null)?.credentials
+        ?.passcode;
+      const refusal = (status: number, title: string, code: string, param?: string) => ({
+        status,
+        body: { title, status, code, detail: `${title}.`, ...(param ? { param } : {}) },
+      });
+      if (passcode === "rejet") {
+        return refusal(400, "Login Rejected", "login_rejected", "credentials");
+      }
+      if (passcode === "adresse") {
+        return {
+          status: 400,
+          body: {
+            title: "Login URL Refused",
+            status: 400,
+            code: "login_url_refused",
+            detail: "No address this login may reach comes from 'host_key'.",
+            param: "credentials",
+            errors: [
+              { field: "credentials.host_key", code: "login_url_refused", message: "refused" },
+            ],
+          },
+        };
+      }
+      if (passcode === "panne") {
+        return refusal(502, "Login Upstream Unavailable", "login_upstream_unavailable");
+      }
+      return { status: 200, body: { handoff_steps: [] }, delayMs: 400 };
+    },
+  },
+  {
+    // The kickoff of the connect popup: the page the popup opens is the lab's own `/connect`.
+    method: "POST",
+    pattern: /^\/api\/integrations\/@[^/]+\/[^/]+\/auths\/[^/]+\/connect\/session$/,
+    handler: () => ({
+      status: 200,
+      body: {
+        connect_url: `${window.location.origin}/connect`,
+        expires_at: "2026-10-12T20:00:00Z",
+      },
+    }),
+  },
+  {
     // The catalogue the integrations page holds whole and filters client-side.
     method: "GET",
     pattern: /^\/api\/integrations$/,

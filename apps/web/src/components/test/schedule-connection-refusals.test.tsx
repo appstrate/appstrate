@@ -26,6 +26,8 @@ const CANDIDATE = {
   account_id: "team@acme.test",
   owned_by_actor: false,
   needs_reconnection: false,
+  scopes_granted: [],
+  missing_scopes: [],
 };
 
 const GMAIL = "@acme/gmail";

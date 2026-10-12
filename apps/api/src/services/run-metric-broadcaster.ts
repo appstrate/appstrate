@@ -38,7 +38,7 @@ import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { notifyRunMetric, type RunMetricNotifyPayload } from "@appstrate/db/notify";
-import { computeRunSpend } from "./state/runs.ts";
+import { computeRunSpend, readTokenUsage } from "./state/runs.ts";
 import { logger } from "../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -182,10 +182,9 @@ async function fireBroadcast(runId: string): Promise<void> {
       return;
     }
     // Persist the running cost on the run row so a hard refresh during
-    // a streaming run sees the latest value, not stale `null`. The SSE
-    // payload was previously the only path delivering `cost_so_far`, so
-    // a refresh refetched `runs.cost` (null until finalize) and the UI
-    // jumped back to $0. Bounded by the throttle (one UPDATE per 250 ms
+    // a streaming run sees the latest value, not stale `null`. Without
+    // it the SSE payload is the only path delivering `cost_so_far`: a refresh
+    // refetches `runs.cost` (null until finalize) and the UI jumps back to $0. Bounded by the throttle (one UPDATE per 250 ms
     // window per run). Monotonic-max via WHERE keeps a late finalize
     // race or out-of-order tick from regressing the persisted aggregate.
     //
@@ -278,7 +277,7 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
     user_id: runRow.userId,
     end_user_id: runRow.endUserId,
     package_id: runRow.packageId,
-    token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
+    token_usage: readTokenUsage(runRow.tokenUsage, runId),
     cost_so_far: costUsd,
     cost_pricing_status: pricingStatus,
   };

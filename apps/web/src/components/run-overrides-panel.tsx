@@ -33,7 +33,7 @@ const INHERIT = "__inherit__";
 // "use the org default"). Emitting it verbatim — rather than an internal
 // `__none__` sentinel each caller has to translate — means both the run
 // launcher and the schedule form send the right value, so a scheduled run
-// with "None" selected is no longer silently routed through the org-default
+// with "None" selected is not silently routed through the org-default
 // proxy.
 const NONE = "none";
 
@@ -62,7 +62,7 @@ interface RunOverridesPanelProps {
   value: RunOverridesValue;
   onChange: (next: RunOverridesValue) => void;
   /**
-   * Version selector (#770) forwarded to the integration connection pickers so
+   * Version selector forwarded to the integration connection pickers so
    * their per-integration readiness verdict judges the definition that runs.
    */
   version?: string;

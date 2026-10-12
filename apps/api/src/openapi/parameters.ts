@@ -10,7 +10,8 @@ export const parameters = {
     name: "offset",
     in: "query" as const,
     required: false,
-    description: "Number of items to skip before the first returned item.",
+    description:
+      "Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`).",
     schema: { type: "integer", minimum: 0, default: 0 },
   },
   IfMatch: {

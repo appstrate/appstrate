@@ -77,7 +77,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 // write (inserts a row) and rarely called more than once per login;
 // 10/min/IP is a loose ceiling.
 const DEVICE_CODE_RL_POINTS = 10;
-// CLI token endpoints (issue #165). `/cli/token` serves both the device-
+// CLI token endpoints. `/cli/token` serves both the device-
 // code → tokens exchange (once per interval ≈ 5s, ~120 polls over 10 min)
 // AND the silent-refresh path (once per ~15 min per active CLI). 30/min/IP
 // covers both patterns. `/cli/revoke` is only called on `appstrate logout`
@@ -695,7 +695,7 @@ export function oidcGuardsPlugin() {
           }),
         },
         {
-          // Issue #165 — rate-limit the CLI's JWT + rotating-refresh
+          // Rate-limit the CLI's JWT + rotating-refresh
           // endpoints. `/cli/token` handles both the initial device-code
           // → tokens exchange AND refresh-token rotation (discriminated
           // by `grant_type` in the body); one ceiling covers both because

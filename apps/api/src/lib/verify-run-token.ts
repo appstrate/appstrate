@@ -36,19 +36,19 @@ export async function verifyRunToken(c: Context): Promise<{
     runOrigin: "platform" | "remote";
     /**
      * The agent definition the run executes — `"draft"` or a concrete semver
-     * stamped at kickoff (#636). The dependency guards read the manifest AT
+     * stamped at kickoff. The dependency guards read the manifest AT
      * this ref so a post-kickoff draft edit cannot retroactively change a
      * pinned run's authorization set.
      */
     versionRef: string | null;
     /**
-     * Snapshot of the connection resolver output frozen at run kickoff
-     * (#199): the set bound per integration, which authorises a `connection_id`.
+     * Snapshot of the connection resolver output frozen at run kickoff:
+     * the set bound per integration, which authorises a `connection_id`.
      */
     resolvedConnections: RunConnectionSnapshot;
     /**
      * Snapshot of each declared integration's resolved manifest version frozen
-     * at run kickoff (#686). The credentials resolver reads the integration
+     * at run kickoff. The credentials resolver reads the integration
      * manifest AT this version so a mid-run MITM refresh sees the same
      * delivery/auth plan the spawn used.
      */

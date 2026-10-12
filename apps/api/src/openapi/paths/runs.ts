@@ -12,7 +12,7 @@ const inlineDependencyAuthorization =
 
 const runConnectionOverrides = {
   type: "object",
-  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey; \`[]\` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise \`must_choose_connection\` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (\`[]\` included), and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`), and so is a key that names no integration the agent declares (400 \`invalid_request\`, \`param: connection_overrides\`) and \`[]\` on an integration it marks \`required\` (400 \`validation_failed\`, an \`errors[]\` item \`required_integration_unbound\` on \`connection_overrides.<id>\`). A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
+  description: `Per-integration connection sets for THIS run (the launch-override layer). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\` — 0..${MAX_CONNECTIONS_PER_INTEGRATION} connections per integration, each carrying its own authKey; \`[]\` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise \`must_choose_connection\` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (\`[]\` included), and binds exactly that subset; one naming any connection outside it is refused with \`override_outranked\` — drop it or choose within the set. Resolved at kickoff, persisted on \`runs.connection_overrides\` and snapshotted into \`runs.resolved_connections\` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED \`connection\` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (\`lib/launch-schemas.ts\`), and so are a key that names no integration the agent declares and \`[]\` on an integration it marks \`required\`: 400 \`validation_failed\`, an \`errors[]\` item on \`connection_overrides.<id>\` whose \`code\` is \`undeclared_connection_override\` or \`required_integration_unbound\`. A set that cannot bind answers 409 \`missing_integration_connection\`, whose per-integration \`errors[].code\` is \`override_connection_unavailable\` (an id not accessible to the actor) or \`override_outranked\`.`,
   additionalProperties: connectionIdSetJsonSchema,
 } as const;
 
@@ -147,11 +147,11 @@ const canonicalRunsPaths = {
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent\'s closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency\'s mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
+                    'Per-run dependency version overrides. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent\'s closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency\'s mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
               },
-              // An unknown field is a 400, never a silent drop (#1187) — the
+              // An unknown field is a 400, never a silent drop — the
               // same rule `POST /api/runs/remote` and `POST /api/runs/inline`
               // apply. A caller pinned to an older field name learns it stopped
               // being honoured instead of getting a run with other parameters.
@@ -167,7 +167,7 @@ const canonicalRunsPaths = {
       responses: {
         "201": {
           description:
-            "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`.",
+            "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`.",
           headers: {
             ...STD_RESPONSE_HEADERS,
             "Idempotent-Replayed": { $ref: "#/components/headers/IdempotentReplayed" },
@@ -372,6 +372,11 @@ const canonicalRunsPaths = {
             },
           },
         },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         // A READ: `requireAgent()` asks placement only, so the 404 is the opaque
         // `agent_not_found` and nothing else — an agent switched off here still
@@ -388,7 +393,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Delete all runs for an agent",
       description:
-        "Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
+        "Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1111,6 +1116,11 @@ const canonicalRunsPaths = {
             },
           },
         },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -1301,7 +1311,7 @@ const canonicalRunsPaths = {
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
+                    'Per-run dependency version overrides. Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
                 contextSnapshot: {
@@ -1665,7 +1675,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Fetch the run bundle archive (HMAC)",
       description:
-        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },

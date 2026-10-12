@@ -72,7 +72,7 @@ _appstrate_runner_bootstrap() {
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # A release is `v1.2.3` as a git tag but `1.2.3` everywhere an operator
-  # reads it (image tags, `.env`, `appstrate --version`): accept both (#1788).
+  # reads it (image tags, `.env`, `appstrate --version`): accept both.
   if [ "$VERSION" != "latest" ]; then VERSION="v${VERSION#v}"; fi
   BIN_DIR="${APPSTRATE_BIN_DIR:-/usr/local/bin}"
   DEST="${BIN_DIR}/appstrate"

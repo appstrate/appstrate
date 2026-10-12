@@ -61,8 +61,8 @@ export const createModelSchema = z
     // `org_models.credential_id` is a strict UUID FK to
     // `model_provider_credentials.id` — built-in (system) credentials live
     // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
-    // slugs (e.g. "anthropic"). Validating as UUID here turns the
-    // legacy 500 ("invalid input syntax for type uuid") into a clean 400
+    // slugs (e.g. "anthropic"). Validating as UUID here turns a
+    // 500 ("invalid input syntax for type uuid") into a clean 400
     // and lets the route handler emit a hint that points operators at the
     // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
     // credential). `null`: each member serves the model with their own
@@ -164,7 +164,7 @@ export const testInlineSchema = z
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and
- * update handlers so PATCH cannot accept a state POST rejects (issue #727).
+ * update handlers so PATCH cannot accept a state POST rejects.
  */
 function throwOnAliasViolation(violation: AliasInvariantViolation | null): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
@@ -297,7 +297,7 @@ export function createModelsRouter() {
         throw invalidRequest("providerId must name a registered provider", "providerId");
       }
       throwOnModelOutsideOffer(providerId, modelId);
-      // Model-alias guards (issue #727, Threat A) — shared invariant rule:
+      // Model-alias guards — shared invariant rule:
       if (aliased) {
         throwOnAliasViolation(
           checkAliasInvariants({
@@ -344,7 +344,7 @@ export function createModelsRouter() {
         after: { label, modelId, credentialId },
       });
       // Return the bare created resource (same shape as GET/list) so callers
-      // see the resolved state without a follow-up fetch (#657). The row was
+      // see the resolved state without a follow-up fetch. The row was
       // just inserted — failing to re-project it (e.g. credential became
       // unreachable mid-request) is a server-side inconsistency.
       const model = await getOrgModel(orgId, id, requestPayerUserId(c));
@@ -442,7 +442,7 @@ export function createModelsRouter() {
       // Return the bare *effective* default model resource — `is_default` is
       // recomputed by listOrgModels (DB flag, or the system-default fallback
       // when no DB row is flagged) — so callers see the resulting state
-      // without a follow-up GET (#657). When no default remains in effect
+      // without a follow-up GET. When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
       const all = await listOrgModels(orgId, requestPayerUserId(c));
       const def = all.find((m) => m.is_default);
@@ -587,7 +587,7 @@ export function createModelsRouter() {
       }
     }
 
-    // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
+    // Model-alias guards on the EFFECTIVE post-update state —
     // without this, PATCH is a bypass of every invariant POST enforces: flip
     // `aliased` on an oauth-subscription or non-backing row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
@@ -642,7 +642,7 @@ export function createModelsRouter() {
         resourceId: modelId,
         after: data,
       });
-      // Return the bare updated resource (#657), projected for a model alias
+      // Return the bare updated resource, projected for a model alias
       // (Threat A) — the same projection the list and effective-default paths
       // apply.
       //

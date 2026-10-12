@@ -52,13 +52,11 @@ import {
   updateRun,
   appendRunLog,
   computeRunSpend,
+  readIntegrationsUnbound,
   readLastEmittedOutput,
+  readTokenUsage,
   runAgentIdentity,
 } from "./state/runs.ts";
-import {
-  runIntegrationsUnboundSchema,
-  type RunIntegrationUnbound,
-} from "@appstrate/core/integration";
 import { createRunNotifications } from "./state/notifications.ts";
 import {
   addMemories as addUnifiedMemories,
@@ -79,7 +77,6 @@ import { clearRunMetricBroadcastState } from "./run-metric-broadcaster.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { runResultSchema } from "../lib/jsonb-schemas.ts";
-import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { TokenUsage } from "@appstrate/shared-types";
 
 // Re-export the pure helpers so callers that already import from this
@@ -124,7 +121,7 @@ const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
  * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
  * from a terminal model error the runner already stamped: that verdict is
  * the runner's authoritative call (runner-pi's `getTerminalError()`), and
- * finalize no longer scans the `run_logs` adapter-error trail at all.
+ * finalize does not scan the `run_logs` adapter-error trail at all.
  *
  * One generic reason on purpose, so finalize stays transport-agnostic: the
  * proxy a run resolved at preflight is not in the sink context, and naming it
@@ -310,7 +307,7 @@ async function ingestInner(
  *           declared) — failure overrides to "failed".
  *        b. If still "success": apply the "zero tokens" rule (no LLM
  *           roundtrip ever happened) — overrides to "failed".
- *   4. Build the result payload (`{ output }`) mirroring the legacy
+ *   4. Build the result payload (`{ output }`) in the
  *      platform shape; consumers of `runs.result` get the same structure
  *      whether the run executed in-process or came from a remote runner.
  *   5. Build the terminal params shared by the CAS and the broadcast.
@@ -337,8 +334,8 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     // throttle entry. `finalizeRunImpl` has many exits (idempotent no-op when
     // the sink is already closed, the CAS-winner path, and any throw from the
     // post-CAS side effects); dropping the entry here covers all of them,
-    // including the throwing ones that previously leaked it for the lifetime
-    // of the process. Also runs AFTER the post-CAS side effects, so a metric
+    // including the throwing ones, which would otherwise leak it for the
+    // lifetime of the process. Also runs AFTER the post-CAS side effects, so a metric
     // event racing them cannot re-create an entry that nothing then clears.
     //
     // Local-only by construction: the entry lives on whichever replica
@@ -818,7 +815,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   };
   void emitEvent("onRunStatusChange", broadcastParams);
 
-  // Fan out in-app notifications — one row per recipient (issue #667). Only
+  // Fan out in-app notifications — one row per recipient. Only
   // the CAS winner reaches here, so this runs exactly once per run. Awaited
   // (after the broadcast) rather than detached: the run is already terminal
   // and the broadcast has already fired, so the small INSERT adds negligible
@@ -857,11 +854,10 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
  *
  * Three callers funnel through here today:
  *
- *   - `POST /api/runs/:id/cancel` — user-triggered cancellation. Without
- *     this convergence, the cancel route used to write `status='cancelled'`
- *     directly and the terminal ledger barrier + `onRunStatusChange`
- *     broadcast never ran — metering subscribers observed zero charge for
- *     cancelled runs that had already burned LLM tokens (issue #12 follow-up).
+ *   - `POST /api/runs/:id/cancel` — user-triggered cancellation. A cancel
+ *     route writing `status='cancelled'` directly would skip the terminal
+ *     ledger barrier + `onRunStatusChange` broadcast: metering subscribers
+ *     would observe zero charge for a cancelled run that burned LLM tokens.
  *   - `listOrphanRunIds` + boot loop — runs that were `running` when the
  *     server crashed are finalised here so billing/observability hooks see
  *     the exact same lifecycle as a clean termination.
@@ -919,7 +915,7 @@ export async function synthesiseFinalize(
  * runner posts. A synthesised terminal carries an `emptyRunResult()`, so a
  * run whose agent had ALREADY delivered its output ended with
  * `runs.result = null` — the payload survived on disk but was invisible to
- * `GET /api/runs/:id`, the dashboard and the CLI's `--output` (issue #1020).
+ * `GET /api/runs/:id`, the dashboard and the CLI's `--output`.
  *
  * RECOVER, NEVER FABRICATE: only a payload that is actually persisted AND a
  * plain record is attached. No row, or a row whose `data` is null, leaves
@@ -987,8 +983,7 @@ function tokenUsageIsNonZero(usage: TokenUsage): boolean {
 /**
  * Last-known cumulative usage snapshot for a run — the value the
  * `appstrate.metric` side-channel wrote onto `runs.tokenUsage` during the
- * run. Parsed through the token-usage schema so a corrupt JSONB value
- * degrades to `null`, never a throw. Used by finalize
+ * run, read under the column's one policy. Used by finalize
  * to avoid erasing real usage when a run dies without posting a terminal
  * `result.usage`, and by {@link synthesiseFinalize} to reconstruct the
  * terminal usage for platform-synthesised closures.
@@ -999,9 +994,7 @@ async function readLastKnownUsage(runId: string): Promise<TokenUsage | null> {
     .from(runs)
     .where(eq(runs.id, runId))
     .limit(1);
-  if (!row?.tokenUsage) return null;
-  const parsed = tokenUsageSchema.safeParse(row.tokenUsage);
-  return parsed.success ? parsed.data : null;
+  return readTokenUsage(row?.tokenUsage, runId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1108,8 +1101,8 @@ async function persistEventAndAdvance(
       }),
     );
   } catch (err) {
-    // A row-value failure (22xxx/23514) replays identically and would wedge the stream
-    // (#1501): claim the sequence with a placeholder. After sanitisation only a platform
+    // A row-value failure (22xxx/23514) replays identically and would wedge the stream:
+    // claim the sequence with a placeholder. After sanitisation only a platform
     // bug lands here, hence error level — logged only if we claimed (a lost race drops nothing).
     const sqlState = rowValueErrorCode(err);
     if (sqlState === null) throw err;
@@ -1152,11 +1145,10 @@ async function persistEventAndAdvance(
   // actually transitions pending → running (the first ingested event).
   // Platform-origin runs already emit `started` from
   // `executeAgentInBackground` when they flip the row, so they are
-  // excluded here to avoid a duplicate. Remote runs no longer emit at
-  // row-insert time (run-creation.ts) — that fired before the DB
-  // transition and never again when it actually happened.
+  // excluded here to avoid a duplicate. Remote runs emit nothing at
+  // row-insert time (run-creation.ts): that is before the DB transition.
   if (firstEvent && run.runOrigin === "remote") {
-    const integrationsUnbound = parseSinkIntegrationsUnbound(run);
+    const integrationsUnbound = readIntegrationsUnbound(run.integrationsUnbound, run.id);
     void emitEvent("onRunStatusChange", {
       orgId: run.orgId,
       runId: run.id,
@@ -1170,17 +1162,6 @@ async function persistEventAndAdvance(
   }
 
   return "claimed";
-}
-
-/** The run's recorded `integrations_unbound`; a drifted row is logged and omitted, never thrown. */
-function parseSinkIntegrationsUnbound(run: RunSinkContext): RunIntegrationUnbound[] | null {
-  if (run.integrationsUnbound === null || run.integrationsUnbound === undefined) return null;
-  const parsed = runIntegrationsUnboundSchema.safeParse(run.integrationsUnbound);
-  if (parsed.success) return parsed.data;
-  logger.warn("run.started: runs.integrations_unbound does not parse; emitted without it", {
-    runId: run.id,
-  });
-  return null;
 }
 
 async function bufferEvent(runId: string, sequence: number, event: RunEvent): Promise<void> {

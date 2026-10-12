@@ -104,7 +104,7 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 function loginToolDiagnostic(msg: string): string | null {
   if (!msg.startsWith(CONNECT_LOGIN_TOOL_ERROR_PREFIX)) return null;
   const detail = msg.slice(CONNECT_LOGIN_TOOL_ERROR_PREFIX.length).replace(/^:\s*/, "").trim();
-  if (!detail) return "the integration rejected the submitted credentials.";
+  if (!detail) return "The integration rejected the submitted credentials.";
   // The text is authored by the integration package — clip it so a runaway
   // upstream body can't be pasted wholesale into an API response.
   const clipped =
@@ -146,8 +146,8 @@ interface ConnectRunExecutorOptions {
  * It returns the CONCRETE published version alongside the manifest because
  * the sidecar's byte route (`GET /internal/mcp-server-bundle/:scope/:name`)
  * requires it: past the system-package short-circuit an absent `?version=` is
- * rejected outright (#588 — serving "latest" is exactly the manifest/bytes
- * skew that guard closed). `version: null` is the system-mcp-server case, the
+ * rejected outright (serving "latest" would skew the manifest from the
+ * bytes). `version: null` is the system-mcp-server case, the
  * one population the byte route serves by id alone.
  *
  * `pin` is the manifest's `source.server.version` RANGE (e.g. `^1.0.0`), not
@@ -269,7 +269,7 @@ export async function buildConnectLoginSpec(
         type: run.type,
         entry_point: run.entry_point,
         packageId: ref.name,
-        // #588 — the CONCRETE version the resolver picked, forwarded to the
+        // The CONCRETE version the resolver picked, forwarded to the
         // byte route as `?version=` so the bytes match the manifest read
         // above. Absent only for a system mcp-server (served from the boot
         // registry by id alone), which is the one case the route allows.
@@ -302,7 +302,7 @@ export async function buildConnectLoginSpec(
       variables: {},
       // Same projection as the run-start re-bootstrap reads back from storage
       // (`decryptCredentialInputsToStringMap`), so a login input is never
-      // delivered on the first login and lost on the next (#1897).
+      // delivered on the first login and lost on the next.
       inputs: toCredentialStringMap(execution.inputs),
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
     },

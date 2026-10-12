@@ -10,15 +10,13 @@
  * sidecar (LLM reverse proxy, `/mcp`, credential injection), and both halves
  * of that protocol evolve in the same commit. A pair built from two different
  * commits starts normally, passes every health check, and then fails somewhere
- * upstream with a message that names neither image — issue #1195 cost a day of
- * bisecting exactly that (pi ≥ #1167 sends a zstd-compressed Codex body;
- * sidecar < #1166 buffered it as text and corrupted it — neither version was
- * buggy alone, only the pair was).
+ * upstream with a message that names neither image (one side sends a zstd-compressed
+ * body the other buffers as text and corrupts — neither version is buggy
+ * alone, only the pair is).
  *
- * The old `docker:build:runtime` rebuilt only `appstrate-pi`, so on a dev host
- * — where images are rebuilt by hand — the sidecar could silently be weeks
- * behind. Making the pair the only buildable unit removes that failure mode at
- * the source: there is no command left that builds one half.
+ * The pair is the only buildable unit: on a dev host, where images are rebuilt
+ * by hand, a command building one half would leave the other silently weeks
+ * behind.
  *
  * ## Build stamp
  *

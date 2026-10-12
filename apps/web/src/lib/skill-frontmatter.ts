@@ -3,7 +3,7 @@
 /** SKILL.md frontmatter errors, client side — `checkSkillMarkdown` is the server's own checker. */
 
 import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
-import { SKILL_FRONTMATTER_ERROR_KEYS, yamlPosition } from "./mutation-error";
+import { SKILL_FRONTMATTER_ERROR_KEYS, sentenceKey, yamlPosition } from "./mutation-error";
 
 /**
  * The i18n key naming the fault, with the `position` its sentence may hold. The checker's own
@@ -17,7 +17,7 @@ export function skillFrontmatterError(
   if (!violation) return null;
   const reason = violation.reason.toLowerCase();
   return {
-    key: SKILL_FRONTMATTER_ERROR_KEYS[reason] ?? "editor.errorContent",
+    key: sentenceKey(SKILL_FRONTMATTER_ERROR_KEYS, reason) ?? "editor.errorContent",
     params: {
       position: reason === "skill_invalid_frontmatter" ? yamlPosition(violation.message) : "",
     },

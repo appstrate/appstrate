@@ -82,7 +82,6 @@ export function PickerMenu({
     canApply,
     ownerLabel,
     setLabel,
-    scopeFitOf,
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
@@ -188,7 +187,7 @@ export function PickerMenu({
       (pickedNone && required)
     : runBlocking;
   const rows: ChoiceRow[] = candidates.map((c) => {
-    const fit = scopeFitOf(c);
+    const fit = c.scope_fit;
     const missing = missingScopeLabels(c).join(", ");
     // Only the connection owner can renew via OAuth — a foreign
     // shared connection's tokens belong to someone else. We still

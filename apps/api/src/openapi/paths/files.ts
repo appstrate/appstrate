@@ -149,8 +149,8 @@ const fileWithPreviewSchema = {
 
 /**
  * Errors every `/api/files` operation can answer with before its handler
- * ever runs — all three come from the shared pipeline, not from the handler,
- * and were previously undocumented:
+ * ever runs — all three come from the shared pipeline, not from the
+ * handler:
  *
  *  - `400` — `requireSpaceContext()` with no resolvable `X-Space-Id`.
  *  - `403` — the RBAC guard without `files:read`, or `requireSpaceContext()`

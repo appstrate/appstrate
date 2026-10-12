@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * HTTP surface of the `appstrate-runner` daemon (issue #819, phase 1) —
+ * HTTP surface of the `appstrate-runner` daemon —
  * a thin, dumb wire adapter over a {@link RunOrchestrator}. Every route
  * is body-validate → orchestrator call → JSON mirror of the return
  * value; all sequencing intelligence (boundary before workload, sidecar

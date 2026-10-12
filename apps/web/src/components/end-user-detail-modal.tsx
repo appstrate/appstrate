@@ -254,7 +254,7 @@ export function EndUserDetailModal({
                   <Badge key={key} variant="outline" className="text-xs font-normal">
                     <span className="font-medium">{key}</span>
                     <span className="text-muted-foreground mx-1">:</span>
-                    <span>{jsonText(val)}</span>
+                    <span>{jsonText(val ?? null)}</span>
                   </Badge>
                 ))}
               </div>

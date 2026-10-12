@@ -600,7 +600,7 @@ export async function holdsPackageShareAuthority(
  * `403 draft_not_writable` (plan decision 4).
  *
  * A no-op for every other selector, the omitted one included: an omitted
- * selector is the published `latest` (#636), which anybody who may run the
+ * selector is the published `latest`, which anybody who may run the
  * agent may run. Only the DRAFT is restricted, and it is restricted to its
  * authors: a head deployment is the developer's, the rule Apps Script states.
  *

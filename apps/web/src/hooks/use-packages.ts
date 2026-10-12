@@ -34,7 +34,7 @@ import type {
 // invalidate them after writes, and use-current-space resets them on
 // space switch. Only the fetch layer is migrated to the typed client.
 
-// Each read gates ITSELF on the permission its route guards (#1556): a custom
+// Each read gates ITSELF on the permission its route guards: a custom
 // space role may omit any of them, and a surface that shows a package family
 // only incidentally must not fire a request the server is bound to refuse.
 function useCanReadPackages(type: PackageType): boolean {
@@ -71,7 +71,7 @@ type PackageDetailMap = {
 function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDetail {
   return {
     ...d,
-    // display_name is optional (agent editor no longer forces it, issue #825);
+    // display_name is optional (agent editor does not force it);
     // fall back to the package id so labels never render blank.
     display_name: d.display_name || d.id,
     description: d.description ?? "",
@@ -94,8 +94,7 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
 /**
  * Normalize a spec OrgPackageItemDetail to the asserted detail shape.
  * `scope` / `created_by_name` / `used_by_agents` are not returned by the
- * detail endpoints (and never were) — defaulted like the legacy blind cast
- * left them, but with explicit values.
+ * detail endpoints — defaulted with explicit values.
  */
 function normalizePackageItemDetail(
   d: components["schemas"]["OrgPackageItemDetail"],
@@ -357,7 +356,7 @@ export function useAgents() {
       // list shape. `forked_from` is not returned by the list endpoint.
       return data!.data.map((a) => ({
         ...a,
-        // Fall back to the package id when display_name is empty (issue #825).
+        // Fall back to the package id when display_name is empty.
         display_name: a.display_name || a.id,
         description: a.description ?? "",
         schema_version: a.schema_version ?? "",
@@ -476,7 +475,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       id: number;
       version: string;
     }> => {
-      // 201 → the created version resource, bare (issue #657).
+      // 201 → the created version resource, bare.
       const { data } = await client.POST(`/api/packages/${segment}/{scope}/{name}/versions`, {
         params: {
           path: splitPackageRef(packageId),
@@ -540,7 +539,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
     mutationFn: async (
       version: string,
     ): Promise<{ id: string; version: string | null; etag: string | null }> => {
-      // 200 → the updated PACKAGE resource, bare (issue #657): the restore is
+      // 200 → the updated PACKAGE resource, bare: the restore is
       // reflected in `version`/`manifest`/`content`; its `ETag` is the new draft version.
       const { data, response } = await client.POST(
         `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`,
@@ -591,7 +590,7 @@ export function useForkPackage() {
   return useMutation({
     meta: { errorHandledByCaller: true },
     mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
-      // 201 → the forked package resource, bare (issue #657): `id` is the new
+      // 201 → the forked package resource, bare: `id` is the new
       // package ID under org scope, `forked_from` the source package ID.
       const { data } = await client.POST("/api/packages/{scope}/{name}/fork", {
         params: { path: splitPackageRef(packageId) },

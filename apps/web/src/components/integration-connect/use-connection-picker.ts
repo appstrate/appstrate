@@ -18,7 +18,7 @@ import {
 import { useHostedConnectPopup } from "./use-integration-oauth-popup";
 import { connectableAuthKeys } from "./connectable-auth-keys";
 import { describeResolution, unboundLabel } from "./integration-run-readiness";
-import { scopeFit, scopeLabels, sortByScopeFit } from "./connection-scope-fit";
+import { scopeLabels } from "./scope-labels";
 import { requiredScopesForAgent } from "@appstrate/core/integration";
 import {
   canApplyConnectionSet,
@@ -64,7 +64,7 @@ export interface ConnectionPickerOptions {
   agentScopes: string[] | undefined;
   persistence: ConnectionPickerPersistence;
   /**
-   * Version selector for the readiness verdict (#770). A non-`draft` value
+   * Version selector for the readiness verdict. A non-`draft` value
    * pins the per-integration resolution + run-blocking flag to that published
    * manifest so the run-options modal matches the run. Omitted → draft.
    */
@@ -152,7 +152,7 @@ export function useConnectionPicker(
 
   const { resolution, run_blocking: runBlocking, required } = entry;
   const {
-    candidates: unranked,
+    candidates,
     resolved_connection_ids: resolvedConnectionIds,
     member_pinned_connection_ids: memberPinnedConnectionIds,
     can_add_connection: canAddConnection,
@@ -160,21 +160,6 @@ export function useConnectionPicker(
   const { lockedConnectionIds, lockedBy, byDefault, softDefaultIds, emptyPickerPrompt } =
     describeResolution(resolution);
 
-  const fits = new Map(
-    unranked.map((c) => [
-      c.id,
-      scopeFit({
-        manifest,
-        authKey: c.auth_key,
-        granted: c.scopes_granted,
-        missing: c.missing_scopes,
-        required: requiredScopesFor(c.auth_key),
-      }),
-    ]),
-  );
-  const scopeFitOf = (c: IntegrationCandidate) => fits.get(c.id) ?? "unjudged";
-  // Compatible first, least privilege leading.
-  const candidates = sortByScopeFit(unranked, scopeFitOf);
   const byId = (id: string): IntegrationCandidate | undefined =>
     candidates.find((c) => c.id === id);
   const missingScopeLabels = (c: IntegrationCandidate) =>
@@ -360,7 +345,6 @@ export function useConnectionPicker(
     // Labels shared by several components
     ownerLabel,
     setLabel,
-    scopeFitOf,
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,

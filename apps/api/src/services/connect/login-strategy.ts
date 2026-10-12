@@ -15,7 +15,7 @@
  */
 
 import { LoginError, runLogin, type LoginConfig } from "@appstrate/connect/connect";
-import { badGateway, invalidRequest } from "../../lib/errors.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import {
   assertRequiredIdentityClaims,
@@ -32,9 +32,10 @@ import type {
 import {
   assertCredentialsMatchSchema,
   assertFieldsInput,
-  loginInputRefused,
+  loginInputUnencodable,
   loginRejected,
   loginTimedOut,
+  loginUpstreamUnavailable,
   loginUrlRefused,
   requireNonEmptyCredentials,
 } from "./strategy.ts";
@@ -57,14 +58,14 @@ function loginRefusal(err: unknown, ctx: ConnectContext): unknown {
   switch (err.reason) {
     case "rejected":
       return loginRejected(
-        `the service refused the submitted credentials (HTTP ${err.upstreamStatus}).`,
+        `The service refused the submitted credentials (HTTP ${err.upstreamStatus}).`,
       );
     case "invalid_input":
-      return loginInputRefused(err.field!);
+      return loginInputUnencodable(err.field!);
     case "url_not_allowed":
       return err.fields?.length ? loginUrlRefused(err.fields) : err;
     case "upstream_failed":
-      return badGateway("The service could not complete the login. Try again later.");
+      return loginUpstreamUnavailable(err.retryAfterSeconds);
     case "timeout":
       return loginTimedOut(err.timeoutMs!);
     default:

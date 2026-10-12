@@ -1128,6 +1128,7 @@
   "error.requiredIntegrationUnbound": "L'agent exige cette intégration, mais le choix retenu est « Aucune connexion » : choisissez une connexion, ou retirez ce choix.",
   "error.connectionOverridesRefused": "Un choix de connexion vise une intégration que cette version de l'agent ne déclare pas. Retirez ce choix, puis relancez.",
   "error.outputToolRequired": "Un schéma de sortie est défini : l'outil « output » doit rester activé pour que l'agent renvoie son résultat.",
+  "error.dependencyOverridesRefused": "Un choix de version vise une dépendance que cette version de l'agent ne déclare pas. Retirez ce choix, puis relancez.",
   "launchWarnings.run_one": "Ce run s'exécute sans l'intégration {{names}}",
   "launchWarnings.run_other": "Ce run s'exécute sans les intégrations {{names}}",
   "launchWarnings.schedule_one": "Les déclenchements s'exécuteront sans l'intégration {{names}}",

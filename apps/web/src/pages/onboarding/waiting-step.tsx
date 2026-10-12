@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Closed-mode landing page (issue #228). Displayed by `OrgGate` when
+// Closed-mode landing page. Displayed by `OrgGate` when
 // `AUTH_DISABLE_ORG_CREATION=true` and the signed-in user has no
 // organization membership. Self-hosters get a calm "wait for invitation"
 // screen instead of a broken /onboarding/create flow.

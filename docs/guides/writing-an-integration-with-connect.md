@@ -86,7 +86,7 @@ The raw long-key spelling is **not** accepted — the alias layer that once
 carried it is gone, and a manifest using it resolves no `api_call` surface.
 When this extension declares a synthetic name, that name is reserved and takes
 precedence over a same-named native MCP tool. A native tool literally named
-`api_call__<authKey>` is therefore no longer swallowed by the synthetic surface:
+`api_call__<authKey>` is therefore not swallowed by the synthetic surface:
 it collides with nothing and stays in the catalog. Without the extension, native
 tools named `api_call` or `api_upload` remain ordinary tools.
 
@@ -344,7 +344,9 @@ document (local-fragment `$ref` only, no external `$ref`).
       "schema": {
         "type": "object",
         "required": ["api_key"],
-        "properties": { "api_key": { "type": "string", "description": "Service API key" } }
+        "properties": {
+          "api_key": { "type": "string", "writeOnly": true, "description": "Service API key" }
+        }
       }
     },
     "delivery": {
@@ -372,7 +374,7 @@ document (local-fragment `$ref` only, no external `$ref`).
         "required": ["username", "password"],
         "properties": {
           "username": { "type": "string" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -445,7 +447,7 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
         "required": ["email", "password"],
         "properties": {
           "email":    { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -506,43 +508,56 @@ variable, so a declarative login cannot target a per-connection upstream.
 Each `{{name}}` value is encoded for the place it takes, so a value never adds a
 parameter, a member, a part or a header line (the sidecar does the same for the
 `{{name}}` a `connect.tool` login tool writes into its own requests, by their
-`Content-Type`):
+`Content-Type`, and every `api_call` path for the `{{field}}` an agent writes into a
+target, a header or a substituted text body, where a refused value is a
+`credential_unusable`):
 
 - `url` — a placeholder that starts the template is a base URL, inserted as is; the
   resulting URL must still match `authorized_uris`. Every other value is percent-encoded
   as one component wherever it sits — a path segment, a query component, a fragment, but
   also a port, a userinfo or a value right after the host or the base. Write the `/` a
   URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
-  never `https://example.com{{path}}`, whose `/` would be encoded. A URL refused for its
-  host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request` naming
-  the inputs in its authority.
-- `body` — by the media type of the `Content-Type` header, else of `content_type`:
+  never `https://example.com{{path}}`, whose `/` would be encoded. A path segment its
+  placeholders render empty, `.` or `..` is refused: no encoding keeps it one segment. A URL refused
+  for its host (malformed, blocked, outside `authorized_uris`) is a `400 login_url_refused`
+  naming the inputs in its authority.
+- `body` — by the media type of the `Content-Type` header, else of `content_type`. A
+  body holding a `{{name}}` needs one of these, written without a `{{name}}` (a value
+  would pick the encoder); otherwise the manifest is refused when it is written and the
+  connect fails as `invalid_config` (a login tool's request is answered 400). A header
+  name written twice in different case is refused the same way. A body with no
+  placeholder is sent untouched:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
-  - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a
-    value inside a string literal. A bare `{{name}}` is one JSON value of the input's
-    type: the submitted credentials are first typed by `credentials.schema`, so a field
-    declared `number` goes as a number (`"1234"` → `1234`) and a field declared `string`
-    as a JSON string whatever it spells (`"0123"`, `"true"`). A `connect.tool` login
-    tool's inputs are strings: a bare position takes them as JSON strings;
+  - JSON (`application/json`, `text/json`, `application/x-json`, `application/x-ndjson`,
+    any `+json`) escapes a value inside a string literal. A bare `{{name}}` is one JSON
+    value of the input's type: the submitted credentials are first typed by
+    `credentials.schema`, so a field declared `number` goes as a number
+    (`"1234"` → `1234`) and a field declared `string` as a JSON string whatever it
+    spells (`"0123"`, `"true"`). A `connect.tool` login tool's inputs are strings: a bare
+    position takes them as JSON strings;
   - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
     in a CDATA section;
-  - `multipart/*` refuses a value carrying CR or LF, so a value adds no part. A value
-    inside a part's own headers (a `Content-Disposition` `filename="{{name}}"`) is not
-    escaped: keep placeholders in part bodies;
-  - any other body takes the value as is.
+  - `multipart/*` (its `boundary` parameter required) refuses a value carrying CR, LF or
+    the boundary delimiter, so a value adds no part. On a part's own header lines a
+    placeholder must sit inside a quoted string (`filename="{{name}}"`), where a value
+    carrying `"` or `\` is refused; outside one (`name={{name}}`, `Content-Type: {{name}}`)
+    the request is refused when sent, whatever the value;
+  - `text/plain` takes the value as is.
 - header values — the value as is; one carrying a line break, another control character
   or a character above U+00FF is refused, and in a `Cookie` header any character outside
   RFC 6265 `cookie-octet` too (`;`, `,`, space, `"`, `\`).
 
-A value refused where it is placed is a `400 invalid_request` naming `credentials.<name>`.
+A value refused where it is placed is a `400 login_input_unencodable` naming
+`credentials.<name>`.
 
-A login the service refuses is a `400 invalid_request` on `credentials` whose detail
-starts `Login failed:`, as for a `connect.tool` login: the declared `success_criteria`
+A login the service refuses is a `400 login_rejected` on `credentials`, as for a
+`connect.tool` login: the declared `success_criteria`
 failed on an answer below 500, or, with none declared, the service answered 400, 401,
 403 or 422. A 404, 405 or 410 (whatever the criteria) and any other answer below 500
 that no criterion judges (a 302) are a defect of the integration, a `500`. A service
-that cannot be reached, answers 429 or answers 5xx is a `502 bad_gateway`, and one that
-does not answer within `request_timeout_ms` a `504 timeout`.
+that cannot be reached, answers 429 or answers 5xx is a `502 login_upstream_unavailable`
+relaying its `Retry-After`, and one that does not answer within `request_timeout_ms` a
+`504 timeout`.
 
 **A form login should declare `success_criteria`.** AFPS makes them optional, and without
 them any 2xx counts as success — but most web apps answer a wrong password with `200` and
@@ -605,8 +620,16 @@ delivery.
 
 A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
 like a pasted credential, by the one required string field of `credentials.schema` that
-is not a secret (`format: "password"` or `writeOnly`), masked (`al****.com`), else
-`Connexion N`. Mark the password field as a secret so the username names the connection.
+is not a secret, masked (`al****.com`), else, when the only required string field is one
+secret that is not `format: "password"`, by that key, masked (`fc****f10b`), else
+`Connexion N`.
+
+**Mark every secret field `writeOnly: true`** (an API key, a token) or
+`format: "password"` (a password a human chose, which never names a connection). It is
+the one rule the platform reads, never the field's name. The connect form masks the
+input of a secret and shows any other field in clear, and a secret beside a non-secret
+field never names the connection — so marking the password is also what lets the
+username do it.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).
@@ -635,7 +658,7 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
         "required": ["email", "password"],
         "properties": {
           "email":    { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -1098,7 +1121,7 @@ GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by U
 ```
 
 Coolify — always self-hosted, so no `default`, and a team token the user pastes
-(`scripts/system-packages/integration-coolify-mcp-1.0.0/manifest.json`):
+(`scripts/system-packages/integration-coolify-mcp-1.0.1/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1120,7 +1143,7 @@ Coolify — always self-hosted, so no `default`, and a team token the user paste
     "credentials": {
       "schema": {
         "type": "object",
-        "properties": { "token": { "type": "string" } },
+        "properties": { "token": { "type": "string", "writeOnly": true } },
         "required": ["token"]
       }
     },

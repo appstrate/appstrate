@@ -5,7 +5,8 @@
  * current schema: its query reads every org integration draft and published version, and the
  * report lists the expressions the platform does not evaluate, the `{{field}}` placeholders a
  * delivery template leaves as literal text and the injected credentials a run refuses as
- * `exfiltration`, and nothing for a clean manifest. Every version is gated — a range resolves
+ * `exfiltration`, plus two advisories (a scope that is not one token, a secret-named credential
+ * field the connect form shows in clear), and nothing for a clean manifest. Every version is gated — a range resolves
  * older ones too — and a system package is not read at all.
  */
 
@@ -116,6 +117,34 @@ describe("0035 — stored manifests the release refuses", () => {
       ],
       expressions: 1,
       exfiltration: 0,
+      advisories: 0,
     });
+  });
+
+  it("lists a scope that is not one token and a secret-named field the form shows in clear", () => {
+    const auth = {
+      type: "oauth2",
+      authorized_uris: ["https://api.acme.test/**"],
+      default_scopes: ["read write"],
+      credentials: {
+        schema: {
+          properties: {
+            api_token: { type: "string" },
+            password: { type: "string", format: "password" },
+            client_secret: { type: "string", writeOnly: true },
+            // Never masked by name: a public key, and a multi-line field.
+            host_key: { type: "string" },
+            private_key: { type: "string" },
+          },
+        },
+      },
+    };
+    const manifest = JSON.stringify({ auths: { k: auth } });
+    const report = manifestIssues([{ id: CLEAN, version: "draft", manifest }]);
+    expect(report.lines.map((l) => l.split(":")[0])).toEqual([
+      `${CLEAN}@draft [scope] auths.k.default_scopes.0`,
+      `${CLEAN}@draft [clear-secret] auths.k.credentials.schema.properties.api_token`,
+    ]);
+    expect(report).toMatchObject({ expressions: 0, exfiltration: 0, advisories: 2 });
   });
 });

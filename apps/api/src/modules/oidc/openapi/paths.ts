@@ -1055,7 +1055,7 @@ export const oidcPaths = {
       security: [],
       summary: "Request a device + user code (RFC 8628 §3.2)",
       description:
-        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/cli/token` with (issue #165). Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
+        "Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/cli/token` with. Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.",
       requestBody: {
         required: true,
         content: {
@@ -1131,7 +1131,7 @@ export const oidcPaths = {
       },
     },
   },
-  // ── CLI auth plugin endpoints (issue #165, #251) ──────────────────────────
+  // ── CLI auth plugin endpoints ──────────────────────────
   // Mounted by `cliTokenPlugin()` via `betterAuthPlugins()` under
   // `/api/auth/cli/*`. Documented here so the public surface is discoverable
   // from `/api/docs`. Token/revoke use client_id auth; the session-management
@@ -1465,7 +1465,7 @@ export const oidcPaths = {
     },
   },
 
-  // ── Phase 3 admin oversight (#251) ────────────────────────────────────────
+  // ── Admin oversight ────────────────────────────────────────────────────────
 
   "/api/orgs/{orgId}/cli-sessions": {
     get: {

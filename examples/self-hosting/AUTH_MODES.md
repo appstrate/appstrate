@@ -13,14 +13,14 @@ bootstrap the first owner safely.
 
 ## TL;DR
 
-| Goal                                             | Set                                                                                            |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| Public SaaS / demo (default)                     | nothing — leave all `AUTH_*` flags unset                                                       |
-| Lock down signup, allow invitations              | `AUTH_DISABLE_SIGNUP=true`                                                                     |
-| Lock down org creation too (single-org tenant)   | `AUTH_DISABLE_SIGNUP=true` + `AUTH_DISABLE_ORG_CREATION=true` + `AUTH_PLATFORM_ADMIN_EMAILS=…` |
-| Restrict to specific email domains               | `AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com,foo.io`                                                  |
-| Name the owner of the root org on first deploy   | `AUTH_BOOTSTRAP_OWNER_EMAIL=admin@acme.com` + `AUTH_BOOTSTRAP_TOKEN=…`, redeem at `/claim`     |
-| Unattended install, claim ownership later (#344) | (auto) — `appstrate install --yes` generates `AUTH_BOOTSTRAP_TOKEN`, redeem at `/claim`        |
+| Goal                                           | Set                                                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Public SaaS / demo (default)                   | nothing — leave all `AUTH_*` flags unset                                                       |
+| Lock down signup, allow invitations            | `AUTH_DISABLE_SIGNUP=true`                                                                     |
+| Lock down org creation too (single-org tenant) | `AUTH_DISABLE_SIGNUP=true` + `AUTH_DISABLE_ORG_CREATION=true` + `AUTH_PLATFORM_ADMIN_EMAILS=…` |
+| Restrict to specific email domains             | `AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com,foo.io`                                                  |
+| Name the owner of the root org on first deploy | `AUTH_BOOTSTRAP_OWNER_EMAIL=admin@acme.com` + `AUTH_BOOTSTRAP_TOKEN=…`, redeem at `/claim`     |
+| Unattended install, claim ownership later      | (auto) — `appstrate install --yes` generates `AUTH_BOOTSTRAP_TOKEN`, redeem at `/claim`        |
 
 ---
 
@@ -205,7 +205,7 @@ install, writes it to `.env`, and prints a banner with the redemption URL.
 The platform reads the token at boot, holds it in memory, and lets the
 **first** POST to `/api/auth/bootstrap/redeem` matching that token claim
 ownership of the instance — closing the historical "silent open mode
-after `curl|bash`" footgun (issue #344).
+after `curl|bash`" footgun.
 
 State machine:
 

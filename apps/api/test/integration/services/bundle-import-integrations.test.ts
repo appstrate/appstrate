@@ -96,6 +96,7 @@ function connectManifest(name: string, criterion: Record<string, unknown>) {
             request: {
               method: "POST",
               url: "https://api.example.com/login",
+              content_type: "application/x-www-form-urlencoded",
               body: "p={{password}}",
             },
             success_criteria: [criterion],

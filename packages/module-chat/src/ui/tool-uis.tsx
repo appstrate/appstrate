@@ -66,8 +66,8 @@ import {
 
 /**
  * `invoke_operation` operationId that kicks off an integration connect flow.
- * `initiateIntegrationConnect` is the unified, auth-type-agnostic op (issue
- * #769) whose result carries a `connect_url`; its result renders the connect
+ * `initiateIntegrationConnect` is the unified, auth-type-agnostic op
+ * whose result carries a `connect_url`; its result renders the connect
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
@@ -452,7 +452,7 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // fallback swap.
 //
 // A launch refused for a missing connection (409) carries a ready-to-open
-// `connect_url` per actionable integration (#1207), so the connect cards render
+// `connect_url` per actionable integration, so the connect cards render
 // UNDER the run panel and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
 // without an optional integration carries the same link on its warning, shown

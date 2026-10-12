@@ -12,7 +12,7 @@ import type { PackageTypeConfig } from "./config.ts";
  * `manifest.type` MUST already equal `cfg.type`. It is the manifest's identity
  * AND the discriminator `validateManifest` dispatches on, so rewriting it after
  * validation turned a manifest valid for one type into a stored manifest no
- * schema accepts (issue #987) — hence the invariant instead of a repair.
+ * schema accepts — hence the invariant instead of a repair.
  *
  * `$schema` is still stamped: it is a tooling pointer the platform owns, not
  * author content, and with `type` guaranteed it is a normalization rather than

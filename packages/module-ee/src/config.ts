@@ -109,7 +109,7 @@ export const ESTIMATED_MODEL_CREDITS_PER_CHAT_TURN = 20;
 /**
  * Estimated COMPUTE cost per second of a run's effective (post-ceiling) timeout.
  *
- * Phase 1 ships 0: platform compute is NOT charged yet. The quoting arithmetic,
+ * Ships 0: platform compute is NOT charged yet. The quoting arithmetic,
  * the facts the platform reports, and the admission path are all already in
  * place — flipping this constant to a non-zero value is the ONLY change
  * required to start gating on compute. No new hook, no new core field, no
@@ -120,7 +120,7 @@ export const COMPUTE_CREDITS_PER_RUN_SECOND = 0;
 /**
  * Estimated COMPUTE cost per chat turn (in credits).
  *
- * Phase 1 ships 0, same as the per-run-second rate: flipping it to a non-zero
+ * Ships 0, same as the per-run-second rate: flipping it to a non-zero
  * value is the ONLY change required to start gating chat on compute.
  */
 export const COMPUTE_CREDITS_PER_CHAT_TURN = 0;

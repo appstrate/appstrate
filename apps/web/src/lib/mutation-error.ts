@@ -2,7 +2,9 @@
 
 import { toast } from "sonner";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { CompanionViolationReason } from "@appstrate/afps-shared/companion-files";
 import type {
+  OverrideRefusalCode,
   INTEGRATION_MANIFEST_FAILURE_CODES,
   MissingIntegrationConnectionCode,
 } from "@appstrate/core/integration";
@@ -11,13 +13,13 @@ import { ApiError } from "../api/errors";
 import { PACKAGE_PATH_ERROR_KEYS } from "./package-files";
 
 /** SKILL.md frontmatter refusals; each key is one rule, said in the reader's language. */
-export const SKILL_FRONTMATTER_ERROR_KEYS: Record<string, string> = {
+export const SKILL_FRONTMATTER_ERROR_KEYS = {
   skill_invalid_frontmatter: "editor.errorSkillInvalidFrontmatter",
   skill_missing_frontmatter_name: "editor.errorSkillFrontmatterName",
   skill_invalid_frontmatter_name: "editor.errorSkillInvalidName",
   skill_missing_frontmatter_description: "editor.errorSkillFrontmatterDescription",
   skill_invalid_frontmatter_description: "editor.errorSkillDescriptionTooLong",
-};
+} as const satisfies Partial<Record<Lowercase<CompanionViolationReason>, string>>;
 
 /**
  * Where a YAML parser stopped, said in the reader's language: « (ligne 3, colonne 14) », or "".
@@ -40,7 +42,7 @@ type CommonSentenceCode =
   | (typeof INTEGRATION_MANIFEST_FAILURE_CODES)[number]
   | "remote_binds_one_connection";
 
-/** Every other `missing_integration_connection` code, and a 400's `required_integration_unbound`. */
+/** Every other `missing_integration_connection` code, and the 400 items of a refused override key. */
 const RESOLUTION_ERROR_KEYS = {
   pinned_connection_unavailable: "error.pinnedConnectionUnavailable",
   override_connection_unavailable: "error.overrideConnectionUnavailable",
@@ -53,13 +55,18 @@ const RESOLUTION_ERROR_KEYS = {
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
   override_outranked: "error.overrideOutranked",
   required_integration_unbound: "error.requiredIntegrationUnbound",
-} as const satisfies Record<Exclude<MissingIntegrationConnectionCode, CommonSentenceCode>, string>;
+  undeclared_connection_override: "error.connectionOverridesRefused",
+  undeclared_dependency_override: "error.dependencyOverridesRefused",
+} as const satisfies Record<
+  Exclude<MissingIntegrationConnectionCode, CommonSentenceCode> | OverrideRefusalCode,
+  string
+>;
 
 /**
  * Refusals whose sentence is `agents:*` copy other components reuse; the lock codes interpolate
  * the field named in `param`. Every other code resolves to `common:apiError.<code>`.
  */
-export const REFUSAL_ERROR_KEYS: Record<string, string> = {
+export const REFUSAL_ERROR_KEYS = {
   locked_input_field: "error.lockedInputField",
   locked_required_field_empty: "error.lockedRequiredFieldEmpty",
   draft_not_writable: "error.draftNotWritable",
@@ -70,12 +77,15 @@ export const REFUSAL_ERROR_KEYS: Record<string, string> = {
   ...RESOLUTION_ERROR_KEYS,
   ...PACKAGE_PATH_ERROR_KEYS,
   ...SKILL_FRONTMATTER_ERROR_KEYS,
-};
+} as const;
+
+/** `keys[code]`, for a code that may lie outside the table's closed key set. */
+export function sentenceKey(keys: Readonly<Record<string, string>>, code: string) {
+  return Object.prototype.hasOwnProperty.call(keys, code) ? keys[code] : undefined;
+}
 
 /** Generic refusals made precise by the member they blame: `<code>:<param>` → `agents` key. */
 const PARAM_REFUSAL_KEYS: Record<string, string> = {
-  // An override key the launched version does not declare.
-  "invalid_request:connection_overrides": "error.connectionOverridesRefused",
   // The only rule on the whole `runtime_tools` member: an output schema needs the `output` tool.
   "invalid_manifest:manifest.runtime_tools": "error.outputToolRequired",
 };
@@ -97,7 +107,7 @@ export function refusalMessage(err: Refusal): string | null {
   const message = err.message ?? "";
   const paramKey = PARAM_REFUSAL_KEYS[`${code}:${err.param ?? err.field}`];
   if (paramKey) return i18n.t(paramKey, { ns: "agents" });
-  const agentsKey = REFUSAL_ERROR_KEYS[code];
+  const agentsKey = sentenceKey(REFUSAL_ERROR_KEYS, code);
   if (agentsKey) {
     // `param` is `<prefix>.<field>`; the field itself may contain dots, so only
     // the first segment is the prefix.

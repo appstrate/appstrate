@@ -276,10 +276,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       connection_overrides: { "@schedbodyorg/typo": await ownConnections(1) },
     });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; param?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.param).toBe("connection_overrides");
-    expect(problem.detail).toContain("@schedbodyorg/typo");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@schedbodyorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
@@ -304,9 +308,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       dependency_overrides: { "@schedbodyorg/undeclared": "draft" },
     });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.detail).toContain("@schedbodyorg/undeclared");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "dependency_overrides.@schedbodyorg/undeclared",
+        code: "undeclared_dependency_override",
+      }),
+    ]);
   });
 
   it('accepts "draft" and a semver spec as dependency_overrides values (control)', async () => {
@@ -364,9 +373,14 @@ describe("PATCH /api/schedules/:id — body validation", () => {
   it("rejects a connection_overrides key the fired agent does not declare, and keeps the row", async () => {
     const res = await put({ connection_overrides: { "@schedputorg/typo": [crypto.randomUUID()] } });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.detail).toContain("@schedputorg/typo");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@schedputorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
     expect(row!.connectionOverrides).toBeNull();
   });
@@ -696,11 +710,16 @@ describe("PATCH /api/schedules/:id — `dependency_overrides` keys vs. a MOVED m
     // pinned skill is not a declared dependency at all.
     const res = await put(id, { version_override: "draft" });
     expect(res.status, await res.clone().text()).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
     // Naming the key is the whole value of refusing here rather than at the
     // tick: the author has to know WHICH pin their draft edit orphaned.
-    expect(problem.detail).toContain(SKILL);
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: `dependency_overrides.${SKILL}`,
+        code: "undeclared_dependency_override",
+      }),
+    ]);
     // Still armed on the selector it was written with — a refused patch
     // applies nothing.
     const [row] = await db.select().from(schedules).where(eq(schedules.id, id));

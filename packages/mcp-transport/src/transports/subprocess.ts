@@ -339,8 +339,7 @@ export class SubprocessTransport implements Transport {
       if (newlineIdx === -1) break;
       const line = this.stdoutBuffer.slice(0, newlineIdx);
       this.stdoutBuffer = this.stdoutBuffer.slice(newlineIdx + 1);
-      // A fully-newline-terminated giant line was previously dispatched without
-      // any byte check (only the trailing buffer was guarded) — a real bypass.
+      // A fully-newline-terminated giant line bypasses the trailing-buffer guard.
       // Drop and report any line over the byte cap before it reaches JSON.parse.
       if (this.byteLength(line) > lineCap) {
         this.onerror?.(

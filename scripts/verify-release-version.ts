@@ -16,7 +16,7 @@
  * files still said `1.0.0-beta.41` (79 sites, twelve releases stale) and
  * `.env.example` said `1.0.0-beta.51` — a third value again.
  *
- * The #1201 image-trio guard structurally cannot catch this. It compares the
+ * The image-trio guard structurally cannot catch this. It compares the
  * platform, `PI_IMAGE` and `SIDECAR_IMAGE` refs to EACH OTHER, and all three
  * take the same stale fallback from the same `${APPSTRATE_VERSION}`, so the
  * trio is perfectly coherent — coherently twelve releases old. Agreement
@@ -76,7 +76,7 @@
  * then tag", so during the bump PR the fallback is one release AHEAD of every
  * tag that exists. An equality check would fail exactly the PR that fixes the
  * problem — the same shape as the `check-consumer-versions.ts` major-release
- * deadlock that PR #1032 had to unwind. "Behind the newest release" is the
+ * deadlock. "Behind the newest release" is the
  * actual defect and is the only thing rejected.
  *
  * `git describe` is not used: it needs a commit-reachable tag and reports
@@ -144,9 +144,9 @@ export interface VersionSite {
  * of the tag families this gate deliberately ignores.
  *
  * This is its own outcome, not a third kind of skip, because the two failures
- * it separates are the ones a silent `return` used to merge. `add()` bailed on
- * anything `isValidVersion` rejected and recorded NOTHING, so a bump that
- * touched 81 of 82 sites and mangled the 82nd — `${APPSTRATE_VERSION:-1.0.0.beta.54}`,
+ * it separates are the ones a silent `return` would merge. An `add()` bailing on
+ * anything `isValidVersion` rejects and recording NOTHING means a bump that
+ * touches 81 of 82 sites and mangles the 82nd — `${APPSTRATE_VERSION:-1.0.0.beta.54}`,
  * dots where the `-beta` belongs — produced "81 hardcoded version site(s) …
  * all name 1.0.0-beta.54" and exit 0, over a compose file naming a tag GHCR
  * does not have. The count in the success line is the only trace, and nobody
@@ -211,7 +211,7 @@ const LITERAL_IMAGE_PIN = /ghcr\.io\/appstrate\/[a-z0-9-]+:([^\s"'`${]+)/g;
  * `type=semver,pattern={{major}}.{{minor}}` gives `1.0`, and
  * `type=sha,prefix=sha-` gives `sha-<sha>`. Pinning to one of these is a
  * deliberate operator choice about which CHANNEL to track — the same reasoning
- * the #1201 image-trio boot guard applies — so the gate has no opinion about
+ * the image-trio boot guard applies — so the gate has no opinion about
  * it. The list is closed on purpose: anything outside it is junk, not a family
  * nobody thought of, and the fix for a genuinely new family is to add it here
  * with the metadata-action line that produces it.
@@ -284,9 +284,9 @@ export interface ReleaseSource {
  * has, isolated behind a function type so callers can supply it.
  *
  * `scripts/test/verify-release-version.test.ts` passes a literal list. That is
- * not a stylistic preference: the tests used to call the real git command, so
- * they asserted on whatever tags the checkout happened to carry, and they
- * FAILED in the `Unit tests` job — `.github/workflows/test.yml` checks out with
+ * not a stylistic preference: tests calling the real git command would assert
+ * on whatever tags the checkout happens to carry, and would
+ * FAIL in the `Unit tests` job — `.github/workflows/test.yml` checks out with
  * `actions/checkout` defaults (no `fetch-tags`), so the ref namespace is empty
  * there and the "no source" throw fired inside a test that expected a floor.
  * The same emptiness occurs in a shallow clone, a container, or a fresh
@@ -399,10 +399,10 @@ export function resolveReleaseSource(
  * Everything `main` reaches for outside itself, so a test can reach in.
  *
  * Every branch below ENDS THE GATE — the vacuity floor, the malformed report,
- * the disagreement report, the staleness report — and each was previously
- * unreachable from a test, because `main` was neither exported nor separable
- * from `trackedFiles` + `readFileSync` + `process.env`. Deleting any one of
- * them left the suite green, which is the same "passes without checking"
+ * the disagreement report, the staleness report — and each must be
+ * reachable from a test: with `main` inseparable from `trackedFiles` +
+ * `readFileSync` + `process.env`, deleting any one of them would leave the
+ * suite green, which is the same "passes without checking"
  * failure the gate itself exists to prevent, one level up.
  *
  * The defaults ARE the production wiring, and they are resolved inside `main`

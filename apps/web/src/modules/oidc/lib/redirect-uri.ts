@@ -13,8 +13,7 @@
  *
  * Being stricter than the server is the bug this shape prevents: the form used
  * to require `hostname === "localhost"`, which rejected `http://127.0.0.1/cb`
- * and `http://[::1]/cb` in the dashboard even though the API accepts both
- * (#1012).
+ * and `http://[::1]/cb` in the dashboard even though the API accepts both.
  */
 export function looksLoopback(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, "");

@@ -23,7 +23,7 @@
  * - `createInProcessPair(tools, info?)` — convenience helper that returns a
  *   `Server` and `Client` already connected via `InMemoryTransport`. The
  *   default surface for first-party tools where subprocess overhead is
- *   unjustifiable (one of the explicit drivers behind issue #276).
+ *   unjustifiable.
  *
  * What it deliberately does *not* re-export: JSON-RPC envelope types, error
  * codes, transport implementations. Callers depend on the SDK directly for

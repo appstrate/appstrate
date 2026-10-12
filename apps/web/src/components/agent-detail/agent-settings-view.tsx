@@ -24,6 +24,7 @@ import type { Versioned } from "../../hooks/use-packages";
 import { RoleLimitNotice } from "../role-limit-notice";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
+import { agentConnectionsTabVisible } from "../../lib/route-access";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { RailLink } from "../settings/rail-link";
 import { AgentOverviewTab } from "./agent-overview-tab";
@@ -152,7 +153,7 @@ export function AgentSettingsView({
       return can("agents:configure");
     }
     if (section === "schedules") return can("schedules:read");
-    if (section === "connections") return can("integrations:read");
+    if (section === "connections") return agentConnectionsTabVisible(can);
     if (section === "map" || section === "files" || section === "bundle") {
       return can("agents:read");
     }

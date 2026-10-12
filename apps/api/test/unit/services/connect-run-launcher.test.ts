@@ -401,6 +401,7 @@ describe("parseConnectResult", () => {
     expect(err).toBeInstanceOf(ApiError);
     const api = err as ApiError;
     expect(api.status).toBe(400);
+    expect(api.code).toBe("login_rejected");
     expect(api.param).toBe("credentials");
     // Cause…
     expect(api.message).toContain("Invalid password for user a@b.c");

@@ -69,7 +69,7 @@ function parseTargetValue(value: string): ShareTarget | null {
 export const SHARE_PARAM = "share";
 
 /**
- * The two things "sharing" can mean, named separately (#1440).
+ * The two things "sharing" can mean, named separately.
  *
  * DISTRIBUTION ("Utiliser") is the offer of RBAC spec §6.10: the recipient gets
  * the package placed in their own space, switches it on themselves, and it runs
@@ -400,7 +400,7 @@ export function SharePackageDialog({
  * Co-authoring, which is a role in the package's HOME space and nothing else.
  *
  * Always rendered, never hidden behind the cases where it is possible: the
- * absence of this gesture IS the bug (#1440), so the tab that cannot perform it
+ * absence of this gesture IS the bug, so the tab that cannot perform it
  * has to say why instead of disappearing. Three answers, read off the home
  * space's own grant rather than `can` — `can` answers for the space the reader
  * is standing in, which is rarely this one.

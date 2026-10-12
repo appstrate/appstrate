@@ -1627,15 +1627,11 @@ describe("Runs API", () => {
         expect(body.data).toHaveLength(5);
         expect(body.hasMore).toBe(true);
 
-        // Lenient posture: a malformed limit falls back to the default
-        // 1000 (returning everything here) instead of a 400.
         const resBad = await app.request(`/api/runs/${run.id}/logs?limit=abc`, {
           headers: authHeaders(ctx),
         });
-        expect(resBad.status).toBe(200);
-        const bodyBad = (await resBad.json()) as { data: unknown[]; hasMore: boolean };
-        expect(bodyBad.data).toHaveLength(6);
-        expect(bodyBad.hasMore).toBe(false);
+        expect(resBad.status).toBe(400);
+        expect(((await resBad.json()) as { param?: string }).param).toBe("limit");
       });
     });
   });
@@ -2027,7 +2023,7 @@ describe("Runs API", () => {
       ]);
     });
 
-    it("GET /api/runs/:id refuses to serve an integrations_unbound row that drifted from its shape", async () => {
+    it("GET /api/runs/:id reads a drifted integrations_unbound or token_usage as not recorded", async () => {
       await seedAgent({ id: "@runorg/drift-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
       const run = await seedRun({
         packageId: "@runorg/drift-agent",
@@ -2036,12 +2032,15 @@ describe("Runs API", () => {
         userId: ctx.user.id,
         status: "success",
         integrationsUnbound: ["@acme/slack"] as never,
+        tokenUsage: { input_tokens: "many" } as never,
       });
 
       const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
 
-      // Parsed, never trusted as typed: a drifted row fails loudly, not as a half-shaped item.
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.integrations_unbound).toBeNull();
+      expect(body.token_usage).toBeNull();
     });
 
     it("GET /api/runs/:id returns connections_used null when no integrations resolved", async () => {

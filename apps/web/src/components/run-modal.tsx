@@ -101,7 +101,7 @@ function RunModalForm({
 }
 
 /**
- * Resolved-model transparency line (#635) — mirrors the server's resolution
+ * Resolved-model transparency line — mirrors the server's resolution
  * cascade (agent model setting > org default) so the user sees which model
  * the run will use BEFORE triggering. The org default is resolved at run
  * creation, so a default changed mid-session silently applies to the next

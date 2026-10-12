@@ -34,11 +34,11 @@ export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./
 export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";
 
-// The one token-endpoint symbol that crosses the package boundary: apps/api's
-// integration refresh classifies on it. `parseTokenResponse`, the request
+// The token-endpoint symbols that cross the package boundary: apps/api's
+// integration refresh classifies on the first and reads its grant with the second. `parseTokenResponse`, the request
 // builders and the error classifier stay internal — `token-exchange.ts` /
 // `token-refresh.ts` are the only callers and they import the concrete module.
-export { ClientAuthInvariantError } from "./token-utils.ts";
+export { ClientAuthInvariantError, withProvenScopes } from "./token-utils.ts";
 
 // Credential-proxy primitives, in the shape the /api/credential-proxy/proxy
 // route's service layer consumes them. The in-container sidecar runs the same
@@ -47,7 +47,7 @@ export { ClientAuthInvariantError } from "./token-utils.ts";
 // `@appstrate/db`) — see `runtime-pi/sidecar/helpers.ts`. Only what a barrel
 // consumer actually imports is re-exported here; `applyInjectedCredentialHeader`
 // and `buildInjectedCredentialHeader` are reached through the subpath.
-export { substituteVars, applyInjectedCredentialHeaderToHeaders } from "./proxy-primitives.ts";
+export { applyInjectedCredentialHeaderToHeaders } from "./proxy-primitives.ts";
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // ─── AFPS integration manifest ─────────────────────────────────────────
@@ -75,7 +75,7 @@ export { planCaBundle } from "./proxy-ca-planner.ts";
 export type { RefreshContext } from "./token-refresh.ts";
 
 // Connect-session tokens — short-lived HMAC capability tokens that gate the
-// unified hosted-connect-portal flow (issue #769). Stateless mint/verify;
+// unified hosted-connect-portal flow. Stateless mint/verify;
 // the secret (`CONNECT_SESSION_SECRET`) and single-use `jti` enforcement are
 // the caller's responsibility.
 export { mintConnectSession, verifyConnectSession } from "./connect-session-token.ts";

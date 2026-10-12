@@ -100,7 +100,7 @@ export interface AppstrateRunPlan {
   /** Packaged bundle ZIP — injected as `/workspace/agent-package.afps`. */
   agentPackage?: Buffer | null;
 
-  // --- Integrations (Phase 1.4) ---
+  // --- Integrations ---
   /**
    * Integrations to spawn inside the sidecar. Built by
    * `resolveIntegrationSpawns` — one entry per declared, active,

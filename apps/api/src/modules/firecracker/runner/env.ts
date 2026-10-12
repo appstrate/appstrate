@@ -2,8 +2,8 @@
 
 /**
  * `appstrate-runner` daemon environment — validated here, NOT in
- * @appstrate/env. The daemon is a standalone process on the KVM host
- * (issue #819, phase 1): it owns its own configuration surface the same
+ * @appstrate/env. The daemon is a standalone process on the KVM host:
+ * it owns its own configuration surface the same
  * way the firecracker module owns FIRECRACKER_* (see ../env.ts). Parsed
  * once at daemon boot (fail-fast with Zod messages) and cached for the
  * process lifetime.
@@ -27,7 +27,7 @@ const runnerEnvSchema = z.object({
   // interface or 127.0.0.1 behind a reverse proxy) and firewalling the
   // port: the bearer token is the only lock on this door.
   FIRECRACKER_RUNNER_HOST: z.string().default("0.0.0.0"),
-  // Unix-domain-socket listen path (issue #868). When set, the daemon
+  // Unix-domain-socket listen path. When set, the daemon
   // binds this socket INSTEAD of host:port — the recommended co-located
   // transport: a containerized platform bind-mounts the socket's
   // directory and the platform↔daemon wire (bearer token + per-run

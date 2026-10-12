@@ -2,7 +2,7 @@
 
 /**
  * Preview-token + HTML-hardening primitives for the cookie-less file
- * preview route (Phase 4 / D5).
+ * preview route.
  *
  * Agent-generated HTML is untrusted code that runs in the user's browser. The
  * platform serves it from a hardened, session-less route authorized ONLY by a

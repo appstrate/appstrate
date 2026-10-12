@@ -1613,6 +1613,19 @@ branches that both added a migration since the fork both numbered it from the
 same index, and only one of the two files survives a conflict on that journal.
 The check that catches it costs nothing: boot the API on an EMPTY database.
 
+**The 12 October merge of main (3 commits, 25 conflicted files)**
+
+Typed refusals (#1926 to #1928): every refusal of main lands as its own
+sentence in the redesign's vocabulary; the connection pickers take the server's
+order (`scope_fit`) instead of sorting client-side; the hosted connect form
+masks fields from the schema (`writeOnly`, `format: "password"`); a partial
+OAuth consent warns. Seven files main touched had been replaced by the
+redesign (`schedule-form`, `run-row`, `run-outcome-tab`, `run-files-tab`,
+`run-featured-file`, `inline-connect-button`, `org-settings/layout`): main only
+changed their comments, so they stay deleted. `0090_org_logo` met main's
+`0090_llm_usage_payer_check` and is now `0091_org_logo`; three manifest-casing
+exclusions that named deleted files are gone. `bun run check` is green.
+
 **The 10 October evening merge of main (5 commits, 14 conflicted files)**
 
 Connection shares as rows (#1922): the redesign's tables and lists keep their

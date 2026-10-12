@@ -269,7 +269,7 @@ export async function loadTokens(profile: string): Promise<Tokens | null> {
  *
  * Deletion never withholds the local cleanup: leaving a live plaintext
  * refresh token in `credentials.json` after the user ran `logout` is
- * the outcome we are protecting against (issue #1321). So the file
+ * the outcome we are protecting against. So the file
  * store is always cleared first, and only then is a keyring failure
  * reported — loudly, because a copy of the credential may survive
  * there, unless the operator opted into plaintext storage and so never

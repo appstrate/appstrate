@@ -25,6 +25,8 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  proxyRequirement,
+  rankByLeastPrivilege,
   resolveConnections as resolveConnectionsPure,
   servingCandidates,
   translateResolutionError,
@@ -178,6 +180,7 @@ function req(
   agentScopes: string[] = [],
 ): IntegrationRequirement {
   return {
+    kind: "agent",
     integrationId: INTEG,
     manifest,
     hasSelectedTools: true,
@@ -610,6 +613,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "acc_x",
         ownedByActor: false,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
       },
     ]);
   });
@@ -633,6 +638,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "acc_x",
         ownedByActor: false,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
       },
     ]);
   });
@@ -671,6 +678,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "root@web-01",
         ownedByActor: true,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
       },
       {
         id: mineDead.id,
@@ -678,6 +687,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "root@db-01",
         ownedByActor: true,
         needsReconnection: true,
+        scopesGranted: [],
+        missingScopes: [],
       },
       {
         id: theirsLive.id,
@@ -685,6 +696,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "ops@corp",
         ownedByActor: false,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
       },
       {
         id: theirsDead.id,
@@ -692,6 +705,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "ci@corp",
         ownedByActor: false,
         needsReconnection: true,
+        scopesGranted: [],
+        missingScopes: [],
       },
     ]);
     // …and the snake_case projection the 409 envelope carries.
@@ -903,6 +918,7 @@ describe("resolveConnections — multi-integration", () => {
       requirements: [
         req(oauth2Manifest()),
         {
+          kind: "agent",
           integrationId: INTEG2,
           manifest: m2,
           hasSelectedTools: true,
@@ -926,6 +942,7 @@ describe("resolveConnections — multi-integration", () => {
       requirements: [
         req(oauth2Manifest()),
         {
+          kind: "agent",
           integrationId: INTEG2,
           manifest: m2,
           hasSelectedTools: true,
@@ -956,6 +973,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
   });
 
   const inertReq = (required: boolean): IntegrationRequirement => ({
+    kind: "agent",
     integrationId: INTEG,
     manifest: oauth2Manifest(),
     hasSelectedTools: false,
@@ -1001,6 +1019,7 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
 
   function requiredAuthReq(required: boolean): IntegrationRequirement {
     return {
+      kind: "agent",
       integrationId: INTEG,
       manifest: requiredOauth2Manifest(),
       hasSelectedTools: false,
@@ -1158,7 +1177,7 @@ describe("resolveConnections — fallback among own connections of one account",
 
   it("still asks without an agent selection (a credential-proxy call)", () => {
     const result = resolveConnections({
-      requirements: [{ ...req(oauth2Manifest()), noAgentSelection: true }],
+      requirements: [proxyRequirement(INTEG, oauth2Manifest())],
       accessibleConnections: [narrow(), broad()],
       pins: [],
     });
@@ -1227,6 +1246,182 @@ describe("resolveConnections — fallback among own connections of one account",
       ["read"],
     );
     expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+});
+
+describe("rankByLeastPrivilege", () => {
+  function catalogManifest(): IntegrationManifest {
+    const m = oauth2Manifest() as unknown as { auths: { oauth: Record<string, unknown> } };
+    m.auths.oauth.scope_catalog = [
+      { value: "read", label: "Read" },
+      { value: "write", label: "Write" },
+    ];
+    return m as unknown as IntegrationManifest;
+  }
+  const selection = { manifest: catalogManifest(), agentTools: [], agentScopes: ["read"] };
+
+  it("orders exact, unjudged, broader, missing, and names each row's fit and gap", () => {
+    const missing = conn({ scopesGranted: [] });
+    const broader = conn({ scopesGranted: ["read", "write"] });
+    const unjudged = conn({ authKey: "pat" });
+    const exact = conn({ scopesGranted: ["read"] });
+
+    const ranked = rankByLeastPrivilege(selection, [missing, broader, unjudged, exact]);
+
+    expect(ranked.map((r) => [r.row.id, r.scopeFit, r.missingScopes])).toEqual([
+      [exact.id, "exact", []],
+      [unjudged.id, "unjudged", []],
+      [broader.id, "broader", []],
+      [missing.id, "missing", ["read"]],
+    ]);
+  });
+
+  describe("the fit of one grant", () => {
+    const [READ, SEND, MODIFY, LABELS] = ["mail.read", "mail.send", "mail.modify", "mail.labels"];
+    const manifest = {
+      ...oauth2Manifest(),
+      auths: {
+        oauth: {
+          type: "oauth2",
+          default_scopes: ["openid", READ],
+          scope_catalog: [
+            { value: "openid", label: "Identity" },
+            { value: READ, label: "Read" },
+            { value: SEND, label: "Send" },
+            { value: MODIFY, label: "Read & write", implies: [READ, SEND] },
+            { value: LABELS, label: "Labels" },
+          ],
+        },
+        key: { type: "api_key" },
+        bare: { type: "oauth2", default_scopes: ["read"] },
+      },
+    } as unknown as IntegrationManifest;
+    const fit = (scopesGranted: string[], agentScopes: string[], authKey = "oauth") =>
+      rankByLeastPrivilege({ manifest, agentTools: [], agentScopes }, [
+        conn({ authKey, scopesGranted }),
+      ])[0]!.scopeFit;
+
+    it("is missing when the grant does not cover the agent", () => {
+      expect(fit(["openid", READ], [READ, SEND])).toBe("missing");
+    });
+
+    it("is exact within the agent's scopes and the defaults, an empty grant included", () => {
+      expect(fit(["openid", READ, SEND], [SEND])).toBe("exact");
+      expect(fit(["openid", READ], [])).toBe("exact");
+      expect(fit([], [])).toBe("exact");
+    });
+
+    it("counts what a required scope implies as asked for", () => {
+      expect(fit(["openid", MODIFY, SEND], [MODIFY])).toBe("exact");
+    });
+
+    it("ignores what the catalog does not declare: the IdP's echo grants nothing", () => {
+      expect(fit(["openid", "profile", "email", READ], [READ])).toBe("exact");
+    });
+
+    it("is broader beyond the agent's scopes and the defaults, a covering parent included", () => {
+      expect(fit(["openid", READ, LABELS], [READ])).toBe("broader");
+      // `modify` covers `send` but also writes.
+      expect(fit(["openid", MODIFY], [SEND])).toBe("broader");
+    });
+
+    it("passes no breadth judgement off oauth2, or on an oauth2 auth with no catalog", () => {
+      expect(fit([], [], "key")).toBe("unjudged");
+      expect(fit(["read", "write"], [], "bare")).toBe("unjudged");
+    });
+  });
+
+  it("puts a live row before a dead one of the same standing, else keeps the given order", () => {
+    const dead = conn({ scopesGranted: ["read"], needsReconnection: true });
+    const first = conn({ scopesGranted: ["read"] });
+    const second = conn({ scopesGranted: ["read"] });
+
+    const ranked = rankByLeastPrivilege(selection, [dead, first, second]);
+
+    expect(ranked.map((r) => r.row.id)).toEqual([first.id, second.id, dead.id]);
+  });
+});
+
+describe("resolveConnections — must_choose candidates carry their scopes", () => {
+  it("lists what each candidate grants and what the agent still misses on it", () => {
+    const narrow = conn({ accountId: "acc_a", scopesGranted: ["read"] });
+    const wide = conn({ accountId: "acc_b", scopesGranted: ["read", "write"] });
+    const result = resolveConnections({
+      requirements: [requiredReq(oauth2Manifest(), [], ["read", "write"])],
+      accessibleConnections: [narrow, wide],
+      pins: [],
+    });
+
+    const err = result.errors[0]!;
+    expect(err.code).toBe("must_choose_connection");
+    expect(translateResolutionError(err).candidate_connections).toEqual([
+      {
+        id: narrow.id,
+        label: narrow.label,
+        account_id: "acc_a",
+        owned_by_actor: true,
+        needs_reconnection: false,
+        scopes_granted: ["read"],
+        missing_scopes: ["write"],
+      },
+      {
+        id: wide.id,
+        label: wide.label,
+        account_id: "acc_b",
+        owned_by_actor: true,
+        needs_reconnection: false,
+        scopes_granted: ["read", "write"],
+        missing_scopes: [],
+      },
+    ]);
+  });
+});
+
+describe("resolveConnections — insufficient_scopes names its remedy", () => {
+  const underScoped = (input: Partial<ConnectionRow> = {}) => conn({ scopesGranted: [], ...input });
+  const foreign = () => underScoped({ userId: "user_someone_else", sharedSpaceIds: [SPACE_ID] });
+  const remedyOf = (input: Partial<Parameters<typeof resolveConnections>[0]>) => {
+    const result = resolveConnections({
+      requirements: [requiredReq(oauth2Manifest(), [], ["read"])],
+      accessibleConnections: [],
+      pins: [],
+      ...input,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("insufficient_scopes");
+    return translateResolutionError(err).remedy;
+  };
+
+  it("an own connection no governing layer binds: upgrade it or connect a new one", () => {
+    expect(remedyOf({ accessibleConnections: [underScoped()] })).toBe("upgrade_or_new");
+  });
+
+  it("another member's connection: connect a new one", () => {
+    const c = foreign();
+    expect(remedyOf({ accessibleConnections: [c], pins: [memberPin(c.id)] })).toBe(
+      "new_connection",
+    );
+  });
+
+  it("an admin pin or an enforced org default: an admin rebinds, whoever owns the row", () => {
+    const c = underScoped();
+    expect(remedyOf({ accessibleConnections: [c], pins: [pin(c.id)] })).toBe("rebind_by_admin");
+    expect(
+      remedyOf({
+        accessibleConnections: [c],
+        orgDefaults: { [INTEG]: { connectionIds: [c.id], enforce: true } },
+      }),
+    ).toBe("rebind_by_admin");
+  });
+
+  it("a schedule's override: its owner rebinds", () => {
+    const c = underScoped();
+    expect(
+      remedyOf({
+        accessibleConnections: [c],
+        launchOverrides: scheduleOverride({ [INTEG]: [c.id] }),
+      }),
+    ).toBe("rebind_by_schedule_owner");
   });
 });
 
@@ -1497,6 +1692,7 @@ describe("resolveConnections — org default", () => {
 describe("resolveConnections — agent dep `auth_key` (AFPS §4.1)", () => {
   function reqWithAuthKey(authKey: string, required = true): IntegrationRequirement {
     return {
+      kind: "agent",
       integrationId: INTEG,
       manifest: oauth2Manifest(),
       hasSelectedTools: true,
@@ -1792,6 +1988,7 @@ describe("resolveConnections — connect-flow relay (auth_key + requiredScopes)"
 
   function reqPinned(manifest: IntegrationManifest, authKey: string): IntegrationRequirement {
     return {
+      kind: "agent",
       integrationId: INTEG,
       manifest,
       hasSelectedTools: true,

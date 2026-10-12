@@ -4,7 +4,7 @@
 /**
  * Token-aware context budgeting for `api_call` tool outputs.
  *
- * Background — see issue #390. The byte-based caps in `helpers.ts`
+ * Background. The byte-based caps in `helpers.ts`
  * (`MAX_RESPONSE_SIZE`, `ABSOLUTE_MAX_RESPONSE_SIZE`) protect against
  * OOM and "agent downloads a 10 MB PDF" scenarios but do not reflect
  * the true cost of a tool output in the agent's context window:
@@ -57,7 +57,7 @@
  *     `estimate` callback at construction time. The shape of the
  *     contract is the same; only the cost of the estimate changes.
  *
- * Out of scope (issue #390 deliberately leaves these to follow-ups):
+ * Out of scope:
  *   - Auto-compaction of conversational history (lives above the SDK).
  *   - Per-tool / per-provider caps (one knob is enough at this stage).
  *   - LLM-backed summarisation of spilled blobs (separate feature).
@@ -88,8 +88,8 @@ export const DEFAULT_INLINE_OUTPUT_TOKENS = 8_000;
  * for the system prompt, agent instructions, and conversation
  * history; this budget covers tool outputs only.
  *
- * Tightened from 200 K after issue #427: an agent fanning out 8
- * parallel `api_call`s could pack ~525 KB of JSON (~150 K tokens)
+ * Kept tight: an agent fanning out 8
+ * parallel `api_call`s can pack ~525 KB of JSON (~150 K tokens)
  * of tool output into a single LLM turn and blow past the upstream
  * model's TPM window before any retry / Retry-After negotiation
  * could land. Keeping the ceiling well below typical model context
@@ -159,8 +159,8 @@ interface BudgetDecision {
    *   wired with {@link TokenBudgetOptions.contextWindowTokens}: a
    *   call that would push `consumed + estimated` past
    *   `contextWindow - reserveTokens` spills even if it would fit
-   *   under the inline cap and the run-level ceiling. Added in #464
-   *   to handle parallel tool-call fan-outs that individually fit
+   *   under the inline cap and the run-level ceiling. It
+   *   handles parallel tool-call fan-outs that individually fit
    *   but collectively blow past the upstream model's hard limit
    *   before Pi SDK's turn-boundary compaction fires.
    */
@@ -195,8 +195,8 @@ interface TokenBudgetOptions {
    * `consumed + estimated` past `contextWindowTokens - reserveTokens`
    * spills regardless of the run-budget ceiling. Defends against the
    * "10 parallel tool_results, each fits inline, sum blows the model's
-   * hard limit" failure mode (#464). When unset, the legacy two-tier
-   * (inline cap + run budget) guard remains the only check.
+   * hard limit" failure mode. When unset, the two-tier
+   * (inline cap + run budget) guard is the only check.
    */
   contextWindowTokens?: number;
   /**

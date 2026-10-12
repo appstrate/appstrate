@@ -116,7 +116,7 @@ interface RunPipelineParams {
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
-   * Per-run dependency version overrides (#666). Threaded into
+   * Per-run dependency version overrides. Threaded into
    * `buildRunContext` → `buildAgentPackage` and persisted verbatim on
    * `runs.dependency_overrides`. Null when the run resolved manifest pins.
    */
@@ -128,7 +128,7 @@ interface RunPipelineParams {
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
-   * The resolver's launch-override layer (#199): the caller's per-integration
+   * The resolver's launch-override layer: the caller's per-integration
    * connection sets for THIS run (`run_override`, persisted on
    * `runs.connection_overrides` for the audit) or the firing schedule's frozen
    * ones (`schedule_override`, already on the schedule row).
@@ -199,7 +199,7 @@ export async function resolveRunPreflight(params: {
    */
   manifestCache?: IntegrationManifestCache;
   /**
-   * Run-kickoff connect-link relay (#1207) — forwarded to readiness verbatim.
+   * Run-kickoff connect-link relay — forwarded to readiness verbatim.
    * Request paths pass `connectOfferPolicyFromRequest(c)`; the scheduler has no
    * request and no human to hand a link to, so it passes nothing.
    */
@@ -286,7 +286,7 @@ export async function seedPinnedIntegrationManifests(params: {
 }
 
 // ---------------------------------------------------------------------------
-// Spawn-dependency freeze (#686) — shared across origins
+// Spawn-dependency freeze — shared across origins
 // ---------------------------------------------------------------------------
 
 /**
@@ -295,10 +295,8 @@ export async function seedPinnedIntegrationManifests(params: {
  *
  * The single point the integration pin is enforced for a run, shared by EVERY
  * origin — platform (`prepareAndExecuteRun`), scheduled (same), and remote
- * (`run-creation.createRun`). Extracting it is what closes the remote-origin
- * gap: before, only the platform path froze versions, so a remote run silently
- * served the mutable draft on the credential path (the exact #686 bug class on
- * a different origin).
+ * (`run-creation.createRun`). Shared, because an origin that does not freeze
+ * versions serves the mutable draft on the credential path.
  *
  *   - Rejects an override KEY that names no declared skill/integration with a
  *     400 (the "fails silently on the key axis" trap the value gate can't see).
@@ -418,7 +416,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   if (!gates.ok) throw preflightGateApiError(gates.error);
   const { agent } = gates;
 
-  // --- Step 2a: Integration manifest version snapshot (#686) ---
+  // --- Step 2a: Integration manifest version snapshot ---
   //
   // Validate `dependency_overrides` keys and freeze every declared
   // integration's manifest version against PUBLISHED versions honoring its
@@ -442,7 +440,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   );
   const freezeMs = Date.now() - freezeStart;
 
-  // --- Step 2b: Connection resolution snapshot (#199) ---
+  // --- Step 2b: Connection resolution snapshot ---
   //
   // Apply the cascade (integration-connection-resolver.ts) once at kickoff so:
   //  - the spawn loader (run-context-builder) spawns the set the cascade bound,
@@ -463,7 +461,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   let connectionsMs = 0;
   // An actor-less run leaves the connection snapshot null (nothing to pin).
   // Scheduled actor-less runs that declare integrations never reach here —
-  // the scheduler fail-fasts first (#735); other run paths always have an actor.
+  // the scheduler fail-fasts first; other run paths always have an actor.
   if (actor) {
     const connectionsStart = Date.now();
     const outcome = await runWithSpan(
@@ -571,11 +569,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
       });
     }
     // Every bundle-layer failure over stored artifacts — an unresolved
-    // dependency pin (#666), an integrity mismatch, a signature-policy
+    // dependency pin, an integrity mismatch, a signature-policy
     // rejection, a malformed archive — is translated into a coded RFC 9457
     // error BEFORE the container starts, never a silent draft fallback.
     // Anything left unmapped reaches the global handler as an opaque
-    // `500 internal_error` with no detail (#878).
+    // `500 internal_error` with no detail.
     const mapped = toBundleApiError(err);
     if (mapped) throw mapped;
     throw err;
@@ -639,7 +637,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         resolvedIntegrationVersions,
         runnerName: params.runnerName ?? null,
         runnerKind: params.runnerKind ?? null,
-        // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
+        // Model aliases: the run DTO (`state/runs.ts`)
         // emits `modelCredentialId` to any dashboard user who can read the run,
         // and a credential id cross-references — via GET /api/model-provider-
         // credentials → its provider and endpoint — straight to the backing.

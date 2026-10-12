@@ -1571,10 +1571,10 @@ describe("files service + routes", () => {
     const problem = (await garbage.json()) as { errors: { field: string }[] };
     expect(problem.errors.map((e) => e.field)).toEqual(["purpose"]);
 
-    // limit out of range → route's `.max(100).catch(20)` yields the 20 default;
-    // an in-range value is honored.
+    // A limit above the maximum is refused; an in-range value is honored.
     const over = await app.request(`/api/files?limit=500`, { headers: authHeaders(ctx) });
-    expect(((await over.json()) as { limit: number }).limit).toBe(20);
+    expect(over.status).toBe(400);
+    expect(((await over.json()) as { param?: string }).param).toBe("limit");
     const inRange = await app.request(`/api/files?limit=50`, { headers: authHeaders(ctx) });
     expect(((await inRange.json()) as { limit: number }).limit).toBe(50);
   });

@@ -2,7 +2,7 @@
 
 /**
  * `appstrate runner …` — install and manage the Firecracker runner daemon
- * on a KVM host (issue #819, phase 3).
+ * on a KVM host.
  *
  * The CLI does NOT contain the daemon: `appstrate-runner-<arch>` is a
  * separately-compiled binary published as a GitHub Release asset. These
@@ -904,7 +904,7 @@ export async function resolveUninstallDataDir(
  * binary / unit / drop-ins / config (bearer token), and — unless
  * `--keep-data` — the state dir. Every step is best-effort and idempotent (a
  * partial or already-removed install never errors), so it doubles as a repair
- * for a half-finished install. Issue #821.
+ * for a half-finished install.
  */
 export async function runnerUninstallCommand(opts: RunnerUninstallOptions = {}): Promise<void> {
   intro("Appstrate runner uninstall");

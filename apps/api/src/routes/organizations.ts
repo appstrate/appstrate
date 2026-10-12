@@ -161,7 +161,7 @@ router.post("/", async (c) => {
     throw forbidden("Only the user's own credential can create organizations");
   }
   const user = c.get("user");
-  // Self-hosting closed mode (issue #228): when org creation is disabled
+  // Self-hosting closed mode: when org creation is disabled
   // platform-wide, only platform admins (AUTH_PLATFORM_ADMIN_EMAILS) may
   // create new organizations. The OrgGate webapp branch surfaces a
   // "waiting for invitation" page to non-admin users with no org.
@@ -511,7 +511,7 @@ router.patch(
     });
 
     // Bare updated resource — same serializer as the invitations list in
-    // GET /orgs/:orgId (issue #657).
+    // GET /orgs/:orgId.
     return c.json({
       id: updated.id,
       email: updated.email,
@@ -582,7 +582,7 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
   await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
 
   // Bare updated resource — same serializer as the members list in
-  // GET /orgs/:orgId (issue #657).
+  // GET /orgs/:orgId.
   const updated = await getOrgMemberWithProfile(orgId, targetUserId);
   if (!updated) {
     throw notFound("Member not found");

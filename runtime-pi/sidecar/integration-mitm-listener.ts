@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.2d — HTTPS MITM listener bound to a single integration's
+ * HTTPS MITM listener bound to a single integration's
  * credential payload (proposal §4.1.4 + §4.1.6).
  *
  * Wire flow:
@@ -93,6 +93,7 @@ import {
   beyondBoundReason,
   credentialStaysWithinBound,
   HOP_BY_HOP_HEADERS,
+  RequestTemplateError,
   substituteRequest,
   UnencodableInputError,
   unresolvedPlaceholders,
@@ -198,7 +199,7 @@ interface CreateMitmListenerOptions {
   onEvent?: (event: MitmListenerEvent) => void;
   /** The connection's egress allowlist — SNI at TLS level, the full URL per request. */
   egressPolicy: RunnerEgressPolicy;
-  /** Only the owning runner may connect (#1458). */
+  /** Only the owning runner may connect. */
   isPeerAllowed: PeerCheck;
 }
 
@@ -272,7 +273,7 @@ export function createIntegrationMitmListener(
 
   // Inner servers keyed by upstream authority: the inner request carries no
   // trace of the tunnel it came through, so the server itself must know the
-  // port the runner asked for (#1588). Their sockets live in one 0700
+  // port the runner asked for. Their sockets live in one 0700
   // directory, named by a counter, not the authority: AF_UNIX paths cap near
   // 104 bytes.
   const tlsServers = new Map<string, Promise<InnerTlsServer>>();
@@ -554,7 +555,7 @@ async function handleInboundConnection(
     return;
   }
   // … then the egress allowlist (no cert mint, no DNS for an unauthorized host).
-  // The upstream is the SNI host on the port the runner CONNECTed to (#1588).
+  // The upstream is the SNI host on the port the runner CONNECTed to.
   if (!deps.egressPolicy.allowsAuthority(sniHost, result.port)) {
     emit({ kind: "connect-rejected", reason: "not-authorized", host: sniHost, port: result.port });
     rawSocket.destroy();
@@ -760,7 +761,8 @@ export function extractSni(buf: Buffer): string | null {
 type ConnectInputSubstitutionResult =
   | { url: string; bodyText: string | null; headers: Record<string, string> }
   | { failed: string }
-  | { refused: string };
+  | { refused: string }
+  | { unsubstitutable: string };
 
 /**
  * Pure, unit-testable helper for connect-login transient-input
@@ -769,7 +771,7 @@ type ConnectInputSubstitutionResult =
  *
  * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
  * `{ failed: <name> }` rather than forwarding a half-substituted request
- * upstream; a value the request cannot carry returns `{ refused: <name> }`.
+ * upstream; `{ refused: <name> }` is a value the request cannot carry, `{ unsubstitutable }` a body no encoder covers.
  * A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(
@@ -788,6 +790,7 @@ export function applyConnectInputSubstitution(
     return { url, bodyText: body, headers };
   } catch (err) {
     if (err instanceof UnencodableInputError) return { refused: err.field };
+    if (err instanceof RequestTemplateError) return { unsubstitutable: err.message };
     throw err;
   }
 }
@@ -931,6 +934,10 @@ async function forwardInnerRequest(
     if ("failed" in result) {
       emit({ kind: "request-refused", url, reason: "unresolved login placeholder" });
       return new Response("MITM listener: unresolved login placeholder", { status: 400 });
+    }
+    if ("unsubstitutable" in result) {
+      emit({ kind: "request-refused", url, reason: "login request not substitutable" });
+      return new Response(`MITM listener: ${result.unsubstitutable}`, { status: 400 });
     }
     if ("refused" in result) {
       credentials.refuseActiveInput?.(result.refused, targetUrl);

@@ -2812,6 +2812,8 @@ export const agentConnectionReadiness: Json200<
             origin_space_id: null,
             needs_reconnection: false,
             missing_scopes: [],
+            // The server ranks the candidates and says how each fits the agent's scopes.
+            scope_fit: "exact",
             is_own: true,
           },
           {
@@ -2831,6 +2833,7 @@ export const agentConnectionReadiness: Json200<
             // Under-scoped on purpose: the amber warning under a candidate is a
             // state of this picker that nothing else in the lab reaches.
             missing_scopes: ["https://www.googleapis.com/auth/drive.file"],
+            scope_fit: "missing",
             is_own: false,
           },
         ],
@@ -5393,4 +5396,35 @@ export const library: Json200<"/api/library", "get"> = {
       },
     ]),
   },
+};
+
+/** The hosted connect form's context: an API-key auth whose fields declare how they are masked. */
+export const hostedConnectContext: Json200<"/api/integrations/connect/context", "get"> = {
+  packageId: "@appstrate/lab-vault",
+  auth_key: "key",
+  display_name: "Coffre labo",
+  icon: null,
+  auth: {
+    type: "api_key",
+    credentials: {
+      schema: {
+        type: "object",
+        required: ["api_key", "passcode"],
+        properties: {
+          api_key: { type: "string", title: "Clé d'API", writeOnly: true },
+          passcode: { type: "string", title: "Code d'accès", writeOnly: true },
+          pin: { type: "string", title: "Code PIN", format: "password" },
+          consumer_key: {
+            type: "string",
+            title: "Clé consommateur",
+            description: "Identifiant public de l'application, affiché en clair.",
+          },
+          host_key: { type: "string", title: "Empreinte de l'hôte" },
+        },
+      },
+    },
+  },
+  connection_id: null,
+  csrf: "lab-csrf",
+  variables: null,
 };

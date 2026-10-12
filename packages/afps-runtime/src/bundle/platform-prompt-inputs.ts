@@ -108,7 +108,7 @@ function skillFromPackage(pkg: BundlePackage): PlatformPromptTool {
  * Walk all non-root packages once and collect the skill references.
  * Tools are NOT collected: every agent tool (runtime, integration,
  * first-party) is advertised to the model via MCP `tools/list`, so the
- * prompt no longer lists them or their docs (see `renderPlatformPrompt`).
+ * prompt does not list them or their docs (see `renderPlatformPrompt`).
  * Skills are not MCP tools — they are workspace files — so they keep
  * their prompt section.
  */

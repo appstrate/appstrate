@@ -20,7 +20,7 @@ export function metadataToEntries(metadata: Record<string, unknown> | null): Met
   if (!metadata) return [];
   return Object.entries(metadata).map(([key, value]) => ({
     key,
-    value: jsonText(value),
+    value: jsonText(value ?? null),
     original: isMetadataValue(value) ? value : undefined,
   }));
 }

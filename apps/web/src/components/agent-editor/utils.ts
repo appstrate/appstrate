@@ -159,17 +159,17 @@ export function getRuntimeTools(m: Record<string, unknown>): string[] {
  *   - the retired AFPS 1.x `dependencies` keys (`tools` → `mcp_servers`,
  *     `providers` → `integrations`) dropped, for the same reason — a draft can
  *     acquire one by importing a bundle assembled from a legacy published
- *     version, and the author-direction save rejects it (#1021).
+ *     version, and the author-direction save rejects it.
  *
  * In both cases the user would otherwise be shown an error for a field the
  * editor cannot even display, with no way to clear it. Typing either into the
  * raw-JSON tab still surfaces the rejection — this normalises on LOAD only.
  *
  * Both halves delegate to `@appstrate/core` — `dropRetiredRuntimeTools` is the
- * SAME function the publish path runs (`services/package-versions.ts`). The
- * editor used to reimplement it and the two drifted on the empty case, so an
- * agent whose only tool was retired serialised differently depending on which
- * path saved it. One implementation, one byte sequence. Core is type-gated
+ * SAME function the publish path runs (`services/package-versions.ts`). A
+ * second implementation here would drift on the empty case, and an agent whose
+ * only tool is retired would serialise differently depending on which path
+ * saved it. One implementation, one byte sequence. Core is type-gated
  * (`type: "agent"`), which is exactly this call site: `package-editor.tsx`
  * invokes it only in the agent branch.
  *

@@ -6,7 +6,7 @@ import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
 
 /**
  * A run's token consumption: the total, with the four-bucket breakdown behind a
- * tooltip. Lifted out of the run-detail header (#1046) so the run row's details
+ * tooltip. Lifted out of the run-detail header so the run row's details
  * panel can render it.
  *
  * Its own file despite the single caller: it is `RunCostReadout`'s twin — same

@@ -21,8 +21,7 @@ const TONE_VARIANTS: Record<ConnectionStatusTone, BadgeProps["variant"]> = {
  * health — the member connections page and the integration detail page (the
  * Connexions picker keeps its own dropdown-row affordances). Owns the
  * tone→color mapping so the same state can never render red on one surface and
- * amber on another: `needs_reconnection` was previously a destructive (red)
- * badge on the integration detail page but an amber pill in preferences.
+ * amber on another.
  *
  * Text stays a child so each call site keeps its own i18n key/namespace.
  */

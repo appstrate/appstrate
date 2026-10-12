@@ -376,7 +376,7 @@ export async function apiCommand(
     //    "manual"` is the deliberate default (see `api/retry.ts`), and
     //    a redirect response usually carries no body at all (Hono's
     //    `c.redirect()` sends none) — so without this the user gets a
-    //    0-byte file and exit 0 with nothing explaining why (#1021).
+    //    0-byte file and exit 0 with nothing explaining why.
     //    Skipped for `-I`/HEAD: a bodyless response is the expected
     //    shape there, not an anomaly. The exit code is deliberately
     //    left alone — `-f` / `--fail-with-body` already turn a 3xx

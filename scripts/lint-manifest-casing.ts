@@ -278,15 +278,9 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   // this line. Delete it then — do not edit the generated file.
   { path: "apps/web/src/api/schema.d.ts", keys: ["iconUrl"], reason: WIRE_DTO },
   { path: "apps/web/src/components/editor-shell.tsx", keys: ["displayName"], reason: WIRE_DTO },
-  { path: "apps/web/src/components/schedule-form.tsx", keys: ["displayName"], reason: WIRE_DTO },
   { path: "apps/web/src/components/package-detail/", keys: ["displayName"], reason: WIRE_DTO },
   {
     path: "apps/web/src/pages/unified-package-detail.tsx",
-    keys: ["displayName"],
-    reason: WIRE_DTO,
-  },
-  {
-    path: "apps/web/src/modules/agent-map/map-panel-dialog.tsx",
     keys: ["displayName"],
     reason: WIRE_DTO,
   },
@@ -306,7 +300,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     reason: WIRE_DTO,
   },
   { path: "apps/web/src/pages/integration-detail.tsx", keys: ["displayName"], reason: WIRE_DTO },
-  { path: "apps/web/src/pages/schedule-create.tsx", keys: ["displayName"], reason: WIRE_DTO },
   {
     path: "apps/web/src/pages/preferences/connections.tsx",
     keys: ["displayName"],

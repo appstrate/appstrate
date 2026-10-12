@@ -11,7 +11,7 @@
  * longer exists, a misspelt runner label, an unclosed `${{ }}` — none of it was
  * caught before GitHub itself tried to run the file, and a workflow that fails
  * to parse simply does not run. On a repo whose `main` ruleset requires no
- * status checks (see #1230), a workflow that silently stops running is a gate
+ * status checks, a workflow that silently stops running is a gate
  * that silently stops existing.
  *
  * This wraps `actionlint`, which is the linter for that language.

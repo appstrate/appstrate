@@ -355,7 +355,7 @@
             }
           },
           "403": {
-            "description": "Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
+            "description": "Sign-up blocked by the platform signup gate: signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason.",
             "content": {
               "application/json": {
                 "schema": {
@@ -584,7 +584,7 @@
         "operationId": "redeemBootstrapToken",
         "tags": ["Auth"],
         "summary": "Claim ownership of an unattended install",
-        "description": "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
+        "description": "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance. Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -1129,7 +1129,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents."
+            "description": "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it, so the modal and badge never disagree with the actual run. Ignored for system agents."
           }
         ],
         "responses": {
@@ -1348,7 +1348,7 @@
         "operationId": "deleteAgentPersistence",
         "tags": ["Agents"],
         "summary": "Bulk-delete persistence rows for an agent",
-        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
+        "description": "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -1892,7 +1892,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`) and `[]` on an integration it marks `required` (400 `validation_failed`, an `errors[]` item `required_integration_unbound` on `connection_overrides.<id>`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so are a key that names no integration the agent declares and `[]` on an integration it marks `required`: 400 `validation_failed`, an `errors[]` item on `connection_overrides.<id>` whose `code` is `undeclared_connection_override` or `required_integration_unbound`. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -1907,7 +1907,7 @@
                   },
                   "dependency_overrides": {
                     "type": "object",
-                    "description": "Per-run dependency version overrides (#666). Flat map: `{ \"@scope/skill\": \"draft\" | \"<semver|dist-tag>\" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `\"draft\"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.",
+                    "description": "Per-run dependency version overrides. Flat map: `{ \"@scope/skill\": \"draft\" | \"<semver|dist-tag>\" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `\"draft\"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.",
                     "additionalProperties": {
                       "type": "string"
                     }
@@ -1928,7 +1928,7 @@
         },
         "responses": {
           "201": {
-            "description": "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`.",
+            "description": "Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -2208,6 +2208,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -2223,7 +2227,7 @@
         "operationId": "deleteAgentRuns",
         "tags": ["Runs"],
         "summary": "Delete all runs for an agent",
-        "description": "Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
+        "description": "Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -2349,7 +2353,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`) and `[]` on an integration it marks `required` (400 `validation_failed`, an `errors[]` item `required_integration_unbound` on `connection_overrides.<id>`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so are a key that names no integration the agent declares and `[]` on an integration it marks `required`: 400 `validation_failed`, an `errors[]` item on `connection_overrides.<id>` whose `code` is `undeclared_connection_override` or `required_integration_unbound`. A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -3127,6 +3131,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -3356,7 +3364,7 @@
                   },
                   "dependency_overrides": {
                     "type": "object",
-                    "description": "Per-run dependency version overrides (#666/#686). Flat map `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. `\"draft\"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.",
+                    "description": "Per-run dependency version overrides. Flat map `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. `\"draft\"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.",
                     "additionalProperties": {
                       "type": "string"
                     }
@@ -3976,7 +3984,7 @@
         "operationId": "fetchRunWorkspace",
         "tags": ["Runs"],
         "summary": "Fetch the run bundle archive (HMAC)",
-        "description": "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+        "description": "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
         "parameters": [
           {
             "name": "runId",
@@ -4920,7 +4928,7 @@
                   },
                   "model_id_override": {
                     "type": "string",
-                    "description": "Override the persisted model on every run triggered by this schedule. It must be bound to an organization credential (a schedule never spends a member's own credential): a model each member serves with their own is a 409 `model_credential_required`."
+                    "description": "Override the persisted model on every run triggered by this schedule. It must be bound to an organization credential (a schedule never spends a member's own credential): a model each member serves with their own is a 409 `model_credential_required`. When unset, the effective model is the agent's model in the space, else the organization default, and the same rule applies to it."
                   },
                   "proxy_id_override": {
                     "type": "string",
@@ -4932,7 +4940,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 0..20 per integration, always an ARRAY; `[]` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (`[]` included), which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and `[]` on an integration it marks `required` (400 `invalid_request`, `param: connection_overrides`).",
+                    "description": "Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }`, 0..20 per integration, always an ARRAY; `[]` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (`[]` included), which it then narrows (`override_outranked` otherwise, see 409). Stored on `package_schedules.connection_overrides` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and `[]` on an integration it marks `required`: 400 `validation_failed`, an `errors[]` item on `connection_overrides.<id>` whose `code` is `undeclared_connection_override` or `required_integration_unbound`.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -4947,14 +4955,14 @@
                   },
                   "dependency_overrides": {
                     "type": "object",
-                    "description": "Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.",
+                    "description": "Per-dependency version overrides frozen on the schedule row. Shape: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.",
                     "additionalProperties": {
                       "type": "string"
                     }
                   },
                   "actor": {
                     "type": "object",
-                    "description": "Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`.",
+                    "description": "Execution identity for runs this schedule fires. Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`.",
                     "properties": {
                       "userId": {
                         "type": "string"
@@ -5070,7 +5078,7 @@
             "description": "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`)."
           },
           "409": {
-            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: `model_id_override` names a model served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail.",
+            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5270,14 +5278,14 @@
                   },
                   "dependency_overrides": {
                     "type": ["object", "null"],
-                    "description": "Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing.",
+                    "description": "Per-dependency version overrides frozen on the schedule. Shape: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing.",
                     "additionalProperties": {
                       "type": "string"
                     }
                   },
                   "actor": {
                     "type": "object",
-                    "description": "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. A schedule already running as another member takes the same for any patch, this field included.",
+                    "description": "Re-point the schedule's execution identity. Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. A schedule already running as another member takes the same for any patch, this field included.",
                     "properties": {
                       "userId": {
                         "type": "string"
@@ -5359,7 +5367,7 @@
             "$ref": "#/components/responses/NoPublishedVersion"
           },
           "409": {
-            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: `model_id_override` names a model served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.",
+            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5507,6 +5515,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -5611,6 +5623,10 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7072,7 +7088,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Invalid body or credentials. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer."
+            "description": "Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7081,7 +7097,18 @@
             "$ref": "#/components/responses/NotFound"
           },
           "502": {
-            "description": "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).",
+            "description": "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7173,9 +7200,10 @@
                   "scopes": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[\\x21\\x23-\\x5b\\x5d-\\x7e]+$"
                     },
-                    "description": "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
+                    "description": "OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
                   },
                   "force_account_select": {
                     "type": "boolean"
@@ -7255,7 +7283,7 @@
         "operationId": "initiateIntegrationConnect",
         "tags": ["Integrations"],
         "summary": "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
-        "description": "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
+        "description": "Porte A — the hosted **Connect** portal, the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7294,9 +7322,10 @@
                   "scopes": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[\\x21\\x23-\\x5b\\x5d-\\x7e]+$"
                     },
-                    "description": "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
+                    "description": "OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
                   },
                   "force_account_select": {
                     "type": "boolean"
@@ -7737,7 +7766,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer. The page session survives: the form can be submitted again."
+            "description": "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again."
           },
           "403": {
             "description": "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
@@ -7757,7 +7786,18 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). The page session survives.",
+            "description": "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. The page session survives.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9971,6 +10011,7 @@
                       "needs_reconnection": false,
                       "aliased": false,
                       "credentialId": "pk_abc123",
+                      "binding": "org",
                       "billed_to": "org",
                       "contextWindow": 128000,
                       "maxTokens": 16384,
@@ -10107,7 +10148,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential."
+            "description": "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -10670,7 +10711,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, or `personal_credential_not_bindable` when `credentialId` names a member's personal credential."
+            "description": "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -10682,11 +10723,11 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model a schedule names in `model_id_override`: a schedule spends organization credentials only, so change those schedules' model first.",
+            "description": "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model enabled schedules run (through their override, their agent's model in their space, or the organization default): a schedule spends organization credentials only, so change those schedules' model first; the problem body carries `schedule_ids`.",
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
+                  "$ref": "#/components/schemas/ScheduleIdsProblem"
                 }
               }
             }
@@ -10827,7 +10868,7 @@
           {
             "name": "fields",
             "in": "query",
-            "description": "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, featured, live_model_search, models. An unknown field is a 400.",
+            "description": "Comma-separated allowlist of fields to return per provider (`providerId` is always included). Allowed: providerId, displayName, iconUrl, description, docsUrl, apiShape, defaultBaseUrl, baseUrlOverridable, authMode, personal_allowed, featured, live_model_search, models. An unknown field is a 400.",
             "schema": {
               "type": "string"
             }
@@ -10894,6 +10935,10 @@
                           "authMode": {
                             "type": "string",
                             "enum": ["api_key", "oauth2"]
+                          },
+                          "personal_allowed": {
+                            "type": "boolean",
+                            "description": "Whether members may bring their own credential for this provider. `false` when the endpoint is the organization's to choose: a personal credential is refused with `personal_credential_custom_endpoint`."
                           },
                           "featured": {
                             "type": "boolean",
@@ -10984,6 +11029,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -11050,6 +11099,8 @@
                       "owner_type": "org",
                       "owner_id": null,
                       "owner_name": null,
+                      "allowed_actions": ["edit", "delete", "test"],
+                      "bindable": false,
                       "created_by": "usr_cm3abc123",
                       "createdAt": "2026-01-10T08:00:00Z",
                       "updatedAt": "2026-01-10T08:00:00Z"
@@ -11238,7 +11289,8 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "$ref": "#/components/responses/ValidationError",
+            "description": "Validation error, including `personal_credential_custom_endpoint` (param `providerId`) when a personal credential is tested on a provider whose endpoint is the organization's to choose."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -11517,7 +11569,8 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/ValidationError"
+            "$ref": "#/components/responses/ValidationError",
+            "description": "Validation error. `invalid_request` (param `api_key`) when `api_key` is sent for an OAuth credential: reconnect it instead."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -11663,7 +11716,7 @@
         "operationId": "createOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
         "summary": "Mint a one-shot pairing token for the connect helper",
-        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact personal credential in place (one the caller owns; another member's answers `404`); omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. The credential the pairing produces is personal, owned by the caller (a subscription is never shared). **Permission:** `model-provider-credentials:connect`; `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper@0.3.x <token>` command, pinned to the helper range this platform speaks. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact personal credential in place: the caller's own OAuth credential of `providerId`, the one rule behind the credential's `reconnect` action (anything else answers `404`); omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. The credential the pairing produces is personal, owned by the caller (a subscription is never shared). **Permission:** `model-provider-credentials:connect`; `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -11685,7 +11738,7 @@
                   "credentialId": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "Existing personal OAuth credential of the caller to reconnect in place. It must match `providerId`; omit it when connecting a new account."
+                    "description": "Existing personal OAuth credential of the caller to reconnect in place, of provider `providerId` (anything else is a 404); omit it when connecting a new account."
                   }
                 },
                 "additionalProperties": false
@@ -11914,7 +11967,7 @@
         },
         "responses": {
           "200": {
-            "description": "Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is the provider's offer (Pi's model registry), derived with no upstream call: every OAuth provider is a subscription provider (`codex`, `claude-code`) whose models are never enumerated. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
+            "description": "Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is the provider's offer (Pi's model registry), derived with no upstream call: every OAuth provider is a subscription provider (`codex`, `claude-code`) whose models are never enumerated. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13491,7 +13544,8 @@
                   "$ref": "#/components/schemas/OrgSettings"
                 },
                 "example": {
-                  "api_version": "2026-03-21"
+                  "api_version": "2026-03-21",
+                  "personal_model_credentials": true
                 }
               }
             }
@@ -13540,7 +13594,7 @@
                   },
                   "personal_model_credentials": {
                     "type": "boolean",
-                    "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call."
+                    "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH."
                   }
                 },
                 "additionalProperties": false
@@ -14454,7 +14508,7 @@
         "operationId": "upsertMyIntegrationPin",
         "tags": ["Profile"],
         "summary": "Pin connections for the caller's runs of an agent",
-        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin one whose `scopes_granted` covers what the agent needs, rather than upgrading one other agents use.",
+        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin a candidate whose `missing_scopes` is empty, rather than upgrading one other agents use.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15660,6 +15714,8 @@
             "description": "Max number of runs to return (1-50, default 10)",
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
               "default": 10
             }
           },
@@ -15715,6 +15771,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -15756,6 +15816,8 @@
             "description": "Max number of memories to return (1-50, default 10).",
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
               "default": 10
             }
           }
@@ -16461,7 +16523,7 @@
         "operationId": "getMcpServerBundle",
         "tags": ["Internal"],
         "summary": "Fetch the AFPS bundle bytes for a referenced mcp-server package",
-        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).",
+        "description": "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).",
         "security": [
           {
             "bearerExecToken": []
@@ -18998,7 +19060,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
+            "description": "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes — so the run-with-options modal stays consistent with the selected version. Ignored for system agents."
           }
         ],
         "responses": {
@@ -25184,7 +25246,7 @@
         "operationId": "credentialProxyGet",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a GET request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `\"` or `\\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -25234,7 +25296,7 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["0", "1"]
@@ -25450,7 +25512,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`).",
+            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25527,7 +25589,7 @@
         "operationId": "credentialProxyPost",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a POST request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `\"` or `\\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -25577,7 +25639,7 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["0", "1"]
@@ -25793,7 +25855,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`).",
+            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -25877,7 +25939,7 @@
         "operationId": "credentialProxyPut",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PUT request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `\"` or `\\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -25927,7 +25989,7 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["0", "1"]
@@ -26143,7 +26205,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`).",
+            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -26227,7 +26289,7 @@
         "operationId": "credentialProxyPatch",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a PATCH request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `\"` or `\\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -26277,7 +26339,7 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["0", "1"]
@@ -26493,7 +26555,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`).",
+            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -26577,7 +26639,7 @@
         "operationId": "credentialProxyDelete",
         "tags": ["Credential Proxy"],
         "summary": "Proxy a DELETE request to an integration with server-side credential injection",
-        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema. Set `X-Substitute-Body: 1` to run the same substitution on the request body (verbs that carry one).\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
+        "description": "High-value endpoint. Accepts an upstream HTTP request and forwards it to the upstream API after injecting the stored credentials server-side. Credentials never leave Appstrate.\n\nAuthentication: bearer only — either an API key with the `credential-proxy:call` scope (carried by a key created with `scopes` omitted or empty when its creator holds it) or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.\n\nOptional `Appstrate-User` header scopes the call to an end-user's connection (API-key auth only).\n\nURL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `\"` or `\\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.\n\nBoolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.\n\nEvery response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.",
         "security": [
           {
             "bearerApiKey": []
@@ -26627,7 +26689,7 @@
             "name": "X-Substitute-Body",
             "in": "header",
             "required": false,
-            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted. Ignored on verbs that do not carry a body (GET, DELETE).",
+            "description": "When `1`, the request body is decoded as UTF-8 and `{{field}}` placeholders are substituted, each value escaped for the body's `Content-Type`, which must then be JSON, form, XML, multipart or `text/plain`. Ignored on verbs that do not carry a body (GET, DELETE).",
             "schema": {
               "type": "string",
               "enum": ["0", "1"]
@@ -26843,7 +26905,7 @@
             "$ref": "#/components/responses/InternalServerError"
           },
           "502": {
-            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a header the connection's credential is substituted or injected into would not be a valid HTTP field value (CR, LF, NUL, another control character or a character above U+00FF); nothing was sent, the detail names the header, never the value (`proxy_configuration_error`).",
+            "description": "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error `dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed body broke off after its headers (`destination_unavailable`); `credential_unusable` — a value of the connection cannot be sent where the call places it: a header it is substituted or injected into would not be a valid HTTP field value, or a `{{field}}` of the target, a header or the body takes a value its place cannot carry (or leaves a path segment empty). Nothing was sent; the detail names the header or the `{{field}}`, never the value (`proxy_configuration_error`).",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -29407,7 +29469,7 @@
         "name": "offset",
         "in": "query",
         "required": false,
-        "description": "Number of items to skip before the first returned item.",
+        "description": "Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`).",
         "schema": {
           "type": "integer",
           "minimum": 0,
@@ -29614,7 +29676,7 @@
         }
       },
       "RetryAfter": {
-        "description": "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down`.",
+        "description": "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down` or a 502 `login_upstream_unavailable` relaying the service's own.",
         "schema": {
           "type": "integer"
         }
@@ -29651,7 +29713,7 @@
           },
           "code": {
             "type": "string",
-            "description": "On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool`, `required_integration_unbound`, `integration_not_active` — the extras below are keyed on it — or one of `integration_not_found`, `integration_wrong_type`, `integration_invalid_manifest` (the declared integration's manifest could not be loaded; no extras), or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's `warnings[]` item, one of `not_connected`, `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`, `integration_unbound` (see ConnectionResolutionWarning). On any other validation item, the validator's own code."
+            "description": "On a connection-resolution item (`field: integrations.<id>`) one of `not_connected`, `needs_reconnection`, `pinned_connection_unavailable`, `override_connection_unavailable`, `override_outranked`, `must_choose_connection`, `insufficient_scopes`, `auth_key_mismatch`, `auth_serves_no_selected_tool`, `auth_key_serves_no_selected_tool`, `required_integration_unbound`, `integration_not_active` — the extras below are keyed on it — or one of `integration_not_found`, `integration_wrong_type`, `integration_invalid_manifest` (the declared integration's manifest could not be loaded; no extras), or, on `POST /api/runs/remote` only, `remote_binds_one_connection` (the cascade binds several connections to an integration, and a remote runner addresses one per integration; no extras). On a launch response's `warnings[]` item, one of `not_connected`, `must_choose_connection`, `auth_key_mismatch`, `integration_not_active`, `integration_unbound` (see ConnectionResolutionWarning). On a refused launch override key (`field: connection_overrides.<id>` or `dependency_overrides.<id>`), one of `undeclared_connection_override`, `required_integration_unbound`, `undeclared_dependency_override`. On any other validation item, the validator's own code."
           },
           "message": {
             "type": "string"
@@ -29664,7 +29726,15 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["id", "label", "account_id", "owned_by_actor", "needs_reconnection"],
+              "required": [
+                "id",
+                "label",
+                "account_id",
+                "owned_by_actor",
+                "needs_reconnection",
+                "scopes_granted",
+                "missing_scopes"
+              ],
               "properties": {
                 "id": {
                   "type": "string"
@@ -29684,6 +29754,20 @@
                 "needs_reconnection": {
                   "type": "boolean",
                   "description": "True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected."
+                },
+                "scopes_granted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "OAuth scopes the connection holds; empty off `oauth2`."
+                },
+                "missing_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Scopes the agent's selected tools require that the connection lacks; empty when it covers them. A run naming a candidate with a non-empty list fails with `insufficient_scopes`. Always empty on the credential proxy, which selects no tool."
                 }
               }
             },
@@ -29691,14 +29775,24 @@
           },
           "connection_id": {
             "type": "string",
-            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow."
+            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow."
           },
           "missing_scopes": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names. When `source` is `admin_pin`, `org_default_enforced` or `schedule_override`, an admin, or the schedule's owner, must switch that binding instead."
+            "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks."
+          },
+          "remedy": {
+            "type": "string",
+            "enum": [
+              "new_connection",
+              "upgrade_or_new",
+              "rebind_by_admin",
+              "rebind_by_schedule_owner"
+            ],
+            "description": "Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them."
           },
           "owned_by_actor": {
             "type": "boolean",
@@ -29834,6 +29928,26 @@
                   "integration_invalid_manifest",
                   "remote_binds_one_connection"
                 ]
+              }
+            }
+          }
+        ]
+      },
+      "ScheduleIdsProblem": {
+        "description": "A problem that may name schedules. On `model_scheduled` — the write would leave enabled schedules running a model served only by each member's own credential, which a schedule has none of — `schedule_ids` lists them. A schedule's effective model is its `model_id_override`, else its agent's model in its space, else the organization default. Change those schedules' model, or bind the model to an organization credential.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ProblemDetail"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "schedule_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "On `model_scheduled`: the enabled schedules the write would leave on that model."
               }
             }
           }
@@ -30291,6 +30405,7 @@
       "OrgSettings": {
         "type": "object",
         "description": "Organization settings (extensible)",
+        "required": ["personal_model_credentials"],
         "properties": {
           "restrict_package_copy": {
             "type": "boolean",
@@ -30306,7 +30421,7 @@
           },
           "personal_model_credentials": {
             "type": "boolean",
-            "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call."
+            "description": "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH."
           }
         }
       },
@@ -31297,8 +31412,8 @@
           },
           "model_source": {
             "type": ["string", "null"],
-            "enum": ["system", "org", null],
-            "description": "Model source: 'system' (platform-provided) or 'org' (user-configured). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch."
+            "enum": ["system", "org", "user", null],
+            "description": "Who paid for the run's model: 'system' (platform-provided), 'org' (an organization credential) or 'user' (the launching member's own personal credential). Resolved at run creation — an org-default change between triggers applies to subsequent runs unless the run was pinned via the runAgent `modelId` override. `null` on a remote-origin run (its runner brings its own model) and on a run refused before launch."
           },
           "cost": {
             "type": ["number", "null"],
@@ -31413,7 +31528,7 @@
           },
           "unread": {
             "type": "boolean",
-            "description": "True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count."
+            "description": "True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count."
           },
           "runNumber": {
             "type": ["integer", "null"],
@@ -31450,7 +31565,7 @@
           },
           "dependency_overrides": {
             "type": ["object", "null"],
-            "description": "Per-run dependency version overrides (#666). Flat map: `{ \"@scope/skill\": \"draft\" | \"<semver|dist-tag>\" }`. A `\"draft\"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.",
+            "description": "Per-run dependency version overrides. Flat map: `{ \"@scope/skill\": \"draft\" | \"<semver|dist-tag>\" }`. A `\"draft\"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.",
             "additionalProperties": {
               "type": "string"
             }
@@ -31683,7 +31798,7 @@
           },
           "dependency_overrides": {
             "type": ["object", "null"],
-            "description": "Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.",
+            "description": "Per-dependency version overrides frozen on the schedule row. Flat map: `{ \"@scope/dep\": \"draft\" | \"<semver|dist-tag>\" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.",
             "additionalProperties": {
               "type": "string"
             }
@@ -32011,6 +32126,8 @@
           "owner_type",
           "owner_id",
           "owner_name",
+          "allowed_actions",
+          "bindable",
           "created_by",
           "createdAt",
           "updatedAt"
@@ -32024,7 +32141,7 @@
           },
           "apiShape": {
             "type": ["string", "null"],
-            "description": "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider."
+            "description": "Protocol family. `null` for a built-in credential whose every model is managed — the binding is not exposed, so the endpoint doesn't reveal the provider."
           },
           "base_url": {
             "type": ["string", "null"],
@@ -32061,6 +32178,18 @@
             "type": ["string", "null"],
             "description": "Display name of `owner_id`; `null` for `org`."
           },
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["edit", "delete", "test", "reconnect"]
+            },
+            "description": "The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`, and `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to its owner holding `model-provider-credentials:connect` when it is an OAuth credential, whether or not it needs reconnection (`needs_reconnection`)."
+          },
+          "bindable": {
+            "type": "boolean",
+            "description": "Whether an organization model may be bound to this credential: `true` for an organization API key (not a subscription), `false` for a personal credential, an organization subscription or a built-in credential."
+          },
           "created_by": {
             "type": ["string", "null"]
           },
@@ -32094,6 +32223,7 @@
           "iconUrl",
           "source",
           "credentialId",
+          "binding",
           "billed_to",
           "created_by",
           "createdAt",
@@ -32186,12 +32316,17 @@
           },
           "credentialId": {
             "type": ["string", "null"],
-            "description": "ID of the organization `model_provider_credentials` row the model is bound to. `null` when the model is unbound: each member serves it with their own personal credential for `providerId` (`billed_to` says whether the caller has one). `null` for managed models — binding not exposed."
+            "description": "The bound organization credential; `null` when `binding` is `member` or `managed`. `null` for managed models — binding not exposed."
+          },
+          "binding": {
+            "type": "string",
+            "enum": ["org", "member", "managed"],
+            "description": "How the model is served. `org` — bound to one credential (an organization credential, or the platform key for a built-in model). `member` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed."
           },
           "billed_to": {
             "type": ["string", "null"],
-            "enum": ["user", "org", null],
-            "description": "Who pays for a call to this model, for the caller. `org` — a built-in model or a model bound to an organization credential: the organization (or the platform) pays whoever calls (a dead credential is `needs_reconnection`). `user` — an unbound model (`credentialId: null`) one of the caller's own personal credentials serves. `null` — an unbound model nothing of the caller's serves: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there."
+            "enum": ["system", "org", "user", null],
+            "description": "Who pays for a call to this model, for the caller. `system` — a built-in model, paid by the platform. `org` — bound to an organization credential: the organization pays whoever calls (a dead credential is `needs_reconnection`). `user` — unbound, and served by one of the caller's own credentials. `null` — unbound and nothing of the caller's serves it: a spend is refused (`409 model_credential_required`). Read for runs and chat: the public LLM proxy (`/api/llm-proxy`, used by remote runs) never serves a subscription, so a caller whose only applicable credential is a subscription has none there."
           },
           "cost": {
             "type": ["object", "null"],
@@ -32468,7 +32603,7 @@
           },
           "candidates": {
             "type": "array",
-            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth.",
+            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
             "items": {
               "type": "object",
               "required": [
@@ -32485,6 +32620,7 @@
                 "shared_here",
                 "needs_reconnection",
                 "missing_scopes",
+                "scope_fit",
                 "is_own"
               ],
               "properties": {
@@ -32549,6 +32685,11 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "scope_fit": {
+                  "type": "string",
+                  "enum": ["exact", "unjudged", "broader", "missing"],
+                  "description": "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`)."
                 },
                 "is_own": {
                   "type": "boolean"

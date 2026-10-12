@@ -601,7 +601,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   }
 
   // No orgs at all -- redirect to onboarding (or to "waiting for invitation"
-  // when this user may not create one — issue #228 closed mode).
+  // when this user may not create one, the closed mode).
   if (orgs.length === 0) {
     return <Navigate to={orgLessEntry(canCreateOrg)} replace />;
   }
@@ -665,7 +665,7 @@ export function App() {
     return <BootScreen />;
   }
 
-  // Hosted connect portal (issue #769) — standalone, auth-agnostic. Rendered
+  // Hosted connect portal — standalone, auth-agnostic. Rendered
   // before every auth/bootstrap gate because it authenticates via its own
   // httpOnly page cookie (pinned by the dispatch redirect), not the platform
   // session: it must work for embedded end-users with no Better Auth user.
@@ -686,7 +686,7 @@ export function App() {
     );
   }
 
-  // Bootstrap-token redemption (#344 Layer 2b) — when the platform has a
+  // Bootstrap-token redemption — when the platform has a
   // pending unattended-install token AND the visitor isn't authenticated,
   // every route funnels into `/claim`. The redeem route owns its own gate
   // (timing-safe compare + DB-org-count); the SPA's job is just to render
