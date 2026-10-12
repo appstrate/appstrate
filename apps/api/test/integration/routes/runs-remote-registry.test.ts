@@ -877,6 +877,17 @@ describe("POST /api/runs/remote — kind: registry", () => {
       expect(await db.select().from(runs)).toHaveLength(0);
     });
 
+    it("refuses an inline run whose set binds several connections and purges its shadow package", async () => {
+      const items = await refusalItems(await launchWith("inline", { [INTEG]: [a, b] }));
+      expect(items.map((e) => [e.field, e.code])).toEqual([
+        [`integrations.${INTEG}`, "remote_binds_one_connection"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+      expect(
+        await db.select({ id: packages.id }).from(packages).where(eq(packages.ephemeral, true)),
+      ).toHaveLength(0);
+    });
+
     it("refuses a connection the actor cannot reach (409, override_connection_unavailable item)", async () => {
       const colleague = await memberContext(ctx, "member");
       const theirs = await seedIntegrationConnection(colleague, INTEG);
@@ -884,6 +895,44 @@ describe("POST /api/runs/remote — kind: registry", () => {
       const items = await refusalItems(await launchWith("registry", { [INTEG]: [theirs] }));
       expect(items.map((e) => [e.field, e.code])).toEqual([
         [`integrations.${INTEG}`, "override_connection_unavailable"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
+  });
+
+  describe("a required integration with an emptied connection set", () => {
+    const INTEG = "@acme/required-svc";
+
+    it("refuses `[]` on the required integration as a 400 validation_failed item", async () => {
+      await seedConnectionTestIntegration(ctx, INTEG);
+      await seedRegistryAgent(
+        ctx,
+        {
+          ...publishedManifest("1.2.3"),
+          dependencies: { skills: {}, mcp_servers: {}, integrations: { [INTEG]: "^1.0.0" } },
+          integrations_configuration: { [INTEG]: { tools: ["search"], required: true } },
+        } as unknown as Record<string, unknown>,
+        "1.2.3",
+      );
+
+      const res = await post({
+        source: {
+          kind: "registry",
+          packageId: "@acme/briefing",
+          stage: "published",
+          spec: "1.2.3",
+        },
+        spaceId: ctx.defaultSpaceId,
+        input: {},
+        connection_overrides: { [INTEG]: [] },
+      });
+
+      const problem = await expectProblem(res, 400, { code: "validation_failed" });
+      expect(problem.errors).toEqual([
+        expect.objectContaining({
+          field: `connection_overrides.${INTEG}`,
+          code: "required_integration_unbound",
+        }),
       ]);
       expect(await db.select().from(runs)).toHaveLength(0);
     });

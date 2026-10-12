@@ -56,7 +56,11 @@ import {
   connectionOverridesSchema,
   dependencyOverridesSchema,
 } from "../lib/launch-schemas.ts";
-import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
+import {
+  insertShadowPackage,
+  buildShadowLoadedPackage,
+  deleteOrphanShadowPackage,
+} from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
@@ -418,31 +422,38 @@ export function createRunsRemoteRouter() {
       // never reach a remote host's workspace. Applies to both source shapes:
       // `agentForRun.manifest` is the resolved manifest in either branch.
       const fileInputSchema = agentForRun.manifest.input?.schema;
-      if (fileInputSchema) {
-        assertNoPlatformFileRefs(asJSONSchemaObject(fileInputSchema), effectiveInput ?? {});
-      }
-
       const runId = `run_${crypto.randomUUID()}`;
-      const runner = await resolveRunnerContext(c);
-      const result = await createRun({
-        runId,
-        orgId,
-        spaceId,
-        actor,
-        agent: agentForRun,
-        ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
-        input: effectiveInput,
-        // Normalize an empty map to null (mirrors the platform run route): a
-        // non-null map on the row means the run carried explicit overrides.
-        dependencyOverrides,
-        launchOverrides,
-        apiKeyId: c.get("apiKeyId") ?? undefined,
-        sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
-        contextSnapshot: body.contextSnapshot,
-        runnerName: runner.name,
-        runnerKind: runner.kind,
-        ...(manifestCache ? { manifestCache } : {}),
-      });
+      let result: Awaited<ReturnType<typeof createRun>>;
+      try {
+        if (fileInputSchema) {
+          assertNoPlatformFileRefs(asJSONSchemaObject(fileInputSchema), effectiveInput ?? {});
+        }
+
+        const runner = await resolveRunnerContext(c);
+        result = await createRun({
+          runId,
+          orgId,
+          spaceId,
+          actor,
+          agent: agentForRun,
+          ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
+          input: effectiveInput,
+          // Normalize an empty map to null (mirrors the platform run route): a
+          // non-null map on the row means the run carried explicit overrides.
+          dependencyOverrides,
+          launchOverrides,
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+          sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
+          contextSnapshot: body.contextSnapshot,
+          runnerName: runner.name,
+          runnerKind: runner.kind,
+          ...(manifestCache ? { manifestCache } : {}),
+        });
+      } catch (err) {
+        // A refused inline run leaves no run row, so its shadow package is purged.
+        if (attributionPath === "inline_shadow") await deleteOrphanShadowPackage(agentForRun.id);
+        throw err;
+      }
 
       logger.info("runs.remote.attribution", {
         runId: result.runId,
