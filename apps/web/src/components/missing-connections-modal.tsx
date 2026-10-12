@@ -23,19 +23,19 @@ import {
 import { refusalMessage } from "../lib/mutation-error";
 
 interface MissingConnectionsModalProps {
-  open: boolean;
   onClose: () => void;
+  /** The 409's items, one per refused integration (`integrations.{packageId}`). */
   errors: MissingIntegrationFieldError[];
   /** The agent whose run 409'd; keys the server resolution each picker consumes. */
-  agentPackageId?: string;
+  agentPackageId: string;
   /** The version the refused launch ran: `required` (and so "no connection") is that version's. */
-  version?: string;
+  version: string | undefined;
   /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
   integrationEntries?: AgentIntegrationEntry[];
   /** Replays the refused launch. */
   onRetry: () => void;
   /** Disables the retry button while the new run is in flight. */
-  retrying?: boolean;
+  retrying: boolean;
 }
 
 /**
@@ -43,9 +43,9 @@ interface MissingConnectionsModalProps {
  * `errors[]` entry. An actionable row embeds `IntegrationConnectionPicker`, which writes the
  * member's pin for this agent as the Connexions tab does; "Re-run" replays the launch, which
  * reads that pin. Structural failures keep a plain message: no pick fixes them.
+ * Mounted only while a refusal stands, so it is always open.
  */
 export function MissingConnectionsModal({
-  open,
   onClose,
   errors,
   agentPackageId,
@@ -61,12 +61,11 @@ export function MissingConnectionsModal({
     .filter((i) => i.run_blocking)
     .map((i) => i.integration_package_id);
 
-  const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
-  const { showRetry, canRetry } = retryDecision(integrationErrors, retrying, stillBlocking);
+  const { showRetry, canRetry } = retryDecision(errors, retrying, stillBlocking);
 
   return (
     <Modal
-      open={open}
+      open
       onClose={onClose}
       title={t("missingConnections.title")}
       actions={
@@ -88,7 +87,7 @@ export function MissingConnectionsModal({
           modal instead of overflowing past it (and pushing the footer out of
           view). `-mr-2 pr-2` insets the scrollbar without clipping row borders. */}
       <div className="-mr-2 max-h-[55vh] space-y-2 overflow-y-auto pr-2">
-        {integrationErrors.map((err, i) => (
+        {errors.map((err, i) => (
           <MissingRow
             key={`${err.field}-${i}`}
             err={err}
@@ -110,8 +109,8 @@ export function MissingRow({
   integrationEntries,
 }: {
   err: MissingIntegrationFieldError;
-  agentPackageId?: string;
-  version?: string;
+  agentPackageId: string;
+  version: string | undefined;
   integrationEntries?: AgentIntegrationEntry[];
 }) {
   const { t } = useTranslation(["agents"]);
@@ -133,19 +132,18 @@ export function MissingRow({
     isStructural ? undefined : agentPackageId,
     version,
   );
-  const resolution = verdict?.resolution;
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
+  // Resolved = the run-kickoff gate would let it through; no verdict is not "ready".
   const resolved = !!verdict && !verdict.run_blocking;
   const unbound = unboundLabel(verdict?.resolution.warning ?? null);
-  // The picker needs the manifest + first verdict to render fully wired; hold
-  // a spinner until both land (non-structural rows with the agent in context).
-  // Both reads gate on `integrations:read`: without it neither lands, so the
-  // row names the integration and waits for nothing.
-  const pickable = !isStructural && !!agentPackageId && readsIntegrations;
-  const canRenderPicker = pickable && !!detail && !!resolution;
-  const loadingVerdict = pickable && (!detail || !resolution);
+  // The picker needs the manifest + first verdict to render fully wired; a
+  // non-structural row holds a spinner until both land. Both reads gate on
+  // `integrations:read`: without it neither lands, so the row names the
+  // integration and waits for nothing.
+  const pickable = !isStructural && readsIntegrations;
+  const canRenderPicker = pickable && !!detail && !!verdict;
+  const loadingVerdict = pickable && !canRenderPicker;
 
   const displayName = detail?.manifest.display_name ?? packageId;
   // An item code this build has no sentence for keeps the resolver's own message.

@@ -39,12 +39,7 @@ import {
   picksAfterActorChange,
   refusalForActor,
 } from "../lib/connection-choice";
-import {
-  withConnectionOverride,
-  withFallbackConnections,
-  withoutFallbackConnections,
-  type ConnectionSet,
-} from "../lib/connection-set";
+import { withConnectionOverride, type ConnectionSet } from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
@@ -293,14 +288,14 @@ export function ScheduleForm(props: ScheduleFormProps) {
     actorIsViewer ? packageId : undefined,
     firedVersion,
   );
-  // The saved map replaces the stored one: a key the fired version no longer declares is
-  // dropped (the server refuses it), whichever picker — or none — the form shows.
-  const held = {
+  // What a save sends, and what a refusal is judged against. It replaces the stored map: a key
+  // the fired version does not declare is dropped (the server refuses it), whichever picker —
+  // or none — the form shows.
+  const savedOverrides = savedScheduleOverrides(
     overrides,
-    readiness: readiness?.integrations,
-    declared: firedIntegrations?.map((i) => i.id),
-  };
-  const savedOverrides = savedScheduleOverrides(held);
+    readiness?.integrations,
+    firedIntegrations?.map((i) => i.id),
+  );
 
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
@@ -366,7 +361,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
       input,
     };
     const overrideArgs = {
-      ...held,
+      overrides: savedOverrides,
       versionOverride,
       versionOverrideChanged,
       actor,
@@ -579,10 +574,8 @@ export function ScheduleForm(props: ScheduleFormProps) {
                   {...(actorIsViewer && firedIntegrations
                     ? { agentIntegrations: firedIntegrations }
                     : {})}
-                  value={withFallbackConnections(overrides, held.readiness)}
-                  onChange={(next) =>
-                    setOverrides(withoutFallbackConnections(next, held.readiness))
-                  }
+                  value={overrides}
+                  onChange={setOverrides}
                   version={firedVersion}
                   scheduled
                 />

@@ -850,6 +850,13 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   there is the member's pin, Re-run replays the launch and waits until every
   row is answered. With no connection to bind, the picker reads "Connect" or
   "Choose" instead of "Inherit", and the refusal shows whole.
+- **An unset connection pick shows what the agent would bind** (#1929). In the
+  dashboard's schedule form and "Run with options" modal, an integration with
+  no pick shows the connection the usual resolution binds, marked as the
+  default, where it read "Inherit"; the entry that reset to "Inherit" is
+  offered only for an explicit pick. "Run with options" keeps the connection
+  picks of a launch sent before the version's integrations loaded, where it
+  dropped them all.
 - **Connection readiness says which integrations are inert** (#1929): each
   integration of `GET /api/agents/{scope}/{name}/connection-readiness`
   carries a required boolean `inert`, true when the agent declares it with

@@ -53,7 +53,7 @@ interface RunOverridesPanelProps {
   persistedProxyId: string | null;
   /**
    * Agent's declared integration dependencies — drives the
-   * connectionOverrides picker. Pass an empty array to hide the section
+   * connection-overrides pickers. Pass an empty array to hide the section
    * (e.g. for agents without integrations). The caller is responsible
    * for reading `dependencies.integrations` off the agent manifest.
    */
@@ -69,6 +69,7 @@ interface RunOverridesPanelProps {
   /**
    * For a schedule: it spends organization credentials only, so a model each
    * member pays for themselves cannot be picked, and nobody's credential is named.
+   * The connection hint then speaks of every fire instead of this run.
    */
   scheduled?: boolean;
 }
@@ -291,10 +292,11 @@ export function RunOverridesPanel({
       )}
 
       {agentIntegrations && agentIntegrations.length > 0 && (
-        <ScheduleConnectionOverridesSection
+        <ConnectionOverridesSection
           agentPackageId={packageId}
           integrations={agentIntegrations}
           version={version}
+          scheduled={scheduled}
           value={value.connection_overrides ?? {}}
           onChange={(integrationId, connectionIds) =>
             onChange(withConnectionOverride(value, integrationId, connectionIds))
@@ -309,24 +311,26 @@ export function RunOverridesPanel({
  * Per-integration picker section that drives `value.connection_overrides`.
  * Renders the shared `IntegrationConnectionPicker` (one dropdown per
  * integration) in `override` mode: validating a set writes it into the
- * `connection_overrides` map, "inherit" clears the key. The pick freezes
- * into the schedule row on save (the launch override — below admin pins, above member pins).
- * "No connection" writes `[]`.
+ * `connection_overrides` map, "inherit" clears the key, "No connection"
+ * writes `[]`. The map is the launch override (below admin pins, above member
+ * pins) of the form that holds it: one run's, or a schedule's on every fire.
  *
  * Identical UX to the agent page's connection picker — same candidate
  * list, scope/lock verdicts and inline connect flow — only the
  * persistence target differs (transient form value vs. member pin).
  */
-function ScheduleConnectionOverridesSection({
+function ConnectionOverridesSection({
   agentPackageId,
   integrations,
   version,
+  scheduled,
   value,
   onChange,
 }: {
   agentPackageId: string;
   integrations: AgentIntegrationRef[];
   version?: string;
+  scheduled: boolean;
   value: Record<string, string[]>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
 }) {
@@ -334,7 +338,9 @@ function ScheduleConnectionOverridesSection({
   return (
     <div className="space-y-2">
       <Label>{t("schedule.connectionOverrides.label")}</Label>
-      <p className="text-muted-foreground text-xs">{t("schedule.connectionOverrides.hint")}</p>
+      <p className="text-muted-foreground text-xs">
+        {scheduled ? t("schedule.connectionOverrides.hint") : t("run.overrides.connectionHint")}
+      </p>
       <div className="border-border bg-card space-y-3 rounded-md border p-3">
         {integrations.map((integ) => (
           <IntegrationOverrideRow
@@ -370,13 +376,13 @@ function IntegrationOverrideRow({
 
   // Gate the row on whether the agent can connect this integration at all
   // (declared auth the actor can start a flow on, given its tool selection).
-  // Mirrors the run-time `integration_not_active`/no-auth gates so the
-  // schedule editor never offers an override for an unconnectable integration.
+  // Mirrors the run-time `integration_not_active`/no-auth gates so neither
+  // form offers an override for an unconnectable integration.
   if (!detail) return null;
   if (connectableAuthKeysForAgent(detail.manifest, integration.tools).length === 0) return null;
 
   return (
-    <div className="space-y-1.5" data-testid={`schedule-conn-row-${integration.id}`}>
+    <div className="space-y-1.5" data-testid={`conn-override-row-${integration.id}`}>
       <div className="text-xs font-medium">{displayName}</div>
       <IntegrationConnectionPicker
         integrationId={integration.id}

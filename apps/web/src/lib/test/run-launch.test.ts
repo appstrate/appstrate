@@ -231,7 +231,13 @@ describe("retryLaunch", () => {
 });
 
 describe("launchFromOptions", () => {
-  const untouched = { input: {}, version: "draft", overrides: {}, dependencyOverrides: {} };
+  const untouched = {
+    input: {},
+    version: "draft",
+    overrides: {},
+    declaredIntegrations: ["@acme/crm"],
+    dependencyOverrides: {},
+  };
 
   it("sends only the version when nothing was set, like plain Lancer", () => {
     expect(launchFromOptions(untouched)).toEqual({ version: "draft" });
@@ -254,6 +260,7 @@ describe("launchFromOptions", () => {
           proxy_id_override: "proxy_1",
           connection_overrides: { "@acme/crm": ["conn_1"] },
         },
+        declaredIntegrations: ["@acme/crm"],
         dependencyOverrides: { "@acme/skill": "draft" },
       }),
     ).toEqual({
@@ -265,6 +272,25 @@ describe("launchFromOptions", () => {
       connectionOverrides: { "@acme/crm": ["conn_1"] },
       dependencyOverrides: { "@acme/skill": "draft" },
     });
+  });
+
+  it("drops a pick for an integration the launched version does not declare", () => {
+    const picks = { "@acme/crm": ["conn_1"], "@acme/retired": ["conn_9"] };
+    expect(
+      launchFromOptions({ ...untouched, overrides: { connection_overrides: picks } })
+        .connectionOverrides,
+    ).toEqual({ "@acme/crm": ["conn_1"] });
+  });
+
+  it("keeps every pick while the version's integrations have not loaded", () => {
+    const picks = { "@acme/crm": ["conn_1"], "@acme/drive": ["conn_2"] };
+    expect(
+      launchFromOptions({
+        ...untouched,
+        overrides: { connection_overrides: picks },
+        declaredIntegrations: undefined,
+      }).connectionOverrides,
+    ).toEqual(picks);
   });
 
   it('passes the "none" proxy pick through: it is the wire value for no proxy', () => {

@@ -151,8 +151,8 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
  */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
-  retrying = false,
-  stillBlocking?: readonly string[],
+  retrying: boolean,
+  stillBlocking: readonly string[] | undefined,
 ): { showRetry: boolean; canRetry: boolean } {
   const blocked = (e: MissingIntegrationFieldError) =>
     stillBlocking?.includes(integrationIdOfField(e.field)) === true;

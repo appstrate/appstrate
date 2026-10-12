@@ -3,7 +3,7 @@
 /**
  * The recovery modal of a refused launch (#1830). Its dialog chrome is a Radix
  * portal, which renders nothing without a DOM, so a row is rendered through
- * `MissingRow` and the Re-run button's state is asserted on `retryDecision`.
+ * `MissingRow`; the Re-run button's state is `retryDecision`, tested with its module.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
@@ -13,7 +13,6 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
 import { MissingRow } from "../missing-connections-modal.tsx";
-import { retryDecision } from "../../lib/connection-choice.ts";
 import type { MissingIntegrationFieldError } from "../../lib/connection-choice.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
 import { spaceStore } from "../../stores/space-store.ts";
@@ -113,7 +112,7 @@ describe("MissingRow", () => {
     expect(draft).not.toContain(label("detail.integrationUnbound"));
   });
 
-  it("names why an optional integration now runs without, ahead of the resolved header", () => {
+  it("names why an optional integration runs without, ahead of the resolved header", () => {
     const qc = new QueryClient();
     qc.setQueryData(
       readinessKey(),
@@ -203,55 +202,11 @@ describe("MissingRow", () => {
     try {
       const html = renderRow(qc);
       expect(html).toContain(`data-testid="member-picker-${INTEGRATION}"`);
-      // The trigger names the stored pin; a per-run override picker, unset, reads "inherit".
+      // The trigger names the stored pin as a pick; an override picker, unset, marks it the default.
       expect(html).toContain("compte-web");
-      expect(html).not.toContain(label("detail.integrationMemberPicker.inherit"));
+      expect(html).not.toContain(label("detail.integrationMemberPicker.defaultBadge"));
     } finally {
       snapshot.mockRestore();
     }
-  });
-});
-
-describe("retryDecision", () => {
-  const fixable = [fieldError("not_connected")];
-  const structural: MissingIntegrationFieldError = {
-    field: "integrations.@acme/gmail",
-    code: "integration_not_active",
-    message: "inactive",
-  };
-
-  it("offers the re-run, enabled, once no refused row still blocks", () => {
-    expect(retryDecision(fixable, false, [])).toEqual({ showRetry: true, canRetry: true });
-    // A blocking integration the 409 did not name is not this modal's to answer.
-    expect(retryDecision(fixable, false, ["@acme/drive"]).canRetry).toBe(true);
-  });
-
-  it("holds the re-run while the live readiness still blocks a refused row", () => {
-    expect(retryDecision(fixable, false, [INTEGRATION])).toEqual({
-      showRetry: true,
-      canRetry: false,
-    });
-  });
-
-  it("does not gate on a verdict that has not loaded: the server stays the authority", () => {
-    expect(retryDecision(fixable, false, undefined).canRetry).toBe(true);
-  });
-
-  it("holds the re-run while the launch is in flight", () => {
-    expect(retryDecision(fixable, true, []).canRetry).toBe(false);
-  });
-
-  it("offers no re-run when every row is structural: nothing in the modal answers them", () => {
-    expect(retryDecision([structural], false, []).showRetry).toBe(false);
-  });
-
-  it("holds the re-run beside a structural row still blocking, and frees it once it clears", () => {
-    const mixed = [...fixable, structural];
-    // The fixable row is answered; the structural one is not the modal's to fix.
-    expect(retryDecision(mixed, false, ["@acme/gmail"])).toEqual({
-      showRetry: true,
-      canRetry: false,
-    });
-    expect(retryDecision(mixed, false, []).canRetry).toBe(true);
   });
 });

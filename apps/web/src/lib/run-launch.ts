@@ -4,6 +4,7 @@ import type { MissingIntegrationConnectionCode } from "@appstrate/core/integrati
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { RunWithOptionsSubmit } from "../components/run-with-options-modal";
 import { ApiError } from "../api/errors";
+import { withDeclaredConnections } from "./connection-set";
 import {
   integrationIdOfField,
   missingConnectionErrors,
@@ -143,12 +144,16 @@ export function launchRefusal(err: unknown): LaunchRefusal | null {
  * empty input or dependency map and an unset override are left out, so the
  * server applies what plain "Lancer" gets. `version` is always an explicit pick
  * (the modal seeds it with that same default). Overrides are already wire
- * values (a proxy pick of "none" means no proxy) and pass through as-is.
+ * values (a proxy pick of "none" means no proxy) and pass through as-is, the
+ * connection picks narrowed to `declaredIntegrations`. While those are unknown
+ * every pick rides: dropped, the run could bind another account, whereas the
+ * server refuses an undeclared key out loud (400).
  */
 export function launchFromOptions({
   input,
   version,
   overrides,
+  declaredIntegrations,
   dependencyOverrides,
 }: RunWithOptionsSubmit): RunLaunch {
   const {
@@ -156,7 +161,7 @@ export function launchFromOptions({
     generation_config_override: generation,
     proxy_id_override: proxyId,
     connection_overrides: connectionOverrides,
-  } = overrides;
+  } = withDeclaredConnections(overrides, declaredIntegrations);
   return {
     ...(Object.keys(input).length > 0 ? { input } : {}),
     version,

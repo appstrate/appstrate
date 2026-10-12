@@ -56,26 +56,26 @@ export interface ScheduleEditOverrides {
   actor?: ActorValue;
 }
 
+/**
+ * What a schedule save stores: the fallback's binding named, then the declared keys only.
+ * `readiness` is the caller's when the schedule runs as them, none for another actor;
+ * `declared` is the fired version's integrations, `undefined` (not loaded) keeping every pick.
+ */
+export function savedScheduleOverrides(
+  overrides: RunOverridesValue,
+  readiness: readonly FallbackBindingEntry[] | undefined,
+  declared: readonly string[] | undefined,
+): RunOverridesValue {
+  return withDeclaredConnections(withFallbackConnections(overrides, readiness), declared);
+}
+
 interface ScheduleOverrideArgs {
+  /** What the save stores: {@link savedScheduleOverrides}. */
   overrides: RunOverridesValue;
-  /** The caller's readiness entries when the schedule runs as them; none for another actor. */
-  readiness: readonly FallbackBindingEntry[] | undefined;
-  /** The integrations the fired version declares; `undefined` (not loaded) keeps every pick. */
-  declared: readonly string[] | undefined;
   versionOverride: string | undefined;
   versionOverrideChanged: boolean;
   actor: ActorValue | undefined;
   currentActor: ActorValue | undefined;
-}
-
-/** What a schedule save stores: the fallback's binding named, then the declared keys only. */
-export function savedScheduleOverrides(
-  args: Pick<ScheduleOverrideArgs, "overrides" | "readiness" | "declared">,
-): RunOverridesValue {
-  return withDeclaredConnections(
-    withFallbackConnections(args.overrides, args.readiness),
-    args.declared,
-  );
 }
 
 /** The override half of a schedule write; an edit sends the version and actor only if changed. */
@@ -88,8 +88,7 @@ export function scheduleOverridePayload(
 export function scheduleOverridePayload(
   args: ScheduleOverrideArgs & { isEdit: boolean },
 ): ScheduleEditOverrides | ScheduleCreateOverrides {
-  const { versionOverride, actor } = args;
-  const overrides = savedScheduleOverrides(args);
+  const { overrides, versionOverride, actor } = args;
   if (args.isEdit) {
     return {
       model_id_override: overrides.model_id_override ?? null,

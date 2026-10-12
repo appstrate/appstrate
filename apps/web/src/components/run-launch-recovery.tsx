@@ -44,7 +44,6 @@ export function RunLaunchRecovery({
       }
     >
       <MissingConnectionsModal
-        open
         onClose={launcher.dismiss}
         errors={launcher.missingErrors}
         agentPackageId={packageId}
