@@ -92,9 +92,15 @@ function renderRow(
   version?: string,
   code: Code = "must_choose_connection",
 ): string {
-  return render(<MissingRow err={fieldError(code)} agentPackageId={AGENT} version={version} />, {
-    queryClient: qc,
-  });
+  return render(
+    <MissingRow
+      err={fieldError(code)}
+      agentPackageId={AGENT}
+      version={version}
+      integrationEntries={undefined}
+    />,
+    { queryClient: qc },
+  );
 }
 
 describe("MissingRow", () => {

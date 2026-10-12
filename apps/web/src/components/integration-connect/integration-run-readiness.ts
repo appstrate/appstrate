@@ -20,7 +20,7 @@ interface ResolutionView {
   lockedBy: "admin_pin" | "org_default" | null;
   /** The soft org default's whole stored set while in play, incl. members candidates hide. */
   softDefaultIds: string[];
-  /** Connection health, not run relevance (the server's `run_blocking`). No verdict ⇒ false. */
+  /** Connection health, not run relevance (the server's `run_blocking`): bound, with no error. */
   resolved: boolean;
   emptyPickerPrompt: EmptyPickerPrompt;
 }

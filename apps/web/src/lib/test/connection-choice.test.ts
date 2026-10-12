@@ -10,6 +10,7 @@ import {
   refusalReasonKey,
   retryDecision,
   scheduleConnectionChoices,
+  withConnectionPickAs,
   type ConnectionChoice,
   type MissingIntegrationFieldError,
 } from "../connection-choice.ts";
@@ -143,6 +144,39 @@ describe("picksAfterActorChange", () => {
     expect(
       picksAfterActorChange({ picks: BOB_PICKS, runsAs: BOB, nextRunsAs: ALICE, stored: null }),
     ).toBeUndefined();
+  });
+});
+
+describe("withConnectionPickAs", () => {
+  const GMAIL = "@acme/gmail";
+  // The viewer's picker opened a connect popup; this is the set it writes once it settles.
+  const late = { pickedAs: ALICE, integrationId: GMAIL, connectionIds: ["c_alice", "c_new"] };
+
+  it("lands on the overrides as they stand: a model changed while the popup was open is kept", () => {
+    const now = { model_id_override: "m2", connection_overrides: { "@acme/slack": ["c_s"] } };
+    expect(withConnectionPickAs(now, { ...late, runsAs: ALICE })).toEqual({
+      model_id_override: "m2",
+      connection_overrides: { "@acme/slack": ["c_s"], [GMAIL]: ["c_alice", "c_new"] },
+    });
+  });
+
+  it("writes nothing once the schedule runs as someone else: the pick names the viewer's connections", () => {
+    // The actor change dropped the picks; the late write must not put the viewer's back.
+    const cleared = { model_id_override: "m2" };
+    expect(withConnectionPickAs(cleared, { ...late, runsAs: BOB })).toBe(cleared);
+    expect(withConnectionPickAs(cleared, { ...late, runsAs: undefined })).toBe(cleared);
+  });
+
+  it("clears a pick for the actor it was made for", () => {
+    const now = { connection_overrides: { [GMAIL]: ["c_bob"] } };
+    expect(
+      withConnectionPickAs(now, {
+        pickedAs: BOB,
+        runsAs: BOB,
+        integrationId: GMAIL,
+        connectionIds: null,
+      }),
+    ).toEqual({});
   });
 });
 

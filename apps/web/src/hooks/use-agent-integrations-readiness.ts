@@ -9,8 +9,8 @@ import { blockingIntegrationIds, useAgentConnectionReadiness } from "./use-integ
  *
  * Reads the single bulk `connection-readiness` query (server-authoritative —
  * the same resolver the run-kickoff 409 runs, including the required-auth
- * carve-out for declared-but-inert integrations). One call drives this badge,
- * the Connexions tab, and the pre-run check, so they can never disagree.
+ * carve-out for declared-but-inert integrations). One call drives this badge
+ * and the Connexions tab, so they can never disagree.
  *
  * `blocks_run` is deliberately NOT the source: it answers the wider question
  * "would the run be refused", and since the readiness read reports the space

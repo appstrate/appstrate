@@ -6,7 +6,8 @@ import {
 } from "@appstrate/core/integration";
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
-import { type ActorValue, sameActor } from "./schedule-payload";
+import { withConnectionOverride, type ConnectionSet } from "./connection-set";
+import { type ActorValue, type RunOverridesValue, sameActor } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
@@ -110,6 +111,24 @@ export function picksAfterActorChange(args: {
   return args.stored && sameActor(args.nextRunsAs, args.stored.actor)
     ? args.stored.picks
     : undefined;
+}
+
+/**
+ * `overrides` with a pick made for `pickedAs`, unchanged once the schedule runs as someone else:
+ * a pick names its actor's connections, and a connect popup settles long after it was opened.
+ */
+export function withConnectionPickAs(
+  overrides: RunOverridesValue,
+  pick: {
+    pickedAs: ActorValue | undefined;
+    runsAs: ActorValue | undefined;
+    integrationId: string;
+    connectionIds: ConnectionSet;
+  },
+): RunOverridesValue {
+  return sameActor(pick.pickedAs, pick.runsAs)
+    ? withConnectionOverride(overrides, pick.integrationId, pick.connectionIds)
+    : overrides;
 }
 
 /**

@@ -63,18 +63,18 @@ export function PickerMenu({
   const navigate = useNavigate();
   const { data: spaces } = useSpaces();
   const {
-    runBlocking,
+    gatesRun,
     candidates,
     canAddConnection,
     canConnect,
     integrationPath,
     canOpenIntegration,
-    overrideMode,
     auths,
     authKeys,
     hasCandidates,
     explicitIds,
     shownPick,
+    shownIds,
     shownAsDefault,
     required,
     unavailableIds,
@@ -82,7 +82,6 @@ export function PickerMenu({
     atCap,
     oneClick,
     displayConns,
-    shownUnusable,
     busy,
     canApply,
     ownerLabel,
@@ -91,7 +90,6 @@ export function PickerMenu({
     missingScopeLabels,
     connectsWithAgentScopes,
     open,
-    setOpen,
     onOpenChange,
     oauthPending,
     persist,
@@ -126,7 +124,6 @@ export function PickerMenu({
       ? t("detail.integrationMemberPicker.addVia", { label: tl })
       : t("detail.integrationMemberPicker.addConnection");
   };
-  const shownIds = shownPick ?? [];
   const showsNone = shownPick?.length === 0;
   // The radio states the explicit layer: an unset pick showing the default's "no connection"
   // leaves it unchecked and selectable, which is how that choice is made explicit.
@@ -140,16 +137,7 @@ export function PickerMenu({
     choose: () => t("detail.integrationMemberPicker.chooseLabel"),
     connect: () => t("detail.integrationMemberPicker.connectLabel"),
   }[trigger]();
-  // Amber on exactly the states that gate a run. The server's `run_blocking` (same verdict as
-  // the launch badge and the kickoff 409) judges the cascade: a member pin, and what an unset
-  // override shows. It does not know a set override, judged here on the pick the trigger names:
-  // an under-scoped, unavailable or dead member, or "no connection" for an integration the
-  // agent requires.
-  const triggerWarn =
-    overrideMode && explicitIds !== null
-      ? shownUnusable || unavailableIds.length > 0 || (showsNone && required)
-      : runBlocking;
-  const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
+  const TriggerIcon = gatesRun ? AlertTriangle : TRIGGER_ICONS[trigger];
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -157,7 +145,7 @@ export function PickerMenu({
         <Button
           variant="outline"
           size="sm"
-          className={`h-7 justify-start gap-1.5 text-xs ${triggerWarn ? AMBER_TEXT : ""}`}
+          className={`h-7 justify-start gap-1.5 text-xs ${gatesRun ? AMBER_TEXT : ""}`}
           data-testid={`member-pick-${integrationId}`}
         >
           <TriggerIcon className="size-3" />
@@ -313,7 +301,7 @@ export function PickerMenu({
               // Stays open on a refused write, so the ticks stay editable.
               e.preventDefault();
               void persist(checkedIds).then((ok) => {
-                if (ok) setOpen(false);
+                if (ok) onOpenChange(false);
               });
             }}
             data-testid={`member-pick-apply-${integrationId}`}

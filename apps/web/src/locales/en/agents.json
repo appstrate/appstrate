@@ -50,7 +50,7 @@
   "missingConnections.close": "Close",
   "missingConnections.retry": "Re-run",
   "missingConnections.resolved": "Connection ready — re-run",
-  "detail.integrationMemberPicker.title": "Choose the connections this agent uses",
+  "detail.integrationMemberPicker.title": "Choose the connections to use",
   "detail.integrationMemberPicker.selectedCount_one": "{{count}} connection",
   "detail.integrationMemberPicker.selectedCount_other": "{{count}} connections",
   "detail.integrationMemberPicker.apply_one": "Apply ({{count}} connection)",

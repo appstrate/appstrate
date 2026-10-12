@@ -38,16 +38,17 @@ import {
   pendingConnectionChoices,
   picksAfterActorChange,
   refusalForActor,
+  withConnectionPickAs,
 } from "../lib/connection-choice";
-import { withConnectionOverride, type ConnectionSet } from "../lib/connection-set";
+import type { ConnectionSet } from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
-  type ScheduleCreateOverrides,
-  type ScheduleEditOverrides,
+  type ScheduleCreateData,
+  type ScheduleEditData,
   sameActor,
   savedScheduleOverrides,
-  scheduleOverridePayload,
+  scheduleSavePayload,
 } from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
 import { useAgentConnectionReadiness } from "../hooks/use-integrations";
@@ -83,17 +84,6 @@ const TIMEZONES = [
   "Asia/Tokyo",
 ] as const;
 
-/** The fields both writes send; only the override half differs. */
-interface ScheduleSaveFields {
-  name?: string;
-  cron_expression: string;
-  timezone?: string;
-  input?: Record<string, unknown>;
-}
-
-type ScheduleCreateData = ScheduleSaveFields & ScheduleCreateOverrides;
-type ScheduleEditData = ScheduleSaveFields & { enabled?: boolean } & ScheduleEditOverrides;
-
 interface ScheduleFormCommonProps {
   defaultValues?: {
     name?: string;
@@ -126,7 +116,7 @@ interface ScheduleFormCommonProps {
    * dead end.
    */
   homeWritable?: boolean;
-  /** Package id needed by RunOverridesPanel to fetch versions. */
+  /** The agent being scheduled; the override section waits for it. */
   packageId?: string;
   agents?: Array<{ id: string; displayName: string }>;
   selectedAgentId?: string;
@@ -194,10 +184,14 @@ export function ScheduleForm(props: ScheduleFormProps) {
     initialInputValues(inputWrapper, settings, defaultValues?.input),
   );
 
-  // Override-layer state — mirrors the Run modal's accordion, except
-  // these overrides are persisted on the schedule row and replayed on
-  // every fire (vs. the Run modal which only applies them once).
-  const [overrides, setOverrides] = useState<RunOverridesValue>(() => {
+  // Who a fire runs as (`actor`: `undefined` = caller on create, unchanged on edit) and the
+  // override layer stored for it — the Run modal's accordion, replayed on every fire. One state,
+  // because the connection picks belong to the actor: a write to either reads the other as it
+  // stands, not as some earlier render saw it.
+  const [{ actor, overrides }, setRun] = useState<{
+    actor: ActorValue | undefined;
+    overrides: RunOverridesValue;
+  }>(() => {
     const v: RunOverridesValue = {};
     if (defaultValues?.connection_overrides)
       v.connection_overrides = defaultValues.connection_overrides;
@@ -205,7 +199,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
     if (defaultValues?.generation_config_override)
       v.generation_config_override = defaultValues.generation_config_override;
     if (defaultValues?.proxy_id_override) v.proxy_id_override = defaultValues.proxy_id_override;
-    return v;
+    return { actor: defaultValues?.actor, overrides: v };
   });
   // Version override lives outside the model/proxy panel: a schedule either
   // "inherits" (nothing stored → resolve at fire time) or freezes one version.
@@ -244,8 +238,6 @@ export function ScheduleForm(props: ScheduleFormProps) {
     );
   const [overridesOpen, setOverridesOpen] = useState(initialOverridesNonEmpty);
 
-  // Execution identity. `undefined` = caller (create) / unchanged (edit).
-  const [actor, setActor] = useState<ActorValue | undefined>(defaultValues?.actor);
   const { user } = useAuth();
   // Who a fire runs as while the select holds nothing: the schedule's own actor
   // on edit, the caller on create.
@@ -258,23 +250,31 @@ export function ScheduleForm(props: ScheduleFormProps) {
   // The pickers judge the VIEWER's connections; they only speak for a schedule
   // that runs as the viewer.
   const actorIsViewer = !!user && sameActor(runsAs, { userId: user.id });
-  const changeActor = (next: ActorValue | undefined) => {
-    setOverrides((prev) => {
-      const { connection_overrides: picks, ...rest } = prev;
+  const changeActor = (next: ActorValue | undefined) =>
+    setRun((prev) => {
+      const { connection_overrides: picks, ...rest } = prev.overrides;
       const kept = picksAfterActorChange({
         picks,
-        runsAs,
+        runsAs: prev.actor ?? baseActor,
         nextRunsAs: next ?? baseActor,
         stored: isEdit
           ? { actor: currentActor, picks: defaultValues?.connection_overrides ?? undefined }
           : null,
       });
-      return kept ? { ...rest, connection_overrides: kept } : rest;
+      return { actor: next, overrides: kept ? { ...rest, connection_overrides: kept } : rest };
     });
-    setActor(next);
-  };
+  // A pick is made for the actor this render shows. A picker's connect popup settles long after:
+  // by then the schedule may run as someone else, where the viewer's connections must not land.
   const setConnectionPick = (integrationId: string, connectionIds: ConnectionSet) =>
-    setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds));
+    setRun((prev) => ({
+      ...prev,
+      overrides: withConnectionPickAs(prev.overrides, {
+        pickedAs: runsAs,
+        runsAs: prev.actor ?? baseActor,
+        integrationId,
+        connectionIds,
+      }),
+    }));
 
   // Rows come from the definition every fire runs: inherit is the latest published version,
   // never the draft this page would otherwise project for an author.
@@ -290,12 +290,13 @@ export function ScheduleForm(props: ScheduleFormProps) {
   // What a save sends, and what a refusal is judged against. It replaces the stored map: a key
   // the fired version does not declare is dropped (the server refuses it), whichever picker —
   // or none — the form shows.
-  const savedOverrides = savedScheduleOverrides({
+  const overridesState = {
     overrides,
     runsAsViewer: actorIsViewer,
     viewerReadiness: readiness?.integrations,
     declared: firedIntegrations?.map((i) => i.id),
-  });
+  };
+  const savedOverrides = savedScheduleOverrides(overridesState);
 
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
@@ -336,7 +337,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
     name: ["cron_expression", "timezone", "enabled"],
   });
 
-  const onFormSubmit = handleSubmit((data) => {
+  const onFormSubmit = handleSubmit((fields) => {
     // The form state is SEEDED with the agent's resolved values so the admin
     // sees what a fire will use — but `package_schedules.input` outranks both
     // layers behind it, so submitting that seed back would freeze the author
@@ -354,28 +355,17 @@ export function ScheduleForm(props: ScheduleFormProps) {
     const input = changedInputValues(inputWrapper, settings, inputValues);
 
     setSubmitted({ runsAs, picks: savedOverrides.connection_overrides ?? {} });
-    const fields = {
-      name: data.name || undefined,
-      cron_expression: data.cron_expression,
-      timezone: data.timezone,
+    const save = {
+      fields,
       input,
-    };
-    const overrideArgs = {
-      overrides: savedOverrides,
+      ...overridesState,
       versionOverride,
       versionOverrideChanged,
       actor,
       currentActor,
     };
-    if (props.mode === "edit") {
-      props.onSubmit({
-        ...fields,
-        enabled: data.enabled,
-        ...scheduleOverridePayload({ isEdit: true, ...overrideArgs }),
-      });
-    } else {
-      props.onSubmit({ ...fields, ...scheduleOverridePayload({ isEdit: false, ...overrideArgs }) });
-    }
+    if (props.mode === "edit") props.onSubmit(scheduleSavePayload({ isEdit: true, ...save }));
+    else props.onSubmit(scheduleSavePayload({ isEdit: false, ...save }));
   });
 
   return (
@@ -497,7 +487,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
             </div>
           )}
 
-          {/* Execution identity (#738) */}
+          {/* Execution identity */}
           <div className="space-y-2">
             <Label>{t("schedule.actorTitle")}</Label>
             {/* Edit seeds `actor` with the schedule's current identity, so the
@@ -575,7 +565,8 @@ export function ScheduleForm(props: ScheduleFormProps) {
                     ? { agentIntegrations: firedIntegrations }
                     : {})}
                   value={overrides}
-                  onChange={setOverrides}
+                  onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
+                  onConnectionPick={setConnectionPick}
                   version={firedVersion}
                   scheduled
                 />

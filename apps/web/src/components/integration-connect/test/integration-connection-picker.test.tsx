@@ -346,6 +346,54 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).not.toContain(`member-pick-clear-${INTEGRATION}`);
   });
 
+  it("judges an override narrowing a lock on what it binds, not on the locked set", () => {
+    // The admin pin holds a dead member, so the cascade blocks; the override binds `db` alone.
+    const deadWeb = { ...candidate(WEB, "web"), needs_reconnection: true };
+    const locked = resolution({
+      source: "admin_pin",
+      admin_pinned_connection_ids: [WEB, DB],
+      candidates: [deadWeb, candidate(DB, "db")],
+    });
+    const override = (value: string[] | null): Persistence => ({
+      mode: "override",
+      value,
+      onChange: () => {},
+    });
+    const narrowed = renderPicker(locked, true, override([DB]));
+    expect(narrowed).toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(narrowed).toContain(">db<");
+    expect(narrowed).not.toContain("text-amber-600");
+    // Control: unset, the locked set binds, and narrowed to the dead member it still gates.
+    expect(renderPicker(locked, true, override(null))).toContain("text-amber-600");
+    expect(renderPicker(locked, true, override([WEB]))).toContain("text-amber-600");
+    // "No connection" under a healthy lock gates only an integration the agent requires.
+    const healthy = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB, DB] });
+    expect(renderPicker(healthy, false, override([]), true)).toContain("text-amber-600");
+    expect(renderPicker(healthy, false, override([]))).not.toContain("text-amber-600");
+  });
+
+  it("says why an override reaching outside the lock is refused, whatever the cascade binds", () => {
+    const outranked = `member-pick-outranked-warning-${INTEGRATION}`;
+    const locked = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] });
+    const html = renderPicker(locked, false, {
+      mode: "override",
+      value: [DB],
+      onChange: () => {},
+    });
+    expect(html).toContain("text-amber-600");
+    expect(html).toContain(outranked);
+    expect(html).toContain(i18n.t("agents:error.overrideOutranked"));
+    expect(html).toContain(`member-pick-clear-${INTEGRATION}`);
+    // Control: an override within the lock is not refused.
+    const within = renderPicker(locked, false, {
+      mode: "override",
+      value: [WEB],
+      onChange: () => {},
+    });
+    expect(within).not.toContain(outranked);
+    expect(within).not.toContain("text-amber-600");
+  });
+
   it("a soft org default leaves the dropdown open", () => {
     const html = renderPicker(
       resolution({ source: "org_default", org_default_connection_ids: [WEB] }),
@@ -810,32 +858,6 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     return { asked: () => asked, rebind, unsubscribe };
   }
 
-  function Probe({
-    persistence,
-    openPopup,
-    onPicker,
-  }: {
-    persistence: ConnectionPickerPersistence;
-    openPopup: OpenPopup;
-    onPicker: (picker: ConnectionPicker | null) => void;
-  }) {
-    onPicker(
-      useConnectionPicker(
-        {
-          integrationId: INTEGRATION,
-          agentPackageId: AGENT,
-          manifest: MANIFEST,
-          authStatuses: [],
-          agentTools: undefined,
-          agentScopes: undefined,
-          persistence,
-        },
-        { openPopup },
-      ),
-    );
-    return null;
-  }
-
   async function mount(
     answers: Array<() => Promise<Readiness>>,
     popup: (qc: QueryClient) => OpenPopup,
@@ -845,7 +867,11 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     const mounted = await mountReadiness(qc, answers);
     const pickers: Array<ConnectionPicker | null> = [];
     render(
-      <Probe persistence={persistence} openPopup={popup(qc)} onPicker={(p) => pickers.push(p)} />,
+      <PickerProbe
+        persistence={persistence}
+        openPopup={popup(qc)}
+        onPicker={(p) => pickers.push(p)}
+      />,
       { queryClient: qc },
     );
     mounted.rebind();
@@ -1026,6 +1052,56 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     } finally {
       toasted.mockRestore();
     }
+  });
+
+  it("reports a refused pin write, and reads no verdict it did not move", async () => {
+    const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
+    try {
+      const { mounted, picker } = await mount([before], settles, { mode: "pin" });
+      expect(await picker.persist([WEB])).toBe(false);
+      expect(put).toHaveBeenCalledTimes(1);
+      expect(mounted.asked()).toBe(1);
+      mounted.unsubscribe();
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("a connect whose pin write is refused settles without a second write or read", async () => {
+    const warned = spyOn(toast, "warning").mockImplementation(() => 0);
+    const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
+    try {
+      const { mounted, picker } = await mount([fallbackBefore, fallbackAfter], settles, {
+        mode: "pin",
+      });
+      await expect(picker.triggerConnect("primary")).resolves.toBeUndefined();
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([, init]) => init.body)).toEqual([{ connection_ids: [WEB, ADDED] }]);
+      // The mount, then the popup's refetch: the refused write moved no verdict.
+      expect(mounted.asked()).toBe(2);
+      expect(warned).not.toHaveBeenCalled();
+      mounted.unsubscribe();
+    } finally {
+      warned.mockRestore();
+      put.mockRestore();
+    }
+  });
+
+  it("the menu closes on an accepted set and stays open on a refused one", async () => {
+    const closes = async (accepted: boolean) => {
+      const opened: boolean[] = [];
+      const picker = {
+        ...pickerFor(resolution({})),
+        persist: async () => accepted,
+        onOpenChange: (open: boolean) => opened.push(open),
+      };
+      const apply = propsOf(menuOf(picker), `member-pick-apply-${INTEGRATION}`);
+      (apply!.onSelect as (e: { preventDefault: () => void }) => void)({ preventDefault() {} });
+      await Bun.sleep(0);
+      return opened;
+    };
+    expect(await closes(true)).toEqual([false]);
+    expect(await closes(false)).toEqual([]);
   });
 
   it("writes nothing and says nothing when the settled popup created no connection", async () => {
@@ -1340,7 +1416,11 @@ describe("IntegrationConnectionPicker — an unset override", () => {
 
   it("counts a set the cascade binds", () => {
     const html = renderPicker(
-      resolution({ source: "org_default", resolved_connection_ids: [WEB, DB] }),
+      resolution({
+        source: "org_default",
+        org_default_connection_ids: [WEB, DB],
+        resolved_connection_ids: [WEB, DB],
+      }),
       false,
       unset,
     );

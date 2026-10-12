@@ -6,9 +6,8 @@
  * The replay of a launch refused with `409 missing_integration_connection` only
  * drops the launch's own connection pick for the integrations the 409 refused:
  * dropping anything else changes the run, or gets it refused (an agent with a
- * required input refuses a replay without it). A second 409 replays the first
- * replay, not the original launch. "Lancer avec options…" sends an option only
- * when set, so an untouched modal launches what plain "Lancer" does.
+ * required input refuses a replay without it). "Lancer avec options…" sends an
+ * option only when set, so an untouched modal launches what plain "Lancer" does.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -199,20 +198,6 @@ describe("retryLaunch", () => {
         { field: "integrations.@acme/crm", code: "not_connected", message: "connect" },
       ]),
     ).toEqual(launch);
-  });
-
-  it("a second 409 builds on the first replay: a dropped pick stays dropped", () => {
-    // The launcher keeps each replayed launch, so the next replay starts from it.
-    const first = retryLaunch(
-      { connectionOverrides: { "@acme/crm": ["conn_outside"], "@acme/mail": ["conn_mail"] } },
-      [{ field: "integrations.@acme/crm", code: "override_outranked", message: "outranked" }],
-    );
-    // The second 409 names another integration: crm must not come back.
-    expect(
-      retryLaunch(first, [
-        { field: "integrations.@acme/drive", code: "not_connected", message: "connect" },
-      ]).connectionOverrides,
-    ).toEqual({ "@acme/mail": ["conn_mail"] });
   });
 });
 

@@ -31,8 +31,8 @@ interface MissingConnectionsModalProps {
   agentPackageId: string;
   /** The version the refused launch ran: `required` (and so "no connection") is that version's. */
   version: string | undefined;
-  /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
-  integrationEntries?: AgentIntegrationEntry[];
+  /** The agent's tools/scopes per integration, so a new connection requests exactly those. */
+  integrationEntries: AgentIntegrationEntry[] | undefined;
   /** Replays the refused launch. */
   onRetry: () => void;
   /** Disables the retry button while the new run is in flight. */
@@ -112,7 +112,7 @@ export function MissingRow({
   err: MissingIntegrationFieldError;
   agentPackageId: string;
   version: string | undefined;
-  integrationEntries?: AgentIntegrationEntry[];
+  integrationEntries: AgentIntegrationEntry[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
@@ -122,15 +122,13 @@ export function MissingRow({
   // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
 
-  // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the
-  // Connexions tab and the launch-readiness badge consume (the picker below
-  // fetches it too; React Query dedupes the shared key). The header reflects it
-  // live: the connect/renew flow invalidates the `["integrations", …]` prefix
-  // (hosted connect portal popup close, `connection_update` SSE), this query
-  // refetches, and the header flips to resolved without a manual Re-run.
+  // The server's verdict for the launched version, under the key the picker below reads it
+  // from. The header follows it live: a connect, a renew or a `connection_update` event
+  // invalidates the integration queries, this one refetches, and the header flips to resolved
+  // without a manual Re-run.
   const { data: verdict } = useIntegrationReadinessEntry(
     isStructural ? undefined : packageId,
-    isStructural ? undefined : agentPackageId,
+    agentPackageId,
     version,
   );
   const entry = integrationEntries?.find((e) => e.id === packageId);

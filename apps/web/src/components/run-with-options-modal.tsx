@@ -10,6 +10,7 @@ import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { storedInputValues } from "../lib/agent-input";
 import { RunOverridesPanel } from "./run-overrides-panel";
+import { withConnectionOverride } from "../lib/connection-set";
 import type { RunOverridesValue } from "../lib/schedule-payload";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
@@ -178,6 +179,9 @@ function RunWithOptionsForm({
           agentIntegrations={deps.agentIntegrations}
           value={overrides}
           onChange={setOverrides}
+          onConnectionPick={(integrationId, connectionIds) =>
+            setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds))
+          }
           version={version}
         />
       )}

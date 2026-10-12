@@ -45,6 +45,9 @@ import { useCanReach } from "../../hooks/use-can-reach";
  *                 agent-wide default for this member across every run.
  *  - `override` — controlled form value (schedule editor, per-run modal);
  *                 nothing is persisted until the form is. `null` = unset.
+ *                 `onChange` also fires once a connect popup settles, long after
+ *                 the render that passed it: it must apply the pick to the value
+ *                 the form holds then.
  *
  * In both, an explicit pick displays itself and an unset pick displays what the layer below
  * binds, marked as the default; `[]` at either layer is "no connection", offered only when the
@@ -70,9 +73,10 @@ export interface ConnectionPickerOptions {
   agentScopes: string[] | undefined;
   persistence: ConnectionPickerPersistence;
   /**
-   * Version selector for the readiness verdict. A non-`draft` value
-   * pins the per-integration resolution + run-blocking flag to that published
-   * manifest so the run-options modal matches the run. Omitted → draft.
+   * Version selector for the readiness verdict: the per-integration resolution, `required` and
+   * the run-blocking flag are those of that definition, so a launch form matches what it runs.
+   * Omitted → the server's default: the draft for a caller who can write the package, else the
+   * latest published version.
    */
   version?: string;
 }
@@ -145,9 +149,6 @@ export function useConnectionPicker(
   const authKeys = Object.keys(auths).filter(
     (k) => connectable.has(k) && (requiredAuthKey === null || k === requiredAuthKey),
   );
-  // The whole verdict (cascade + scope diff) is computed server-side; a pin
-  // write or scope upgrade invalidates it so the dropdown re-resolves.
-  const refresh = () => invalidateIntegrationQueries(qc);
   const requiredScopesFor = (authKey: string) =>
     requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
 
@@ -213,7 +214,17 @@ export function useConnectionPicker(
   };
   // The trigger shows, and is judged on, the shown pick — never the uncommitted draft.
   const shown = judge(shownIds);
-  const shownUnusable = shown.underScoped.length > 0 || shown.dead.length > 0;
+  // Whether the pick gates a run — what turns the picker amber. The server's `run_blocking` (same
+  // verdict as the launch badge and the kickoff 409) judges the cascade: a member pin, and what
+  // an unset override shows. It does not know a set override, judged here on the pick itself: an
+  // under-scoped, dead or unavailable member, or "no connection" for a required integration.
+  const gatesRun =
+    overrideMode && explicitIds !== null
+      ? shown.underScoped.length > 0 ||
+        shown.dead.length > 0 ||
+        unavailableIds.length > 0 ||
+        (explicitIds.length === 0 && required)
+      : runBlocking;
   // The ticked rows and the warnings under the picker follow the set "Valider" would write: the
   // same one until a tick moves it.
   const checked = draft === null ? shown : judge(draft);
@@ -238,8 +249,9 @@ export function useConnectionPicker(
       } catch {
         return false;
       }
-      // Only a pin write moves the server's verdict; an override is a form value.
-      await refresh();
+      // The verdict (cascade + scope diff) is the server's: a pin write moves it, so the picker
+      // reads it again. An override is a form value and moves nothing.
+      await invalidateIntegrationQueries(qc);
     }
     setDraft(null);
     return true;
@@ -308,7 +320,7 @@ export function useConnectionPicker(
 
   return {
     // Verdict
-    runBlocking,
+    gatesRun,
     required,
     candidates,
     candidateIds,
@@ -327,6 +339,7 @@ export function useConnectionPicker(
     // Sets
     explicitIds,
     shownPick,
+    shownIds,
     shownAsDefault,
     fromDefault,
     unavailableIds,
@@ -334,7 +347,6 @@ export function useConnectionPicker(
     atCap,
     oneClick,
     displayConns: shown.conns,
-    shownUnusable,
     underScopedConns: checked.underScoped,
     deadConns: checked.dead,
     busy,
@@ -347,7 +359,6 @@ export function useConnectionPicker(
     connectsWithAgentScopes,
     // Menu + actions
     open,
-    setOpen,
     onOpenChange,
     oauthPending,
     persist,
