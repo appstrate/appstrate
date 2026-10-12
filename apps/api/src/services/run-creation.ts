@@ -62,9 +62,8 @@ interface CreateRunInput {
    */
   dependencyOverrides?: Record<string, string> | null;
   /**
-   * The caller's per-integration connection picks (`connection_overrides` on
-   * the body, cascade layer 3) — the SAME value the route's readiness pass read.
-   * Its ids are persisted on `runs.connection_overrides`.
+   * Cascade layer 3 (the body's `connection_overrides`): the value the route's readiness pass
+   * read, so both resolve the same cascade. Its ids persist on `runs.connection_overrides`.
    */
   launchOverrides?: LaunchOverrides | null;
   /** Client-requested sink TTL. */
@@ -115,10 +114,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // caller — `POST /api/runs/remote` — already validates the
   // (agent, input, spaceId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
-  // branch runs it inside `runInlinePreflight`. Both read the caller's
-  // `connection_overrides` as the `launchOverrides` handed in here. Running it
-  // again would repeat that work; the connection cascade below still
-  // re-resolves, which catches a change in between.
+  // branch runs it inside `runInlinePreflight`. Running it again would repeat
+  // that work; the connection cascade below still re-resolves, which catches a
+  // change in between.
 
   // --- Shared preflight: rate, concurrency, timeout cap, beforeUsage hook.
   //     Single source of truth across platform / remote / scheduled origins.
@@ -166,11 +164,9 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   });
 
   // --- Snapshot the connection cascade (#199, remote-path mirror of
-  //     run-pipeline). `launchOverrides` is the value the readiness pass the
-  //     route already ran was given, so the two resolve the same cascade. A
-  //     failure at this point is therefore a between-readiness-and-now race
-  //     (connection deleted, new admin pin), and it answers the same 409
-  //     `missing_integration_connection` the readiness check does.
+  //     run-pipeline). A failure here is a race since the route's readiness
+  //     pass (connection deleted, new admin pin) and answers its 409
+  //     `missing_integration_connection`.
   const versionRef = versionRefOf(overrideVersionLabel);
   let resolvedConnections: ResolvedConnectionMap | null = null;
   let integrationsUnbound: RunIntegrationUnbound[] | undefined;

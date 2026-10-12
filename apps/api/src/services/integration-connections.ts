@@ -109,6 +109,7 @@ import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.
 import {
   connectionActions,
   meConnectionAuthorityFilter,
+  OLDEST_FIRST,
   ownRowInSpace,
   sharedInto,
   usableInSpace,
@@ -513,7 +514,7 @@ function loadSelectableRows(packageId: string, context: { spaceId: string; actor
         usableInSpace(context.spaceId, context.actor),
       ),
     )
-    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
+    .orderBy(...OLDEST_FIRST);
 }
 
 type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];

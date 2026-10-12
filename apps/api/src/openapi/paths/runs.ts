@@ -1256,7 +1256,11 @@ const canonicalRunsPaths = {
                     'Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
-                connection_overrides: runConnectionOverrides,
+                connection_overrides: {
+                  ...runConnectionOverrides,
+                  description:
+                    'Per-integration connection picks for THIS run: `{ "@scope/integration": ["<connection_id>"] }`, always an ARRAY, `[]` running without the integration. The launch-override layer of the cascade `POST /api/agents/{scope}/{name}/run` documents on the same field, with its refusals, and one rule of its own: a remote run binds ONE connection per integration, so a set of several, named here or bound by another layer, answers 409 `missing_integration_connection` with a `remote_binds_one_connection` item.',
+                },
                 contextSnapshot: {
                   type: "object",
                   description:

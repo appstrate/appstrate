@@ -259,7 +259,7 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too, when no pin, org default or `connection_overrides` names it. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
+          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too, when no pin, org default or `connection_overrides` names it and the schedule is not written for another member. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
       },
       connection_id: {
         type: "string",
@@ -2355,7 +2355,7 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_package_id", "required", "run_blocking", "resolution"],
+          required: ["integration_package_id", "required", "run_blocking", "inert", "resolution"],
           properties: {
             integration_package_id: { type: "string" },
             required: {
@@ -2367,6 +2367,11 @@ export const schemas = {
               type: "boolean",
               description:
                 "True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning`).",
+            },
+            inert: {
+              type: "boolean",
+              description:
+                "True iff the agent declares this integration with nothing a run would start (inert): a run resolves no connection for it, whatever `resolution` reports for the picker.",
             },
             resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
           },

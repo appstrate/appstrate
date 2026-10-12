@@ -142,10 +142,8 @@ export const CreateRemoteRunBodySchema = z
     // platform run route's value gate (`isValidDependencyOverride`); the KEY
     // gate + pin resolution happen in `freezeRunSpawnDependencies`.
     dependency_overrides: dependencyOverridesSchema.optional(),
-    // Per-run connection picks (the launch-override layer) — run-level, applies
-    // to both source shapes. The KEY gate needs the effective manifest, so each
-    // branch asks it below; a set of several is refused by `createRun`
-    // (`remote_binds_one_connection`), the one place that rule lives.
+    // Run-level, both source shapes. The KEY gate needs the effective manifest:
+    // each branch asks it below.
     connection_overrides: connectionOverridesSchema.optional(),
     contextSnapshot: z
       .record(z.string(), z.unknown())
@@ -258,9 +256,6 @@ export function createRunsRemoteRouter() {
       // Seeded by the inline preflight only — the registry branch resolves no
       // pins of its own, so `createRun` creates its own Map there.
       let manifestCache: IntegrationManifestCache | undefined;
-      // The caller's connection picks, as ONE value per branch: the readiness
-      // pass and `createRun`'s cascade both read it, so the two cannot disagree
-      // about which connection the run uses.
       let launchOverrides: LaunchOverrides | null;
       // Normalize an empty map to null (mirrors the platform run route): a
       // non-null map on the row means the run carried explicit overrides.

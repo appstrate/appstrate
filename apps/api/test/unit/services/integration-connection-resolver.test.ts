@@ -15,7 +15,7 @@
  *   4. integration_pins (user_id = actor.id)     → member preference
  *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
  *   6. fallback: own + shared accessible
- *      → exactly one OWN = auto (must_choose under `bindsOwnByDefault: false`), two or more =
+ *      → exactly one OWN = auto (must_choose under `noFallback`), two or more =
  *        must_choose; no own row = not_connected / must_choose when `required`, else bound to
  *        none + warning
  *
@@ -634,8 +634,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     ]);
   });
 
-  it("lists its candidates in readiness's order: the serving rows, least privilege first", () => {
-    const requirement = req(oauth2Manifest(), [], ["read"]);
+  it("lists the serving rows as candidates, least privilege first", () => {
     const [broad, theirs, dead, pat, short, orphaned] = [
       own({ scopesGranted: ["read", "write"] }),
       shared({ scopesGranted: ["read"] }),
@@ -644,20 +643,19 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       own({ scopesGranted: [] }),
       own({ authKey: "gone" }),
     ];
-    const rows = [broad, theirs, dead, pat, short, orphaned];
     const result = resolveConnections({
-      requirements: [requirement],
-      accessibleConnections: rows,
+      requirements: [req(oauth2Manifest(), [], ["read"])],
+      accessibleConnections: [broad, theirs, dead, pat, short, orphaned],
       pins: [],
     });
-    // What readiness builds its `candidates[]` from (`resolveAgentIntegrationPick`).
-    const readiness = rankByLeastPrivilege(
-      requirement,
-      servingCandidates(requirement, rows, (row) => row.authKey),
-    ).map((ranked) => ranked.row.id);
-    expect(readiness).toEqual([pat.id, theirs.id, dead.id, broad.id, short.id]);
     expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual(readiness);
+    expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual([
+      pat.id,
+      theirs.id,
+      dead.id,
+      broad.id,
+      short.id,
+    ]);
   });
 
   it("a colleague sharing a connection does not move a run that auto-bound my own", () => {
@@ -848,7 +846,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     });
   });
 
-  describe("binding no own connection by default (`bindsOwnByDefault: false`)", () => {
+  describe("`noFallback` — an own connection is a choice, one included", () => {
     type Input = Parameters<typeof resolveConnectionsPure>[0];
     const requirementsOf = (required: boolean) => [{ ...req(oauth2Manifest()), required }];
     const resolve = (rows: ConnectionRow[], over: Partial<Input> = {}) =>
@@ -856,7 +854,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         requirements: requirementsOf(false),
         accessibleConnections: rows,
         pins: [],
-        bindsOwnByDefault: false,
+        noFallback: true,
         ...over,
       });
 
@@ -876,7 +874,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
       });
     }
 
-    it("answers own N and own 0 as a resolution that binds by default does", () => {
+    it("answers own N and own 0 as the fallback does", () => {
       const others: [rows: ConnectionRow[], code: ConnectionResolutionWarningCode][] = [
         [[own(), own({ authKey: "pat" })], "must_choose_connection"],
         [[own(), shared(), own()], "must_choose_connection"],

@@ -85,14 +85,13 @@ async function seedConnection(opts: {
   clientRef?: string | null;
   label?: string;
   shared?: boolean;
-  accountId?: string;
 }): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
       integrationId: INTEGRATION,
       authKey: "primary",
-      accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
+      accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
       orgId: opts.orgId ?? ctx.orgId,
       spaceId: opts.spaceId,
       userId: opts.endUserId ? null : (opts.userId ?? ctx.user.id),
@@ -357,34 +356,6 @@ describe("0041 — connections widened to org scope", () => {
     it("the fallback, for an owner's one connection", async () => {
       const only = await seedConnection({ spaceId: ctx.defaultSpaceId });
       expect(await boundAcrossWidening(ctx.user.id)).toEqual([only]);
-    });
-
-    it("not the fallback of an owner who connected in two spaces: widened, it asks in each", async () => {
-      const other = await seedSpace({ orgId: ctx.orgId });
-      for (const id of [AGENT, INTEGRATION]) {
-        await activatePackage({ orgId: ctx.orgId, spaceId: other.id }, id, {
-          shareBy: ctx.user.id,
-        });
-      }
-      const here = await seedConnection({ spaceId: ctx.defaultSpaceId, accountId: "same" });
-      const there = await seedConnection({ spaceId: other.id, accountId: "same" });
-      expect([await bound(ctx.user.id), await bound(ctx.user.id, other.id)]).toEqual([
-        [here],
-        [there],
-      ]);
-      await run(true);
-      for (const spaceId of [ctx.defaultSpaceId, other.id]) {
-        const { errors } = await resolveConnectionsForRun({
-          agentManifest,
-          packageId: AGENT,
-          actor: { type: "user", id: ctx.user.id },
-          scope: { orgId: ctx.orgId, spaceId },
-        });
-        expect(errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
-        expect(errors[0]!.candidateConnections!.map((c) => c.id).sort()).toEqual(
-          [here, there].sort(),
-        );
-      }
     });
   });
 

@@ -5,7 +5,7 @@
  * taking a default a later connection would turn into that question: a write
  * that leaves a `must_choose_connection` open for the schedule's actor (their one
  * own connection that no pin, org default or `connection_overrides` names
- * included), or freezes a pick that actor cannot reach (`override_connection_unavailable`) or
+ * included, unless the write is for another member), or freezes a pick that actor cannot reach (`override_connection_unavailable`) or
  * that an admin pin or enforced org default outranks (`override_outranked`), is a `409 missing_integration_connection` carrying only those items. Every
  * other connection verdict is accepted — it is repaired without editing the
  * schedule — and a non-required integration a fire would start without is
@@ -144,10 +144,10 @@ describe("schedule writes — the connection choice is made up front", () => {
     });
   }
 
-  const LAYERS = ["admin pin", "enforced org default", "member pin", "soft org default"] as const;
+  type Layer = "admin pin" | "enforced org default" | "member pin" | "soft org default";
 
   /** Names `connectionId` as the integration's set in one layer under the launch override. */
-  async function nameSet(layer: (typeof LAYERS)[number], connectionId: string): Promise<void> {
+  async function nameSet(layer: Layer, connectionId: string): Promise<void> {
     if (layer === "admin pin" || layer === "member pin") {
       await db.insert(integrationPins).values({
         spaceId: ctx.defaultSpaceId,
@@ -201,7 +201,7 @@ describe("schedule writes — the connection choice is made up front", () => {
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
-  for (const layer of LAYERS) {
+  for (const layer of ["member pin", "soft org default"] as const) {
     it(`accepts that create once the set is named (${layer})`, async () => {
       await seedAgentWithIntegration();
       await nameSet(layer, await seedIntegrationConnection(ctx, INTEGRATION));
@@ -494,41 +494,12 @@ describe("schedule writes for another actor — only what both reach", () => {
     expect(((await res.json()) as WriteBody).warnings).toBeNull();
   });
 
-  it("refuses the actor's one private connection that nothing names, revealing nothing of it", async () => {
-    const own = await seedIntegrationConnection(member, INTEGRATION, {
-      label: "private-label",
-      accountId: "private-account",
-    });
-
-    const res = await createForMember();
-    expect(res.status).toBe(409);
-    const text = await res.text();
-    for (const secret of [own, "private-label", "private-account"]) {
-      expect(text).not.toContain(secret);
-    }
-    const body = JSON.parse(text) as ProblemBody;
-    expect(body.errors).toHaveLength(1);
-    expect(body.errors[0]).toMatchObject({
-      field: `integrations.${INTEGRATION}`,
-      code: "must_choose_connection",
-      candidate_connections: [],
-    });
-    expect(body.errors[0]!.message).toContain("a member pin of their own");
-    expect(await db.select().from(schedules)).toHaveLength(0);
-  });
-
-  it("withholds the warnings whether the actor holds no connection or one their own pin names", async () => {
+  it("withholds the warnings whether the actor holds no connection or one", async () => {
     const none = await createForMember();
     expect(none.status).toBe(201);
     expect(((await none.json()) as WriteBody).warnings).toBeNull();
 
-    await db.insert(integrationPins).values({
-      spaceId: ctx.defaultSpaceId,
-      packageId: AGENT,
-      integrationId: INTEGRATION,
-      userId: member.user.id,
-      connectionIds: [await seedIntegrationConnection(member, INTEGRATION)],
-    });
+    await seedIntegrationConnection(member, INTEGRATION);
     const one = await createForMember();
     expect(one.status).toBe(201);
     expect(((await one.json()) as WriteBody).warnings).toBeNull();
@@ -919,7 +890,7 @@ describe("schedule writes for an end user — the caller picks among its connect
   });
 });
 
-describe("schedule fires — the set the write named is the one bound", () => {
+describe("schedule fires — a named set binds, an unnamed one takes the fallback", () => {
   let ctx: TestContext;
 
   beforeAll(() => {
@@ -973,5 +944,31 @@ describe("schedule fires — the set the write named is the one bound", () => {
       [INTEGRATION]: [{ connectionId: named, source: "schedule_override" }],
     });
     await waitForRunPipelineSettled();
+  });
+
+  it("fires a schedule stored without a set on its actor's one connection, and fails on two", async () => {
+    const schedule = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      enabled: true,
+    });
+    const only = await seedIntegrationConnection(ctx, INTEGRATION);
+
+    await triggerScheduledRun(schedule.id);
+    const [bound] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    expect(bound!.status).not.toBe("failed");
+    expect(bound!.resolvedConnections).toMatchObject({
+      [INTEGRATION]: [{ connectionId: only, source: "fallback_auto" }],
+    });
+    await waitForRunPipelineSettled();
+
+    await seedIntegrationConnection(ctx, INTEGRATION);
+    await triggerScheduledRun(schedule.id);
+    const fires = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    const refused = fires.find((run) => run.id !== bound!.id)!;
+    expect(refused).toMatchObject({ status: "failed", resolvedConnections: null });
+    expect(refused.error).toContain(`Integration '${INTEGRATION}' needs a connection choice`);
   });
 });

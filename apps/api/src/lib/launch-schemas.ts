@@ -20,8 +20,6 @@
  *
  *   - `connection_overrides` — all four take {@link connectionOverridesSchema}
  *     and refuse an undeclared key through {@link connectionOverrideRefusals}.
- *     A launch hands the ONE parsed value to its readiness pass and to the
- *     cascade that snapshots the run, so the two resolve the identical cascade.
  *     The remote surface adds a rule of its own in `run-creation.ts`: a run
  *     binds one connection per integration (`remote_binds_one_connection`).
  *   - `dependency_overrides` — the remote surface and schedules take

@@ -3371,7 +3371,7 @@
                   },
                   "connection_overrides": {
                     "type": "object",
-                    "description": "Per-integration connection sets for THIS run (the launch-override layer). Map of sets: `{ \"@scope/integration\": [\"<connection_id>\", ...] }` — 0..20 connections per integration, each carrying its own authKey; `[]` runs without the integration (see the set schema). Always an ARRAY, even for a single id. Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; shared connections are never bound implicitly). Under an admin pin or an enforced org default the override must name a subset of that governing set (`[]` included), and binds exactly that subset; one naming any connection outside it is refused with `override_outranked` — drop it or choose within the set. Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same set. A namespace bound to more than one connection exposes a REQUIRED `connection` argument on each of its tools, enumerating the connection labels. Ids that are not uuids are refused at the write (`lib/launch-schemas.ts`), and so is a key that names no integration the agent declares (400 `invalid_request`, `param: connection_overrides`) and `[]` on an integration it marks `required` (400 `validation_failed`, an `errors[]` item `required_integration_unbound` on `connection_overrides.<id>`). A set that cannot bind answers 409 `missing_integration_connection`, whose per-integration `errors[].code` is `override_connection_unavailable` (an id not accessible to the actor) or `override_outranked`.",
+                    "description": "Per-integration connection picks for THIS run: `{ \"@scope/integration\": [\"<connection_id>\"] }`, always an ARRAY, `[]` running without the integration. The launch-override layer of the cascade `POST /api/agents/{scope}/{name}/run` documents on the same field, with its refusals, and one rule of its own: a remote run binds ONE connection per integration, so a set of several, named here or bound by another layer, answers 409 `missing_integration_connection` with a `remote_binds_one_connection` item.",
                     "additionalProperties": {
                       "type": "array",
                       "items": {
@@ -5093,7 +5093,7 @@
             "description": "`no_published_version` when the agent has never been published, `agent_not_found` when this space holds no placement for it, `agent_not_active_in_space` when it holds one that is switched OFF (switch it back on with `POST /api/spaces/{spaceId}/packages`)."
           },
           "409": {
-            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail.",
+            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write; a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5382,7 +5382,7 @@
             "$ref": "#/components/responses/NoPublishedVersion"
           },
           "409": {
-            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.",
+            "description": "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write; a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_modified_concurrently`: the schedule was written since this patch read it (`updated_at` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -5969,7 +5969,7 @@
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
-                                  "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                                  "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                                 },
                                 "allowed_actions": {
                                   "type": "array",
@@ -7051,7 +7051,7 @@
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                      "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                     },
                     "allowed_actions": {
                       "type": "array",
@@ -7714,7 +7714,7 @@
                         },
                         "origin_space_id": {
                           "type": ["string", "null"],
-                          "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                          "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                         },
                         "allowed_actions": {
                           "type": "array",
@@ -8002,7 +8002,7 @@
                           },
                           "origin_space_id": {
                             "type": ["string", "null"],
-                            "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                            "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                           },
                           "allowed_actions": {
                             "type": "array",
@@ -8226,7 +8226,7 @@
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                      "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                     },
                     "allowed_actions": {
                       "type": "array",
@@ -8690,7 +8690,7 @@
                                 },
                                 "origin_space_id": {
                                   "type": ["string", "null"],
-                                  "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                                  "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                                 },
                                 "allowed_actions": {
                                   "type": "array",
@@ -14921,7 +14921,7 @@
                     },
                     "origin_space_id": {
                       "type": ["string", "null"],
-                      "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                      "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                     },
                     "allowed_actions": {
                       "type": "array",
@@ -29786,7 +29786,7 @@
                 }
               }
             },
-            "description": "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too, when no pin, org default or `connection_overrides` names it. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`."
+            "description": "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too, when no pin, org default or `connection_overrides` names it and the schedule is not written for another member. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`."
           },
           "connection_id": {
             "type": "string",
@@ -32690,7 +32690,7 @@
                 },
                 "origin_space_id": {
                   "type": ["string", "null"],
-                  "description": "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
+                  "description": "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else."
                 },
                 "needs_reconnection": {
                   "type": "boolean"
@@ -32761,7 +32761,13 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["integration_package_id", "required", "run_blocking", "resolution"],
+              "required": [
+                "integration_package_id",
+                "required",
+                "run_blocking",
+                "inert",
+                "resolution"
+              ],
               "properties": {
                 "integration_package_id": {
                   "type": "string"
@@ -32773,6 +32779,10 @@
                 "run_blocking": {
                   "type": "boolean",
                   "description": "True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning`)."
+                },
+                "inert": {
+                  "type": "boolean",
+                  "description": "True iff the agent declares this integration with nothing a run would start (inert): a run resolves no connection for it, whatever `resolution` reports for the picker."
                 },
                 "resolution": {
                   "$ref": "#/components/schemas/IntegrationAgentResolution"

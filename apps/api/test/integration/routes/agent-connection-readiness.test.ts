@@ -109,6 +109,7 @@ interface ReadinessBody {
     integration_package_id: string;
     required: boolean;
     run_blocking: boolean;
+    inert: boolean;
     resolution: ReadinessResolution;
   }>;
 }
@@ -206,6 +207,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ?.required).toBe(true);
     expect(integ?.run_blocking).toBe(true);
+    expect(integ?.inert).toBe(false);
     expect(integ?.resolution).toMatchObject({ source: null, error_code: "not_connected" });
 
     // Parity: the run gate rejects with 409.
@@ -245,6 +247,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   it("inert OPTIONAL integration (no tools, not required) → present but not blocking", async () => {
     await seedAgentWith(buildAgentManifest([INTEGRATION], false));
     await seedIntegration(false);
+    await seedConnection();
 
     const body = (await (await getReadiness()).json()) as ReadinessBody;
     expect(body.blocks_run).toBe(false);
@@ -252,6 +255,9 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ).toBeDefined();
     expect(integ!.run_blocking).toBe(false);
+    // The picker's verdict reads like a bound one; `inert` is what tells a run binds nothing.
+    expect(integ!.resolution).toMatchObject({ source: "fallback_auto", error_code: null });
+    expect(integ!.inert).toBe(true);
   });
 
   // A required auth keeps the integration active with no tools; whether its absence blocks is
@@ -290,6 +296,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     expect(body.errors).toHaveLength(0);
     const integ = body.integrations.find((i) => i.integration_package_id === INTEGRATION);
     expect(integ!.run_blocking).toBe(false);
+    expect(integ!.inert).toBe(false);
     expect(integ!.resolution.resolved_connection_ids).toHaveLength(1);
   });
 
