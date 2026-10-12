@@ -7,7 +7,7 @@
  */
 
 import type { MiddlewareHandler } from "hono";
-import type { ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
+import { classifyApiCallFailure, type ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError } from "./errors.ts";
 
@@ -57,6 +57,7 @@ const PROXY_PROBLEMS = {
     title: "Credential Exfiltration Refused",
     proxyError: "http_request_denied",
   },
+  run_required: { status: 403, title: "Run Required", proxyError: "http_request_denied" },
   credential_not_found: { status: 404, title: "Credential Not Found" },
   credential_unusable: {
     status: 502,
@@ -67,6 +68,12 @@ const PROXY_PROBLEMS = {
     status: 503,
     title: "Service Unavailable",
     proxyError: "proxy_configuration_error",
+  },
+  // After the upstream answered: a 500, not a 503 that would read as "nothing happened, retry".
+  session_store_unavailable: {
+    status: 500,
+    title: "Session Store Unavailable",
+    proxyError: "proxy_internal_error",
   },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
   invalid_request: { status: 400, title: "Invalid Request" },
@@ -94,6 +101,18 @@ export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
 
 /** A proxy's upstream that could not be resolved, reached, or did not answer in time. */
 export type UpstreamFailureCode = Extract<ProxyProblemCode, `upstream_${string}`>;
+
+/**
+ * What a thrown transport error says of the upstream once a refusal is ruled out: it did not
+ * answer in time, or it could not be reached. The one reading both proxies make of such an error.
+ */
+export function transportFailureCode(
+  err: unknown,
+): Extract<UpstreamFailureCode, "upstream_timeout" | "upstream_unreachable"> {
+  return classifyApiCallFailure(err).code === "upstream_timeout"
+    ? "upstream_timeout"
+    : "upstream_unreachable";
+}
 
 /** `"<subject> could not be reached"` and the like: the detail of an upstream failure. */
 export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode): string {

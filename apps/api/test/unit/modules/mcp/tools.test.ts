@@ -101,6 +101,41 @@ describe("mcp catalog", () => {
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
   });
+
+  it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {
+    const operations = [...getCatalog().operations.values()];
+    expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(
+      [],
+    );
+    expect(operations.filter((op) => op.operationId.startsWith("credentialProxy"))).toEqual([]);
+    // Nothing the three discovery tools read offers them: the index is built from the catalog.
+    const index = buildOperationIndex(
+      new Set(["mcp:read", "mcp:invoke", "credential-proxy:call", "credential-proxy:direct"]),
+      undefined,
+    );
+    expect(index).not.toContain("credentialProxy");
+    const { byName, calls } = makeTools(["mcp:read", "mcp:invoke", "agents:run"]);
+    for (const tool of ["describe_operation", "invoke_operation"]) {
+      const refused = await byName
+        .get(tool)!
+        .handler({ operation_id: "credentialProxyGet" }, noExtra);
+      expect(parseResult(refused).code).toBe("unknown_operation");
+    }
+    expect(calls).toHaveLength(0);
+    const found = parseResult(
+      await byName.get("search_operations")!.handler({ query: "credential proxy" }, noExtra),
+    );
+    expect(JSON.stringify(found)).not.toContain("credentialProxy");
+    // The listing stays an operation: `deriveMcpSurface` reads its guard to declare the tools.
+    expect(operationIdGranted("listCredentialProxyConnections", new Set(), undefined)).toBe(false);
+    expect(
+      operationIdGranted(
+        "listCredentialProxyConnections",
+        new Set(["credential-proxy:direct"]),
+        undefined,
+      ),
+    ).toBe(true);
+  });
 });
 
 /**
@@ -650,7 +685,7 @@ describe("invoke_operation", () => {
   });
 
   it("auto-maps a declared header param supplied in query onto a real header", async () => {
-    const op = firstOp((o) => o.headerParams.includes("X-Integration-Id"));
+    const op = firstOp((o) => o.headerParams.includes("If-None-Match"));
     const values: Record<string, string> = {};
     for (const name of op.pathParams) values[name] = "x";
     const { byName, calls } = makeTools(["mcp:invoke"]);
@@ -658,14 +693,14 @@ describe("invoke_operation", () => {
       {
         operation_id: op.operationId,
         path_params: values,
-        query: { "X-Integration-Id": "int_1" },
+        query: { "If-None-Match": '"v1"' },
       },
       noExtra,
     );
     const req = calls[0]!;
-    expect(req.headers.get("X-Integration-Id")).toBe("int_1");
+    expect(req.headers.get("If-None-Match")).toBe('"v1"');
     // Promoted out of the query string, not duplicated there.
-    expect(new URL(req.url).searchParams.has("X-Integration-Id")).toBe(false);
+    expect(new URL(req.url).searchParams.has("If-None-Match")).toBe(false);
   });
 
   it("stamps the internal-dispatch marker so re-entry bypasses outbound audience confinement", async () => {

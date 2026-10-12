@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // `connectionRefusalLines`: a 409 `missing_integration_connection` as the lines both
-// `--remote` and `--report` print, a choice's candidates under it.
+// `--remote` and `--report` print, a choice's candidates under it. `announceLaunch`: the
+// preamble, and what a run with no registered run is told about its credential-proxy calls.
 
 import { describe, it, expect } from "bun:test";
 import {
@@ -96,5 +97,54 @@ describe("connectionRefusalLines", () => {
 
   it("answers null for a body that is not this refusal", () => {
     expect(connectionRefusalLines({ code: "invalid_request", errors: [] })).toBeNull();
+  });
+});
+
+// A locally executed run whose integration tools call the instance's credential proxy
+// (`--integrations remote`) names its run with `X-Run-Id` only when one is registered.
+// Without one (`--report=false`, or a registration `--report-fallback console` degrades)
+// every call is made outside a run.
+describe("announceLaunch — credential-proxy calls outside a run", () => {
+  const INSTANCE = "https://app.example.com";
+  const OUTSIDE_RUN =
+    `⚠ no run registered on ${INSTANCE}: integration calls reach its credential proxy outside a run\n` +
+    "  they need the credential-proxy:direct permission and reach your own connections only (list: appstrate api GET /api/credential-proxy/connections)\n" +
+    "  with --report they go through the registered run instead (credential-proxy:call, the connections the run binds)\n";
+
+  function announce(over: Partial<Parameters<typeof announceLaunch>[0]>) {
+    const out = { stdout: "", stderr: "" };
+    announceLaunch({
+      type: "appstrate.report.started",
+      bundleLabel: "@scope/agent@1.0.0",
+      instance: INSTANCE,
+      run: null,
+      writeStdout: (chunk) => (out.stdout += chunk),
+      writeStderr: (chunk) => (out.stderr += chunk),
+      ...over,
+    });
+    return out;
+  }
+
+  it("says once, under the preamble, what the calls require and reach", () => {
+    expect(announce({ proxyTools: 2 })).toEqual({
+      stdout: "",
+      stderr: `→ running @scope/agent@1.0.0\n${OUTSIDE_RUN}`,
+    });
+  });
+
+  it("says nothing when the run is registered: its calls carry X-Run-Id", () => {
+    const out = announce({ proxyTools: 2, run: { runId: "run_test_1", warnings: [] } });
+    expect(out.stderr).toBe(
+      `→ running @scope/agent@1.0.0 (reporting to ${INSTANCE} as run_test_1)\n`,
+    );
+  });
+
+  it("says nothing when no tool calls the proxy (--integrations local or none, or no integration)", () => {
+    expect(announce({ proxyTools: 0 }).stderr).toBe("→ running @scope/agent@1.0.0\n");
+    expect(announce({}).stderr).toBe("→ running @scope/agent@1.0.0\n");
+  });
+
+  it("writes nothing under --json, on either stream", () => {
+    expect(announce({ proxyTools: 2, json: true })).toEqual({ stdout: "", stderr: "" });
   });
 });

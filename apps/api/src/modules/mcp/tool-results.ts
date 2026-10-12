@@ -16,6 +16,22 @@ export function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
+export function trySetHeader(headers: Headers, name: string, value: string): boolean {
+  try {
+    headers.set(name, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ceiling on inlining a NON-textual file's RAW bytes as base64 in a tool or
  * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the

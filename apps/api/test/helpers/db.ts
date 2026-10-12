@@ -65,6 +65,8 @@ const CORE_TABLES = [
   // Leaf tables (no dependents)
   "notifications",
   "audit_events",
+  // Journal with no FKs, like `audit_events`: nothing cascades into it.
+  "connection_calls",
   "llm_usage",
   "run_logs",
   // Chat tables (core schema, consumed by @appstrate/module-chat).

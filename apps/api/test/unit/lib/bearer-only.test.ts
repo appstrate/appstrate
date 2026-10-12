@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { assertBearerOnly } from "../../../src/lib/bearer-only.ts";
+import { assertBearerOnly, isBearerOnlyCaller } from "../../../src/lib/bearer-only.ts";
 
 const LOOPBACK = { firstPartyLoopback: true };
 
@@ -32,4 +32,16 @@ describe("assertBearerOnly", () => {
       expect(() => assertBearerOnly(method, "LLM proxy")).toThrow();
     });
   }
+});
+
+describe("isBearerOnlyCaller", () => {
+  it("answers what assertBearerOnly enforces, without throwing", () => {
+    expect(isBearerOnlyCaller("api_key")).toBe(true);
+    expect(isBearerOnlyCaller("oauth2-instance")).toBe(true);
+    expect(isBearerOnlyCaller("chat-loopback", LOOPBACK)).toBe(true);
+    expect(isBearerOnlyCaller(undefined, LOOPBACK)).toBe(true);
+    expect(isBearerOnlyCaller("session")).toBe(false);
+    expect(isBearerOnlyCaller("session", { firstPartyLoopback: false })).toBe(false);
+    expect(isBearerOnlyCaller(undefined)).toBe(false);
+  });
 });

@@ -114,7 +114,9 @@ export interface IntegrationRequirement {
 
 /**
  * The requirement of a credential-proxy call. No agent selects anything: every declared auth
- * serves, no scope is required, and the call needs a connection.
+ * serves, no scope is required, and the call needs a connection. The proxy walks the cascade
+ * with no pin and no org default (`selectAccessibleConnection`): under a run the named member of
+ * its bound set, outside one the actor's own rows alone, so the fallback lists no shared row.
  */
 export function proxyRequirement(
   integrationId: string,

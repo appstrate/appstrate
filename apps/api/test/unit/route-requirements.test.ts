@@ -177,11 +177,15 @@ describe("lookup — exact mounts", () => {
 
   it("serves every method from one `router.all`, carrying its guard", () => {
     const table = tableOf((sub) =>
-      sub.all("/credential-proxy/proxy", requirePermission("credential-proxy", "call"), ok),
+      sub.all(
+        "/credential-proxy/proxy",
+        requireAnyPermission(["credential-proxy:call", "credential-proxy:direct"]),
+        ok,
+      ),
     );
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
       expect(served(table, method, "/api/credential-proxy/proxy").requirements).toEqual([
-        "credential-proxy:call",
+        "credential-proxy:call|credential-proxy:direct",
       ]);
     }
   });

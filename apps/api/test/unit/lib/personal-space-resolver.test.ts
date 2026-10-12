@@ -10,9 +10,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { presetPermissions } from "../../../src/lib/permissions.ts";
 import {
   resolveSpaceRole,
   spacePermissions,
+  toSpaceRoleWire,
   type SpaceAccessRow,
 } from "../../../src/lib/space-role.ts";
 
@@ -39,8 +41,40 @@ describe("resolveSpaceRole on a personal space", () => {
       expect(resolveSpaceRole(orgRole, personal, null, OWNER)).toEqual({
         kind: "preset",
         preset: "admin",
+        personalOwner: true,
       });
     }
+  });
+
+  it("grants its owner everything `admin` holds but credential-proxy:direct", () => {
+    // Calling the proxy outside a run is handed out by a space's governor, and
+    // a personal space has none but its owner (RBAC spec §3.6).
+    const admin = presetPermissions("admin");
+    for (const orgRole of ["owner", "member"] as const) {
+      const owned = spacePermissions(resolveSpaceRole(orgRole, personal, null, OWNER));
+      expect(
+        [...admin].filter((permission) => !owned.has(permission)),
+        orgRole,
+      ).toEqual(["credential-proxy:direct"]);
+      expect([...owned].filter((permission) => !admin.has(permission))).toEqual([]);
+    }
+    // The twin: the same preset reached in a team space holds it.
+    const inTeam = spacePermissions(resolveSpaceRole("admin", team, null, OTHER));
+    expect(inTeam.has("credential-proxy:direct")).toBe(true);
+    const asMember = { ref: { kind: "preset", preset: "admin" } } as const;
+    expect(
+      spacePermissions(resolveSpaceRole("member", team, asMember, OTHER)).has(
+        "credential-proxy:direct",
+      ),
+    ).toBe(true);
+  });
+
+  it("shows its owner the preset's name: the narrowing is not a role of its own", () => {
+    expect(toSpaceRoleWire(resolveSpaceRole("member", personal, null, OWNER))).toEqual({
+      kind: "preset",
+      key: "admin",
+      name: "admin",
+    });
   });
 
   it("gives a GUEST owner preset operator — receive and run, never author", () => {
@@ -50,6 +84,7 @@ describe("resolveSpaceRole on a personal space", () => {
     expect(resolveSpaceRole("guest", personal, null, OWNER)).toEqual({
       kind: "preset",
       preset: "operator",
+      personalOwner: true,
     });
   });
 

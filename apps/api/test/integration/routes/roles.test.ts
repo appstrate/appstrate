@@ -241,6 +241,29 @@ describe("custom space roles", () => {
       expect((await expectProblem(res, 400)).detail).toContain("members:invite");
     });
 
+    it("accepts credential-proxy:direct alone, the grant `admin` is the one preset to list", async () => {
+      const role = await createRole({
+        key: "proxy-direct",
+        permissions: ["credential-proxy:direct"],
+      });
+      expect(role.permissions).toEqual(["credential-proxy:direct"]);
+      expect(role.unavailable_permissions).toEqual([]);
+
+      const { data } = (await (await req("GET", "/api/roles")).json()) as { data: RoleWire[] };
+      const holders = data
+        .filter((r) => r.kind === "preset" && r.permissions.includes("credential-proxy:direct"))
+        .map((r) => r.key);
+      expect(holders).toEqual(["admin"]);
+
+      // The owner reaches the space as preset `admin`, so the role is theirs to hand out.
+      const asGuest = await memberContext(owner, "guest");
+      const assigned = await req("POST", `/api/spaces/${owner.defaultSpaceId}/members`, {
+        userId: asGuest.user.id,
+        custom_role_id: role.id,
+      });
+      expect(assigned.status).toBe(201);
+    });
+
     it("refuses an empty permission list", async () => {
       await expectProblem(await post(validBody({ permissions: [] })), 400, {
         param: "permissions",

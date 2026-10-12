@@ -1115,7 +1115,8 @@ export async function getRunAttribution(
 
 /**
  * The in-flight run an `X-Run-Id` names: unknown, other-org and (with `spaceId`) other-space ids
- * are one 404, no existence probe; not `owner`'s (when set) is 403; finished is 400.
+ * are one 404, no existence probe; not `owner`'s (when set) is 403; finished is 400. The
+ * credential proxy further requires a run its caller executes (`requireCallerRun`).
  */
 export async function requireAttributableRun(input: {
   orgId: string;

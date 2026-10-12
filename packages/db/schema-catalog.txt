@@ -71,6 +71,25 @@ column cli_refresh_tokens.token_hash text not null
 column cli_refresh_tokens.used_at timestamp with time zone
 column cli_refresh_tokens.user_agent text
 column cli_refresh_tokens.user_id text not null
+column connection_calls.actor_id text not null
+column connection_calls.actor_type text not null
+column connection_calls.api_key_id text
+column connection_calls.auth_method text not null
+column connection_calls.connection_id uuid not null
+column connection_calls.created_at timestamp with time zone not null default now()
+column connection_calls.duration_ms integer not null
+column connection_calls.host text not null
+column connection_calls.id bigint not null default nextval('connection_calls_id_seq'::regclass)
+column connection_calls.integration_id text not null
+column connection_calls.method text not null
+column connection_calls.org_id uuid not null
+column connection_calls.outcome text not null
+column connection_calls.owner_id text
+column connection_calls.owner_type text
+column connection_calls.path text not null
+column connection_calls.request_id text
+column connection_calls.run_id text
+column connection_calls.space_id text not null
 column device_codes.attempts integer not null default 0
 column device_codes.client_id text
 column device_codes.device_code text not null
@@ -674,6 +693,7 @@ constraint cli_refresh_tokens cli_refresh_tokens_parent_id_fkey FOREIGN KEY (par
 constraint cli_refresh_tokens cli_refresh_tokens_pkey PRIMARY KEY (id)
 constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token_hash)
 constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint connection_calls connection_calls_pkey PRIMARY KEY (id)
 constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint device_codes device_codes_device_code_unique UNIQUE (device_code)
 constraint device_codes device_codes_pkey PRIMARY KEY (id)
@@ -946,6 +966,9 @@ index CREATE INDEX idx_chat_sessions_org_user ON public.chat_sessions USING btre
 index CREATE INDEX idx_chat_sessions_space_user ON public.chat_sessions USING btree (space_id, user_id)
 index CREATE INDEX idx_cli_refresh_tokens_family ON public.cli_refresh_tokens USING btree (family_id)
 index CREATE INDEX idx_cli_refresh_tokens_user ON public.cli_refresh_tokens USING btree (user_id)
+index CREATE INDEX idx_connection_calls_connection_id ON public.connection_calls USING btree (connection_id, id)
+index CREATE INDEX idx_connection_calls_run ON public.connection_calls USING btree (run_id)
+index CREATE INDEX idx_connection_calls_space_id ON public.connection_calls USING btree (space_id, id)
 index CREATE INDEX idx_end_users_org_id ON public.end_users USING btree (org_id)
 index CREATE INDEX idx_end_users_space_id ON public.end_users USING btree (space_id)
 index CREATE INDEX idx_file_links_consumer_run ON public.file_links USING btree (consumer_run_id)
@@ -1068,6 +1091,7 @@ index CREATE UNIQUE INDEX chat_messages_pkey ON public.chat_messages USING btree
 index CREATE UNIQUE INDEX chat_sessions_pkey ON public.chat_sessions USING btree (id)
 index CREATE UNIQUE INDEX cli_refresh_tokens_pkey ON public.cli_refresh_tokens USING btree (id)
 index CREATE UNIQUE INDEX cli_refresh_tokens_token_hash_unique ON public.cli_refresh_tokens USING btree (token_hash)
+index CREATE UNIQUE INDEX connection_calls_pkey ON public.connection_calls USING btree (id)
 index CREATE UNIQUE INDEX device_codes_device_code_unique ON public.device_codes USING btree (device_code)
 index CREATE UNIQUE INDEX device_codes_pkey ON public.device_codes USING btree (id)
 index CREATE UNIQUE INDEX device_codes_user_code_unique ON public.device_codes USING btree (user_code)

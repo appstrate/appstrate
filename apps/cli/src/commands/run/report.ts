@@ -12,7 +12,7 @@
  * "Remote runner" badge.
  *
  * Three modes:
- *   - `auto` — on when a profile + app are available, off otherwise
+ *   - `auto` — on when a profile or API key is available, off otherwise
  *   - `true` — force on; fail if no profile / app / token
  *   - `false` — always off, console-only
  *
@@ -60,9 +60,9 @@ export interface ReportSession {
   runId: string;
   httpSink: HttpSink;
   /**
-   * Headers to attach to every outbound LLM / credential proxy call —
-   * populates `llm_usage.run_id` + `credential_proxy_usage.run_id`
-   * so per-run cost rollup works at `/events/finalize` time.
+   * Headers to attach to every credential-proxy call. `X-Run-Id` makes it a
+   * call made for this run: it requires `credential-proxy:call` and reaches
+   * the connections the run bound.
    */
   proxyHeaders: Record<string, string>;
   /**

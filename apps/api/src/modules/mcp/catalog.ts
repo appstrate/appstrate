@@ -58,8 +58,8 @@ function extractPathParams(pathTemplate: string): string[] {
 /**
  * Names of `in: header` parameters declared by an operation. Lets
  * invoke_operation route a value the model supplied (in any bag) to a real
- * request header — required by e.g. the Credential Proxy family, which keys
- * off `X-Integration-Id`. Auth-context headers are never sourced from here.
+ * request header — e.g. a conditional read's `If-None-Match`. Auth-context
+ * headers are never sourced from here.
  */
 function extractHeaderParams(node: OperationNode): string[] {
   const params = node.parameters;
@@ -76,15 +76,17 @@ function extractHeaderParams(node: OperationNode): string[] {
 
 /**
  * Kept out of the catalog: the MCP transport and its RFC 9728 well-known (no
- * recursive self-invocation), and the spec document and its viewer, which
- * `describe_operation` already serves piecewise.
+ * recursive self-invocation), the spec document and its viewer, which
+ * `describe_operation` already serves piecewise, and the credential proxy,
+ * which the `api_call` tool alone reaches (`connection-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
     pathTemplate.startsWith("/api/mcp/o") ||
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
-    pathTemplate === "/api/docs"
+    pathTemplate === "/api/docs" ||
+    pathTemplate === "/api/credential-proxy/proxy"
   );
 }
 

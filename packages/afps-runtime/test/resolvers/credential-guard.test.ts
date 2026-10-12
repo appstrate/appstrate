@@ -11,7 +11,11 @@ import {
   credentialUrlPolicy,
   urlPolicyRefusalMessage,
 } from "../../src/resolvers/credential-guard.ts";
-import { substituteVars, templateHost } from "../../src/resolvers/template-vars.ts";
+import {
+  substituteVars,
+  templateHost,
+  templateLocation,
+} from "../../src/resolvers/template-vars.ts";
 
 const fields = { api_key: "SECRET" };
 const allowAll = {
@@ -255,6 +259,85 @@ describe("templateHost — the target host a message echoes", () => {
   it("is <templated> when the templated host does not parse, <unparseable> otherwise", () => {
     expect(templateHost("https://{{host}}:{{port}}/x")).toBe("<templated>");
     expect(templateHost("not a url")).toBe("<unparseable>");
+  });
+});
+
+describe("templateLocation — the host and path a template names", () => {
+  it("keeps the host and path of a literal target", () => {
+    expect(templateLocation("https://api.example.com/v1/users")).toEqual({
+      host: "api.example.com",
+      path: "/v1/users",
+    });
+    expect(templateLocation("https://api.example.com")).toEqual({
+      host: "api.example.com",
+      path: "/",
+    });
+  });
+
+  it("drops the query string and the fragment, literal or templated", () => {
+    expect(templateLocation("https://api.example.com/v1/users?api_key=sk-live-123#frag")).toEqual({
+      host: "api.example.com",
+      path: "/v1/users",
+    });
+    expect(templateLocation("https://api.example.com/v1/users?token={{token}}")).toEqual({
+      host: "api.example.com",
+      path: "/v1/users",
+    });
+  });
+
+  it("drops userinfo, literal or templated", () => {
+    expect(templateLocation("https://alice:hunter2@api.example.com/private?x=1")).toEqual({
+      host: "api.example.com",
+      path: "/private",
+    });
+    expect(templateLocation("https://user:{{password}}@api.example.com/private")).toEqual({
+      host: "api.example.com",
+      path: "/private",
+    });
+  });
+
+  it("names a placeholder of the host or the path as written, never a value", () => {
+    expect(
+      templateLocation("https://{{subdomain}}.example.com/v1/{{ account_id }}/items?x={{secret}}"),
+    ).toEqual({ host: "{{subdomain}}.example.com", path: "/v1/{{account_id}}/items" });
+    expect(templateLocation("https://api.example.com/v1/{{id}}/{{id}}")).toEqual({
+      host: "api.example.com",
+      path: "/v1/{{id}}/{{id}}",
+    });
+  });
+
+  it("reads a leading placeholder as a whole base URL", () => {
+    expect(templateLocation("{{base_url}}/v1/items?key={{api_key}}")).toEqual({
+      host: "{{base_url}}",
+      path: "/v1/items",
+    });
+  });
+
+  it("leaves the caller's own text alone when it resembles a placeholder marker", () => {
+    expect(templateLocation("https://xph0x.example.com/xph0x/{{id}}/xphq1x")).toEqual({
+      host: "xph0x.example.com",
+      path: "/xph0x/{{id}}/xphq1x",
+    });
+  });
+
+  it("has no path for a target it cannot read", () => {
+    expect(templateLocation("not a url")).toEqual({ host: "<unparseable>", path: "" });
+    expect(templateLocation("api.example.com/v1?token=abc")).toEqual({
+      host: "<unparseable>",
+      path: "",
+    });
+    expect(templateLocation("https://api.example.com:{{port}}/v1")).toEqual({
+      host: "<templated>",
+      path: "",
+    });
+  });
+
+  it("has no path for a scheme whose path is the whole opaque remainder", () => {
+    expect(templateLocation("data:text/plain,secret")).toEqual({ host: "", path: "" });
+    expect(templateLocation("mailto:someone@example.com?subject=hi")).toEqual({
+      host: "",
+      path: "",
+    });
   });
 });
 

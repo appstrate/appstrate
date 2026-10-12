@@ -12,7 +12,9 @@
  * `{{var}}` substitution + `authorized_uris` allowlist).
  *
  * `X-Integration-Id` carries the integration package id (`@scope/name`); which
- * connection is decrypted is `selectAccessibleConnection`'s call.
+ * connection is decrypted is `selectAccessibleConnection`'s call: a member of the
+ * `X-Run-Id` run's bound set, else one of the actor's own connections.
+ * {@link listDirectProxyConnections} lists the latter with the same rows and rule.
  *
  * Both this external-runner path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
@@ -27,16 +29,21 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
+import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import {
   renderAuthAuthorizedUris,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
 import type { Actor } from "../../lib/actor.ts";
+import { connectionVariablesOf } from "../../lib/connection-identity.ts";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
-import { requireAttributableRun } from "../state/runs.ts";
+import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
+  integrationsRequiringRun,
+  listActiveIntegrationIds,
+  listOwnUsableConnections,
   selectAccessibleConnection,
   upstreamRejectionStreak,
   type ResolvedConnectionRow,
@@ -57,8 +64,9 @@ export interface ProxyRunSelection extends RunBoundSelection {
 }
 
 /**
- * The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of its own run.
- * Each read checks the run anew, so a run that finished since the call started stops lending.
+ * The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of a run of its own
+ * that it executes itself ({@link requireCallerRun}). Each read checks the run anew, so a run that
+ * finished since the call started stops lending.
  */
 export function runBoundSelection(input: {
   orgId: string;
@@ -68,12 +76,12 @@ export function runBoundSelection(input: {
   actor: Actor;
 }): ProxyRunSelection {
   const { orgId, spaceId, runId, integrationId, actor } = input;
-  const attributableRun = () => requireAttributableRun({ orgId, runId, spaceId, owner: actor });
+  const callerRun = () => requireCallerRun({ orgId, runId, spaceId, actor });
   return {
     id: runId,
-    boundSet: async () => (await attributableRun()).resolvedConnections?.[integrationId] ?? [],
+    boundSet: async () => (await callerRun()).resolvedConnections?.[integrationId] ?? [],
     frozenVersion: async () =>
-      (await attributableRun()).resolvedIntegrationVersions?.[integrationId] ?? null,
+      (await callerRun()).resolvedIntegrationVersions?.[integrationId] ?? null,
   };
 }
 
@@ -129,11 +137,7 @@ export async function resolveIntegrationProxyCredentials(
   }
 
   const connection = await resolveConnection(input, manifest);
-  if (!connection) {
-    throw new IntegrationCredentialNotFoundError(
-      `No credentials configured for integration '${input.integrationId}' in space ${input.spaceId}`,
-    );
-  }
+  if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
   const payload = buildPayload(input.integrationId, manifest, connection);
   return {
@@ -203,9 +207,80 @@ export async function forceRefreshIntegrationProxyCredentials(
   return buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables);
 }
 
+/** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
+interface DirectProxyConnection {
+  integration_id: string;
+  connection_id: string;
+  label: string;
+  auth_key: string;
+  scopes_granted: string[];
+  /** {@link listedAuthorizedUris}: never a value of the connection's credential. */
+  authorized_uris: string[];
+  allow_all_uris: boolean;
+  /** A call binding it answers `409 needs_reconnection` until its owner reconnects it. */
+  needs_reconnection: boolean;
+  /** An enforced org default governs the integration: a call answers `403 run_required`. */
+  run_required: boolean;
+}
+
+/**
+ * What `actor` can call outside a run in the space: its own usable connections
+ * (`listOwnUsableConnections`, the rows the proxy selects from) of the integrations a call would
+ * not answer 404 for — active here, with a published version that declares the connection's auth.
+ * It decrypts nothing: the answer reaches a model's context through the MCP module.
+ */
+export async function listDirectProxyConnections(
+  scope: { orgId: string; spaceId: string },
+  actor: Actor,
+): Promise<DirectProxyConnection[]> {
+  const rows = await listOwnUsableConnections({ spaceId: scope.spaceId, actor });
+  const integrationIds = [...new Set(rows.map((row) => row.integrationId))];
+  const [active, runRequired, manifests] = await Promise.all([
+    listActiveIntegrationIds(integrationIds, scope.spaceId),
+    integrationsRequiringRun(scope.spaceId),
+    Promise.all(integrationIds.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null))),
+  ]);
+  const manifestOf = new Map(integrationIds.map((id, i) => [id, manifests[i]!]));
+
+  const listed = rows.flatMap((row): DirectProxyConnection[] => {
+    const loaded = manifestOf.get(row.integrationId)!;
+    if (!active.has(row.integrationId) || !loaded.ok) return [];
+    const authDef = loaded.manifest.auths?.[row.authKey] as AfpsManifestAuth | undefined;
+    if (!authDef) return [];
+    return [
+      {
+        integration_id: row.integrationId,
+        connection_id: row.id,
+        label: row.label,
+        auth_key: row.authKey,
+        scopes_granted: row.scopesGranted,
+        authorized_uris: listedAuthorizedUris(authDef, connectionVariablesOf(row.variables)),
+        allow_all_uris: authDef.allow_all_uris === true,
+        needs_reconnection: row.needsReconnection,
+        run_required: runRequired.has(row.integrationId),
+      },
+    ];
+  });
+  // Grouped by integration; within one, oldest first.
+  return listed.sort((a, b) => a.integration_id.localeCompare(b.integration_id));
+}
+
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
+
+/**
+ * Why no connection answers. Outside a run the wording depends only on whether an id was named,
+ * never on whose row it names or whether it exists.
+ */
+function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
+  const { integrationId, run } = input;
+  if (run) return `Run '${run.id}' binds no usable connection of integration '${integrationId}'`;
+  const subject = input.connectionId
+    ? `X-Connection-Id names none of your own connections of integration '${integrationId}' usable in this space`
+    : `You have no connection of integration '${integrationId}' usable in this space`;
+  return `${subject}. A connection shared into the space is reached through a run (X-Run-Id).`;
+}
 
 async function loadManifest(input: ResolveIntegrationProxyInput): Promise<IntegrationManifest> {
   const { integrationId } = input;
@@ -308,4 +383,21 @@ function buildPayloadFromFields(
     authorizedUris: renderAuthAuthorizedUris(authDef, fields, variables),
     allowAllUris: authDef.allow_all_uris === true,
   });
+}
+
+/**
+ * An auth's `authorized_uris` as the listing gives them: rendered from the connection's variables
+ * alone. An entry templated on a credential field stays as the manifest declares it — a bare
+ * `{$credential.<field>}` entry renders to that field's whole URL, query string included, and the
+ * field may be the secret itself. Only {@link buildPayloadFromFields} renders with the credential.
+ */
+function listedAuthorizedUris(
+  authDef: Pick<AfpsManifestAuth, "authorized_uris">,
+  variables: ConnectionVariables,
+): string[] {
+  return (authDef.authorized_uris ?? []).flatMap((pattern) =>
+    credentialTemplateRefs(pattern).length > 0
+      ? [pattern]
+      : renderAuthAuthorizedUris({ authorized_uris: [pattern] }, {}, variables),
+  );
 }

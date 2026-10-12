@@ -6,6 +6,7 @@
  * Routes (all mounted under `/api/integrations`, space-scoped):
  *
  *   - `GET    /`                                     — list available + active status
+ *   - `GET    /calls`                                — admin: the credential proxy's calls made in this space
  *
  * Activating and deactivating an integration are NOT here: they are the same
  * act as activating any other package type, on the one pair of doors that
@@ -72,6 +73,7 @@ import {
 } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
+import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -959,6 +961,16 @@ export function createIntegrationsRouter() {
   };
   router.get("/callback", (c) => oauthCallback(c, null));
   router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
+
+  // The credential proxy's journal for this space: every call made here, whatever the connection
+  // and whoever owns it. Under `configure`, the permission that governs which credential the
+  // space resolves to.
+  router.get(
+    "/calls",
+    rateLimit(60),
+    requirePermission("integrations", "configure"),
+    serveSpaceConnectionCalls,
+  );
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;

@@ -654,7 +654,10 @@ function applyDeliveryPlan(headers: Record<string, string>, plan: HttpDeliveryPl
 interface RemoteAppstrateIntegrationResolverOptions {
   /** Base URL of the Appstrate instance. */
   instance: string;
-  /** API key (apst_...) or device-flow JWT with `credential-proxy:call`. */
+  /**
+   * API key (apst_...) or device-flow JWT. It needs `credential-proxy:call` when
+   * `extraHeaders` names a run (`X-Run-Id`), `credential-proxy:direct` otherwise.
+   */
   apiKey: string;
   /** Space id (spc_...) the caller is scoped to. */
   spaceId: string;
@@ -664,7 +667,10 @@ interface RemoteAppstrateIntegrationResolverOptions {
   endUserId?: string;
   /** Session id scoping the platform-side cookie jar. Defaults to a fresh UUID. */
   sessionId?: string;
-  /** Extra headers attached to every credential-proxy call (e.g. `X-Run-Id`). */
+  /**
+   * Extra headers attached to every credential-proxy call. `X-Run-Id` names the caller's own
+   * in-flight remote run: the call is made for it and reaches the connections it bound.
+   */
   extraHeaders?: Record<string, string>;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
@@ -679,6 +685,13 @@ interface RemoteAppstrateIntegrationResolverOptions {
  * The credential-proxy route is provider/integration-agnostic — it gates on
  * the resolved connection's `authorized_uris` and injects the configured
  * header, identically across every `{ns}__api_call` surface.
+ *
+ * Which connection a call resolves depends on `extraHeaders`: with `X-Run-Id`
+ * it is one the run bound; without, the call is made outside a run and
+ * resolves one of the caller's own connections only. A refusal (the
+ * permission of the path taken, `403 run_required` for an integration under
+ * an enforced org default, `404 credential_not_found`) comes back as the
+ * platform's problem document, serialised like any upstream response.
  */
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
   private readonly instance: string;

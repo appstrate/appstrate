@@ -247,7 +247,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Space Profiles**      | Space-scoped connection profile management                                                                                      |
 | **End-Users**           | External end-user management for headless API (cursor pagination via `startingAfter`/`endingBefore`)                            |
 | **Webhooks**            | Run event webhooks with HMAC signing (Standard Webhooks)                                                                        |
-| **Credential Proxy**    | Server-side credential injection for external runners (5 verbs: GET/POST/PUT/PATCH/DELETE)                                      |
+| **Credential Proxy**    | Credential injection outside the sandbox: a remote run's calls, direct calls on the caller's own connections, their listing     |
 | **LLM Proxy**           | Server-side LLM model injection — OpenAI + Anthropic protocol families                                                          |
 | **OAuth Clients**       | OIDC module — instance/end-user OAuth 2.1 client management                                                                     |
 | **CLI Sessions**        | OIDC module — admin oversight of CLI sessions per org (`cli-sessions` RBAC resource)                                            |

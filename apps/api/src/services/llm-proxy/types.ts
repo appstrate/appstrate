@@ -9,6 +9,8 @@
  * one adapter per endpoint and hands it to the shared core.
  */
 
+import type { ProxyCaller } from "../../lib/proxy-caller.ts";
+
 /**
  * Principal that minted the proxy call — mirrors credential-proxy. A `run` is a
  * platform run's own sidecar, authenticated by its run token; its model is the
@@ -20,19 +22,16 @@ export type LlmProxyPrincipal =
   | { kind: "run"; orgId: string };
 
 /**
- * Build the {@link LlmProxyPrincipal} from the resolved auth identity: an API
- * key (`apiKeyId` present) is an `"api_key"` principal, otherwise a cookie
- * session is a `"jwt_user"`. Named rather than inlined at its single caller so
- * the two-branch rule stays one readable statement of who minted the call.
+ * The {@link LlmProxyPrincipal} of a public-route caller: an API key (`apiKeyId` set) is an
+ * `"api_key"` principal, any other bearer a `"jwt_user"`.
  */
-export function buildLlmProxyPrincipal(args: {
-  apiKeyId: string | null | undefined;
-  orgId: string;
-  userId: string;
-}): LlmProxyPrincipal {
-  return args.apiKeyId
-    ? { kind: "api_key", apiKeyId: args.apiKeyId, orgId: args.orgId, userId: args.userId }
-    : { kind: "jwt_user", userId: args.userId, orgId: args.orgId };
+export function buildLlmProxyPrincipal(
+  caller: Pick<ProxyCaller, "apiKeyId" | "orgId" | "userId">,
+): LlmProxyPrincipal {
+  const { apiKeyId, orgId, userId } = caller;
+  return apiKeyId
+    ? { kind: "api_key", apiKeyId, orgId, userId }
+    : { kind: "jwt_user", userId, orgId };
 }
 
 /**

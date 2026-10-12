@@ -37,6 +37,7 @@ const REQUIREMENTS: [string, string[]][] = [
   // A resource with no read action, and a string nobody declared.
   ["space-settings:write", []],
   ["credential-proxy:call", []],
+  ["credential-proxy:direct", []],
   ["nope:write", []],
 ];
 

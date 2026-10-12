@@ -66,6 +66,7 @@ import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-cl
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
+import { isBearerOnlyCaller } from "../../lib/bearer-only.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { enterSpaceById } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -337,7 +338,20 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     authors: any("authors"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
+    proxies: any("proxies"),
   };
+}
+
+/**
+ * Whether the credential proxy accepts the credential this request carries.
+ * The proxy is bearer-only (`isBearerOnlyCaller`) and its tools re-enter it
+ * with that same credential, so a cookie session or the chat's loopback bearer
+ * is offered neither of them.
+ */
+function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
+  return isBearerOnlyCaller(c.get("authMethod"), {
+    firstPartyLoopback: c.get("firstPartyLoopback"),
+  });
 }
 
 /**
@@ -502,9 +516,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // (initialize, tools/list) enters any reachable one to pass the guard.
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
+    const proxied = proxyAcceptsCredential(c);
     const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
       ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor),
+      surface: deriveMcpSurface(space.permissions, ceiling, actor, proxied),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
@@ -519,7 +534,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor),
+      surface: deriveMcpSurface(permissions, ceiling, actor, proxied),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -649,7 +664,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor);
+      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c));
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed

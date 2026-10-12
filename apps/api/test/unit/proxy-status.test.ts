@@ -6,6 +6,7 @@ import { errorHandler } from "../../src/middleware/error-handler.ts";
 import {
   proxyProblem,
   proxyStatusMarker,
+  transportFailureCode,
   upstreamFailureDetail,
   type ProxyProblemCode,
 } from "../../src/lib/proxy-status.ts";
@@ -31,6 +32,7 @@ describe("proxyProblem", () => {
     ["upstream_unresolvable", 502, "appstrate; error=dns_error"],
     ["upstream_timeout", 504, "appstrate; error=http_response_timeout"],
     ["encryption_key_unavailable", 503, "appstrate; error=proxy_configuration_error"],
+    ["session_store_unavailable", 500, "appstrate; error=proxy_internal_error"],
   ] as const)("answers %s with %i and one Proxy-Status member", async (code, status, member) => {
     const res = await answer(code);
     expect(res.status).toBe(status);
@@ -50,5 +52,21 @@ describe("upstreamFailureDetail", () => {
     expect(upstreamFailureDetail("api.example.com", "upstream_timeout")).toBe(
       "api.example.com did not answer in time",
     );
+  });
+});
+
+describe("transportFailureCode", () => {
+  it("reads a timeout as the upstream not answering in time", () => {
+    expect(transportFailureCode(new DOMException("timed out", "TimeoutError"))).toBe(
+      "upstream_timeout",
+    );
+  });
+
+  it("reads any other thrown value as the upstream being unreachable", () => {
+    expect(transportFailureCode(new TypeError("fetch failed"))).toBe("upstream_unreachable");
+    expect(
+      transportFailureCode(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
+    ).toBe("upstream_unreachable");
+    expect(transportFailureCode("boom")).toBe("upstream_unreachable");
   });
 });

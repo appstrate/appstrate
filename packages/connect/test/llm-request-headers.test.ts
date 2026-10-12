@@ -41,6 +41,7 @@ const DROPPED: Record<string, string> = {
   "X-Org-Id": "org_1",
   "X-Space-Id": "spc_1",
   "X-Run-Id": "run_1",
+  "X-View-As": "role=viewer",
   // client network identity
   Forwarded: "for=10.0.0.1",
   "X-Forwarded-For": "10.0.0.1",

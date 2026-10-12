@@ -20,6 +20,12 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- **`credential-proxy:direct`** (`@appstrate/core/permissions`):
+  `CoreResources["credential-proxy"]` is `"call" | "direct"`, so `CorePermission`
+  and `SpaceLevelPermission` gain the string and
+  `CORE_RESOURCE_ACTIONS["credential-proxy"]` is `["call", "direct"]`. `direct`
+  gates a call to `/api/credential-proxy/proxy` outside a run, on the caller's
+  own connections; `call` gates a call for a run (`X-Run-Id`). (#1894)
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus

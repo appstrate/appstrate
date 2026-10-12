@@ -197,7 +197,108 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   (#1929): the write of an enabled schedule is refused `409` until they do;
   see Changed.
 
+- **Review who calls the credential proxy outside a run; there is nothing to
+  run** (#1894). From the deploy on, a call to `/api/credential-proxy/proxy`
+  without `X-Run-Id` requires the new permission `credential-proxy:direct`,
+  which `admin` alone holds among the space presets, and reaches the caller's
+  own connections only (see Changed). `credential-proxy:call` keeps its
+  holders and now covers the calls made for a run only, so:
+  - a `builder`, a custom role and an existing API key that hold
+    `credential-proxy:call` keep calling the proxy for a run and are refused
+    `403` outside one. A custom role gets `credential-proxy:direct` by being
+    edited; a key by being minted anew by a creator who holds it, since a
+    key's stored scopes are its ceiling, a space admin's key included;
+  - a connection another member shared, and every connection of an
+    integration under an enforced org default, is reached through a run only:
+    a script that called one directly must become an agent run, or use a
+    connection its caller owns;
+  - a personal space grants `credential-proxy:direct` to nobody, its owner
+    included.
+
+  Migration `0091` only creates `connection_calls`, the proxy's call journal,
+  and rewrites nothing. Nothing prunes that table: its retention is the
+  operator's. `400 connection_not_in_org_default` and the audit action
+  `integration.connection.proxied` no longer exist, so update a client, an
+  alert or a report that matches either. `PI_IMAGE` and `SIDECAR_IMAGE` ship
+  from this release with the platform, as for every release: the sidecar
+  reads the request-header rule the proxies share.
+
 ### Changed
+
+- **BREAKING (API): outside a run, the credential proxy requires
+  `credential-proxy:direct` and reaches the caller's own connections only**
+  (#1894). A call to `/api/credential-proxy/proxy` without `X-Run-Id` took
+  `credential-proxy:call` and resolved through the space's org defaults and
+  the connections shared into it. It now requires `credential-proxy:direct`,
+  a new space-level permission: `admin` holds it alone among the presets
+  (`builder` does not), a custom role can list it, an API key carries it from
+  a creator who holds it, and a personal space grants it to nobody. The call
+  reaches the caller's own connections usable in the space and nothing else:
+  - no org default applies, a soft one included, and an integration an
+    enforced org default governs answers `403 run_required`, whatever is
+    named;
+  - a named `X-Connection-Id` that is not one of the caller's own (another
+    member's connection, shared into the space or not, or an unknown id)
+    answers one and the same `404 credential_not_found`;
+  - with nothing named: the caller's single own connection, `404
+credential_not_found` for none, `409 must_choose_connection` for several,
+    listing those and no one else's.
+
+  `400 connection_not_in_org_default` no longer exists. The `403` of a caller
+  without the permission names `credential-proxy:direct` and the run path. A
+  call made for a run (`X-Run-Id`) still requires `credential-proxy:call` and
+  still reaches the connections the run bound, a colleague's shared one
+  included; launching runs (`agents:run`) does not open it, so an `operator`
+  or a `runner` registers a remote run and has its proxy calls refused. The
+  rule: `docs/architecture/INTEGRATIONS_RUNTIME.md`, "Platform credential
+  proxy".
+
+- **BREAKING (API): the credential proxy refuses an `X-Run-Id` naming a run
+  the platform executes** (#1894): `403`. Such a run reaches its connections
+  from inside its sandbox, through its sidecar. `X-Run-Id` names the caller's
+  own in-flight run that the caller executes itself, a remote run.
+
+- **BREAKING (API): the credential proxy sends upstream no header describing
+  the platform's own inbound request** (#1894). One rule,
+  `isPlatformRequestHeader` (`@appstrate/connect/platform-request-headers`),
+  read by the credential proxy and by the LLM proxies' forwarding policy,
+  names them: the caller's platform credential (`Authorization`, `Cookie`),
+  its tenancy, run and role preview (`X-Org-Id`, `X-Space-Id`, `X-Run-Id`,
+  `X-View-As`), the platform's markers and versioning (`X-Appstrate-*`,
+  `Appstrate-*`), the network path an edge adds on the way in (`Forwarded`,
+  `Via`, `X-Forwarded-*`, the client-IP headers, `CDN-Loop`, Cloudflare's
+  `CF-*`) and the identity an auth proxy asserts (AWS ALB OIDC, Azure App
+  Service, Google IAP, oauth2-proxy). A Cloudflare Access service-token pair
+  (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) is relayed: it is the
+  caller's credential for its upstream. A caller's own `Cookie` header does
+  not reach the upstream; the cookies an upstream sets are kept and replayed
+  from the server-side jar of the `X-Session-Id` session.
+
+- **BREAKING (MCP): the credential proxy is reached through `api_call`, not
+  `invoke_operation`** (#1894). The five `credentialProxy*` operations are
+  not in the operation catalog (`search_operations`, `describe_operation`,
+  `invoke_operation`); `list_connections` and `api_call` are the MCP path
+  (see Added).
+
+- **BREAKING: the audit action `integration.connection.proxied` no longer
+  exists** (#1894). It recorded the first use per session of a connection the
+  caller did not own. The call journal records every call instead (see
+  Added).
+
+- **The credential proxy answers `500 session_store_unavailable` when the
+  upstream answered but its cookies could not be saved** (#1894), with
+  `Proxy-Status` error `proxy_internal_error`, and withholds the response.
+  The call took effect upstream, so a retry repeats it; the call journal
+  records that code.
+
+- **`appstrate run` says when its integration calls are made outside a run**
+  (#1894). A run executed locally with no run registered on the instance
+  (`--report=false`, or a registration that failed under `--report-fallback
+console`) prints once, before it starts, that its integration calls require
+  `credential-proxy:direct` and reach the caller's own connections only, and
+  that with `--report` they go through the run (`credential-proxy:call`).
+  Nothing is printed under `--json`. A refused call reaches the agent as the
+  tool's error; nothing is retried.
 
 - **BREAKING (API): an undeclared override key has its own code, on both
   maps.** A key naming an id the agent does not declare answers
@@ -772,6 +873,55 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Added
 
+- **`GET /api/credential-proxy/connections`** (#1894): what the caller can
+  call through the credential proxy outside a run, read with the rule the
+  proxy applies. Per connection: the `integration_id` and `connection_id` to
+  send, its label and auth, `scopes_granted`, the auth's `authorized_uris`,
+  `allow_all_uris`, and the two flags a call would still be refused on,
+  `needs_reconnection` and `run_required`. It decrypts nothing: an
+  `authorized_uris` entry templated on a credential field is given as the
+  manifest declares it (`{$credential.<field>}`), and a caller targets it by
+  writing `{{<field>}}` at that place in the target. Requires
+  `credential-proxy:direct`.
+
+- **A journal of the credential proxy's calls** (#1894). Every call that may
+  have sent a connection's credential writes one row once its outcome is
+  known: who acted and through which API key, the connection and its owner,
+  the integration, the run it named, the method, the target's host and path,
+  the outcome, the duration and the `Request-Id`. The outcome is the
+  upstream's status for a response relayed, the proxy's own code for a
+  failure after dispatch, a buffered body that breaks off after its headers
+  included. A refusal decided before anything was sent writes none. Two
+  reads, JSON or `?format=csv`, newest first, paginated by the `Link` header:
+  - `GET /api/me/connections/{connectionId}/calls`: the connection's owner
+    reads every call made with it, whoever made it and from whichever space;
+  - `GET /api/integrations/calls`: a holder of `integrations:configure` reads
+    every call made in the space.
+
+  Limits: it covers the platform proxy only (calls outside a run and the
+  calls of remote runs), so an `api_call` made by a run the platform executes
+  is in that run's logs, not here. Host and path are stored as the caller
+  wrote them, before substitution and without userinfo, query string or
+  fragment: a `{{field}}` placeholder is kept as written, and so is a secret
+  written literally in a path. A row is written best-effort, off the response
+  path. A streamed response is journaled when it is handed over. The owner's
+  read answers `404` once the connection is deleted; the space's read still
+  lists its calls. No retention job exists.
+
+- **MCP: `list_connections` and `api_call`** (#1894), declared to a bearer
+  caller holding `mcp:invoke` and `credential-proxy:direct`.
+  `list_connections` is the listing above. `api_call` sends 1 to 50 requests
+  through the credential proxy in one call, each with typed arguments
+  (integration, method, target, headers, body, connection) in place of the
+  route's control headers, and returns one entry per request, in order: the
+  upstream's status, a few headers and a text body cut at
+  `max_response_bytes`, or the platform's refusal of that request, which does
+  not stop the others. One result carries a bounded total of body bytes. The
+  tool generates the proxy session and returns its `session_id`, to pass back
+  to keep the upstream's cookies; `run_id` makes the calls for one of the
+  caller's own remote runs, which requires `credential-proxy:call`. Guide:
+  `docs/guides/connecting-mcp-clients.md`.
+
 - **Boot warning for environment keys this version does not read.** One `warn`
   line lists each set key whose namespace is one the platform reads and that no
   current setting consumes, so a renamed, retired or misspelled variable is
@@ -970,6 +1120,12 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   the payload Pi builds.
 
 ### Fixed
+
+- **An `Idempotency-Key` sent to the credential proxy reaches the upstream**
+  (#1894). On `/api/credential-proxy/proxy` the header is the upstream's
+  (Stripe's, for one): it is relayed with the caller's other headers,
+  whatever the verb, where a mutating call carrying one was refused `400
+idempotency_not_supported`. The platform de-duplicates nothing on it.
 
 - **A session is refused for a user with no user row.** The session hook throws
   instead of creating a session without a realm.

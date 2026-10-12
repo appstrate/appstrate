@@ -150,10 +150,18 @@ const ADMIN_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = SPACE_LEVEL_
 /** Families a `builder` authors and operates with, but does not govern. */
 const BUILDER_EXCLUDED_PREFIXES = ["space-settings:", "space-members:", "api-keys:"] as const;
 
-/** `builder`: author and operate — admin minus the governance surfaces. */
+/**
+ * `builder`: author and operate — admin minus the governance surfaces, and
+ * minus `credential-proxy:direct`. Authoring and running agents takes the proxy
+ * for a run (`credential-proxy:call`, which a builder holds), not outside one:
+ * `credential-proxy:direct` is held by the `admin` preset alone, and reaches
+ * anyone else through a custom role or an API key.
+ */
 const BUILDER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
   [...ADMIN_PRESET_PERMISSIONS].filter(
-    (p) => !BUILDER_EXCLUDED_PREFIXES.some((prefix) => p.startsWith(prefix)),
+    (p) =>
+      p !== "credential-proxy:direct" &&
+      !BUILDER_EXCLUDED_PREFIXES.some((prefix) => p.startsWith(prefix)),
   ),
 );
 
@@ -332,11 +340,16 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Credential proxy — BYOI ("Bring Your Own Instance") for remote
-  // AFPS runs. High-value scope: one compromised API key can reach every
-  // provider in the space. A key minted with `scopes` omitted or empty carries it
-  // when its creator holds it; a non-empty `scopes` mints a narrower key.
+  // Credential proxy for a run — `/api/credential-proxy/proxy` with `X-Run-Id`,
+  // the BYOI ("Bring Your Own Instance") path of remote AFPS runs, reaching the
+  // connections the run bound. A key minted with `scopes` omitted or empty
+  // carries it when its creator holds it; a non-empty `scopes` mints a narrower key.
   "credential-proxy:call",
+  // Credential proxy outside a run — no `X-Run-Id`, on the caller's own
+  // connections. `admin` is the one preset holding it, so a key carries it from
+  // a creator who is a space admin or whose custom role holds it, under the same
+  // `scopes` rule.
+  "credential-proxy:direct",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered
   // per-call in `llm_usage` (source='proxy'). A key minted with `scopes` omitted or
