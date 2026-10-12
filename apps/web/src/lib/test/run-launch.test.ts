@@ -148,7 +148,6 @@ describe("retryLaunch", () => {
     expect(retryLaunch({ rerun_from: "run_1", version: "1.0.0" }, [])).toEqual({
       rerun_from: "run_1",
       version: "1.0.0",
-      connectionOverrides: {},
     });
   });
 
@@ -160,7 +159,7 @@ describe("retryLaunch", () => {
       generation: { temperature: 0.2 },
       dependencyOverrides: { "@acme/skill": "draft" },
     };
-    expect(retryLaunch(launch, [])).toEqual({ ...launch, connectionOverrides: {} });
+    expect(retryLaunch(launch, [])).toEqual(launch);
   });
 
   it("drops the launch's own pick the 409 refuses: replayed, it would be refused again", () => {

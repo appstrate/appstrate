@@ -106,7 +106,8 @@ export function retryLaunch(
   launch: RunLaunch,
   errors: readonly MissingIntegrationFieldError[],
 ): RunLaunch {
-  const own = launch.connectionOverrides ?? {};
+  const own = launch.connectionOverrides;
+  if (!own) return launch;
   const refused = new Set(
     errors.flatMap((e) => {
       const id = integrationIdOfField(e.field);
