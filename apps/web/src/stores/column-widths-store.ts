@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useSyncExternalStore } from "react";
-import { authStore } from "./auth-store";
 
 /**
  * The widths a person gave a table's columns, remembered across reloads.
  *
- * Same call as `column-visibility-store.ts`: a convenience per person and per
- * table, never a location, and the table works without it. `localStorage` can
+ * Same call as `column-visibility-store.ts`: a convenience per browser and per
+ * table, never a location, and the table works without it. Keyed like that
+ * store, by table only: no account identifier is written to storage. `localStorage` can
  * be absent (the test runner), blocked or full, so every access is guarded and
  * a failure only costs the person the width they chose.
  */
@@ -21,9 +21,8 @@ const listeners = new Set<() => void>();
 /** Cached per key so `getSnapshot` returns a stable reference between writes. */
 const snapshots = new Map<string, ColumnWidths>();
 
-/** One person's widths for one table: two accounts in one browser keep their own. */
 function storageKey(table: string): string {
-  return `${PREFIX}${authStore.getState().user?.id ?? "anonymous"}-${table}`;
+  return `${PREFIX}${table}`;
 }
 
 function read(table: string): ColumnWidths {

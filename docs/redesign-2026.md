@@ -3963,14 +3963,14 @@ colour and logo (deferred by decision, twice — do not start it).
   is digits — substring, no index, `pg_trgm` the day a workspace holds hundreds
   of thousands of runs), and `?user=me` composes with every other filter
   instead of taking a separate path.
-- **`?user=me` combines now** (`listGlobalRuns({ mine })`). It used to take a
-  separate query that dropped `kind`, `status` and the date range on the floor,
-  so the screen showed two filters as active and the server applied one — the
-  toolbar could not have been drawn honestly on top of it. One behaviour change
-  came with it: an END-USER passing `chat_session_id` now gets nothing rather
-  than their own runs, because chat sessions belong to members and the filter
-  is no longer ignored for them. That is the correct answer to the question
-  asked, but it is a change.
+- **`?user=me` combines** with every other filter. It used to take a separate
+  query that dropped `kind`, `status` and the date range on the floor, so the
+  screen showed two filters as active and the server applied one. Main's
+  visibility rule (#1307) now carries it: `?user=me` is `ownRunsFilter`, a WHERE
+  fragment passed to `listGlobalRuns` as `visibility`, which composes with the
+  rest. (The `mine` option this branch once added to `listGlobalRuns` is gone:
+  it used `actorScopeFilter`, whose `user_id IS NULL` arm widens a member's
+  view to every end-user run, the very thing `runs:read-all` gates.)
 - ~~**Some page actions were still a filled blue.**~~ Fixed 22 August, and the
   gap was the SETTINGS surfaces: the two treatments were applied to the list
   screens when they were written and never to the settings ones, which was

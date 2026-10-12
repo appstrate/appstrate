@@ -51,7 +51,7 @@ import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
-import { type Actor, actorFilter, actorScopeFilter } from "../../lib/actor.ts";
+import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
@@ -1828,17 +1828,6 @@ interface ListGlobalRunsOptions {
    * then.
    */
   search?: string;
-  /**
-   * Narrow to what the caller may call their own: their own runs plus the
-   * unattributed ones (schedule- and system-triggered) for a member, strictly
-   * their own for an end-user — {@link actorScopeFilter} owns that semantic.
-   *
-   * It is an option here rather than its own function because it has to COMPOSE
-   * with the filters below. `GET /api/runs?user=me` used to take a separate
-   * code path that dropped `kind`, `status` and the date range on the floor:
-   * the UI showed "my runs" and "failed" both selected and served neither.
-   */
-  mine?: boolean;
   actor?: Actor | null;
   /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
   visibility?: SQL;
@@ -1858,7 +1847,6 @@ export async function listGlobalRuns(
     endDate,
     chatSessionId,
     search,
-    mine = false,
     actor = null,
     visibility,
     canReadAgentInput = false,
@@ -1866,14 +1854,6 @@ export async function listGlobalRuns(
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
-  if (mine) {
-    // Fail CLOSED. `actor` is optional on this options object, so a caller
-    // asking for "mine" without saying whose would otherwise get the whole
-    // org — a filter that widens instead of narrowing, which is the one
-    // failure mode this endpoint spends 400s to avoid elsewhere.
-    if (!actor) throw new Error("listGlobalRuns: `mine` requires an actor");
-    conditions.push(actorScopeFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
-  }
   if (status) {
     const wanted = Array.isArray(status) ? status : [status];
     // An empty list would produce `IN ()` — SQL for "nothing", where the caller

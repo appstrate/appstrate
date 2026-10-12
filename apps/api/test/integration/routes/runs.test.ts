@@ -813,18 +813,19 @@ describe("Runs API", () => {
       expect(body.data[0]!.id).toBe(mineFailed.id);
     });
 
-    it("keeps the unattributed runs a member is meant to see under ?user=me", async () => {
-      // "Mine" is not "runs carrying my id": a schedule- or system-triggered
-      // run has no user at all, and a member has always seen those in their own
-      // view (`actorScopeFilter`). It is the half of that condition a refactor
-      // is most likely to drop, and dropping it empties the view for anyone
-      // whose agents run on a schedule.
+    it("leaves the unattributed runs to runs:read-all under ?user=me", async () => {
+      // `?user=me` is `ownRunsFilter` (`actorFilter`), the narrow half of the
+      // run-visibility rule: "mine" is the runs this principal launched. A row
+      // with no actor (no live launch path writes one; a schedule's runs carry
+      // the schedule's frozen actor) is a `runs:read-all` row, because the
+      // `user_id IS NULL` arm of `actorScopeFilter` would also match every
+      // end-user's run for a member (RBAC spec §3.4).
       await seedAgent({
         id: "@runorg/unattributed-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      const scheduled = await seedRun({
+      const unattributed = await seedRun({
         packageId: "@runorg/unattributed-agent",
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
@@ -832,11 +833,14 @@ describe("Runs API", () => {
         status: "success",
       });
 
-      const res = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
+      const mine = await app.request("/api/runs?user=me", { headers: authHeaders(ctx) });
+      expect(mine.status).toBe(200);
+      const mineBody = (await mine.json()) as { data: { id: string }[] };
+      expect(mineBody.data.map((r) => r.id)).not.toContain(unattributed.id);
 
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { data: { id: string }[] };
-      expect(body.data.map((r) => r.id)).toContain(scheduled.id);
+      const all = await app.request("/api/runs", { headers: authHeaders(ctx) });
+      const allBody = (await all.json()) as { data: { id: string }[] };
+      expect(allBody.data.map((r) => r.id)).toContain(unattributed.id);
     });
 
     it("takes several statuses at once", async () => {

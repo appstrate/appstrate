@@ -558,12 +558,6 @@ export function createRunsRouter() {
     // not grantable to them, so `runVisibilityFilter` already yields exactly
     // their own runs — and either way the list composes with every filter
     // below, instead of a self-view that quietly drops them.
-    // `?user=me` narrows to the caller's own runs even when `runs:read-all`
-    // would have widened the list; without it the caller reads whatever their
-    // permission allows. An end-user needs no branch of its own: `read-all` is
-    // not grantable to them, so `runVisibilityFilter` already yields exactly
-    // their own runs — and either way the list composes with every filter
-    // below, instead of a self-view that quietly drops them.
     const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);

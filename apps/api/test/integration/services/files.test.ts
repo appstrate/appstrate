@@ -437,8 +437,17 @@ describe("files service + routes", () => {
 
   it("searches the complete file collection by name before pagination", async () => {
     const runId = await seedRunRow(scope);
-    const matching = await publishStream(scope, runId, "Quarterly Forecast.pdf", "forecast");
-    await publishStream(scope, runId, "Meeting notes.txt", "notes");
+    // A published file copies its run's attribution (`getRunAttribution`), and a
+    // member without `runs:read-all` only reads the rows attributed to them.
+    const attribution = { userId: ctx.user.id, endUserId: null };
+    const matching = await publishStream(
+      scope,
+      runId,
+      "Quarterly Forecast.pdf",
+      "forecast",
+      attribution,
+    );
+    await publishStream(scope, runId, "Meeting notes.txt", "notes", attribution);
 
     const page = await listFilesForActor(
       scope,

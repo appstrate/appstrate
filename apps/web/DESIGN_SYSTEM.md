@@ -307,9 +307,9 @@ its fixtures.
      (cursor `col-resize`): drag it, double-click it to fit the column to its
      longest content (one click to see the full names), or focus it and use the
      arrows (Shift for a bigger step, Enter to fit). A column never goes below
-     its track's floor. The width is the person's: it is kept per table (its
-     `label`) and per account in `localStorage`
-     (`stores/column-widths-store.ts`, a phone keeps its own), and the table
+     its track's floor. The width is kept per table (its `label`) in
+     `localStorage`, like the hidden columns: no account identifier is written
+     to storage (`stores/column-widths-store.ts`, a phone keeps its own), and the table
      works without it. The row's end and fixed-size ticks have no handle.
 - **List state lives in the URL** (`lib/list-params.ts`: `useListParams` on a
   page, `useLocalListParams` in a panel that floats over a page): filters are
