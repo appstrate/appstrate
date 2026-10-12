@@ -19,9 +19,7 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
  * the run-detail page header, where the page title, the tabs and the banners
  * already carry most of the columns, so they move into the details panel.
  *
- * This replaces the old `disableLink` boolean, which meant "rendered on the
- * detail page" under a name that described only one of its consequences. Two
- * props for one distinction is exactly the duplication #1046 exists to remove.
+ * One prop for one distinction: where the row is rendered.
  */
 type RunRowVariant = "list" | "detail";
 
@@ -42,7 +40,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
  *   - start date, proxy → `run-execution-tab.tsx` (`run.infoStartedAt`,
  *     `run.infoProxy`)
  *   - the four token buckets → same pane; only their SUM is here, because that
- *     is the figure #1046 demotes from the header and the pane never shows it
+ *     is a figure the header leaves out and the pane never shows
  *   - `#N` → the page title
  *   - the run TYPE → the top line itself, in both variants, via `RunTypeBadge`
  * The Fichiers tab badge shows a total, never the in/out split, so the split

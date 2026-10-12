@@ -266,7 +266,7 @@ export interface SpaceMemberRemoval {
  *  - the **grant** bound, on `accessAfter`: dropping an explicit restriction can
  *    hand out the open space's default role, so the caller must have been able
  *    to grant it. At the route this rested on an org role a concurrent
- *    promotion could move before the DELETE ran (#1439).
+ *    promotion could move before the DELETE ran.
  *  - the **manage** bound, on the row being dropped: without it,
  *    `space-members:remove` alone ejects a space admin, because a removal in a
  *    `closed` or `private` space exposes no implicit role for the grant bound

@@ -62,7 +62,7 @@ export type HttpDeliveryInjectionDecision =
  * This is the single rendering + override-policy seam for remote MCP, MITM,
  * credential-proxy, and portable `api_call` callers. It never inspects or
  * normalises `plan.value`: a valid secret whose bytes happen to start with an
- * auth-scheme word must reach the upstream unchanged (#988).
+ * auth-scheme word must reach the upstream unchanged.
  *
  * AFPS §7.6 defines `prefix` as a literal prepended to the rendered value, so
  * it is concatenated verbatim — an `Authorization` scheme carries its own

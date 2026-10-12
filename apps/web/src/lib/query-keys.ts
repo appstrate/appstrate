@@ -61,7 +61,7 @@ export function invalidateRunLogs(qc: QueryClient, orgId: Id, spaceId: Id, runId
  * Refetch every cached run detail after a mutation whose file container is
  * not available at the hook call site. Deleting a produced file changes the
  * run's `file_counts`, which is what the run page's tab badge and its
- * single-file presentation rule (#1177) are derived from; invalidating only
+ * single-file presentation rule are derived from; invalidating only
  * file queries would leave the page counting a row that no longer exists.
  */
 export function invalidateRunDetails(qc: QueryClient) {

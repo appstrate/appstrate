@@ -15,7 +15,7 @@ export function integrationIdOfField(field: string): string {
 }
 
 /** One `errors[]` item of a `409 missing_integration_connection`. */
-export type MissingIntegrationFieldError = components["schemas"]["ResolutionFieldError"];
+export type MissingIntegrationFieldError = components["schemas"]["ConnectionResolutionItem"];
 
 type ConnectionChoiceCandidate = NonNullable<
   MissingIntegrationFieldError["candidate_connections"]
@@ -39,7 +39,9 @@ export interface ConnectionChoice {
   candidates: ConnectionChoiceCandidate[];
 }
 
-function isScheduleChoiceCode(code: string): code is ConnectionChoice["code"] {
+function isScheduleChoiceCode(
+  code: MissingIntegrationConnectionCode,
+): code is ConnectionChoice["code"] {
   return SCHEDULE_CHOICE_CODES.some((c) => c === code);
 }
 
@@ -135,13 +137,13 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
 export type ConnectionOverridesMap = Record<string, string[]>;
 
 /** Verdicts raised before any account is looked at: no pick fixes them. */
-const STRUCTURAL_CODES: ReadonlySet<string> = new Set([
+const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
   "auth_key_serves_no_selected_tool",
   ...INTEGRATION_MANIFEST_FAILURE_CODES,
-] satisfies MissingIntegrationConnectionCode[]);
+]);
 
-export function isStructuralCode(code: string): boolean {
+export function isStructuralCode(code: MissingIntegrationConnectionCode): boolean {
   return STRUCTURAL_CODES.has(code);
 }
 

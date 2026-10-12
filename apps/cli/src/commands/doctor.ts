@@ -3,7 +3,7 @@
 /**
  * `appstrate doctor` — list every appstrate binary on $PATH.
  *
- * Issue #249, phase 3. This command file is the thin I/O wrapper —
+ * This command file is the thin I/O wrapper —
  * `lib/doctor.ts` owns the algorithm + formatting so tests can assert on
  * the rendered output without touching commander or the real PATH.
  */

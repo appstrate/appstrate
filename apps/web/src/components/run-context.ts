@@ -6,8 +6,8 @@
  * Two surfaces read it — the run-header gauge (`ContextGaugeReadout`) and the
  * Exécution pane's per-turn table (`TurnsTable`, in `run-execution-tab.tsx`) —
  * and they must agree: a header
- * saying `64 %` above a table whose widest bar is always full is exactly the
- * disagreement #1046 exists to remove. This module is the single derivation;
+ * saying `64 %` above a table whose widest bar is always full is the
+ * disagreement to avoid. This module is the single derivation;
  * the two components only render what it returns.
  *
  * Split from both components for the same reason `run-cost.ts` is: the web test

@@ -24,7 +24,7 @@
 # (in `bun run check`) enforces it: it refuses a fallback behind the newest `v*`
 # tag, and demands exact equality with the tag on a release push. It exists
 # because this instruction went unread for twelve releases — the fallback sat at
-# 1.0.0-beta.41 through v1.0.0-beta.54, and the #1201 image-trio boot guard
+# 1.0.0-beta.41 through v1.0.0-beta.54, and the image-trio boot guard
 # cannot see it (all three images take the SAME stale fallback, so they agree).
 #
 # It is not `latest`: GHCR only receives a `latest` tag for a non-prerelease

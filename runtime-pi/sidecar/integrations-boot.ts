@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sidecar-side integration bootstrap (Phase 1.4 + 1.5).
+ * Sidecar-side integration bootstrap.
  *
  * Reads the `INTEGRATIONS_TO_SPAWN_JSON` env var produced by the
  * platform launcher (see `apps/api/src/services/run-launcher/pi.ts`),
@@ -12,7 +12,7 @@
  * future: Firecracker microVM, podman, …), and aggregates their tools
  * on a shared {@link McpHost}.
  *
- * Phase 1.5 also wires per-connection HTTPS MITM listeners for auths
+ * It also wires per-connection HTTPS MITM listeners for auths
  * that declare `delivery.http`: a per-run CA is minted on boot, each
  * such bound connection gets a credentials source (cache + refresh hook) +
  * listener bound on the adapter's preferred interface, and the listener
@@ -247,7 +247,7 @@ async function fetchBundleBytes(
   serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  // #588 — the platform pins a concrete version at run kickoff; forward it so
+  // The platform pins a concrete version at run kickoff; forward it so
   // the bytes match the manifest the spawn-resolver read. Only a system
   // mcp-server has none (boot registry, single version, served by id alone) —
   // for anything else the route rejects an absent `?version=`.
@@ -310,7 +310,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
 }
 
 /**
- * Phase 7 — connect to a remote Streamable HTTP MCP server using the
+ * Connect to a remote Streamable HTTP MCP server using the
  * actor's live credentials. Auth-type-agnostic: reads the resolved
  * `HttpDeliveryPlan` per request from the credentials source so the same
  * code path handles OAuth2 (refresh-aware Bearer), api_key (static PAT
@@ -333,14 +333,14 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
  * tie-breaker should the payload ever surface more than one. Throws when no
- * auth produces an injectable header — Phase 7 can't run an MCP client
+ * auth produces an injectable header — a remote MCP client cannot run
  * without authentication (every public hosted MCP today gates `tools/call`
  * behind some credential).
  */
 /**
  * Dependency seam for {@link connectRemoteHttpIntegration} — production
  * callers omit it (the default wires the real Streamable HTTP client). The
- * credentials source is no longer a dep: the caller hoists ONE source per
+ * credentials source is not a dep: the caller hoists ONE source per
  * integration and passes it in directly, so tests inject a fake source as the
  * second positional argument instead. Unit tests still override `createClient`
  * / `createSseClient` to exercise the per-request Bearer injection +
@@ -738,14 +738,14 @@ interface SpawnAndConnectResult {
  * collectors AS they are created, so a throw mid-pipeline still lets the
  * caller's teardown reclaim a half-built listener/client (no leak on error).
  */
-/** Max runner-stderr lines retained per runner for failure reports (#779). */
+/** Max runner-stderr lines retained per runner for failure reports. */
 const STDERR_TAIL_MAX_LINES = 20;
 /** Cap per stderr line folded into a failure report — avoids a runaway blob. */
 const STDERR_LINE_MAX_CHARS = 500;
 
 /**
  * Best-effort secret scrub for a runner stderr line before it is folded
- * into a run's failure report (#779). Runner stderr already flows to the
+ * into a run's failure report. Runner stderr already flows to the
  * sidecar's own logs; surfacing it in the run report widens the audience
  * to the operator who triggered the run, so scrub the high-signal
  * credential shapes a third-party server might print on a failed auth
@@ -766,7 +766,7 @@ export function scrubStderrLine(line: string): string {
 
 /**
  * Operator override for the per-call MCP tool timeout applied to
- * integration clients (#779 annex). Absent/invalid → `undefined` → the
+ * integration clients. Absent/invalid → `undefined` → the
  * MCP SDK default applies, unchanged behaviour. Third-party servers that
  * do a cold OAuth refresh on their first tool call can legitimately need
  * more. Unlike the connect deadline (a fixed constant — no writer ever set
@@ -830,7 +830,7 @@ async function spawnAndConnectLocalIntegration(params: {
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
   /**
-   * Caller-owned bounded tail of the runner's stderr lines (#779). The
+   * Caller-owned bounded tail of the runner's stderr lines. The
    * spawn pipeline pushes every line (capped at
    * {@link STDERR_TAIL_MAX_LINES}); on failure the caller folds the tail
    * into the recorded error so the actual cause (an OAuth 405, a module
@@ -841,12 +841,12 @@ async function spawnAndConnectLocalIntegration(params: {
 }): Promise<SpawnAndConnectResult> {
   const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
 
-  // One listener per connection, picked MITM-first (#543). `egressCtx` is
+  // One listener per connection, picked MITM-first. `egressCtx` is
   // handed to the adapter as the runner's HTTPS_PROXY:
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
   //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
   //   - neither          → null: the runner has no egress route.
-  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
+  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner.
   let egressCtx: RuntimeEgressContext | null = null;
   const policy = compileRunnerEgressPolicy(
     spec.egress ?? { authorizedUris: [], declaredUris: [], allowAllUris: false },
@@ -1047,8 +1047,8 @@ async function spawnAndConnectLocalIntegration(params: {
     namespace: spec.namespace,
     client: wrapped,
     connection: spec.connection,
-    // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
-    // declared tools. `undefined` keeps the legacy "all tools allowed".
+    // McpHost.register filters `tools/list` to the agent's
+    // declared tools. `undefined` allows every tool.
     ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
     // R8a — apply `hidden_tools` belt-and-suspenders filter so a tool name
     // the manifest hides is never reachable, even via fixtures that bypassed
@@ -1172,7 +1172,7 @@ export function hiddenToolsForNativeUpstream(
  * Whether the spec's entire surface is the in-process `api_call` server. The
  * resolver signals it with `sourceKind: "none"` AND an absent
  * `manifest.server`; both are checked because a hand-written spec in a test
- * has historically set only one.
+ * may set only one.
  */
 function isServerlessSpec(spec: IntegrationSpawnSpec): boolean {
   return spec.sourceKind === "none" || !spec.manifest.server;
@@ -1291,7 +1291,7 @@ export async function bootIntegrations(
     });
     throw err;
   }
-  // ─── Phase 1.5 (kickoff) — MITM run-CA mint, raced with adapter.prepare ───
+  // ─── MITM run-CA mint, raced with adapter.prepare ───
   // The CA mint (openssl keygen + self-sign, ~100 ms) only needs the runId;
   // it has no dependency on the adapter context, so it runs concurrently
   // with `adapter.prepare` instead of serializing after it — the agent's
@@ -1336,7 +1336,7 @@ export async function bootIntegrations(
     data: { adapter: adapter.id, prepareMs: Math.round(adapterPrepareMs) },
   });
 
-  // ─── Phase 1.5 (converge) — MITM bring-up (run-CA + cert minter) ───
+  // ─── MITM bring-up (run-CA + cert minter) ───
   // The CA was minted once per run (kicked off above, concurrent with the
   // adapter phase), regardless of how many integrations need it.
   // Per-connection listeners share the same minter (lazily creates leaf
@@ -1383,7 +1383,7 @@ export async function bootIntegrations(
 
   for (const spec of specs) {
     const specStart = performance.now();
-    // #779 — bounded tail of the runner's stderr, folded into the failure
+    // Bounded tail of the runner's stderr, folded into the failure
     // report below so the real cause (an OAuth 405, a crashed module, …)
     // reaches operators instead of living only in `docker logs`.
     const stderrTail: string[] = [];
@@ -1553,14 +1553,14 @@ export async function bootIntegrations(
         continue;
       }
 
-      // ─── Phase 7 — remote HTTP MCP path ───
+      // ─── Remote HTTP MCP path ───
       // When the spawn-spec declares `sourceKind: "remote"` the integration
       // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
       // No bundle to fetch, no runner to spawn, no MITM listener — the
       // sidecar opens a Streamable HTTP client directly and injects the
       // Bearer token per-request from the credentials source. Trade-off:
-      // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
-      // upstream URLs through a hosted MCP — the upstream decides).
+      // no per-tool upstream URL can be enforced through a hosted MCP —
+      // the upstream decides.
       if (spec.sourceKind === "remote") {
         if (!source) {
           // Unreachable: `sourceKind === "remote"` forces `needsSource`. Guard
@@ -1581,7 +1581,7 @@ export async function bootIntegrations(
           namespace: spec.namespace,
           client,
           connection,
-          // Phase 3 tool allowlist still applies — McpHost filters
+          // The tool allowlist applies here too — McpHost filters
           // tools/list before exposing them to the agent.
           allowedTools: spec.toolAllowlist,
           // R8a defensive — `manifest.hidden_tools` is enforced at
@@ -1631,7 +1631,7 @@ export async function bootIntegrations(
       // MITM is created only when the CA came up AND this integration declared
       // `delivery.http`. `mitmSource` is returned so the connect-login hook
       // (run-start acquisition, below) drives `setSessionOutputs` on the same
-      // source the MITM listener reads from. `spec.egress` (#543) is the
+      // source the MITM listener reads from. `spec.egress` is the
       // fallback: a no-injection runner that still needs an outbound route gets
       // a plain CONNECT egress listener instead.
       const wantsMitm =
@@ -1734,7 +1734,7 @@ export async function bootIntegrations(
       // bug.
       const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       const ms = Math.round(performance.now() - specStart);
-      // #779 — append the runner's stderr tail so the boot report carries
+      // Append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom
       // (e.g. "MCP connect timeout (30s)" hiding an OAuth 405 underneath).
       const stderrSuffix =

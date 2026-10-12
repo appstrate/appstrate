@@ -11,9 +11,7 @@
  * {@link buildPublishFileDef} because it needs an injected HTTP uploader
  * only the runtime entrypoint can supply.
  *
- * These were previously Pi-SDK extension factories baked into the runtime
- * image (`@appstrate/runner-pi/runtime-tools/builtin/*`). They are now plain
- * tool definitions so the SAME logic can be hosted two ways:
+ * They are plain tool definitions so the SAME logic can be hosted two ways:
  *
  *   1. As in-process MCP tools served by the credential-isolating sidecar
  *      (`runtime-pi/sidecar/server.ts`), exposed on the agent-facing `/mcp`
@@ -83,9 +81,7 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
  * Membership form of {@link CANONICAL_RUNTIME_TOOL_EVENT_TYPES}, for the trust
  * boundary in `reEmitRuntimeToolEvents`.
  *
- * Named CANONICAL, not ACCEPTED. It was briefly the latter, when it also held
- * the pre-#1177 `document.published` spelling; that member is gone and the
- * name outlived it. On a set whose whole job is to be closed, a name promising
+ * Named CANONICAL, not ACCEPTED: on a set whose whole job is to be closed, a name promising
  * a wider membership than it has is an invitation to add one back.
  */
 const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(

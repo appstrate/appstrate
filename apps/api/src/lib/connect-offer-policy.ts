@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Request-side gate for the run-kickoff connect-offer relay (issue #1207): the
+ * Request-side gate for the run-kickoff connect-offer relay: the
  * caller ASKED for a `connect_url` (`RUN_CONNECT_OFFERS_HEADER`, whose docblock
  * says who may), and the actor could have minted the same link by hand — it
  * holds `integrations:connect`, the permission guarding the connect routes.

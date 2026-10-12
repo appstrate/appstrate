@@ -158,8 +158,7 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
 /**
  * Discriminated failure modes shared by every spawn-time package resolution.
  * Distinct from "package missing" so callers can log WHY a package was skipped
- * (a leaked diagnosis cycle in prod traced to the silent stale-draft/latest-bytes
- * split; see issue #588).
+ * (a silent stale-draft/latest-bytes split is otherwise undiagnosable).
  */
 type PublishedManifestFailure =
   | "not_found"
@@ -178,8 +177,8 @@ type PublishedManifestResolution =
  * Resolve a package to a CONCRETE published version honoring its pin, and
  * return that version's RAW manifest (unparsed — the caller validates with the
  * schema for its package type). This is the single version-resolution kernel
- * behind both the mcp-server spawn path (#588) and the integration spawn path
- * (#686): the manifest comes from `package_versions.manifest` for the SAME
+ * behind both the mcp-server spawn path and the integration spawn path:
+ * the manifest comes from `package_versions.manifest` for the SAME
  * `version` the byte route is told to serve, so manifest and bytes can never
  * skew.
  *
@@ -205,8 +204,8 @@ async function resolvePublishedManifest(
   // registry by id, which holds ONE version per id — so there is no version to
   // pin, and this returns `version: null`. (They do get `package_versions`
   // rows, written by `syncSystemPackagesToDb`; this path simply never consults
-  // them.) The byte route short-circuits on the same registry, so issue #588 —
-  // manifest and bytes drawn from different versions — cannot arise here; it
+  // them.) The byte route short-circuits on the same registry, so
+  // manifest and bytes drawn from different versions cannot arise here; that
   // only concerns separately-versioned local packages.
   const sys = getSystemPackages().get(packageId);
   if (sys) {
@@ -337,7 +336,7 @@ export async function resolveMcpServerForSpawn(
 }
 
 // ---------------------------------------------------------------------------
-// Integration manifest version resolution (#686)
+// Integration manifest version resolution
 // ---------------------------------------------------------------------------
 
 /**
@@ -435,7 +434,7 @@ export async function readIntegrationManifestAt(
 
 /**
  * Read an integration manifest for a RUN, honoring the version frozen on
- * `runs.resolved_integration_versions` (#686). The single decision point for
+ * `runs.resolved_integration_versions`. The single decision point for
  * "frozen version vs draft" — used by every run-scoped reader (credentials
  * resolver, byte-route authz) so the "no frozen entry → draft" fallback lives
  * in ONE place instead of a ternary duplicated per call site.
@@ -484,8 +483,8 @@ type RunIntegrationVersionsResult =
  * Resolve EVERY declared integration to a concrete manifest version for a run,
  * honoring each `dependencies.integrations.<id>` pin (and any per-run
  * `dependency_overrides`) against PUBLISHED versions — the integration-axis
- * sibling of `RunPackageCatalog` (#666) and the connection cascade snapshot
- * (#199). This is the single point the pin is enforced:
+ * sibling of `RunPackageCatalog` and the connection cascade snapshot.
+ * This is the single point the pin is enforced:
  *
  *   - Seeds the shared `manifestCache` with the resolved manifest keyed by
  *     packageId, so every kickoff reader threading that cache (connection
@@ -500,7 +499,7 @@ type RunIntegrationVersionsResult =
  * (422) rather than silently spawning the draft. Soft failures (package
  * missing / wrong type / invalid manifest) are left unseeded — the spawn
  * resolver already drops such integrations with a warning, and the runtime
- * reader falls back to the draft, matching pre-#686 behavior.
+ * reader falls back to the draft.
  */
 export async function resolveRunIntegrationVersions(params: {
   agentManifest: Record<string, unknown>;
@@ -537,7 +536,7 @@ export async function resolveRunIntegrationVersions(params: {
       } else {
         // not_found / wrong_type / invalid — soft. Leave the cache unseeded so
         // the spawn resolver's own miss-handling skips the integration and the
-        // runtime reader falls back to draft (pre-#686 behavior).
+        // runtime reader falls back to draft.
         logger.info("integration version left unresolved; falling back to draft", {
           integrationId: entry.id,
           reason: res.reason,

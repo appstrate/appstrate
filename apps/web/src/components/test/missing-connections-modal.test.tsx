@@ -27,7 +27,9 @@ const INTEGRATION = "@acme/slack";
 const AGENT = "@acme/ops";
 const WEB = "11111111-1111-4111-8111-111111111111";
 
-const fieldError = (code: string): MissingIntegrationFieldError => ({
+type Code = MissingIntegrationFieldError["code"];
+
+const fieldError = (code: Code): MissingIntegrationFieldError => ({
   field: `integrations.${INTEGRATION}`,
   code,
   message: code,
@@ -84,7 +86,11 @@ const UNBOUND = resolution({ warning: warning("not_connected") });
 const BLOCKED = resolution({ error_code: "must_choose_connection" });
 const label = (key: string) => i18n.t(`agents:${key}`);
 
-function renderRow(qc: QueryClient, version?: string, code = "must_choose_connection"): string {
+function renderRow(
+  qc: QueryClient,
+  version?: string,
+  code: Code = "must_choose_connection",
+): string {
   return render(
     <MissingRow
       err={fieldError(code)}

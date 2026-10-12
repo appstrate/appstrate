@@ -314,7 +314,7 @@ export async function runRemote(
   // one stderr line (the `⚠` advisory on `appstrate.error`): leaving it unset
   // would silently fall back to the sink's own `process.stderr.write` default,
   // so a caller that injected `writeStderr` would still get that line on the
-  // global stream — the very leak this seam exists to close (issue #1180).
+  // global stream — the very leak this seam exists to close.
   const consoleSink: EventSink = createConsoleSink({
     json: opts.json,
     verbosity: opts.verbosity ?? "normal",
@@ -634,8 +634,7 @@ async function triggerRun(
   // (apps/api/src/routes/runs.ts → `c.json(row, 201)`, same DTO as
   // `GET /runs/:id`). We read *only* its `id` — falling back to alternate
   // keys (`{ runId }`, `{ run.id }`, …) would silently mask a contract
-  // drift instead of failing fast at the boundary (#657 removed the
-  // legacy `runId` alias). The error body carries the unexpected payload
+  // drift instead of failing fast at the boundary. The error body carries the unexpected payload
   // so the user can debug a server mismatch without re-running with
   // extra logging.
   const payload = (await res.json().catch(() => null)) as {

@@ -38,7 +38,7 @@ class DockerWorkloadHandle implements WorkloadHandle {
  *
  * Returns the `HostConfig`/`User` overrides to merge into the
  * `createContainer` options: the socket bind + `user: "0:0"` + the
- * low-port sysctl for the transparent egress plane (#779) when
+ * low-port sysctl for the transparent egress plane when
  * integrations are present, otherwise an empty object (defaults apply).
  */
 export function sidecarSocketOverrides(
@@ -49,7 +49,7 @@ export function sidecarSocketOverrides(
     ? {
         binds: ["/var/run/docker.sock:/var/run/docker.sock"],
         user: "0:0",
-        // #779 — let the sidecar bind :53/:443/:80 on the per-run bridge for
+        // Let the sidecar bind :53/:443/:80 on the per-run bridge for
         // its transparent egress plane (DNS responder + SNI-passthrough).
         // Netns-scoped sysctl, not a capability: `CapDrop: ["ALL"]` stays.
         sysctls: { "net.ipv4.ip_unprivileged_port_start": "0" },
@@ -103,7 +103,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       // Warm the shared egress network so the first run doesn't pay the
       // create. The ID is deliberately NOT cached: it is re-resolved by
       // name on every use (createSidecar / createWorkload) so the process
-      // self-heals when the network disappears mid-lifetime (#834).
+      // self-heals when the network disappears mid-lifetime.
       docker.ensureNetwork(docker.EGRESS_NETWORK_NAME),
     ]);
     this.verifiedImages.add(env.PI_IMAGE);
@@ -122,7 +122,7 @@ export class DockerOrchestrator implements RunOrchestrator {
 
   async shutdown(): Promise<void> {
     // The egress network is intentionally left in place: it is durable
-    // infra shared with any other Appstrate process on this daemon (#834).
+    // infra shared with any other Appstrate process on this daemon.
     // Removing it here used to break the runs of a concurrently-running
     // instance, whose cached network ID went stale.
   }
@@ -289,7 +289,7 @@ export class DockerOrchestrator implements RunOrchestrator {
     // Resolve the egress network by name on every use (not a boot-time
     // cached ID): if it vanished mid-lifetime (`docker network prune`,
     // daemon restart, another Appstrate process), ensureNetwork recreates
-    // it and the run proceeds instead of 404ing until an API restart (#834).
+    // it and the run proceeds instead of 404ing until an API restart.
     const [platformApiUrl, platformNetwork, egressNetworkId] = await Promise.all([
       this.resolvePlatformApiUrl(),
       docker.detectPlatformNetwork(),
@@ -301,7 +301,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       baseEnv: pickOperatorSidecarEnv(),
       port: "8080",
       forwardProxyPort: "8081",
-      // Phase 1.4 — RUN_ID lets the sidecar stamp `appstrate.run=<runId>`
+      // RUN_ID lets the sidecar stamp `appstrate.run=<runId>`
       // on the integration runner containers it spawns, letting the
       // platform's orphan reaper match them back to the parent run.
       runId,
@@ -342,7 +342,7 @@ export class DockerOrchestrator implements RunOrchestrator {
       await docker.connectContainerToNetwork(platformNetwork.networkId, containerId);
     }
 
-    // #406 — parallel boot. Start the sidecar but DO NOT block on its
+    // Parallel boot. Start the sidecar but DO NOT block on its
     // `/health` here. The agent (started in parallel by pi.ts) drives
     // a retrying MCP handshake against `sidecar:8080/mcp`, which absorbs:
     //   - ECONNREFUSED while the sidecar is wiring its listener

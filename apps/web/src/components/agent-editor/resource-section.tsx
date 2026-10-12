@@ -116,7 +116,7 @@ export function ResourceSection({
   // §6.9, `services/package-catalog.ts`), so an agent can legally depend on a
   // package this space does not run, and the entry below stays visible for it.
   const { data: items, isLoading } = usePackageList(type);
-  // Without the type's read the catalog never loads (#1556): the declared
+  // Without the type's read the catalog never loads: the declared
   // entries are then all this section knows, listed by id.
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.2c — real X.509 generator backed by the system `openssl` CLI.
+ * Real X.509 generator backed by the system `openssl` CLI.
  *
  * Implements the {@link CertGenerator} contract exposed by
  * `@appstrate/connect/proxy-ca-planner`. Generates:

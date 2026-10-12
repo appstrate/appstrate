@@ -95,7 +95,7 @@ export async function runInlinePreflight(params: {
   /** The transport must authorize caller-selected sources before readiness reads their metadata. */
   authorizeDependencies: (manifest: AgentManifest) => Promise<void>;
   /**
-   * Run-kickoff connect-link relay (#1207), honoured on the fail-fast branch
+   * Run-kickoff connect-link relay, honoured on the fail-fast branch
    * only: accumulate mode serves the dry-run validator, which launches nothing
    * and so must not burn a single-use capability nobody will open. See
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).

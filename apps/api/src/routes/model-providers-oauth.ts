@@ -52,7 +52,7 @@ export const importBody = z
     /**
      * Optional. When omitted, the server derives the label from the provider's
      * `displayName` and dedupes against existing org credentials.
-     * `@appstrate/connect-helper` no longer invents one client-side.
+     * `@appstrate/connect-helper` does not invent one client-side.
      */
     label: z.string().min(1).max(120).optional(),
     access_token: z.string().min(1, "access_token is required"),
@@ -173,7 +173,7 @@ async function handlePairRedeem(c: Context<AppEnv>) {
   });
 
   // Deliberate operation-result shape (NOT the bare credential resource —
-  // flow-completion exception to the strict rule, #657): the helper's bearer
+  // flow-completion exception to the strict rule): the helper's bearer
   // is single-use and consumed by this request, so it cannot follow up with a
   // GET. `available_model_ids` is the provider's offer, for the helper's
   // terminal summary. The dashboard gets the created credential via

@@ -23,7 +23,7 @@ import {
 } from "../lib/hosted-connect-submit";
 
 /**
- * Standalone hosted connect form (issue #769) — the form half of the unified
+ * Standalone hosted connect form — the form half of the unified
  * connect portal. Reached when the dispatch endpoint
  * (`GET /api/integrations/connect/start`) redirects here: a non-OAuth session,
  * or an OAuth one that must first collect connection variables (AFPS §7.12).

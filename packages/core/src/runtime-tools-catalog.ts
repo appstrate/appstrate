@@ -3,8 +3,7 @@
 
 /**
  * Runtime tools catalog — the closed set of first-party tools the agent
- * runtime injects in-process (formerly the `@appstrate/{output,log,note,
- * pin}` `tool` packages, now baked into the runtime image).
+ * runtime injects in-process, baked into the runtime image.
  *
  * Every tool is opt-in per agent via the manifest's top-level
  * `runtime_tools: string[]` field — none is injected by default. The editor
@@ -126,7 +125,7 @@ export interface CanonicalizedRuntimeToolIds {
  * runnable while still telling its caller what was removed.
  *
  * There used to be an alias table mapping `publish_document` forward to
- * `publish_file` (#1177), kept because `runtime_tools` is persisted inside
+ * `publish_file`, kept because `runtime_tools` is persisted inside
  * agent manifests — including published ZIPs, which are immutable. It is gone:
  * no system package ships that spelling, and no stored manifest carries it. A
  * manifest that somehow did has the id DROPPED and reported here, never

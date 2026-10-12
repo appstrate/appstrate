@@ -120,8 +120,8 @@ function readRepository(value: unknown): string | undefined {
  * `homepage` / `repository` / … are author-controlled strings that end up in an
  * `href`, and `javascript:`, `data:` and `vbscript:` all parse as valid URLs —
  * so the rule is a protocol allowlist, not a successful parse. That allowlist
- * is `@appstrate/core/url`, the same primitive the integration page uses
- * (#1122): two copies of this check is how one of them ends up the lenient one.
+ * is `@appstrate/core/url`, the same primitive the integration page uses:
+ * two copies of this check is how one of them ends up the lenient one.
  *
  * A rejected value still renders, as plain text. Dropping the row would hide
  * exactly what someone auditing a package needs to see.

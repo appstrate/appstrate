@@ -116,7 +116,7 @@ export function OrgSettingsLayout() {
           label: t("orgSettings.tabOauth"),
           show: canReach("/org-settings/oauth") && dashboardSsoEnabled,
         },
-        // CLI sessions oversight (issue #251 Phase 3).
+        // CLI sessions oversight.
         {
           to: "/org-settings/cli-sessions",
           icon: Laptop,

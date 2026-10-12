@@ -10,7 +10,7 @@
  * invariants. Both call sites import THIS module directly — there is no
  * intermediate re-export to drift against:
  *   - `packages/core/src/zip.ts` calls `checkCompanionFiles` +
- *     `companionFilesFromRecord` inline (core no longer publishes a
+ *     `companionFilesFromRecord` inline (core does not publish a
  *     `./companion-files` subpath — removed in core 6.0.0).
  *   - `packages/afps-runtime/src/bundle/companion-files.ts` is a thin
  *     internal adapter (Map-accepting, throws `BundleError`) consumed by

@@ -122,6 +122,34 @@ describe("run-metric-broadcaster (integration)", () => {
     expect(eventData(evt, "run_metric").costSoFar).toBeCloseTo(0.0042, 5);
   });
 
+  it("broadcasts a drifted token_usage as not recorded, with the cost", async () => {
+    await db
+      .update(runs)
+      .set({ tokenUsage: { input_tokens: "many" } as never })
+      .where(eq(runs.id, runId));
+    const subId = "sub-drift";
+    trackSubscriber(subId);
+    const frame = new Promise<RealtimeEvent>((resolve) => {
+      addSubscriber({
+        id: subId,
+        filter: {
+          readAll: true,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          runId,
+          isAdmin: true,
+        },
+        send: resolve,
+      });
+    });
+
+    scheduleRunMetricBroadcast(runId);
+
+    const evt = await frame;
+    expect(evt.event).toBe("run_metric");
+    expect(evt.data).toMatchObject({ runId, tokenUsage: null, costSoFar: 0 });
+  });
+
   // ── trailing edge throttling ─────────────────────────────
 
   it("bursts within the throttle window collapse to one trailing emit", async () => {

@@ -243,7 +243,7 @@ export function validateAgainstSchema(
   // Empty-schema short-circuit — an agent that declares nothing accepts
   // anything. Kept (rather than always compiling) because it is the common
   // case and it echoes `data` back untouched; narrowed to
-  // {@link isUnconstrainedSchema} so it can no longer swallow a constraint.
+  // {@link isUnconstrainedSchema} so it cannot swallow a constraint.
   if (isUnconstrainedSchema(schema)) {
     return { valid: true, errors: [], data };
   }

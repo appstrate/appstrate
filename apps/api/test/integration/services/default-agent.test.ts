@@ -9,7 +9,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { validateManifest } from "@appstrate/core/validation";
-import { truncateAll } from "../../helpers/db.ts";
+import { eq } from "drizzle-orm";
+import { auditEvents } from "@appstrate/db/schema";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { provisionDefaultAgentForOrg } from "../../../src/services/default-agent.ts";
 import {
@@ -39,5 +41,26 @@ describe("provisionDefaultAgentForOrg", () => {
     expect(
       await isPackageActiveHere({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId),
     ).toBe(true);
+  });
+
+  it("records the publication in the organization's audit trail", async () => {
+    const ctx: TestContext = await createTestContext({ orgSlug: "starter-audit" });
+    const packageId = `@${ctx.org.slug}/hello-world`;
+
+    await provisionDefaultAgentForOrg(ctx.orgId, ctx.org.slug, ctx.user.id, ctx.defaultSpaceId);
+
+    const events = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.action, "package.version_created"));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actorType: "system",
+      resourceType: "package",
+      resourceId: packageId,
+      after: { type: "agent", version: "1.0.0" },
+    });
   });
 });

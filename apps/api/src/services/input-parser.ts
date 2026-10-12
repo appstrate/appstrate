@@ -84,13 +84,13 @@ export interface ParsedInput {
   /** Per-run proxy override (wire field `proxyId` on the request body). */
   proxyIdOverride?: string;
   /**
-   * Per-integration connection picks for THIS run (#199).
+   * Per-integration connection picks for THIS run.
    * Wire field `connectionOverrides` on the request body; flows into the
    * resolver's layer 3 (the launch override) and is persisted on `runs.connection_overrides`.
    */
   connectionOverrides?: ConnectionOverrides;
   /**
-   * Per-run dependency version overrides (#666). Wire field
+   * Per-run dependency version overrides. Wire field
    * `dependency_overrides`; flows into `buildAgentPackage` and is persisted
    * on `runs.dependency_overrides`. Flat shape:
    * `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. `"draft"` opts that
@@ -958,7 +958,7 @@ export async function parseRequestInput(
     }
   }
 
-  // `dependency_overrides` VALUE guard (#666). Flat map:
+  // `dependency_overrides` VALUE guard. Flat map:
   // packageId → "draft" | "<semver|dist-tag>". The map shape (object of
   // strings) is already guaranteed by the calling surface's schema; what a
   // shape check cannot express is whether each value is a resolvable

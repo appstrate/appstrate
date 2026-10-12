@@ -39,8 +39,8 @@ import { getEnv } from "@appstrate/env";
 
 // Register module-owned RBAC resources. OAuth client registration /
 // rotation / deletion is admin-tier — bakes the surface into the OIDC
-// admin tooling. CLI sessions covers the Phase 3 admin oversight from
-// issue #251 (read = list every member's active CLI sessions, delete =
+// admin tooling. CLI sessions covers the admin oversight
+// (read = list every member's active CLI sessions, delete =
 // force a member's device out from the dashboard). Declaring them here
 // instead of in core's static catalog means a deployment that disables
 // the OIDC module ships with zero dead scope strings.
@@ -287,7 +287,7 @@ const oidcModule: AppstrateModule = {
       grantTo: ["owner", "admin"],
       apiKeyGrantable: true,
     },
-    // Issue #251 Phase 3 — admin oversight of org members' CLI sessions.
+    // Admin oversight of org members' CLI sessions.
     // Owner + admin only; explicitly NOT API-key-grantable (a compromised
     // key with this scope could sign every member of the org out, which
     // would be a much wider blast radius than the key holder's intent).

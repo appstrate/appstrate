@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `/claim` — bootstrap-token redemption page (#344 Layer 2b).
+ * `/claim` — bootstrap-token redemption page.
  *
  * Renders only when `AppConfig.features.bootstrapTokenPending` is true,
  * which the API flips off the moment an organization is created (see

@@ -1233,7 +1233,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Mint a hosted Connect portal session (interactive, auth-type-agnostic)",
       description:
-        "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
+        "Porte A — the hosted **Connect** portal, the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1545,7 +1545,7 @@ export const integrationsPaths = {
             "application/json": {
               // Bare connection resource — same serializer as the
               // connections list / connect flows, not a hand-built
-              // subset (#657).
+              // subset.
               schema: integrationConnectionSchema,
             },
           },
@@ -1669,7 +1669,7 @@ export const integrationsPaths = {
             "application/json": {
               // Bare integration resource — same serializer as
               // GET /integrations/:packageId; the toggled gate is the
-              // resource's `block_user_connections` field (#657).
+              // resource's `block_user_connections` field.
               schema: integrationDetailSchema,
             },
           },

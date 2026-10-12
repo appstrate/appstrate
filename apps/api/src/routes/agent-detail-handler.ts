@@ -51,7 +51,7 @@ import { runVisibilityFilter } from "../lib/run-visibility.ts";
  * empty array: `skills: []` would say the agent declares none, which is false.
  *
  * Both skill branches project off the EFFECTIVE manifest, never off the package
- * object (#878), but they expose different sets: a versioned detail lists every
+ * object, but they expose different sets: a versioned detail lists every
  * DECLARED skill (bare id + range, straight from the manifest — no catalog
  * read) so the dependency-override UI can offer a pin for one that is missing,
  * while the draft detail lists only skills the org catalog resolves, enriched
@@ -129,8 +129,8 @@ async function buildDependencyGroups(
 /**
  * Build the canonical Agent detail DTO — the exact object the `GET` agent
  * detail endpoint serializes. Extracted so mutating endpoints (create / update /
- * fork / restore) can echo the full resource instead of an id-only stub
- * (issue #646), reusing the single GET serializer.
+ * fork / restore) can echo the full resource instead of an id-only stub,
+ * reusing the single GET serializer.
  *
  * `requireAccess` defaults to `true` (the GET semantics: the agent must be
  * ACTIVE in the current space). Mutation responses pass `false` — the caller
@@ -242,7 +242,7 @@ export async function buildAgentDetailDto(
     description: m.description,
     source: agent.source,
     // Canonical scope format includes the `@` sigil — same format the
-    // `{scope}` path params accept (issue #629).
+    // `{scope}` path params accept.
     scope: parsed ? `@${parsed.scope}` : null,
     version: m.version ?? null,
     // WHICH of the two definitions the fields above were projected from — the
@@ -265,7 +265,7 @@ export async function buildAgentDetailDto(
     // `locked_input_field`), so its stored value — the editor's, often a
     // credential or an account id — has no place in a launch payload. The
     // NAMES stay: they are what tells the form to render the field as imposed
-    // instead of asking for it (issue #1338).
+    // instead of asking for it.
     input: {
       ...(m.input ?? { schema: { type: "object", properties: {} } }),
       values: summaryOnly ? withoutLockedFields(storedValues, lockedFields) : storedValues,

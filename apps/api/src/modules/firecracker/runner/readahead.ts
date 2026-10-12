@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Host page-cache warmer for the guest boot artifacts (issue #835).
+ * Host page-cache warmer for the guest boot artifacts.
  *
  * Firecracker reads `rootfs.ext4` / `vmlinux` with buffered I/O, so once the
  * host page cache is warm every guest virtio-blk read is served from host

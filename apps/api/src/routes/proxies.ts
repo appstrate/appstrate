@@ -68,7 +68,7 @@ export function createProxiesRouter() {
         after: { label: data.label, url: data.url },
       });
       // Return the bare created resource — same shape as the GET list
-      // serializer — so callers don't need a follow-up GET (#657).
+      // serializer — so callers don't need a follow-up GET.
       const proxy = await getOrgProxy(orgId, id);
       if (!proxy) throw internalError();
       return c.json(proxy, 201);
@@ -99,7 +99,7 @@ export function createProxiesRouter() {
       // Return the bare *effective* default proxy resource — recomputed from
       // the list serializer (DB flag, or the system-default fallback when no
       // DB row is flagged) — so callers see the resulting state without a
-      // follow-up GET (#657). When no default remains in effect (unset with
+      // follow-up GET. When no default remains in effect (unset with
       // no system fallback) there is no resource: 204.
       const proxies = await listOrgProxies(orgId);
       const def = proxies.find((p) => p.is_default);
@@ -156,7 +156,7 @@ export function createProxiesRouter() {
         after: data,
       });
       // Return the bare updated resource — same shape as the GET list
-      // serializer — so callers don't need a follow-up GET (#657).
+      // serializer — so callers don't need a follow-up GET.
       const proxy = await getOrgProxy(orgId, proxyId);
       if (!proxy) throw notFound("Proxy not found");
       return c.json(proxy);

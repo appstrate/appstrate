@@ -51,7 +51,7 @@ export function mayConfigurePackage(space: SpaceGrant | undefined, type: Package
 
 /**
  * What co-authoring a package means for the caller, given their standing in its
- * HOME space (#1440).
+ * HOME space.
  *
  * Sharing a package is DISTRIBUTION — the recipient gets it placed in their own
  * space and runs it with their own credentials. Working on the live object is a

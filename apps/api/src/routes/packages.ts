@@ -170,7 +170,7 @@ function manifestErrorsToFieldErrors(errors: string[]): ValidationFieldError[] {
 }
 
 /**
- * Phase 1 gate — after `validateManifest` accepts an agent manifest,
+ * After `validateManifest` accepts an agent manifest,
  * cross-check that any `integrations_configuration[id]` selection (§4.4)
  * is a subset of the referenced integration's catalog. Skips silently for
  * non-agent types, integrations with no configuration entry, and
@@ -209,12 +209,12 @@ async function assertAgentIntegrationScopesValid(
  *   type while `validateManifest` dispatches purely on the manifest's own root
  *   `type`, so without it a wrong-type manifest validates against ITS OWN
  *   schema and then has `type` rewritten to the route's downstream —
- *   persisting a manifest no schema ever accepted (issue #987). Retired
+ *   persisting a manifest no schema ever accepted. Retired
  *   `runtime_tools` ids reject, so a typo or a removed id is reported instead
  *   of silently stripped.
  * - `"stored"` — the manifest is already persisted (PATCH content-only
  *   carry-forward; publishing an existing draft). NO `type` gate: stored
- *   artifacts are tolerated on read (#983), and gating here would make a
+ *   artifacts are tolerated on read, and gating here would make a
  *   legacy drifted draft permanently un-publishable. Retired ids drop so such
  *   a draft stays editable and publishable.
  *
@@ -294,8 +294,8 @@ export const forkSchema = z
  * `tool` package type, it kept being accepted here — stripped in silence, so a
  * client still sending it got a 201 and a package without it, with nothing
  * anywhere saying the field had gone. A retired name must fail loudly
- * (`docs/NO_TRANSITIONAL_CODE.md` §1), which is the rule that closed the four
- * launch surfaces in #1187; the barrier is generic and names no field.
+ * (`docs/NO_TRANSITIONAL_CODE.md` §1), the rule the four
+ * launch surfaces follow; the barrier is generic and names no field.
  */
 const packageFilePathSchema = z.string().min(1).max(1024);
 
@@ -754,7 +754,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
       const packageId = validatedManifest.name;
 
-      // Scope no longer gates creation, but a system package id must never be shadowed by an
+      // Scope does not gate creation, but a system package id must never be shadowed by an
       // org-owned row — the boot sync upserts system rows by id and would later overwrite it
       // (orgId→null). Mirror the system-package guard the update/delete/version handlers apply.
       if (isSystemPackage(packageId)) {
@@ -885,7 +885,7 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
  * Org-scoped (no space activation gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
- * directly to echo what the caller just wrote (issue #646). Returns `null` when
+ * directly to echo what the caller just wrote. Returns `null` when
  * the package is not found in the org.
  *
  * WHICH definition the manifest-derived fields are projected from is the agent
@@ -1151,7 +1151,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
       },
     });
 
-    // Same serializer as the GET detail (issue #657). The `ETag` is the version
+    // Same serializer as the GET detail. The `ETag` is the version
     // THIS write produced, so a write landing in between refuses the caller's next.
     const detail = await loadPackageDetailDto(c, rcfg, itemId, orgId);
     if (!detail) {
@@ -1233,8 +1233,8 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
 /**
  * Build the canonical version detail DTO — the exact object the `GET` version
  * detail endpoint serializes. Reused by the version create endpoint so it
- * echoes the resulting version resource instead of an id/message stub (issue
- * #646). Refuses nothing: `content` is null when `detail.content` is (the GET
+ * echoes the resulting version resource instead of an id/message stub.
+ * Refuses nothing: `content` is null when `detail.content` is (the GET
  * handler refuses an unreadable archive before calling this; the create echo
  * does not).
  */
@@ -1331,7 +1331,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
         }),
     });
 
-    if ("error" in result) {
+    if (!result.ok) {
       if (result.error === "no_changes") {
         throw conflict("no_changes", "No changes since the last version");
       }
@@ -1359,7 +1359,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
 
     // Return the created version resource bare — same DTO/serializer as the
     // GET version detail — so callers see the snapshot (manifest, integrity,
-    // dist_tags, …) without a follow-up GET (issue #657). The version is
+    // dist_tags, …) without a follow-up GET. The version is
     // committed: a row that cannot be re-read is a 500, but bytes that cannot be
     // read back (storage, signature policy) only null `content` — never an error
     // answer to a successful write.
@@ -1456,7 +1456,7 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
     });
 
     // Restore mutates the package draft — return the updated PACKAGE resource
-    // bare, same DTO/serializer as the package GET detail (issue #657). The
+    // bare, same DTO/serializer as the package GET detail. The
     // restored version info is reflected in the resource itself (`version`,
     // `manifest`, `content`), and the response carries the draft's NEW `ETag`.
     const packageDto = await loadPackageDetailDto(c, rcfg, itemId, orgId);
@@ -1533,8 +1533,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * - `isPackageReadableInSpace` is VISIBILITY: "is this a system package,
  *   offered to THIS space, or homed here?" (it also excludes ephemeral
  *   shadows). It says nothing about what the caller is ALLOWED to do — a
- *   credential with `scopes: []` passes it. Believing otherwise is exactly the
- *   mistake #1124 had to undo across the rest of the package surface.
+ *   credential with `scopes: []` passes it. It is not an authorization.
  * - `requirePackageReadPermission` is AUTHORIZATION: the resolved row's
  *   `<type>:read` scope. Both file-explorer routes are registered on the
  *   router ROOT, so the RBAC resource is not knowable from the path — only
@@ -2173,7 +2172,7 @@ export function createPackagesRouter() {
     });
 
     // Return the forked package resource bare — same DTO/serializer as the new
-    // package's GET detail, selected by its type (issue #657). The fork
+    // package's GET detail, selected by its type. The fork
     // provenance is resource state: `forked_from` is part of the detail DTO.
     const forkedRcfg = ROUTE_CONFIGS[result.type as PackageType];
     const detail = forkedRcfg
@@ -2503,7 +2502,7 @@ export function createPackagesRouter() {
       );
     }
 
-    // Phase 1 — for agent imports, cross-check integrations_configuration
+    // For agent imports, cross-check integrations_configuration
     // selections against the referenced integration catalogs. `parsePackageZip`
     // already ran `validateManifest`; this is the niveau 2 follow-up.
     //

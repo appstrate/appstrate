@@ -21,10 +21,9 @@
  * the same auth identity simultaneously. On unique-constraint violation we
  * re-fetch rather than propagate the error.
  *
- * Phase 1 note: the core `end_users` table is NEVER widened — `authUserId`,
+ * The core `end_users` table is NEVER widened — `authUserId`,
  * `status`, and `emailVerified` live on `oidc_end_user_profiles`, keyed by
- * `end_user_id`. Phase 0's invariant (core `end_users` has no OIDC vocabulary)
- * is preserved.
+ * `end_user_id`: core `end_users` has no OIDC vocabulary.
  */
 
 import { eq, and, isNull, sql } from "drizzle-orm";

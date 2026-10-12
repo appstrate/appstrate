@@ -4,7 +4,7 @@
  * `appstrate doctor` — list every `appstrate` binary on `$PATH` and report
  * each one's stamped install source, version, and PATH-resolution role.
  *
- * Issue #249, phase 3. Used to:
+ * Used to:
  *   - Help users debug "why is my upgrade not taking effect" (PATH order).
  *   - Identify dual-install state (curl + bun on the same machine).
  *   - Feed actionable uninstall hints for the channel that's NOT winning.
@@ -67,13 +67,13 @@ export interface DoctorReport {
   localInstall?: LocalInstallInfo;
   /**
    * Drift findings against the on-disk `<dir>/docker-compose.yml` of a
-   * detected local install (issue #515). Only populated when a local
+   * detected local install. Only populated when a local
    * install is present AND its compose file carries stale duplicated
    * env defaults (or an intentional override that no longer matches).
    * Absent/empty for a healthy or freshly-installed compose file.
    *
    * Each finding masks the Zod schema's single source of truth the same
-   * way the #513 `MODULES` drift did — `appstrate install
+   * way a `MODULES` drift does — `appstrate install
    * --upgrade-compose` strips the safe-to-remove duplicates.
    */
   composeDrift?: ComposeFinding[];
@@ -141,7 +141,7 @@ export interface RunDoctorOptions {
   binaryName?: string;
   pathScanFs?: PathScanFs;
   probeBinary?: ProbeBinary;
-  /** Timeout per binary probe — issue #249 specifies 500ms. */
+  /** Timeout per binary probe (500ms by default). */
   probeTimeoutMs?: number;
   /** `process.execPath` — used to highlight which entry is the running CLI. */
   execPath?: string;
@@ -154,7 +154,7 @@ export interface RunDoctorOptions {
   /** Override the install dir probed (defaults to `~/appstrate`). */
   installDir?: string;
   /**
-   * Read `<dir>/docker-compose.yml` for the compose-drift check (#515).
+   * Read `<dir>/docker-compose.yml` for the compose-drift check.
    * Returns the file content, or `null` when there is no compose file.
    * Defaults to a real `readFile`. Injected by tests to assert drift
    * formatting without touching disk.
@@ -232,7 +232,7 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
   }
   const sources = new Set(installations.map((i) => i.source));
 
-  // Local-install probe (#343) — surfaces the lifecycle command hints
+  // Local-install probe — surfaces the lifecycle command hints
   // when a Docker-tier install exists. Soft-fails on any error: a
   // missing or unreadable sidecar is the normal state for users who
   // never ran `appstrate install`, and must not perturb the rest of
@@ -247,7 +247,7 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     // intentional swallow — sidecar absence is not a doctor finding.
   }
 
-  // Compose-drift check (#515) — only meaningful for a detected local
+  // Compose-drift check — only meaningful for a detected local
   // install: the on-disk compose file is what an operator's stack
   // actually boots from, so stale duplicated defaults there silently
   // mask the schema's source of truth. Soft-fails on any read error
@@ -268,7 +268,7 @@ export async function runDoctor(opts: RunDoctorOptions = {}): Promise<DoctorRepo
     }
   }
 
-  // Firecracker runner reachability (#819) — only when a local install's
+  // Firecracker runner reachability — only when a local install's
   // `.env` selects the firecracker backend. Soft-fails on any read/probe
   // error: an unreadable/absent `.env` is normal for the "no local install"
   // case (already gated by `localInstall`), and a probe failure surfaces as
@@ -509,7 +509,7 @@ export function formatDoctorReport(report: DoctorReport, runningExecPath: string
 }
 
 /**
- * Render the compose-drift section (#515). Splits the findings into the
+ * Render the compose-drift section. Splits the findings into the
  * two classes so the operator sees which lines are safe to auto-strip
  * (`appstrate install --upgrade-compose`) versus which need a human eye
  * (an intentional override whose recorded default drifted).
@@ -554,7 +554,7 @@ function formatComposeDrift(findings: ComposeFinding[]): string[] {
 }
 
 /**
- * Render the Firecracker runner reachability line (#819). Lightweight by
+ * Render the Firecracker runner reachability line. Lightweight by
  * design — a red line points the operator at `appstrate runner doctor` on
  * the KVM host for the deep diagnosis.
  */

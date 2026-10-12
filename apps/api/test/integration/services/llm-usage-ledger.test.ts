@@ -32,6 +32,13 @@ async function rowById(id: number) {
   return row;
 }
 
+/** What a refused write says: the constraint name sits in the message or the cause, per driver. */
+async function refusalText(write: Promise<unknown>): Promise<string> {
+  const error = await write.catch((err: unknown) => err);
+  const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+  return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+}
+
 describe("recordLlmUsage — plain insert (proxy / chat)", () => {
   let ctx: TestContext;
 
@@ -199,6 +206,57 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
     const text = `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
     expect(text).toContain("context_single");
+  });
+
+  it("stores a payer only on a row a member's own credential paid", async () => {
+    const entry = (credentialSource: "org" | "user" | null, payerUserId: string | null) => ({
+      source: "proxy" as const,
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      credentialSource,
+      payerUserId,
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsd: 0.0001,
+      pricingStatus: "priced" as const,
+      requestId: `req_ledger_payer_${credentialSource}_${payerUserId}`,
+    });
+    const refusal = (...args: Parameters<typeof entry>) =>
+      refusalText(recordLlmUsage(entry(...args)));
+
+    expect(typeof (await recordLlmUsage(entry("user", ctx.user.id)))).toBe("number");
+    expect(typeof (await recordLlmUsage(entry("org", null)))).toBe("number");
+    expect(typeof (await recordLlmUsage(entry(null, null)))).toBe("number");
+
+    expect(await refusal("org", ctx.user.id)).toContain("llm_usage_payer_iff_user_source");
+    expect(await refusal(null, ctx.user.id)).toContain("llm_usage_payer_iff_user_source");
+    expect(await refusal("user", null)).toContain("llm_usage_payer_iff_user_source");
+  });
+});
+
+describe("runs — a payer only on a run a member's own credential pays", () => {
+  it("stores the legal pairs and refuses the others", async () => {
+    await truncateAll();
+    const ctx = await createTestContext({ orgSlug: "runpayer" });
+    await seedAgent({ id: "@runpayer/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
+    const run = (modelSource: "org" | "user" | null, payerUserId: string | null) =>
+      seedRun({
+        packageId: "@runpayer/agent",
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        modelSource,
+        payerUserId,
+      });
+    const refusal = (...args: Parameters<typeof run>) => refusalText(run(...args));
+
+    expect((await run("user", ctx.user.id)).payerUserId).toBe(ctx.user.id);
+    expect((await run("org", null)).payerUserId).toBeNull();
+    expect((await run(null, null)).payerUserId).toBeNull();
+
+    expect(await refusal("org", ctx.user.id)).toContain("runs_payer_iff_user_source");
+    expect(await refusal(null, ctx.user.id)).toContain("runs_payer_iff_user_source");
+    expect(await refusal("user", null)).toContain("runs_payer_iff_user_source");
   });
 });
 

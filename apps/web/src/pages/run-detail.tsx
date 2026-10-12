@@ -150,7 +150,7 @@ export function RunDetailPage() {
   // page size; the list query now runs only when a pane that shows them opens.
   //
   // `outputFileCount` is also what decides which pane LEADS: the derived
-  // presentation rule (#1177) counts what the run PRODUCED and nothing else —
+  // presentation rule counts what the run PRODUCED and nothing else —
   // inputs it consumed never count, and no agent-declared field takes part.
   const inputFileCount = run?.file_counts.input ?? 0;
   const outputFileCount = run?.file_counts.output ?? 0;

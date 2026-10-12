@@ -34,7 +34,7 @@ export interface RunSinkContext {
   startedAt: Date;
   /**
    * The agent definition the run executes — `"draft"` or a concrete semver
-   * stamped at kickoff (#636). Finalize reads the output schema from the
+   * stamped at kickoff. Finalize reads the output schema from the
    * manifest AT this ref (`getRunEffectiveAgent`) so a post-kickoff draft
    * edit cannot change a pinned run's output contract.
    */

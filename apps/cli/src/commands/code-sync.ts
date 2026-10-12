@@ -774,7 +774,7 @@ async function selectSources(
     // more, so the ordinary removal plan takes every one of them off the disk.
     return { skillSpaces: [] };
   }
-  // Skill sources no longer depend on the pin, so a pin that died would sync
+  // Skill sources do not depend on the pin, so a pin that died would sync
   // clean and leave `.mcp.json` naming a space the server will refuse. Nothing
   // else notices any more: say it here, where the space list is already in hand.
   // Listed-but-not-joined is the same refusal as absent — the MCP request sends

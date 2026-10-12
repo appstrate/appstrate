@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Minimal per-run DNS responder for transparent integration egress (#779).
+ * Minimal per-run DNS responder for transparent integration egress.
  *
- * A `delivery.env` integration runner previously reached the outside world
- * only through a plain CONNECT proxy handed to it as `HTTPS_PROXY`. That
- * contract assumes a cooperative HTTP client — but most third-party MCP
+ * A plain CONNECT proxy handed to a `delivery.env` integration runner as
+ * `HTTPS_PROXY` assumes a cooperative HTTP client — but most third-party MCP
  * servers ship clients that either ignore proxy env vars entirely
  * (undici/`fetch`) or speak non-CONNECT forward-proxy for HTTPS (axios),
- * so their egress silently dies (405 / connect timeout).
+ * so their egress would silently die (405 / connect timeout).
  *
- * The fix is to make the runner's egress *transparent*: this responder
+ * So the runner's egress is *transparent*: this responder
  * answers every external A query with the sidecar's own IP on the per-run
  * bridge network, so the runner's direct `connect(host, 443)` lands on the
  * sidecar's SNI-passthrough listener ({@link createTransparentEgressListener})
@@ -181,7 +180,7 @@ export function createIntegrationDnsResponder(
   socket.bind(port, host, () => {
     // Post-bind errors (send failures on a torn-down socket, …) must not
     // crash the sidecar — swallow them; the transparent path degrades and
-    // the runner sees a DNS timeout, same failure mode as before #779.
+    // the runner sees a DNS timeout.
     socket.removeAllListeners("error");
     socket.on("error", () => {});
     readyResolve();

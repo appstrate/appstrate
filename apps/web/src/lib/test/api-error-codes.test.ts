@@ -328,12 +328,31 @@ describe("errorMessage", () => {
 
   it("says what to change for an undeclared connection choice, not the server's English", async () => {
     await i18n.changeLanguage("fr");
-    const detail = '`connection_overrides["@acme/crm"]` is not a declared integration dependency';
-    const err = await problem({ code: "invalid_request", detail, param: "connection_overrides" });
+    const err = await problem({
+      code: "validation_failed",
+      detail: "connection_overrides.@acme/crm: …",
+      errors: [
+        {
+          field: "connection_overrides.@acme/crm",
+          code: "undeclared_connection_override",
+          message: "@acme/crm is not an integration this agent declares",
+        },
+      ],
+    });
     expect(errorMessage(err)).toBe(agentsFr["error.connectionOverridesRefused"]);
-    // Control: the same code blaming another member keeps the generic lead.
-    const other = await problem({ code: "invalid_request", detail, param: "input" });
-    expect(errorMessage(other)).toBe(`Requête refusée : ${detail}`);
+    expect(errorField(err)).toBe("connection_overrides.@acme/crm");
+    const dependency = await problem({
+      code: "validation_failed",
+      detail: "dependency_overrides.@acme/skill: …",
+      errors: [
+        {
+          field: "dependency_overrides.@acme/skill",
+          code: "undeclared_dependency_override",
+          message: "@acme/skill is not a skill or integration this agent declares",
+        },
+      ],
+    });
+    expect(errorMessage(dependency)).toBe(agentsFr["error.dependencyOverridesRefused"]);
   });
 
   it("words a 'no connection' override on a required integration as the pin's refusal", async () => {

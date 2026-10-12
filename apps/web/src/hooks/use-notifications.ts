@@ -26,7 +26,7 @@ const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 
 export function useUnreadCount() {
   const scope = useOrgScope();
-  // Badge counters only need a space context (legacy behavior).
+  // Badge counters only need a space context.
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
@@ -59,7 +59,7 @@ export function useNotifications(opts: { unread?: boolean; limit?: number } = {}
 
 export function useUnreadCountsByAgent() {
   const scope = useOrgScope();
-  // Badge counters only need a space context (legacy behavior).
+  // Badge counters only need a space context.
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",

@@ -149,14 +149,13 @@ interface McpHostUpstream {
   /** The bound connection this upstream serves; its label is the selector value. */
   connection?: Pick<NonNullable<IntegrationSpawnSpec["connection"]>, "label" | "accountId">;
   /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, only
+   * Agent-declared MCP tool allowlist. When set, only
    * tools whose ORIGINAL name (as advertised by the upstream's
    * `tools/list`) appears here are registered with the host; excluded
    * tools are silently dropped (with an audit log) so the agent's LLM
    * never sees a tool it isn't authorised to call.
    *
-   * `undefined` (default) preserves the legacy "all tools allowed"
-   * behaviour. Empty `[]` is a valid explicit "register nothing".
+   * `undefined` (default) allows every tool. Empty `[]` is a valid explicit "register nothing".
    */
   allowedTools?: readonly string[];
   /**
@@ -394,7 +393,7 @@ export class McpHost {
     }
 
     const { tools } = await effectiveUpstream.client.listTools();
-    // Niveau 2 Phase 3 — pre-filter against the agent-declared allowlist
+    // Pre-filter against the agent-declared allowlist
     // before any sanitisation / registration. The check uses the
     // ORIGINAL upstream tool name; namespacing happens downstream and
     // wouldn't survive a Set lookup against the agent's declared names.

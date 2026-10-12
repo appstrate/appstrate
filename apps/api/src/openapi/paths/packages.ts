@@ -78,7 +78,7 @@ const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mutation response schemas (issue #657)
+// Mutation response schemas
 //
 // Mutating package endpoints return the affected resource BARE — the exact
 // shape of the corresponding GET detail, `$ref`'d directly. No operation
@@ -906,8 +906,8 @@ export const packagesPaths = {
               // An unknown field is a 400, never a silent drop: the create /
               // update bodies are `.strict()` in `routes/packages.ts`, so a
               // client still sending the retired `source_code` learns it is
-              // gone instead of getting a 201 without it. Same rule the four
-              // launch surfaces took in #1187.
+              // gone instead of getting a 201 without it. Same rule as the four
+              // launch surfaces.
               additionalProperties: false,
             },
           },
@@ -1419,7 +1419,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
         },
       ],
       responses: {
@@ -2040,7 +2040,7 @@ export const packagesPaths = {
               schema: {
                 // The forked package resource, bare — same shape as the new
                 // package's GET detail, selected by the source package type at
-                // runtime (issue #657). Fields vary by type, so the response is
+                // runtime. Fields vary by type, so the response is
                 // a `oneOf`. Fork provenance is resource state: `forked_from`
                 // is part of both detail DTOs.
                 oneOf: [

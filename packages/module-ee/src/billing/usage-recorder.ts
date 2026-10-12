@@ -538,7 +538,7 @@ function noProgress(args: {
  *     run reaches a terminal status, so billing it early would under-count).
  *     An unsettled NON-system row (BYOK / null) is never billed and its
  *     `credentialSource` is fixed at first insert, so the watermark advances
- *     PAST it, and a long BYOK run can no longer block billing for every org.
+ *     PAST it, and a long BYOK run cannot block billing for every org.
  *   - Scan from `watermark − EE_RECONCILIATION_REPLAY_WINDOW`, not from the
  *     watermark. A serial `id` is taken at INSERT but published at COMMIT, so a
  *     row can appear BELOW an already-advanced watermark and would otherwise be

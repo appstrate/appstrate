@@ -100,21 +100,13 @@ let exitCode = 0;
 //
 // Builds the "VERB /path" set the later sections compare against.
 //
-// This section used to also assert that set, bidirectionally, against a
-// hand-typed `expectedEndpoints` array of 242 string literals. That array is
-// gone: every signal it carried is now produced by something that derives the
-// answer instead of restating it.
+// There is no hand-typed endpoint list: every signal one would carry is
+// produced by something that derives the answer instead of restating it.
 //   - "registered in code but undocumented" → §5 (Code ⊆ Spec).
-//   - "documented but registered by no router" → §5b (Spec ⊆ Code), which is
-//     the one signal the list held alone and the reason it survived this long.
+//   - "documented but registered by no router" → §5b (Spec ⊆ Code).
 //   - "endpoint dropped from the published contract" → `Endpoint removed` in
 //     scripts/detect-breaking-changes.ts, against the committed baseline.
-// Module-contributed endpoints were already exempt — they were pushed into
-// `expectedEndpoints` straight from each module's `openApiPaths()` output, on
-// the stated grounds that "adding or removing a module endpoint requires no
-// update here". Core was the half that never got that treatment, so every new
-// core route cost a second edit in this file whose only failure mode was
-// forgetting to make it.
+// So adding or removing an endpoint, core or module, requires no update here.
 
 const specEndpoints = new Set<string>();
 const paths = openApiSpec.paths as Record<string, Record<string, unknown>>;
@@ -163,10 +155,9 @@ try {
       // This section fails on `error` only, so a `warn` rule here is not a
       // lenient rule — it is an OFF rule that prints a line, and the
       // LINT_ALLOWLIST below (whose whole premise is "keep rules globally ON so
-      // any NEW violation still surfaces") was decorative for exactly as long as
-      // that held. Two of these were being violated at the time of the promotion
-      // and the gate reported ALL CHECKS PASSED. Every rule listed here was
-      // verified clean before being promoted; a genuine deviation earns a
+      // any NEW violation still surfaces") is decorative for as long as
+      // that holds: a violated rule still reports ALL CHECKS PASSED. Every rule
+      // listed here is clean; a genuine deviation earns a
       // narrow, justified pointer entry in LINT_ALLOWLIST, never a downgrade
       // back to `warn`. The two rules turned `off` above are the only blanket
       // exemptions, and both state their reason.
@@ -1502,13 +1493,12 @@ const indexSrc = readFileSync(indexPath, "utf8");
 //    - Default: `import xRouter from "./routes/x.ts"`
 //    - Mixed:   `import xRouter, { helper } from "./routes/x.ts"`
 //
-// The mixed form is in both patterns because omitting it cost real coverage:
+// The mixed form is in both patterns because omitting it costs coverage:
 // `import healthRouter, { bootGate, markServerReady } from "./routes/health.ts"`
-// matched NEITHER pattern (the named one needs `import {` immediately, the
-// default one needed `<ident> from`), so `healthRouter` resolved to no file and
-// `app.route("/", healthRouter)` was dropped — every route health.ts declares
-// was invisible to §5. It dropped in SILENCE; the mount resolver below now
-// fails closed on an unresolved mount instead, which is how that was found.
+// matches NEITHER of the other two (the named one needs `import {` immediately,
+// the default one `<ident> from`), so without it `healthRouter` resolves to no
+// file and every route health.ts declares is invisible to §5. The mount
+// resolver below fails closed on an unresolved mount.
 const importToFile = new Map<string, string>(); // identifier → relative file path
 for (const m of indexSrc.matchAll(
   /import\s+(?:\w+\s*,\s*)?\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
@@ -1541,10 +1531,10 @@ for (const m of indexSrc.matchAll(/(?:const|let)\s+(\w+)\s*=\s*(\w+)\s*\(\s*\)/g
 type Mount = { prefix: string; file: string; factory: string | "__default__" };
 const mounts: Mount[] = [];
 // Mounts whose expression resolves to no route file. COLLECTED, not thrown:
-// this used to `throw`, which left the process with a raw uncaught stack trace
-// — no section header, no `SOME CHECKS FAILED` summary, and none of the other
-// sections' findings, because the throw happened at import time before §5 had
-// printed anything. A legitimate mount the resolver has not been taught (an
+// a `throw` would leave the process with a raw uncaught stack trace — no
+// section header, no `SOME CHECKS FAILED` summary, and none of the other
+// sections' findings, because it would happen at import time before §5
+// prints anything. A legitimate mount the resolver has not been taught (an
 // inline `const sub = new Hono(); app.route("/x", sub)` — none exists in
 // index.ts today, `new Hono` appears once, for `app` itself) would have looked
 // like a crashed tool rather than a gate saying no. It still fails closed; it
@@ -1583,9 +1573,8 @@ for (const m of indexSrc.matchAll(
   }
 
   if (!file) {
-    // An `app.route("/api/x", somethingUnresolvable)` used to be dropped here in
-    // silence, taking every endpoint that router declares with it — the same
-    // whole-mount hole `readRouteFile` had, one step earlier. There is no honest
+    // An `app.route("/api/x", somethingUnresolvable)` dropped here in silence
+    // would take every endpoint that router declares with it. There is no honest
     // fallback: without the file this gate cannot know what `/api/x` serves, so
     // it must not report on it.
     unresolvedMounts.push({ prefix, expr: exprRaw, ident });
@@ -1630,16 +1619,14 @@ for (const m of indexSrc.matchAll(
 // see below).
 //
 // So widening this set IS a silent coverage hole for a new file, and the size
-// assertion under it is the barrier. It is one literal rather than the
-// `ALLOWED_SKIP_FILES` twin-set it replaces — that duplicate went stale under a
-// rename without failing, whereas a count cannot disagree with itself.
+// assertion under it is the barrier. It is one literal rather than a
+// second set of names: a duplicate set goes stale under a rename without
+// failing, whereas a count cannot disagree with itself.
 const SKIP_FILES = new Set<string>([
   // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
   // …)` — a call, not a string/template literal). The path can't be captured
   // statically, so the emitted endpoints are covered by SPEC_ONLY_ALLOWLIST in
-  // §5b. (This used to describe `router.post(entry.urlPath, …)`, a bare
-  // identifier read off a local config array; that array is gone. Before that
-  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.)
+  // §5b.
   // (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
@@ -1688,10 +1675,10 @@ const routeFileCache = new Map<string, string>();
 /**
  * Read a route file, or fail.
  *
- * This used to be `existsSync(full) ? readFileSync(full, "utf8") : ""`, and the
- * empty string travelled: a mount whose route file had moved contributed ZERO
- * endpoints to `codeEndpoints` and said nothing, so §5's "every code route is
- * in the spec" passed over a file it had never opened. That is precisely the
+ * An `existsSync(full) ? readFileSync(full, "utf8") : ""` would let the empty
+ * string travel: a mount whose route file moved would contribute ZERO
+ * endpoints to `codeEndpoints` and say nothing, so §5's "every code route is
+ * in the spec" would pass over a file it never opened. That is precisely the
  * defect `SKIP_FILES` thirty lines above exists to bound — a whole-file skip
  * removes every route in that file from the check — except this one needed no
  * entry and no `SANCTIONED_SKIP_COUNT` review to happen.
@@ -1721,7 +1708,7 @@ function readRouteFile(relPath: string): string {
 for (const mount of mounts) {
   if (SKIP_FILES.has(mount.file)) continue;
   // No `if (!src) continue` here any more: `readRouteFile` throws rather than
-  // handing back an empty string, so an unreadable mount can no longer pass for
+  // handing back an empty string, so an unreadable mount cannot pass for
   // a mount with no routes.
   const src = readRouteFile(mount.file);
 
@@ -2017,8 +2004,7 @@ if (undocumentedInCode.length === 0) {
 }
 
 // Both allowlists are hand-maintained sets of exemptions, and an exemption that
-// no longer applies is the failure mode the deleted `expectedEndpoints` array
-// used to cover from the other direction: SPEC_ONLY_ALLOWLIST names endpoints
+// no longer applies is the failure mode: SPEC_ONLY_ALLOWLIST names endpoints
 // §5b must not flag, so a documented endpoint that gets deleted from the spec
 // stops being enumerated by ANY check here — the only remaining signal is
 // `detect:breaking` against the committed baseline, which a legitimate
@@ -2139,12 +2125,10 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "POST /activate/deny 200",
   "GET /api/integrations/callback 200",
   "GET /api/integrations/callback/{tag} 200",
-  // The three `/api/llm-proxy/*` 200s used to sit here, on the reasoning that a
-  // verbatim upstream passthrough "has no stable schema to declare". It does:
-  // `openapi/paths/llm-proxy.ts` declares a permissive `{ type: "object",
-  // additionalProperties: true }` passthrough schema explicitly to satisfy this
-  // very check, and says so in a comment. Two files asserted opposite things
-  // about the same three endpoints, and the exemption won by short-circuiting.
+  // The three `/api/llm-proxy/*` 200s are NOT here: `openapi/paths/llm-proxy.ts`
+  // declares a permissive `{ type: "object", additionalProperties: true }`
+  // passthrough schema for them, so an exemption would contradict it and win by
+  // short-circuiting.
 ]);
 
 const JSON_MEDIA_TYPE = /^application\/([a-z0-9.+-]+\+)?json$/;
@@ -2515,15 +2499,15 @@ function countJsonResponseSchemaShapes(): { inline: number; named: number } {
 // Coverage enforcement — every NAMED component schema must be either registered
 // (a shared-type pair, checked above) or explicitly EXEMPT (no shared-type
 // consumer). Requiring an explicit, justified decision for every named schema
-// closes the opt-in gap: one nobody registers is no longer silently uncompared.
+// closes the opt-in gap: one nobody registers is not silently uncompared.
 //
 // WHAT THIS DOES NOT COVER, and it is the majority. The universe is
 // `components.schemas` — schemas with a NAME. A 2xx response whose schema is
 // written INLINE at the operation has no name, so it is not in that universe
 // and no amount of registry discipline reaches it. The count is printed below
-// on every run rather than asserted here in prose, because prose is what went
-// stale: this block used to claim "step 7 is fail-closed: a new response schema
-// can't slip in unchecked", which is true only of the named third.
+// on every run rather than asserted here in prose, because prose goes
+// stale: "step 7 is fail-closed: a new response schema can't slip in
+// unchecked" is true only of the named third.
 //
 // Closing it needs a different shape — a registry keyed on
 // `(verb, path, status)` like §4b's request-body one, not on schema name. That

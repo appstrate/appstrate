@@ -10,7 +10,7 @@ import { deriveFieldNames, fieldSchemas } from "./credential-schema";
 /**
  * Presentational credential-field renderer for non-OAuth integration auths
  * (api_key / basic / mtls / custom). Rendered by the standalone hosted connect
- * page (issue #769) — the single credential-entry surface, so there is exactly
+ * page — the single credential-entry surface, so there is exactly
  * ONE credential renderer with no per-surface drift.
  */
 

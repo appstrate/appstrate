@@ -59,7 +59,7 @@ import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
  * in the codebase, and the default of both followers.
  *
  * 10 is the value because the api_call engine walks multi-step OAuth/CAS dances
- * whose session cookie lands on an intermediate 302 (#473), and five hops does
+ * whose session cookie lands on an intermediate 302, and five hops does
  * not always reach the end of one. Nothing is weakened by the raise — every hop
  * is independently DNS-checked, allowlist-checked and credential-stripped, so
  * the cap is a loop/DoS bound, not a trust boundary.
@@ -78,8 +78,7 @@ import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
  *     - `packages/connect/src/dcr.ts` — dynamic client registration is a
  *       single POST to a discovered endpoint.
  *
- *   on this default, and all of them multi-step credential exchanges — the
- *   exact population #473 is about
+ *   on this default, and all of them multi-step credential exchanges:
  *     - `@appstrate/afps-runtime`'s `fetchApiCall` — every `api_call` path.
  *     - `packages/connect/src/oauth-egress.ts` — OAuth discovery, token
  *       exchange and userinfo.

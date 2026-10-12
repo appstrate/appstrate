@@ -1735,7 +1735,7 @@ export function createOidcRouter() {
     // reads the pending client from THESE headers to persist the
     // `(token → clientId)` binding that the BA-driven `/magic-link/verify`
     // create leg later resolves the realm from — a caller who strips or
-    // clobbers their own cookie can no longer detach the link from its
+    // clobbers their own cookie cannot detach the link from its
     // client. See `services/oauth-transaction-binding.ts`.
     const baHeaders = headersWithAuthoritativePendingClient(c.req.raw.headers, ctx.client.clientId);
     try {
@@ -2690,7 +2690,7 @@ export function createOidcRouter() {
   router.get("/.well-known/openid-configuration/api/auth", serveOpenIdConfig);
   router.get("/.well-known/oauth-authorization-server/api/auth", serveOAuthServerConfig);
 
-  // ── Phase 3 admin oversight (#251) ─────────────────────────────────────────
+  // ── Admin oversight ─────────────────────────────────────────────────────────
   //
   // `/api/orgs/:orgId/cli-sessions` is mounted at the OIDC module's HTTP
   // origin root rather than under `/api/oauth/*` because semantically the

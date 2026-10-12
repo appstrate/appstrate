@@ -44,7 +44,7 @@ export interface RegisterDynamicClientInput {
    * `refresh_token` grant (RFC 8414 `grant_types_supported`): a server that
    * doesn't support it may reject a registration that requests it. Registering
    * for authorization_code alone is why an AS never issues a refresh token
-   * (Claude Code #7744), so the connection can't self-renew.
+   * so the connection can't self-renew.
    */
   grantTypes?: string[];
   /**

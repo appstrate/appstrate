@@ -22,7 +22,7 @@
  * of each connection a listener accepts ({@link socketOwnerUid}). The guest gives a
  * runner uid loopback-only egress and redirects its DNS to 127.0.0.1:53, so
  * every route out crosses a sidecar listener: the runner's own CONNECT/MITM
- * listener, or the transparent plane (#779) this adapter mounts on 127.0.0.1
+ * listener, or the transparent plane this adapter mounts on 127.0.0.1
  * for proxy-unaware clients, on the first plain-CONNECT runner's spawn.
  */
 
@@ -458,7 +458,7 @@ export function createProcessIntegrationRuntimeAdapter({
         };
 
   /**
-   * #779 — the plane, started once: its DNS answers 127.0.0.1, where the guest
+   * The plane, started once: its DNS answers 127.0.0.1, where the guest
    * redirects every runner's DNS. Runs without a plain-CONNECT runner never
    * bind 53/443/80.
    */

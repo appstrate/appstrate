@@ -134,8 +134,7 @@ function LinkedAccountsSection({
                       // through a step-up re-login, then retry the unlink.
                       setPendingUnlink(account.id);
                     } else {
-                      // Surface the failure — previously a rejection here was
-                      // silently swallowed and the button just stopped spinning.
+                      // Surface the failure: swallowed, the button just stops spinning.
                       toastError(err);
                     }
                   } finally {

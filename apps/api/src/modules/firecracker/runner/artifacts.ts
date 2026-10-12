@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Guest-artifact resolver for the `appstrate-runner` daemon (issue #819,
- * phase 2).
+ * Guest-artifact resolver for the `appstrate-runner` daemon.
  *
  * Historically the daemon required an on-host `bun run firecracker:build`
  * — Docker + sudo + a full monorepo checkout, ~10 min and ~1.3 GB, on

@@ -72,7 +72,7 @@ export async function buildBundleFromUploadedAfps(
 /**
  * Resolve the version of a package that should be exported.
  *
- * Resolution order — TWO steps, the same two a run has (#636):
+ * Resolution order — TWO steps, the same two a run has:
  *   1. Explicit `versionSpec` (exact / dist-tag / semver range) — 404 if
  *      unresolvable.
  *   2. The `"latest"` dist-tag of the package.
@@ -149,7 +149,7 @@ export async function buildBundleForAgentExport(
  * `version=draft` run, so it must hand the CLI the bytes that run executes —
  * and a server-side `version=draft` run without `dependency_overrides` resolves
  * `dependencies.skills` against published versions
- * (`RunPackageCatalog`, the #666 rule). Walking the closure against draft
+ * (`RunPackageCatalog`). Walking the closure against draft
  * state instead would ship the working copy of a skill the caller may not even
  * write, which the run route refuses with `403 draft_not_writable` — one
  * selector cannot mean two sets of bytes depending on which door asked. A

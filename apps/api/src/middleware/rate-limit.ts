@@ -46,7 +46,7 @@ export function resetRateLimiters(): void {
  * bound to the SAME handler are two buckets, so a client that alternates
  * between them gets twice the budget the endpoint declares. That is why an
  * endpoint gets exactly one registered spelling — the `/api/documents…` aliases
- * that used to need collapsing here are gone (#1177).
+ * that used to need collapsing here are gone.
  */
 function limiterPath(c: Context<AppEnv>): string {
   const pattern = c.req.routePath;

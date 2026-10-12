@@ -60,7 +60,7 @@ export async function downloadVersionZip(
       });
       // Must be a typed `BundleError`: the run pipeline maps those onto the
       // RFC 9457 contract; a bare Error would reach the global handler as an
-      // opaque `500 internal_error` with no detail (#878).
+      // opaque `500 internal_error` with no detail.
       throw new BundleError(
         "INTEGRITY_MISMATCH",
         `Integrity check failed for ${packageId}@${version}`,
@@ -90,7 +90,7 @@ export async function downloadVersionZipForExecution(
  * Delete a versioned package ZIP from Storage unless a version row claims it.
  * Swallows errors (best-effort).
  *
- * The row-delete path no longer uses this — `deletePackageVersion` enqueues the
+ * The row-delete path does not use this — `deletePackageVersion` enqueues the
  * purge on the transactional outbox inside its own transaction. What remains is
  * ROLLBACK cleanup in `createVersionAndUpload`: the version row was rolled back,
  * so there is no committed transaction to hang an outbox row off, and inventing
@@ -154,7 +154,7 @@ interface AgentPackageResult {
  *
  * Dependency resolution uses {@link RunPackageCatalog}, which resolves
  * `dependencies.skills` against PUBLISHED versions honoring each pin
- * (exact → dist-tag → semver range) — the reproducibility fix for #666.
+ * (exact → dist-tag → semver range) — what makes a run reproducible.
  * A dependency's mutable draft never leaks into a consumer's run unless
  * the caller explicitly opts that dependency in via `dependencyOverrides`
  * (the skill-development edit loop). An unsatisfiable pin (including a

@@ -14,6 +14,8 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+Ships as `0.13.0`, before `@appstrate/core` 16.0.0, which requires `^0.13.0`.
+
 ### Added
 
 - **`jsonText`** (`./json-text`): a string passes through, any other JSON
@@ -42,7 +44,8 @@ consumer's publish rather than the first user's `npm install`.
   hostname or dotted IPv4 already in normalized form is kept; any other entry
   (a URL, path, port, wildcard, userinfo, whitespace, trailing dot,
   non-canonical form, or an IPv6 literal, refused because the per-run bridge
-  is IPv4-only) is reported in `invalid`. Hosts match `URL.hostname`
+  is IPv4-only) is reported in `invalid`. The result type is
+  `EgressAllowlistParse`. Hosts match `URL.hostname`
   exactly. (#1912)
 
 - **`./request-template`**: what the `{{name}}` request substitution

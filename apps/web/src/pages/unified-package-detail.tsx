@@ -57,6 +57,7 @@ import { PackageCard } from "../components/package-card";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 import { useModels } from "../hooks/use-models";
 import { useProxies } from "../hooks/use-proxies";
+import { agentConnectionsTabVisible } from "../lib/route-access";
 
 type DetailTab =
   | "overview"
@@ -132,7 +133,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Each tab below is fed by a read of its own, none implied by this route.
   const tabReads = {
     runs: canReadRuns(can),
-    connections: can("integrations:read"),
+    connections: agentConnectionsTabVisible(can),
     memory: can("persistence:read"),
     usedBy: packageSightPermissions("agent").some(can),
   };

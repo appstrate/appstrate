@@ -5,10 +5,8 @@
  * dead members, no single-owner business extension points smuggled into a
  * published interface.
  *
- * Origin: issue #488 ("le contrat a grossi sous la pression d'un module —
- * chat — qui est en réalité une application"). #577 removed the 3 dead
- * members by hand. This check makes that pressure mechanical so the next
- * "chat" cannot regrow the surface unnoticed.
+ * A contract grows under the pressure of one module. This check makes that
+ * pressure mechanical, so the surface cannot regrow unnoticed.
  *
  * FOUR surfaces are audited, because "the contract" is not just
  * `AppstrateModule`: hook names, event names and `PlatformServices` members are
@@ -43,7 +41,7 @@
  * VERSION each module compiles against — is covered elsewhere:
  * `scripts/check-consumer-versions.ts` at core publish time (it reads every
  * consumer repo over the GitHub API, so it also works where the sibling repos
- * are not checked out) and the module loader's boot gate at runtime (#973).
+ * are not checked out) and the module loader's boot gate at runtime.
  *
  * A module root absent from the checkout never causes failure: the ledger
  * records its expected ownership, and the scanner only *adds* drift when a

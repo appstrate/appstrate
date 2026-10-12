@@ -8,7 +8,7 @@
  * against the mutable DRAFT state and ignored the manifest pin), this
  * catalog resolves the agent's transitive closure against PUBLISHED
  * versions, honoring each dependency's pin (exact → dist-tag → semver
- * range) via {@link DbPackageCatalog}. This is the fix for #666: a run
+ * range) via {@link DbPackageCatalog}. A run
  * gets the published bytes the manifest pin selects, NOT whatever the
  * dependency author happens to have in their working copy.
  *
@@ -37,8 +37,7 @@
  * during `resolve` (the bundle builder always resolves before fetching).
  * A fetch for an un-resolved identity falls back to the DB catalog — EXCEPT
  * for a dependency the caller pinned to `draft`: serving published bytes for
- * a draft override would silently break the override (the #666 leak, in
- * reverse), so an owner-miss on a draft-overridden dep throws loud instead.
+ * a draft override would silently break the override, so an owner-miss on a draft-overridden dep throws loud instead.
  */
 
 import {

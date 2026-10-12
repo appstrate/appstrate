@@ -67,7 +67,7 @@ export interface ConnectionPickerOptions {
   agentScopes: string[] | undefined;
   persistence: ConnectionPickerPersistence;
   /**
-   * Version selector for the readiness verdict (#770). A non-`draft` value
+   * Version selector for the readiness verdict. A non-`draft` value
    * pins the per-integration resolution + run-blocking flag to that published
    * manifest so the run-options modal matches the run. Omitted → draft.
    */
