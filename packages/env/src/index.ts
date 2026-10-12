@@ -640,7 +640,7 @@ export const envSchema = z
     ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
 
     // Ceiling on the total bytes of files a single run may publish as
-    // output (Phase 2 ingestion). Default 256 MiB.
+    // output. Default 256 MiB.
     RUN_MAX_OUTPUT_BYTES: z.coerce
       .number()
       .int()
@@ -660,8 +660,8 @@ export const envSchema = z
     // must never be abandoned). 60s balances purge latency against DB churn.
     STORAGE_DELETION_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 
-    // Separate origin for serving untrusted agent-generated HTML previews
-    // (Phase 4 / D5). When set, `GET /api/files/:id` mints its
+    // Separate origin for serving untrusted agent-generated HTML previews.
+    // When set, `GET /api/files/:id` mints its
     // `preview_url` on THIS origin instead of `APP_URL` — the operator points a
     // second registrable domain (eTLD+1) at the same server. A distinct
     // registrable domain is the strongest isolation: the browser gives the
@@ -674,8 +674,8 @@ export const envSchema = z
     //
     // ENFORCED (boot fails, loudly): an absolute URL whose HOST differs from
     // `APP_URL`'s — plus https:// in production, the same rule `APP_URL`
-    // carries. This is not stylistic, even though the preview route no longer
-    // grants a configured value any behavioural exemption:
+    // carries. This is not stylistic, even though the preview route
+    // grants a configured value no behavioural exemption:
     // `mayServeActiveHtml()` reads the loading context and nothing else, so
     // agent HTML is ACTIVE only for a proven `Sec-Fetch-Dest: iframe` load in
     // every mode.

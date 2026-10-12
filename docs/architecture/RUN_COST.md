@@ -100,7 +100,7 @@ A `source="runner"` row is written for every run that consumed tokens except a r
 
 A remote-origin run whose inference flows through the system llm-proxy carries BOTH per-call proxy rows (each with `credential_source` stamped) AND the runner's NULL-`credential_source` cumulative mirror (a remote run resolves no platform model, so `runs.model_source` is NULL). A platform run never carries both — the proxy serves it (proxy rows only) or not (one runner row with a non-NULL `credential_source`, authoritative); a remote run with ONLY a runner row keeps it; a detached row (`run_id IS NULL`) is never a mirror.
 
-The predicate is applied by **all three** ledger reads — `computeRunSpend`, `listLlmUsage` (`PlatformServices.usage.list`) and `getSettledFrontierId` (`.settledFrontier`) — so a metering consumer that applies no filter of its own can no longer double-count a remote run. Skipping those ids is safe for the cursor: a batch is the next `limit` VISIBLE rows after `afterId`, so an empty batch still means "caught up", and an in-flight remote run's invisible mirror no longer pins the frontier.
+The predicate is applied by **all three** ledger reads — `computeRunSpend`, `listLlmUsage` (`PlatformServices.usage.list`) and `getSettledFrontierId` (`.settledFrontier`) — so a metering consumer that applies no filter of its own cannot double-count a remote run. Skipping those ids is safe for the cursor: a batch is the next `limit` VISIBLE rows after `afterId`, so an empty batch still means "caught up", and an in-flight remote run's invisible mirror does not pin the frontier.
 
 ## Settlement (what a cursor consumer may bill)
 

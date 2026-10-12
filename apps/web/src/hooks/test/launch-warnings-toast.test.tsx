@@ -163,12 +163,16 @@ describe("the Connecter action", () => {
     return (warned.mock.calls[0]![1] as { action?: unknown }).action;
   }
 
-  it("is offered to whoever reaches the agent's page, on that route's access alone", async () => {
-    expect(await actionFor(["agents:read"])).toBeDefined();
+  it("is offered when the viewer reaches the agent's page and sees its Connexions tab", async () => {
+    expect(await actionFor(["agents:read", "integrations:read"])).toBeDefined();
+  });
+
+  it("is withheld when the page shows the viewer no Connexions tab", async () => {
+    expect(await actionFor(["agents:read"])).toBeUndefined();
   });
 
   it("is withheld from a viewer the agent's page is closed to", async () => {
-    expect(await actionFor([])).toBeUndefined();
+    expect(await actionFor(["integrations:read"])).toBeUndefined();
   });
 });
 

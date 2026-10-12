@@ -59,6 +59,31 @@ The per-subject sections below are not runbooks and never were. They explain
 what each script does and what it checks, which is what the next release reads
 them for.
 
+## Release beta.67 — order of operations
+
+The order only; each step's detail, counts and rollback are in its `Detail` section below and in
+the root `CHANGELOG.md` (Operators).
+
+**Before the deploy, on the running release (read-only unless stated):**
+
+1. `0035` — stored manifests a connect or a run will refuse, with its `[scope]` advisories. Exits
+   non-zero while a hit remains.
+2. `0039` — report of agents declaring integrations; mark `required: true` where a run cannot do
+   without one, and publish.
+3. `0040` — dry run, then `--apply`: stored `token_usage` brought to the token-usage rule.
+
+**The window:**
+
+1. `pg_dump` the platform database (`0086` and `0089` are one-way).
+2. No active run (`0042` requires it).
+3. Run the migrate service alone (`docker compose run --rm appstrate-migrate`): it applies the
+   pending drizzle migrations, `0088`, `0089` and `0090` among them. The app stays stopped.
+4. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
+5. Start the app.
+6. `0041` dry run, then `--apply`: connections widened to org scope.
+7. `0042` dry run, then `--apply`: model subscriptions made personal.
+8. `0043` dry run, then `--apply`: space-tier auto-provisioned OAuth clients moved to their org.
+
 ## The split
 
 `packages/db/drizzle/*.sql` describes schema shape, is replayed on every

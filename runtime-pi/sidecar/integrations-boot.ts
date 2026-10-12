@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sidecar-side integration bootstrap (Phase 1.4 + 1.5).
+ * Sidecar-side integration bootstrap.
  *
  * Reads the `INTEGRATIONS_TO_SPAWN_JSON` env var produced by the
  * platform launcher (see `apps/api/src/services/run-launcher/pi.ts`),
@@ -12,7 +12,7 @@
  * future: Firecracker microVM, podman, …), and aggregates their tools
  * on a shared {@link McpHost}.
  *
- * Phase 1.5 also wires per-connection HTTPS MITM listeners for auths
+ * It also wires per-connection HTTPS MITM listeners for auths
  * that declare `delivery.http`: a per-run CA is minted on boot, each
  * such bound connection gets a credentials source (cache + refresh hook) +
  * listener bound on the adapter's preferred interface, and the listener
@@ -310,7 +310,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
 }
 
 /**
- * Phase 7 — connect to a remote Streamable HTTP MCP server using the
+ * Connect to a remote Streamable HTTP MCP server using the
  * actor's live credentials. Auth-type-agnostic: reads the resolved
  * `HttpDeliveryPlan` per request from the credentials source so the same
  * code path handles OAuth2 (refresh-aware Bearer), api_key (static PAT
@@ -333,14 +333,14 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
  * tie-breaker should the payload ever surface more than one. Throws when no
- * auth produces an injectable header — Phase 7 can't run an MCP client
+ * auth produces an injectable header — a remote MCP client cannot run
  * without authentication (every public hosted MCP today gates `tools/call`
  * behind some credential).
  */
 /**
  * Dependency seam for {@link connectRemoteHttpIntegration} — production
  * callers omit it (the default wires the real Streamable HTTP client). The
- * credentials source is no longer a dep: the caller hoists ONE source per
+ * credentials source is not a dep: the caller hoists ONE source per
  * integration and passes it in directly, so tests inject a fake source as the
  * second positional argument instead. Unit tests still override `createClient`
  * / `createSseClient` to exercise the per-request Bearer injection +
@@ -846,7 +846,7 @@ async function spawnAndConnectLocalIntegration(params: {
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
   //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
   //   - neither          → null: the runner has no egress route.
-  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
+  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner.
   let egressCtx: RuntimeEgressContext | null = null;
   const policy = compileRunnerEgressPolicy(
     spec.egress ?? { authorizedUris: [], declaredUris: [], allowAllUris: false },
@@ -1047,8 +1047,8 @@ async function spawnAndConnectLocalIntegration(params: {
     namespace: spec.namespace,
     client: wrapped,
     connection: spec.connection,
-    // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
-    // declared tools. `undefined` keeps the legacy "all tools allowed".
+    // McpHost.register filters `tools/list` to the agent's
+    // declared tools. `undefined` allows every tool.
     ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
     // R8a — apply `hidden_tools` belt-and-suspenders filter so a tool name
     // the manifest hides is never reachable, even via fixtures that bypassed
@@ -1172,7 +1172,7 @@ export function hiddenToolsForNativeUpstream(
  * Whether the spec's entire surface is the in-process `api_call` server. The
  * resolver signals it with `sourceKind: "none"` AND an absent
  * `manifest.server`; both are checked because a hand-written spec in a test
- * has historically set only one.
+ * may set only one.
  */
 function isServerlessSpec(spec: IntegrationSpawnSpec): boolean {
   return spec.sourceKind === "none" || !spec.manifest.server;
@@ -1291,7 +1291,7 @@ export async function bootIntegrations(
     });
     throw err;
   }
-  // ─── Phase 1.5 (kickoff) — MITM run-CA mint, raced with adapter.prepare ───
+  // ─── MITM run-CA mint, raced with adapter.prepare ───
   // The CA mint (openssl keygen + self-sign, ~100 ms) only needs the runId;
   // it has no dependency on the adapter context, so it runs concurrently
   // with `adapter.prepare` instead of serializing after it — the agent's
@@ -1336,7 +1336,7 @@ export async function bootIntegrations(
     data: { adapter: adapter.id, prepareMs: Math.round(adapterPrepareMs) },
   });
 
-  // ─── Phase 1.5 (converge) — MITM bring-up (run-CA + cert minter) ───
+  // ─── MITM bring-up (run-CA + cert minter) ───
   // The CA was minted once per run (kicked off above, concurrent with the
   // adapter phase), regardless of how many integrations need it.
   // Per-connection listeners share the same minter (lazily creates leaf
@@ -1553,14 +1553,14 @@ export async function bootIntegrations(
         continue;
       }
 
-      // ─── Phase 7 — remote HTTP MCP path ───
+      // ─── Remote HTTP MCP path ───
       // When the spawn-spec declares `sourceKind: "remote"` the integration
       // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
       // No bundle to fetch, no runner to spawn, no MITM listener — the
       // sidecar opens a Streamable HTTP client directly and injects the
       // Bearer token per-request from the credentials source. Trade-off:
-      // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
-      // upstream URLs through a hosted MCP — the upstream decides).
+      // no per-tool upstream URL can be enforced through a hosted MCP —
+      // the upstream decides.
       if (spec.sourceKind === "remote") {
         if (!source) {
           // Unreachable: `sourceKind === "remote"` forces `needsSource`. Guard
@@ -1581,7 +1581,7 @@ export async function bootIntegrations(
           namespace: spec.namespace,
           client,
           connection,
-          // Phase 3 tool allowlist still applies — McpHost filters
+          // The tool allowlist applies here too — McpHost filters
           // tools/list before exposing them to the agent.
           allowedTools: spec.toolAllowlist,
           // R8a defensive — `manifest.hidden_tools` is enforced at

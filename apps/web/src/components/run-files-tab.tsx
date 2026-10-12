@@ -19,7 +19,7 @@
  * files in one page), so the second pane costs no extra request and the two can
  * never show a different list.
  *
- * No preview here, deliberately. The derived rule (#1177) still decides that a
+ * No preview here, deliberately. The derived rule still decides that a
  * run which produced exactly one file gets that file PRESENTED — but the pane
  * that presents it is Outcome, where the artefact leads the page. This tab is
  * the inventory: an inline preview above a list whose job is to be complete

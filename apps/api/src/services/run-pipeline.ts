@@ -199,7 +199,7 @@ export async function resolveRunPreflight(params: {
    */
   manifestCache?: IntegrationManifestCache;
   /**
-   * Run-kickoff connect-link relay (#1207) — forwarded to readiness verbatim.
+   * Run-kickoff connect-link relay — forwarded to readiness verbatim.
    * Request paths pass `connectOfferPolicyFromRequest(c)`; the scheduler has no
    * request and no human to hand a link to, so it passes nothing.
    */

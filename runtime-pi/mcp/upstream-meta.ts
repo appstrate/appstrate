@@ -13,11 +13,8 @@
  *   {@link UPSTREAM_META_KEY}. The sidecar attaches it on every return
  *   path — including the ones it answered itself (pre-flight refusals,
  *   timeouts, unreachable upstreams) which surface as `status: 0`,
- *   `headers: {}`. The runtime no longer accepts a missing `_meta` —
- *   that pre-`_meta` shape was a backwards-compat shim for sidecars
- *   older than the runtime in the same release; sidecar and runtime
- *   are now built from the same source tree per release, so the shim
- *   is dead code.
+ *   `headers: {}`. The runtime refuses a missing `_meta`: sidecar and
+ *   runtime are built from the same source tree per release.
  *
  * Defence-in-depth: the runtime re-applies the allowlist on parse so
  * a compromised / misbehaving sidecar can't slip a header through —

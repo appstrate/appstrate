@@ -181,7 +181,7 @@ const LOAD_BEARING_RULES = [
   "@typescript-eslint/no-unused-vars",
   // The escape hatch out of every other type-level guarantee.
   "@typescript-eslint/no-explicit-any",
-  // Failure legibility (PR #1161): a rethrow that drops the caught error
+  // Failure legibility: a rethrow that drops the caught error
   // destroys the only record of what actually failed. This rule sat at "off"
   // in `eslint.config.mjs` — the file's one unjustified suppression — hiding
   // 20 such sites, so it is exactly the "switched off in silence" case this

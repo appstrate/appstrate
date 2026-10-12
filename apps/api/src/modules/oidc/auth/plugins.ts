@@ -268,7 +268,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // Default and ceiling are ONE array, so they cannot drift: the provider
       // unions them, and a default outside the ceiling would widen it silently.
       //
-      // A registration `scope` is ADVISORY (issue #1351). The provider validates
+      // A registration `scope` is ADVISORY. The provider validates
       // it against the union above and then persists that union verbatim
       // (`persistOAuthClientRegistration`), so a client declaring `openid` may
       // still ask for `mcp:invoke` at `/authorize`. Upstream documents this: the

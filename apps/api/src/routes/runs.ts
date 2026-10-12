@@ -83,16 +83,13 @@ import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation"
 /**
  * Wire-shape guard for the agent-run body (`POST /agents/{scope}/{name}/run`).
  *
- * `.strict()` on purpose (#1187). This surface had NO body schema at all: the
- * body was read with `c.req.json<RunRequestBody>()`, a cast that validates
- * nothing, so an unknown field was dropped without a trace and a malformed body
- * became `{}` — a 201 for a run executing with parameters nobody asked for.
- * That is the exact failure `assertFieldsUnlocked` states as a rule
- * (`@appstrate/core/input-resolution`) and the one #1179 fixed on the MCP
- * surface, and the
- * launch body was the last place the rule did not hold. `POST /runs/remote` was
- * already `.strict()`; the schedule bodies (`routes/schedules.ts`) took the
- * rule afterwards, and the four launch surfaces now agree.
+ * `.strict()` on purpose. A body read with a bare `c.req.json<RunRequestBody>()`
+ * cast validates nothing: an unknown field is dropped without a trace and a
+ * malformed body becomes `{}` — a 201 for a run executing with parameters nobody
+ * asked for. That is the failure `assertFieldsUnlocked` states as a rule
+ * (`@appstrate/core/input-resolution`). `POST /runs/remote` and the schedule
+ * bodies (`routes/schedules.ts`) are `.strict()` too: the four launch surfaces
+ * agree.
  *
  * Deep semantics stay downstream in `parseRequestInput` (is this dependency
  * spec resolvable, does the replayed run belong to this agent) — this schema

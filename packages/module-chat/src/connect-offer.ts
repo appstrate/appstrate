@@ -13,7 +13,7 @@
  *
  * A payload may carry SEVERAL connect URLs — a readiness error lists one per
  * unconnected integration — so the walk captures every one, in walk order,
- * deduped by normalized URL (issue #1207).
+ * deduped by normalized URL.
  *
  * `ui/auth-offer.ts` (bundled into the SPA) imports from here, so this module
  * may only pull in client-safe leaf imports — never server-only ones (MCP
@@ -70,7 +70,7 @@ export interface ConnectOffer {
   expiresAt?: string;
   /**
    * Integration the link connects (`@scope/name`). A run-kickoff 409 item
-   * (#1207) pairs it with `connect_url`; the card uses it for the integration's
+   * pairs it with `connect_url`; the card uses it for the integration's
    * icon and display name, and to claim the resume append.
    */
   packageId?: string;

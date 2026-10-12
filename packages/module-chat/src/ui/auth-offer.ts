@@ -44,7 +44,7 @@ interface ResumeClaim {
  *  - PACKAGE. One completion signal reaches every mounted card, so two cards
  *    awaiting the same package (a retry after an abandoned attempt) would both
  *    append on the one broadcast.
- *  - TOOL CALL. A run-kickoff 409 renders one card per integration (#1207);
+ *  - TOOL CALL. A run-kickoff 409 renders one card per integration;
  *    those are different packages, so only this key covers them.
  *
  * The TTL only needs to outlive one burst while staying well under any

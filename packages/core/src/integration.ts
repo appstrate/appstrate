@@ -395,8 +395,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       checkJsonPath(path, ["identity_claims", claim]);
     }
 
-    // (1g) Entries templated with `{$credential.<field>}` (#1458) reference declared, required
-    // fields, in the authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden
+    // (1g) Entries templated with `{$credential.<field>}` reference declared, required
+    // fields, in the authority of a `scheme://` entry or as a leading whole URL. Forbidden
     // with `connect` (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only
     // tokens in the bundle). Allowed on api_call: its consumers pin only the declared literal
     // entries. Entries carrying `{$variable.<name>}` are `@afps-spec/schema`'s (§7.9, §7.12).

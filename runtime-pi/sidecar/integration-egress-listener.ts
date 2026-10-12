@@ -22,7 +22,7 @@
  * surface (`ready` / `address` / `proxyUrl` / `close`) so `integrations-boot`
  * collects and tears down both listener kinds uniformly.
  *
- * Only the owning runner may connect (`isPeerAllowed`, #1458).
+ * Only the owning runner may connect (`isPeerAllowed`).
  */
 
 import { createServer as createHttpServer } from "node:http";

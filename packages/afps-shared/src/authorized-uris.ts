@@ -35,7 +35,7 @@ const HAS_TEMPLATE_REF = new RegExp(TEMPLATE_REF.source);
 export type TemplateRoot = "credential" | "variable";
 
 /**
- * Split a URL-form pattern (#1627): exactly one placeholder at index 0, followed by nothing or
+ * Split a URL-form pattern: exactly one placeholder at index 0, followed by nothing or
  * a `/` suffix without placeholders. `null` for any other pattern.
  */
 export function parseUrlFormPattern(
@@ -309,7 +309,7 @@ function renderPattern(
 }
 
 /**
- * Render `authorized_uris` for one connection (#1458). A templated pattern is DROPPED when a
+ * Render `authorized_uris` for one connection. A templated pattern is DROPPED when a
  * referenced field fails {@link AUTHORITY_VALUE} (or, for the URL form, {@link renderUrlValue}),
  * so a value cannot add a wildcard, a separator or another host. Import validation confines
  * placeholders to the host and port, or to the head of a URL-form pattern. A variable must pass
@@ -328,7 +328,7 @@ export function renderAuthorizedUris(
 
 /**
  * The fields and variables whose value would make {@link renderAuthorizedUris} drop an entry,
- * so a connection can be refused when it is written rather than on every later call (#1627).
+ * so a connection can be refused when it is written rather than on every later call.
  */
 export function unrenderableAuthorizedUriFields(
   patterns: readonly string[],
@@ -422,7 +422,7 @@ function compileAuthorizedUriPattern(pattern: string): RegExp | null {
   }
 }
 
-/** A connection's rendered `authorized_uris`, compiled for URL and (host, port) checks (#1458). */
+/** A connection's rendered `authorized_uris`, compiled for URL and (host, port) checks. */
 export interface EgressPolicy {
   allowsAuthority(host: string, port: number): boolean;
   allowsUrl(url: string): boolean;

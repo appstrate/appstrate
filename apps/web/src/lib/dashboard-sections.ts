@@ -15,7 +15,7 @@ interface DashboardSections {
 
 /**
  * The dashboard is the fallback route: it renders for ANY principal, so each
- * section answers to the guard of the query that feeds it (#1556). Pure: the
+ * section answers to the guard of the query that feeds it. Pure: the
  * API's preset pin (`apps/api/test/unit/spa-dashboard-sections.test.ts`) imports it.
  */
 export function dashboardSections(can: (permission: CorePermission) => boolean): DashboardSections {

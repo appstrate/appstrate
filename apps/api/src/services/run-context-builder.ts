@@ -157,7 +157,7 @@ export async function buildRunContext(params: {
     params.proxyId !== undefined &&
     params.generationConfig !== undefined;
 
-  // Phase 1.4 — resolve any declared `dependencies.integrations` into
+  // Resolve any declared `dependencies.integrations` into
   // ready-to-spawn specs (manifest + bundle bytes + delivery env with
   // live credentials). Kicked off FIRST: its inputs are all available at
   // entry and it is the slowest independent chain (storage fetch +

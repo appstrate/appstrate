@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mint a hosted-connect link into the run-kickoff 409 (issue #1207), and into
+ * Mint a hosted-connect link into the run-kickoff 409, and into
  * the connect-flow warnings of a launch that started without one.
  *
  * The readiness gate already names WHICH auth a connect flow must target and

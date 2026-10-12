@@ -6,9 +6,9 @@ End-User Identity Provider for Appstrate spaces. Turns each space into an OAuth 
 
 When an embedding app needs to delegate end-user authentication to Appstrate, this module provides the server-side Authorization Code + PKCE flow. The resulting access token is an ES256-signed JWT carrying `sub` (Better Auth user id), `endUserId`, and `spaceId` claims, accepted as `Authorization: Bearer ey…` on core routes. Core's strict end-user run-visibility filter applies automatically (the strategy sets `endUser` in context).
 
-## Phase 1 status
+## Status
 
-Phase 1 is **complete**. Token-issuance plugin wiring via `@better-auth/oauth-provider`, CSRF-hardened login + consent POST handlers, discovery alias endpoints, per-space email branding, and the end-to-end Authorization Code + PKCE test suite are all in place. The module is a fully functional OAuth 2.1 / OIDC authorization server for Appstrate spaces.
+The module is a fully functional OAuth 2.1 / OIDC authorization server for Appstrate spaces.
 
 ## Owned tables
 
@@ -27,7 +27,7 @@ The core `end_users` table is NEVER modified by this module — all OIDC-specifi
 
 ### The `oidc_end_user_profiles` shadow table
 
-Core's `end_users` table has zero OIDC vocabulary by design (Phase 0 invariant — no `authUserId`, no `emailVerified`, no OIDC status). Every OIDC-specific field the module needs to track about an end-user lives on this shadow table, keyed by `end_user_id`:
+Core's `end_users` table has zero OIDC vocabulary by design (no `authUserId`, no `emailVerified`, no OIDC status). Every OIDC-specific field the module needs to track about an end-user lives on this shadow table, keyed by `end_user_id`:
 
 ```
 oidc_end_user_profiles
@@ -181,7 +181,7 @@ A password change or reset revokes every family of the account too (reason `pass
 
 ## Auth strategy contributed
 
-A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix, per Phase 0 discipline rule). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `spaces.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.
+A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `spaces.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.
 
 Refuses when:
 
@@ -368,7 +368,7 @@ A `scope` declared at registration is **validated** against the ceiling and then
 
 The module keeps that behaviour rather than intersecting the declaration back in, for one reason: the declaration is client-controlled. A registrant that wanted the whole ceiling would simply declare it (DCR re-registers; CIMD edits its own document), so narrowing buys no confinement — while it would break every MCP client that publishes a minimal `scope` and then requests what the protected-resource metadata advertises. What actually bounds a self-service client is the ceiling itself, the single-audience rule at `/oauth2/token`, the consent screen, and the caller's live org role.
 
-Corollary: `markClientSelfService` writes `level` and `self_service` and nothing else. A scope backfill there would hand the client control of the ceiling `/authorize` enforces; it was removed in #1287 and must not come back.
+Corollary: `markClientSelfService` writes `level` and `self_service` and nothing else. A scope backfill there would hand the client control of the ceiling `/authorize` enforces; it must not exist.
 
 ### What the consent screen promises
 
@@ -382,7 +382,7 @@ Making that a real ceiling — minting instance tokens with the consented scope 
 - **Client secret hashing**: secrets are stored as 64-char hex SHA-256 hashes; the plaintext is returned exactly once on create and rotate. No "show secret" UI — lose it and rotate.
 - **Unverified email guard**: `resolveOrCreateEndUser` throws `UnverifiedEmailConflictError` when an auth identity with an unverified email clashes with an existing `end_users` row in the same space. This prevents silent account takeover via SMTP verification being disabled or an auth provider reporting `emailVerified: false`.
 - **`reference_id` → `spaceId` invariant**: every OAuth client row carries a `reference_id` matching an existing `spaces.id`. The admin route enforces this on create, and the auth strategy double-checks `endUser.spaceId === claims.spaceId` on every request.
-- **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
+- **Admin bypass is not shipped**: core runs filtering is strict, with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
 - **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token` to enforce RFC 8707 resource indicators, and rate-limits the endpoints that have no upstream rule — the device-flow and CLI-token routes — via the shared `rate-limiter-flexible` backend. The `/oauth2/*` endpoints themselves are limited per IP by the oauth-provider's own `rateLimit` config (`auth/plugins.ts`): token 20/min, authorize 30/min, introspect 60/min, revoke 30/min, register 5/min, enforced by Better Auth against the same shared limiter. The login POST also has a per-email limit of 5 attempts / 15 min. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
 
 ## Per-space social auth

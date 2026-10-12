@@ -21,7 +21,7 @@
  * ONLY the expected entries, and the jail tree dies with the teardown.
  * Requires root in that mode (vm-smoke.sh sudo-wraps this script).
  *
- * A FOURTH VM (#1547) boots the REAL sidecar with three probe integration
+ * A FOURTH VM boots the REAL sidecar with three probe integration
  * runners and asserts runner egress isolation on the real guest kernel — see
  * `smoke-runner-egress.ts` (its guest programs live in
  * `runner-egress-probes/`). REQUIRES INTERNET ACCESS from the KVM host: the
@@ -472,7 +472,7 @@ try {
   }
 
   // ---------------------------------------------------------------------
-  // Fourth VM (#1547): the REAL in-guest sidecar boots three probe
+  // Fourth VM: the REAL in-guest sidecar boots three probe
   // integration runners; every verdict on runner egress isolation is taken
   // host-side from the console. See smoke-runner-egress.ts.
   // ---------------------------------------------------------------------

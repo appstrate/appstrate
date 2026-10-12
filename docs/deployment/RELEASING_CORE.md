@@ -166,7 +166,7 @@ blocking, `off` skips the check entirely.
 
 A clean run prints `Summary: 0 failure(s)`; warnings count the consumers one
 minor behind (or one major behind at an `X.0.0`) — `core@11.1.0` printed
-`Summary: 0 failure(s), 1 warning(s)`. It no longer hides a
+`Summary: 0 failure(s), 1 warning(s)`. It does not hide a
 failed fetch or an unparsable range: both are counted. It can still include an
 informational "does not depend on `@appstrate/core`" line, so read the
 per-consumer output too.

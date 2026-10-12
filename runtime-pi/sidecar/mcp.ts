@@ -12,7 +12,7 @@
  * Key invariants:
  *
  * 1. `{ns}__api_call` calls {@link executeApiCall} directly via
- *    `proxyDeps`. There is no longer a `/proxy` HTTP envelope — the
+ *    `proxyDeps`. There is no `/proxy` HTTP envelope — the
  *    same credential-isolation invariants (cred fetch, URL allowlist,
  *    server-side header injection, 401-retry, cookie jar, persistent-
  *    auth-failure reporting) are enforced inside the credential-proxy
@@ -1724,8 +1724,8 @@ interface MountMcpOptions {
    * Credential-proxy core deps. `api_call` calls
    * {@link executeApiCall} directly with structured args; `run_history`
    * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
-   * reach the platform upstream. Required: there is no longer a legacy
-   * HTTP-route fallback. The per-connection credential pair is layered
+   * reach the platform upstream. Required: there is no HTTP-route
+   * fallback. The per-connection credential pair is layered
    * on top of these by `makeApiCallTool`.
    */
   proxyDeps: ApiCallBaseDeps;
@@ -1754,7 +1754,7 @@ interface MountMcpOptions {
    * the first-party sidecar tools (run_history, recall_memory).
    * Called on EVERY `/mcp` request so the sidecar's HTTP surface comes up
    * before integration MCP servers finish their initial handshake. The
-   * integration runtime (Phase 1.4) wires `McpHost.buildTools` here:
+   * integration runtime wires `McpHost.buildTools` here:
    * tools registered after the sidecar started serving become visible on
    * the next `tools/list` without restarting anything. First-party
    * names take precedence.
@@ -1773,7 +1773,7 @@ interface MountMcpOptions {
 
 /**
  * Cap on how long the first `/mcp` request waits for integrations to
- * register their tools before responding. Tuned for the Phase 1.5 path
+ * register their tools before responding. Tuned for the MITM path
  * on Docker Desktop / macOS: per-connection spawn pays for `docker
  * create` + `docker cp bundle` + `docker cp ca.pem` (MITM) +
  * `docker start` + Python/Node runner cold-start + MCP handshake, each
@@ -1802,7 +1802,7 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
     bootReady = Promise.race([
       bootReady.then(() => {
         // Disarm the deadline: a boot that finished in time must not log
-        // "exceeded" 30 s later on every run that outlives it (#1548).
+        // "exceeded" 30 s later on every run that outlives it.
         clearTimeout(deadline);
         bootReady = undefined; // resolved — skip the race on later requests
       }),

@@ -302,7 +302,7 @@ export async function buildConnectLoginSpec(
       variables: {},
       // Same projection as the run-start re-bootstrap reads back from storage
       // (`decryptCredentialInputsToStringMap`), so a login input is never
-      // delivered on the first login and lost on the next (#1897).
+      // delivered on the first login and lost on the next.
       inputs: toCredentialStringMap(execution.inputs),
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
     },

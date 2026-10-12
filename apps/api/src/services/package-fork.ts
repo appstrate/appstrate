@@ -241,7 +241,7 @@ async function forkWithConfig(
 
   // Create the fork package (draft): row and archive commit together, under
   // the draft lock every writer of the archive's key holds. The key may still
-  // be queued for deletion by a package deleted under this id (#1612).
+  // be queued for deletion by a package deleted under this id.
   const newPkg = await withPackageDraftLock(targetId, async (tx) => {
     const row = await createOrgItem(
       orgId,

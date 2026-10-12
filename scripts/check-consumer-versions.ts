@@ -136,7 +136,7 @@ export function assessDrift(
     // unpublished version. So at an X.0.0 release, "exactly one major behind"
     // is the only state a consumer can possibly be in, and failing it made
     // every major publish impossible without disabling the whole gate via
-    // CONSUMER_DRIFT_POLICY (issue #1028). Tolerated here and only here: the
+    // CONSUMER_DRIFT_POLICY. Tolerated here and only here: the
     // next release of that major is not itself a major, so an unbumped
     // consumer fails hard the very next time core publishes.
     if (isMajorRelease && oneMajorBehind) {

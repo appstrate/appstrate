@@ -104,7 +104,7 @@ export async function buildMcpDirectFactories(
       emit: opts.emit,
     }),
   );
-  // Phase 1.4 — integration tools. The sidecar's McpHost multiplexes
+  // Integration tools. The sidecar's McpHost multiplexes
   // each spawned `type: integration` MCP server's tools as namespaced
   // entries (`{ns}__{tool}`). We mirror them as Pi tools that forward
   // verbatim to the sidecar's MCP `tools/call`. Any name we already
@@ -119,7 +119,7 @@ export async function buildMcpDirectFactories(
  * as a Pi extension that forwards to `mcp.callTool` verbatim. This is
  * how `{namespace}__{tool}` entries from spawned integration MCP servers
  * (including the generic `{ns}__api_call` tool) become callable from the
- * LLM side (Phase 1.4).
+ * LLM side.
  */
 function buildIntegrationToolFactories(
   advertised: ReadonlyArray<{

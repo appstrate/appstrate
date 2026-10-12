@@ -5,7 +5,9 @@ import { toast } from "sonner";
 import i18n from "../i18n";
 import { authStore } from "../stores/auth-store";
 import { useIntegrationNames } from "./use-integrations";
+import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
+import { agentConnectionsTabVisible } from "../lib/route-access";
 import { packageDetailPath } from "../lib/package-paths";
 import {
   isViewersLaunch,
@@ -23,6 +25,7 @@ import {
 export function useLaunchWarningsToast() {
   const navigate = useNavigate();
   const integrationNames = useIntegrationNames();
+  const { can } = usePermissions();
   const canReach = useCanReach();
   return (target: LaunchTarget, agentPackageId: string, warnings: readonly LaunchWarning[]) => {
     // Checked first: a launch without warnings costs no name lookup.
@@ -35,7 +38,8 @@ export function useLaunchWarningsToast() {
       const canConnect =
         content.connectable &&
         isViewersLaunch(target, authStore.getState().user?.id) &&
-        canReach(agentPath);
+        canReach(agentPath) &&
+        agentConnectionsTabVisible(can);
       toast.warning(content.message, {
         description: content.description,
         ...(canConnect

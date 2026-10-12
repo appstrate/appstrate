@@ -8,10 +8,6 @@
  * / persisted checkpoint — the same shape a real platform run would inherit
  * from previous runs. Only the three seedable keys are honoured; extra
  * keys are ignored so the format can evolve without breaking callers.
- *
- * Matches the contract previously exposed by `afps run --snapshot` in
- * `@appstrate/afps-runtime` so agent authors can move their fixtures
- * over unchanged.
  */
 
 import { readFile } from "node:fs/promises";

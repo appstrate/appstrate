@@ -260,7 +260,7 @@ export async function recordChatUsage(record: ChatUsageRecord): Promise<void> {
  *     `credentialSource` + `executionPlane`; a rejection flows back for the
  *     module to surface as an RFC 9457 problem response.
  *   - a turn on the org's own credential reports `credentialSource: "org"`. The
- *     platform no longer declares it free and skips the hook: a chat turn always
+ *     hook still runs, the turn is not declared free: a chat turn always
  *     runs inside the platform's own process, so the platform funds its compute
  *     even when it funds no inference. A module that meters only
  *     platform-supplied inference quotes that turn at zero and admits it — same

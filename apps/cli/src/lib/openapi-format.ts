@@ -118,10 +118,9 @@ const GLOB_MAX_LENGTH = 200;
  * Path glob matcher — supports `*` (single segment, no `/`) and `**`
  * (any number of chars including `/`). No regex compilation: an
  * iterative two-pointer matcher with a single backtrack anchor runs in
- * O(pattern · path) and is inherently ReDoS-safe. We previously used
- * `new RegExp()` built from user input, which CodeQL flagged as
- * regex-injection even though every metacharacter was escaped —
- * replaced to remove both the false-positive and any residual concern.
+ * O(pattern · path) and is inherently ReDoS-safe, where a
+ * `new RegExp()` built from user input is flagged as regex-injection even
+ * with every metacharacter escaped.
  *
  * A bare path (no glob char) matches only exactly — principle of least
  * surprise so `--path /api/runs` doesn't accidentally pick up

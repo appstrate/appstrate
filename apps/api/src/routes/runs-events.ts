@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * HMAC-signed event ingestion routes. Both platform containers (Phase 5)
+ * HMAC-signed event ingestion routes. Both platform containers
  * and remote CLIs post here — the auth model, the wire format, and the
  * handler logic are identical.
  *
@@ -406,7 +406,7 @@ export function createRunsEventsRouter() {
     return c.json(manifest);
   });
 
-  // POST /api/runs/:runId/files — agent-published run output (Phase 2).
+  // POST /api/runs/:runId/files — agent-published run output.
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
   // here, either via the `publish_file` runtime tool or the entrypoint's

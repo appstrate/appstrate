@@ -518,9 +518,9 @@ export async function handleChatStream(
   // instructions — the engine's own MCP handshake delivers them.
   //
   // The operation-index policy is NOT applied here. The index only ever enters a
-  // prompt through the MCP server's `instructions`, which this route no longer
-  // fetches; the engine appends them and applies the policy itself
-  // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
+  // prompt through the MCP server's `instructions`, which this route does not
+  // fetch; the engine appends them and applies the policy itself
+  // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
   let system = buildSystemPrompt(capabilities);

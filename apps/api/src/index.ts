@@ -463,7 +463,7 @@ void bootBackground()
   .then(() => {
     markServerReady();
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
-    // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
+    // Fire-and-forget reachability probe for USERCONTENT_URL.
     // Never awaited, never fatal; runs after readiness so it can't race the
     // boot gate's 503-until-ready window against a hairpin route.
     void probeUsercontentReachability();

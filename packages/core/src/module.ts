@@ -1284,11 +1284,8 @@ export interface ModuleInitContext {
 // without an entry fails `tsc`), and a member no module consumes fails the check
 // as dead surface, exactly like an `AppstrateModule` member would. Each member's
 // own JSDoc states why the consumer cannot obtain the capability any other way.
-// The previous broad surface (orchestrator /
-// pubsub / realtime / inline / packages / models / spaces / run CRUD)
-// mirrored an in-process module that has since been removed — it carried zero
-// live consumers, so it was dropped rather than left as speculative API.
-// Re-add a member here the moment a consumer genuinely needs it.
+// A member exists here only when a consumer needs it: no speculative API
+// (orchestrator, pubsub, realtime, packages, models, spaces, run CRUD).
 // ---------------------------------------------------------------------------
 
 /**

@@ -26,8 +26,7 @@ export const SLUG_REGEX = new RegExp(`^${SLUG_PATTERN}$`);
 /**
  * Canonical snake_case identifier pattern: a lowercase letter followed by
  * lowercase alphanumerics and underscores. Single source of truth for every
- * `^[a-z][a-z0-9_]*$` check in the codebase (previously re-declared verbatim
- * in `apps/web/src/lib/strings.ts` and inline Zod in the API).
+ * `^[a-z][a-z0-9_]*$` check in the codebase.
  *
  * Two distinct concepts share this exact alphabet:
  *  - **Credential / AFPS auth keys** — the sidecar substitution contract

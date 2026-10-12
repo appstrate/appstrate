@@ -702,7 +702,7 @@ type HostedOAuthBegin =
 
 /**
  * Begin the oauth2 flow of a hosted-connect session whose jti the caller spent; the caller renders
- * the outcome. An auto-provisioned client may have registered upstream before refusing (#1344).
+ * the outcome. An auto-provisioned client may have registered upstream before refusing.
  */
 async function beginHostedOAuth(
   claims: ConnectSessionClaims,
@@ -750,7 +750,7 @@ async function beginHostedOAuth(
     return { redirectUrl: result.redirectUrl };
   } catch (err) {
     if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
-      // The detail names operator artefacts (#1345): logged, never rendered.
+      // The detail names operator artefacts: logged, never rendered.
       logger.warn("Hosted connect OAuth begin refused", {
         status: err.status,
         code: err.code,
@@ -880,7 +880,7 @@ export function createIntegrationsRouter() {
       }
       // Not an `OAuthCallbackError`, so nothing authored this message for a
       // reader: it is a DB fault, a TypeError, an SSRF refusal. Same rule as
-      // the branch above and as `/connect/start` (issue #1345) — this page is
+      // the branch above and as `/connect/start` — this page is
       // session-less, so the text goes to the log and the user gets the
       // generic sentence.
       logger.error("Integration OAuth callback threw", { err: String(err) });
@@ -1209,7 +1209,7 @@ export function createIntegrationsRouter() {
   //
   // Rate-limited per IP: no session, the signed token is the only credential,
   // and a refusal that hands the jti back leaves the link replayable for its
-  // 10-minute TTL (issue #1344). The 429 is the platform's standard
+  // 10-minute TTL. The 429 is the platform's standard
   // problem+json, not a popup page: it answers abuse, not a flow failure.
   router.get("/connect/start", rateLimitByIp(60), async (c) => {
     // The single-use capability token rides this request's query string. Strip
@@ -1264,7 +1264,7 @@ export function createIntegrationsRouter() {
         );
       }
       if ("refused" in begun) {
-        // Rendered generically, with the refusal's own status (#1263, #1345).
+        // Rendered generically, with the refusal's own status.
         if (begun.reusable) await releaseJti(claims.jti);
         const retry = begun.reusable ? "open this link again" : "request a new connection link";
         return c.html(
@@ -1275,7 +1275,7 @@ export function createIntegrationsRouter() {
           begun.refused.status as ContentfulStatusCode,
         );
       }
-      // Nothing sent upstream yet: the very same link works once the fault passes (#1352).
+      // Nothing sent upstream yet: the very same link works once the fault passes.
       // Otherwise the flow may have gone half way, and the burn stops a replay re-entering it.
       if (begun.beforeEgress) await releaseJti(claims.jti);
       return c.html(

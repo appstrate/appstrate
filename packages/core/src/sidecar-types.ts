@@ -113,7 +113,7 @@ export interface SidecarLaunchSpec {
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
   /**
-   * Integrations to bootstrap inside the sidecar (Phase 1.4). Each entry
+   * Integrations to bootstrap inside the sidecar. Each entry
    * declares an `type: integration` AFPS package the agent depends on —
    * the sidecar extracts the bundle, spawns the integration's MCP
    * server, and multiplexes its tools onto the agent-facing `/mcp`
@@ -345,7 +345,7 @@ export interface IntegrationSpawnSpec {
        */
       vendored?: boolean;
       /**
-       * Phase 7 — remote MCP endpoint URL. Required when
+       * Remote MCP endpoint URL. Required when
        * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`. The sidecar
        * opens a Streamable HTTP MCP client against this URL instead of
        * spawning a runner. Mutually exclusive with `entry_point` (enforced
@@ -408,7 +408,7 @@ export interface IntegrationSpawnSpec {
    */
   fileMounts?: Record<string, { content_b64: string; mode: string }>;
   /**
-   * Phase 1.5 — per-auth `delivery.http` metadata. The sidecar starts a
+   * Per-auth `delivery.http` metadata. The sidecar starts a
    * per-connection MITM HTTPS proxy and uses these plans to apply the shared
    * header-prefix and caller-override policy on every upstream request whose
    * URL matches an `authorizedUris` pattern of the matching auth.
@@ -419,7 +419,7 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
-   * Local runner egress policy (#1458), enforced by the one listener (MITM or
+   * Local runner egress policy, enforced by the one listener (MITM or
    * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
    * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
    * `declaredUris`: the manifest's own list; only a host it names literally skips the floor.
@@ -440,7 +440,7 @@ export interface IntegrationSpawnSpec {
    */
   hiddenTools?: readonly string[];
   /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When
+   * Agent-declared MCP tool allowlist. When
    * non-undefined, restricts the set of tools the namespace advertises
    * via `tools/list`. Tools not in the allowlist are silently omitted
    * from `tools/list` and consequently unreachable via `tools/call`
@@ -556,8 +556,8 @@ export type LlmProxyConfig = LlmProxyOauthConfig | LlmProxyPlatformConfig;
  * Canonical wire-format identifier for every LLM model provider Appstrate
  * proxies to. Lives here (in core) so that the sidecar runtime, the
  * platform's model-provider registry, and the OAuth token cache all reference
- * a single source of truth — drift between the three previously caused 401s
- * to surface as "unknown apiShape" rather than a real auth failure.
+ * a single source of truth — drift between the three makes 401s
+ * surface as "unknown apiShape" rather than a real auth failure.
  *
  * `pi-messages` is pi-ai's own vendor-neutral protocol rather than a vendor's:
  * an aliased run's container speaks it, so no vendor-shaped request or response

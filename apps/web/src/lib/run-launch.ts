@@ -97,7 +97,7 @@ const OWN_PICK_REFUSALS: ReadonlySet<MissingIntegrationConnectionCode> = new Set
 /**
  * The launch a `409 missing_integration_connection` refused, replayed with the
  * recovery modal's picks. Everything else the user chose rides along — the
- * input typed in the run modal above all (#1539). The launch's own pick for an
+ * input typed in the run modal above all. The launch's own pick for an
  * integration is dropped only when the 409 refuses that pick itself
  * (`OWN_PICK_REFUSALS`, or `auth_serves_no_selected_tool` naming a connection
  * of it). Under any other code — a connection to repair, above all — the pick

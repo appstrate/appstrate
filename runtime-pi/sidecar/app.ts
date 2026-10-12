@@ -126,7 +126,7 @@ export interface AppDeps {
    * Lazy provider for additional MCP tool definitions. Called on every
    * `/mcp` request so integrations that finish booting after the
    * sidecar's HTTP listener comes up still appear on the next call.
-   * The integration runtime (Phase 1.4) wires `McpHost.buildTools` here.
+   * The integration runtime wires `McpHost.buildTools` here.
    */
   additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
   /**

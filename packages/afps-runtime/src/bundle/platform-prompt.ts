@@ -235,7 +235,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         : "") +
       "You may use the filesystem for temporary processing during this run only.",
   );
-  // Disk bullet (#1019, #1044). The workspace bullet above invites filesystem
+  // Disk bullet. The workspace bullet above invites filesystem
   // use; without the cap next to it, a dependency install can die with ENOSPC
   // mid-run. MB takes precedence if a caller accidentally supplies both
   // backend representations, keeping the output deterministic.
@@ -297,7 +297,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
       "If no available tool can carry a given piece of information, that information cannot reach " +
       "the user — do not assume a final text message will be read.\n",
   );
-  // Batching (#1029). Measured on a reference run: 1.24 tool calls per turn,
+  // Batching. Measured on a reference run: 1.24 tool calls per turn,
   // 84 of 108 turns carrying exactly one, median turn latency 5.3s / p90
   // 24.1s — serialised independent calls, not model thinking, dominate the
   // wall clock. Models default to one call per turn unless told otherwise,

@@ -77,7 +77,7 @@ export async function buildPlatformSystemPrompt(
     ...(f.type ? { type: f.type } : {}),
   }));
 
-  // Phase 1.4 — inline each resolved integration's manifest description +
+  // Inline each resolved integration's manifest description +
   // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
   // API contract alongside the `{ns}__*` tools advertised via MCP
   // `tools/list`. Docs are pulled from `packages.draftContent` (captured
@@ -103,7 +103,7 @@ export async function buildPlatformSystemPrompt(
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
     // The runtime knows the workspace is capped; without this the agent
-    // does not, and a dependency install dies with ENOSPC mid-run (#1019).
+    // does not, and a dependency install dies with ENOSPC mid-run.
     workspaceTmpfsSizeMb: promptWorkspaceTmpfsSizeMb(executionMode),
     workspaceTmpfsSizePercent: plan.resources.writableRootTmpfsPercent,
     ...(plan.resources.semantics
@@ -114,7 +114,7 @@ export async function buildPlatformSystemPrompt(
           },
         }
       : {}),
-    // Deliverables convention (Phase 2): files the agent writes under
+    // Deliverables convention: files the agent writes under
     // `./outputs/` are swept and published as durable run files at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.

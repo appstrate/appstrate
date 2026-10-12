@@ -34,7 +34,7 @@ import type {
 // invalidate them after writes, and use-current-space resets them on
 // space switch. Only the fetch layer is migrated to the typed client.
 
-// Each read gates ITSELF on the permission its route guards (#1556): a custom
+// Each read gates ITSELF on the permission its route guards: a custom
 // space role may omit any of them, and a surface that shows a package family
 // only incidentally must not fire a request the server is bound to refuse.
 function useCanReadPackages(type: PackageType): boolean {

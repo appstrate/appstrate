@@ -97,8 +97,7 @@ function useRunAgent(packageId: string) {
             : {}),
         },
       });
-      // 201 + the bare created Run resource (same shape as GET /runs/:id) —
-      // the legacy `runId` alias was removed (#657).
+      // 201 + the bare created Run resource (same shape as GET /runs/:id).
       return data!;
     },
     onSuccess: (data) => {

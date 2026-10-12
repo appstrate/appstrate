@@ -269,7 +269,7 @@ function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): voi
 
 /**
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
- * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
+ * AND the `dependencies.integrations` map.
  */
 const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
@@ -524,7 +524,7 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
  * this manifest author input, or something already persisted?") and splitting
  * them into two flags would let a future call site set one and forget the
  * other, which is precisely how the author-input rejection was lost once
- * already (#1021):
+ * already:
  *
  *   1. `runtime_tools` ids the platform retired (or an author mistyped).
  *   2. `dependencies` keys AFPS 2.0 retired — `tools` (now `mcp_servers`) and
@@ -595,7 +595,7 @@ export function validateManifest(
   const type = obj.type;
 
   // AFPS 1.x retired dependency vocabulary: on the author direction, reject
-  // and name the replacement key (#1021). See {@link RetiredRuntimeToolsPolicy}
+  // and name the replacement key. See {@link RetiredRuntimeToolsPolicy}
   // for why the keys still parse. Checked before the type dispatch because
   // every package type may declare `dependencies`.
   if (options?.retiredRuntimeTools !== "drop") {

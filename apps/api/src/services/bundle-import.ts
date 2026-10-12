@@ -27,8 +27,7 @@
  * whole import (the error propagates) rather than committing a `packages`
  * row with no version (an un-runnable orphan) — earlier-inserted packages
  * remain (new inserts are harmless). For strict all-or-nothing atomicity,
- * a full-import transaction will be added once storage becomes CAS
- * (§Phase 4).
+ * the import would need a transaction over content-addressed storage.
  */
 
 import { zipSync, unzipSync, type AsyncZippableFile } from "fflate";
@@ -484,8 +483,8 @@ export async function importBundle(
     // cross-tenant TOCTOU between `detectBundleConflicts` (a read-only
     // preflight kept for UX — it reports ALL conflicts at once) and the
     // write: two concurrent imports of the same id from different orgs both
-    // pass the preflight, but only one insert wins; the loser previously
-    // fell through and grafted its version + bytes onto the WINNER's row.
+    // pass the preflight, but only one insert wins; unguarded, the loser
+    // would graft its version + bytes onto the WINNER's row.
     //
     // Serialization per packageId uses the same advisory lock as
     // `createPackageVersion` (`lockPackageVersions`), so

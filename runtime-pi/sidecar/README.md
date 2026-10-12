@@ -71,7 +71,7 @@ The sidecar layers two token-aware checks on top of the byte caps (see `token-bu
 
 Token estimation uses the Anthropic-recommended **3.5 chars/token** heuristic — deterministic, allocation-free, suitable for the hot path of every `api_call`. The official `@anthropic-ai/tokenizer` is no longer accurate for Claude 3+ models, and a real tokenizer (tiktoken / `count_tokens` API) would add 5-50 ms per call to the credential-injection round-trip.
 
-**The decision is not surfaced to the agent.** Text-path results used to carry a `dev.appstrate/token-budget` `_meta` payload describing the accounting; it was removed because it had no reader — `callToolResultToPi` drops `_meta` on the way to Pi, so nothing agent-side ever saw it, and an unread wire field is a contract nobody is holding. `dev.appstrate/upstream` (below) is now the only `_meta` key an `api_call` result carries.
+**The decision is not surfaced to the agent.** Text-path results carry no accounting `_meta`: `callToolResultToPi` drops `_meta` on the way to Pi, so nothing agent-side would read it, and an unread wire field is a contract nobody is holding. `dev.appstrate/upstream` (below) is the only `_meta` key an `api_call` result carries.
 
 What the agent observes is the outcome itself: a spilled result arrives as a `resource_link` block instead of inline text, and it reads the bytes on demand. The accounting stays in the sidecar's own structured logs (`mcp.ts`):
 

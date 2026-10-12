@@ -55,8 +55,7 @@
  * deferred — granting `cli-sessions:delete` to an API key would let a
  * compromised key sign every device of every account out of the platform,
  * which is a much wider blast radius than the key holder's intent.
- * If a future use case justifies the scope, it lands as a Phase 3
- * extension with its own RBAC contribution.
+ * A use case that justifies the scope needs its own RBAC contribution.
  */
 
 import { eq } from "drizzle-orm";

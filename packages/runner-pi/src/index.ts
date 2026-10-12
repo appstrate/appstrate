@@ -2,7 +2,7 @@
 
 // Same rule as every block below, and it holds for TYPES as much as values: a
 // line here is only what something OUTSIDE the package imports FROM THE BARREL.
-// `installSessionBridge` (#1202) and `preserveRequestedThinkingLevel` (#1209)
+// `installSessionBridge` and `preserveRequestedThinkingLevel`
 // lost their last such reader and came off this list.
 //
 // So did fifteen `Options`/payload types across the blocks below — an options

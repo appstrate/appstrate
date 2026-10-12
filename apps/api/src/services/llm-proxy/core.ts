@@ -57,7 +57,7 @@ interface ProxyCallInputs {
   payerUserId: string | null;
   /** A run's own inference: the credential it launched with (`runs.model_credential_id`). */
   runCredentialId?: string | null;
-  /** Forwarded to `llm_usage.run_id`. Populated by Phase 4's `X-Run-Id` header. */
+  /** Forwarded to `llm_usage.run_id`. Populated from the `X-Run-Id` header. */
   runId: string | null;
   /**
    * Forwarded to `llm_usage.chat_session_id`. Read from the VALIDATED loopback

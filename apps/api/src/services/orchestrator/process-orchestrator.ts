@@ -84,7 +84,7 @@ function workspaceDirFor(runId: string): string {
  * ONLY thing that lets a boot-time sweep tell "residue of my own crashed
  * self" apart from "a live sibling instance's run" — the `appstrate-ws-*`
  * naming convention and the uid say nothing about which instance owns a
- * directory, and two `bun run dev` sessions on one host share both (#1130).
+ * directory, and two `bun run dev` sessions on one host share both.
  *
  * A pid is deliberately enough: pids are global, so `kill(pid, 0)` answers
  * the ownership question from any working directory, which matters because
@@ -135,7 +135,7 @@ async function ownerIsAlive(runId: string): Promise<boolean> {
  * regardless of working directory, so this sweep sees the live runs of
  * sibling instances — including ones started from another worktree, which
  * the cwd-relative dataDir sweep cannot even see. Deleting those wiped a
- * running agent's `/workspace` mid-run (#1130).
+ * running agent's `/workspace` mid-run.
  *
  * The uid filter avoids two problems on shared hosts:
  *   - Reaping a workspace owned by another platform instance (running
@@ -342,7 +342,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // owning platform process is still alive belongs to a sibling instance
       // started from this same working directory (two `bun run dev`, or a
       // redeploy overlapping the old process). SIGKILLing its workloads and
-      // deleting its boundary killed live runs at every sibling boot (#1130).
+      // deleting its boundary killed live runs at every sibling boot.
       // Our own residue always fails this check: a crashed platform's pid is
       // dead, which is exactly what makes its runs reclaimable.
       if (await ownerIsAlive(name)) {

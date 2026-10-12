@@ -64,8 +64,8 @@ interface RunExecutionTabProps {
  * charting dependency is worth it. The proportional bar behind the context
  * column is pure CSS.
  *
- * The bar is normalized on the run's context WINDOW, not on the run's own peak
- * (#1046). Peak-relative made every run look equally full — the widest bar was
+ * The bar is normalized on the run's context WINDOW, not on the run's own peak.
+ * Peak-relative made every run look equally full — the widest bar was
  * always 100 % whether the run had used 5 % or 95 % of what it was given, which
  * is the one thing the column exists to tell apart. This is the same reading
  * the header gauge shows, computed by the same helper so the two cannot drift.

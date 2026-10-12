@@ -234,8 +234,8 @@ Firecracker line when a local install selects the backend — a light
 
 ## Production status
 
-Both hardening gaps that previously gated this backend (no jailer,
-in-guest credentials) are closed. It is suitable for production
+The backend runs under the jailer and keeps credentials out of the guest.
+It is suitable for production
 single-tenant and trusted-workload deployments; for hostile multi-tenant
 workloads, weigh the residual threat model below and run an independent
 security review first — the backend has not yet had one. Hardening status:
@@ -256,7 +256,7 @@ security review first — the backend has not yet had one. Hardening status:
    without propagating the VMM exit status, which would break
    `waitForExit` (see `jail.ts`).
 2. **In-guest credentials — MMDS-brokered by default.** The run's raw
-   secrets no longer ride the config drive: with
+   secrets do not ride the config drive: with
    `FIRECRACKER_CREDENTIAL_BROKER=mmds` (the default) the known-secret keys
    (LLM keys, OAuth config, `RUN_TOKEN`, `APPSTRATE_SINK_SECRET`,
    `INTEGRATIONS_TO_SPAWN_JSON`, cookie-session logins) stay in daemon
@@ -450,7 +450,7 @@ host↔guest isolation.
 Timeout/cancel flow through `stopWorkload`/`stopByRunId` (graceful
 `SendCtrlAltDel` attempt, then SIGKILL). A cancel landing during the boot
 window latches (`vm.stopping`) and the just-spawned VMM is killed on the
-post-spawn recheck — a cancel can no longer race the boot into a running
+post-spawn recheck — a cancel cannot race the boot into a running
 VM. The platform stall watchdog calls `stopByRunId` when it finalizes a
 stalled run (the VM is killed, not just the DB row), and at platform boot
 the orphan finalizer does the same for every stale-heartbeat run before
@@ -667,7 +667,7 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   `waitForExit`), `shutdown` (daemon stopping), or `crash` (VMM exited
   non-zero without an intentional stop, incl. the console-ceiling kill).
   `exitMarkerFound` is the nonce-authenticated supervisor exit marker — the
-  same signal `waitForExit` trusts. There is no longer a silent gap between
+  same signal `waitForExit` trusts. There is no silent gap between
   "microVM booted" and cleanup.
 - **Console retention.** Before the workspace is deleted, the last 256 KiB
   of `console.log` is copied to
@@ -698,7 +698,7 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   dead — so a genuinely hung or dead VM is never masked. This removes the
   historical "watchdog kills a healthy, slow-booting run" class (see the Lima
   `RUN_STALL_THRESHOLD=300` workaround).
-  The pump itself is no longer Firecracker-specific: it lives in
+  The pump itself is not Firecracker-specific: it lives in
   `services/run-boot-heartbeat.ts` and is shared with the Docker platform
   path (which hit the same class of failure on cold image pulls). This
   backend only supplies its own liveness probe. The `boot_deadline_at`

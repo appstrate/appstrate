@@ -837,7 +837,7 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
 }
 
 /**
- * Boot-time reachability probe for `USERCONTENT_URL` (issue #1001).
+ * Boot-time reachability probe for `USERCONTENT_URL`.
  *
  * The platform *signs* preview URLs (`services/files.ts` → `mintPreviewUrl`)
  * but never fetches them — so if `USERCONTENT_URL` is set to a host the browser

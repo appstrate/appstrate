@@ -177,7 +177,7 @@ export async function selfUpdateCommand(
   // Not `withSpinner`: the start is conditional (no ticks, no spinner — a
   // no-op update must not paint a download line). The `finally` carries the
   // same obligation the helper would: a spinner that outlives its scope keeps
-  // painting from a `setInterval` for the rest of the process (issue #1180).
+  // painting from a `setInterval` for the rest of the process.
   const spin = spinner(io);
   let spinning = false;
   const onProgress: ProgressFn = (p) => {

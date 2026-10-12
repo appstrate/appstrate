@@ -177,7 +177,7 @@ export async function persistRunEvent(
   }
 }
 
-/** The metric's usage, or null: a malformed one is logged, never thrown (replayed, #1501). */
+/** The metric's usage, or null: a malformed one is logged, never thrown (replayed). */
 function parseMetricUsage(runId: string, value: unknown): TokenUsage | null {
   if (value == null) return null;
   const { usage, tiersDropped } = parseTokenUsage(value);

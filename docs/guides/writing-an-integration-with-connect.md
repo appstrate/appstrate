@@ -86,7 +86,7 @@ The raw long-key spelling is **not** accepted — the alias layer that once
 carried it is gone, and a manifest using it resolves no `api_call` surface.
 When this extension declares a synthetic name, that name is reserved and takes
 precedence over a same-named native MCP tool. A native tool literally named
-`api_call__<authKey>` is therefore no longer swallowed by the synthetic surface:
+`api_call__<authKey>` is therefore not swallowed by the synthetic surface:
 it collides with nothing and stays in the catalog. Without the extension, native
 tools named `api_call` or `api_upload` remain ordinary tools.
 

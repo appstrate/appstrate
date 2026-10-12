@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Release plan: this section ships as `16.0.0`.** Order, each step waiting for
+the one before it to be on npm:
+
+1. `@appstrate/afps-shared` **0.13.0**. Core requires `^0.13.0`, which carries
+   the `./request-template` and `./json-text` subpaths (`jsonText`,
+   `jsonTextMap`), `parseTokenUsage` and the `./ssrf` egress helpers.
+2. `@appstrate/core` **16.0.0** (tag `core@16.0.0`).
+3. `connect-helper` moves its range to `^16.0.0`, right after the tag.
+
+Procedure: `docs/deployment/RELEASING_CORE.md`.
+
 ### Added
 
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
@@ -206,6 +217,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MAX_TOKEN_USAGE_TIERS` (16) entries with unique thresholds. Such a card
   would otherwise have every band of its usage dropped and price at the base
   rate. (#1552)
+
+- **BREAKING (types): `keyof TokenUsage` includes `tiers`**
+  (`@appstrate/core/token-usage`, re-exported from afps-shared). `TokenUsage`
+  is the four counters plus the optional `tiers` bands, so a
+  `Record<keyof TokenUsage, number>` or a loop over its keys that treats every
+  key as a counter does not typecheck. Iterate `TOKEN_USAGE_COUNTERS`
+  (`@appstrate/afps-shared/token-usage`) for the counters.
 
 - **Requires `@appstrate/afps-shared` `^0.13.0`** (was `^0.12.0`): the
   `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`

@@ -2690,7 +2690,7 @@ export function createOidcRouter() {
   router.get("/.well-known/openid-configuration/api/auth", serveOpenIdConfig);
   router.get("/.well-known/oauth-authorization-server/api/auth", serveOAuthServerConfig);
 
-  // ── Phase 3 admin oversight (#251) ─────────────────────────────────────────
+  // ── Admin oversight ─────────────────────────────────────────────────────────
   //
   // `/api/orgs/:orgId/cli-sessions` is mounted at the OIDC module's HTTP
   // origin root rather than under `/api/oauth/*` because semantically the

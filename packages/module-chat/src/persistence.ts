@@ -140,9 +140,8 @@ async function deterministicMessageId(
  * The single write path into `chat_messages`.
  *
  * `precedingMessageId` — the message this one follows — is HASH MATERIAL only;
- * no column stores it. The `parent_id` column that used to was dropped in
- * migration 0054: it re-encoded `seq`, which is what every reader sorts by. The
- * argument survives because it is what keeps a DERIVED id distinct across
+ * no column stores it: a column would re-encode `seq`, which is what every reader
+ * sorts by. The argument is what keeps a DERIVED id distinct across
  * turns; see `deterministicMessageId`.
  */
 async function upsertMessage(
@@ -151,7 +150,7 @@ async function upsertMessage(
   rawMessage: UIMessage,
   precedingMessageId: string | null,
 ): Promise<{ messageId: string; seq: number }> {
-  // A NUL (tool/MCP output, model delta) makes Postgres refuse the row: the message is lost (#1501).
+  // A NUL (tool/MCP output, model delta) makes Postgres refuse the row: the message is lost.
   const message = toPgSafe(rawMessage);
   // Why the hash material cannot be trimmed now that no column stores it: every
   // `gen_…` id already in the table was derived WITH `precedingMessageId`, so
@@ -434,7 +433,7 @@ export function titleFromText(text: string): string | null {
   const midWord = /\S/.test(text.charAt(TITLE_HEAD)) && /\S$/.test(head);
   const boundary = head.search(/\s+\S*$/);
   const kept = midWord && boundary >= 30 ? head.slice(0, boundary) : head.trimEnd();
-  // `chat_sessions.title` is text: a NUL would fail the turn's session UPDATE (#1501).
+  // `chat_sessions.title` is text: a NUL would fail the turn's session UPDATE.
   return toPgSafe(`${kept}…`);
 }
 

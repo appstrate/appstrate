@@ -27,7 +27,7 @@ interface ContextGaugeReadoutProps {
 
 /**
  * The run's context occupancy, a peer of the `$` readout in the run-detail
- * header (#1046).
+ * header.
  *
  * Two readings, because the useful question changes when the run stops: active
  * shows the CURRENT context (`128k / 200k · 64 %` — headroom left before

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Deadline nudges — mid-run wall-clock steering (#1029).
+ * Deadline nudges — mid-run wall-clock steering.
  *
  * The run budget is stated exactly once, in the system prompt built at turn 1
  * (`renderPlatformPrompt` → "You have N seconds to complete this task"). The

@@ -407,7 +407,7 @@ export function createSpacesRouter() {
     // A credential PINNED to a space never enumerates its siblings: it sees the
     // one space it is bound to, whatever its subject reaches. Keyed on the
     // pinned space rather than on `authMethod === "api_key"`, for the reason
-    // `pinnedSpaceScopeGuard` is (issue #1313) — any strategy that pins a space
+    // `pinnedSpaceScopeGuard` is — any strategy that pins a space
     // is confined, not just the one auth method that did when this was written.
     const pinnedSpaceId = c.get("spaceId");
     const scoped = pinnedSpaceId ? entries.filter((e) => e.space.id === pinnedSpaceId) : entries;
@@ -744,7 +744,7 @@ export function createSpacesRouter() {
     // granted, and the standing being dropped one they could have granted too —
     // are asserted inside `removeSpaceMember`, on the rows it acts on and under
     // the lock the grant path holds. Judged here they would rest on an org role
-    // a concurrent promotion can move between the read and the DELETE (#1439),
+    // a concurrent promotion can move between the read and the DELETE,
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
     const { removed, accessAfter, unsharedShares, disabledScheduleIds } = await removeSpaceMember({

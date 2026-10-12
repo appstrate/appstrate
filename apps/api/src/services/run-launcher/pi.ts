@@ -310,7 +310,7 @@ async function runPlatformContainerImpl(
       // sidecar applies a conservative fallback when either is unset.
       ...(llmConfig.contextWindow != null ? { modelContextWindow: llmConfig.contextWindow } : {}),
       ...(llmConfig.maxTokens != null ? { modelMaxTokens: llmConfig.maxTokens } : {}),
-      // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+      // Integrations the sidecar will spawn + multiplex onto
       // the agent-facing `/mcp` surface. Resolved upstream by
       // `resolveIntegrationSpawns` (run-context-builder).
       ...(plan.integrations && plan.integrations.length > 0

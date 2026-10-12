@@ -13,8 +13,6 @@
  *
  * Re-acquisition (refresh) is not a strategy method — the live resolvers call
  * `refreshConnectionCredential`, since only `oauth2` refreshes.
- *
- * Behaviour is unchanged from the inline route logic it replaces.
  */
 
 import { decodeJwtPayload } from "@appstrate/core/jwt";

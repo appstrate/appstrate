@@ -334,8 +334,8 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
     // throttle entry. `finalizeRunImpl` has many exits (idempotent no-op when
     // the sink is already closed, the CAS-winner path, and any throw from the
     // post-CAS side effects); dropping the entry here covers all of them,
-    // including the throwing ones that previously leaked it for the lifetime
-    // of the process. Also runs AFTER the post-CAS side effects, so a metric
+    // including the throwing ones, which would otherwise leak it for the
+    // lifetime of the process. Also runs AFTER the post-CAS side effects, so a metric
     // event racing them cannot re-create an entry that nothing then clears.
     //
     // Local-only by construction: the entry lives on whichever replica
@@ -916,7 +916,7 @@ export async function synthesiseFinalize(
  * runner posts. A synthesised terminal carries an `emptyRunResult()`, so a
  * run whose agent had ALREADY delivered its output ended with
  * `runs.result = null` — the payload survived on disk but was invisible to
- * `GET /api/runs/:id`, the dashboard and the CLI's `--output` (issue #1020).
+ * `GET /api/runs/:id`, the dashboard and the CLI's `--output`.
  *
  * RECOVER, NEVER FABRICATE: only a payload that is actually persisted AND a
  * plain record is attached. No row, or a row whose `data` is null, leaves
@@ -1102,8 +1102,8 @@ async function persistEventAndAdvance(
       }),
     );
   } catch (err) {
-    // A row-value failure (22xxx/23514) replays identically and would wedge the stream
-    // (#1501): claim the sequence with a placeholder. After sanitisation only a platform
+    // A row-value failure (22xxx/23514) replays identically and would wedge the stream:
+    // claim the sequence with a placeholder. After sanitisation only a platform
     // bug lands here, hence error level — logged only if we claimed (a lost race drops nothing).
     const sqlState = rowValueErrorCode(err);
     if (sqlState === null) throw err;
@@ -1146,9 +1146,8 @@ async function persistEventAndAdvance(
   // actually transitions pending → running (the first ingested event).
   // Platform-origin runs already emit `started` from
   // `executeAgentInBackground` when they flip the row, so they are
-  // excluded here to avoid a duplicate. Remote runs no longer emit at
-  // row-insert time (run-creation.ts) — that fired before the DB
-  // transition and never again when it actually happened.
+  // excluded here to avoid a duplicate. Remote runs emit nothing at
+  // row-insert time (run-creation.ts): that is before the DB transition.
   if (firstEvent && run.runOrigin === "remote") {
     const integrationsUnbound = readIntegrationsUnbound(run.integrationsUnbound, run.id);
     void emitEvent("onRunStatusChange", {

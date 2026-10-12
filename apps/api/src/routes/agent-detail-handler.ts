@@ -265,7 +265,7 @@ export async function buildAgentDetailDto(
     // `locked_input_field`), so its stored value — the editor's, often a
     // credential or an account id — has no place in a launch payload. The
     // NAMES stay: they are what tells the form to render the field as imposed
-    // instead of asking for it (issue #1338).
+    // instead of asking for it.
     input: {
       ...(m.input ?? { schema: { type: "object", properties: {} } }),
       values: summaryOnly ? withoutLockedFields(storedValues, lockedFields) : storedValues,

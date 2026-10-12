@@ -314,7 +314,7 @@ export async function withSpinner<T>(
 
 /**
  * A refusal the CLI translated: its message says what the cause means, so
- * {@link formatError} prints it alone (#1517). The cause stays attached.
+ * {@link formatError} prints it alone. The cause stays attached.
  */
 export class ExplainedError extends Error {
   constructor(message: string, options: { cause: unknown }) {

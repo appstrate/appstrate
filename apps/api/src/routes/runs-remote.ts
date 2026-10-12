@@ -440,9 +440,8 @@ export function createRunsRemoteRouter() {
         },
       });
 
-      // Operation envelope (legit exception under #657: one-time sink
-      // credentials are not part of the run resource). The run id field is
-      // `id` — the legacy `runId` alias was removed with the strict rule.
+      // Operation envelope (one-time sink credentials are not part of the
+      // run resource). The run id field is `id`.
       c.status(201);
       return c.json({
         id: result.runId,

@@ -189,7 +189,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
  *  end-user token pins a space too, and carries no `orgRole`, so
  *  `applySpacePermissions` returns early for it (RBAC spec §7.2) and nothing
  *  downstream compares the path space to the pinned one — an end-user of space
- *  A read space B's `run-config`, private spaces included (issue #1313). Both
+ *  A read space B's `run-config`, private spaces included. Both
  *  pinned kinds are confined here, once, instead of per route. */
 export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
   const pinnedSpaceId = c.get("spaceId");

@@ -203,8 +203,9 @@ integration_connections WHERE shared_with_org;` tells whether the step
 - **The starter agent's publication is audited**: a new organization's
   `hello-world` 1.0.0 writes a `package.version_created` line, actor `system`,
   in its default space. (#1914)
-- **The launch-warning toast offers "Connecter" on the agent page's route
-  access alone**, without a second `integrations:read` test beside it. (#1914)
+- **The launch-warning toast offers "Connecter" exactly when the agent page
+  shows its Connexions tab**: both read one rule,
+  `agentConnectionsTabVisible`. (#1914)
 - **BREAKING (API): connect and scopes** (#1913).
   - **Login refusals carry their own code.** A `connect.login` or
     `connect.tool` login the service refused is `400 login_rejected` on

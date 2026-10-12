@@ -124,7 +124,7 @@ export function applySpecToSidecarEnv(
       }
     }
   }
-  // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+  // Integrations the sidecar will spawn + multiplex onto
   // the agent's MCP surface. Each entry carries the bundle bytes +
   // resolved spawn env (with live OAuth tokens / API keys).
   if (spec.integrations && spec.integrations.length > 0) {

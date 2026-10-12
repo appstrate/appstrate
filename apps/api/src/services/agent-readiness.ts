@@ -48,7 +48,7 @@ interface ValidateAgentReadinessParams extends AgentReadinessParams {
   /** `runs.version_ref` of `agent` — the 409's `version_ref`. */
   versionRef: string;
   /**
-   * Opt-in relay for the run-kickoff connect link (#1207) — see
+   * Opt-in relay for the run-kickoff connect link — see
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    */
   connectOffers?: ConnectOfferPolicy | null;

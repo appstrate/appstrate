@@ -1447,7 +1447,7 @@ export const oidcPaths = {
     },
   },
 
-  // ── Phase 3 admin oversight (#251) ────────────────────────────────────────
+  // ── Admin oversight ────────────────────────────────────────────────────────
 
   "/api/orgs/{orgId}/cli-sessions": {
     get: {

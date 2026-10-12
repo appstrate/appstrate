@@ -4,7 +4,7 @@
  * Niveau 2 — per-integration tool/scope picker rendered inside the agent
  * editor's Integrations section. Drives
  * `IntegrationSpawnSpec.toolAllowlist` → sidecar `McpHost.allowedTools`
- * (Phase 3) and optionally pins extra OAuth scopes beyond those
+ * and optionally pins extra OAuth scopes beyond those
  * inferred from the tool selection.
  *
  * Least-privilege contract: `tools: undefined` and `tools: []` are NOT
@@ -193,7 +193,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   const isApiCall = apiCallToolNames.length > 0;
 
   // Aggregate scope catalog across every auth — the resolver treats them
-  // as a single namespace per integration (Phase 0). Dedup by `value`,
+  // as a single namespace per integration. Dedup by `value`,
   // keep the first occurrence's label/description.
   const scopeCatalog = new Map<string, { value: string; label: string; description?: string }>();
   for (const auth of Object.values(detail.manifest.auths ?? {})) {

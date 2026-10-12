@@ -122,9 +122,7 @@ export const MAX_REQUEST_BODY_SIZE = readRequestBodyCapEnv();
  * of being read into memory first — applied by {@link resolveBodyForFetch}
  * when the caller opts into streaming.
  *
- * Sole source, read before touching: the sidecar declared a same-named
- * constant until it was deleted as unused (`runtime-pi/sidecar/helpers.ts`
- * records the deletion). Nothing mirrors this value any more; it is not a
+ * Sole source: nothing mirrors this value; it is not a
  * sidecar knob and not settable, so changing it is a code change here.
  */
 export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
@@ -282,7 +280,7 @@ const responseModeSchema = z
   .optional();
 
 const httpUrl = z.url({ protocol: /^https?$/ });
-/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…` (#1627). */
+/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…`. */
 const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:/.*)?$`);
 
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */

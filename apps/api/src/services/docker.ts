@@ -264,7 +264,7 @@ export async function ensureImagePin(
     Entrypoint: ["sleep"],
     Cmd: ["infinity"],
     // A pin runs `sleep`, so the image's HEALTHCHECK would probe a process
-    // that isn't there (#1521).
+    // that isn't there.
     Healthcheck: { Test: ["NONE"] },
     HostConfig: {
       // No network, no privileges, minimal resources: this process must be
@@ -334,7 +334,7 @@ interface CreateContainerOptions {
   /**
    * Docker `HostConfig.Binds` entries (`/host/path:/container/path[:ro]`).
    * Used by the sidecar to receive the host's Docker socket so it can
-   * `docker run` per-integration runner containers (Phase 1.4+). Empty by
+   * `docker run` per-integration runner containers. Empty by
    * default for every other workload — agent containers never get this.
    */
   binds?: string[];
@@ -953,7 +953,7 @@ async function removeVolumesMatching(predicate: (name: string) => boolean): Prom
  * redeploy that boots before the old one is drained — writes the same label.
  * A sweep keyed on that label alone force-removed live agents and sidecars
  * out from under a sibling instance mid-run, and the victim's `waitForExit`
- * then reported the disappearance as exit code 137 (#1130). Same class of
+ * then reported the disappearance as exit code 137. Same class of
  * bug as #834, which fixed it for the shared egress network.
  *
  * So the sweep reclaims only what it can prove is finished, without needing
@@ -1073,7 +1073,7 @@ let platformNetworkCache: { networkId: string; hostname: string } | null | undef
  * Returns null when running outside Docker (local dev).
  * A 5xx, a transport error or an unreadable body throws uncached,
  * so an outage at boot is retried rather than falling back to `PLATFORM_API_URL`
- * / host-gateway for the process lifetime (#1129). Any other status is
+ * / host-gateway for the process lifetime. Any other status is
  * definitive (404 = not a container, 401/403 = proxy ACL): null is cached.
  */
 export async function detectPlatformNetwork(): Promise<{

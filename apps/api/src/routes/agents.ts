@@ -342,7 +342,7 @@ export function createAgentsRouter() {
   // Permission BEFORE `requireAgent()`, as on every agent route: that
   // middleware 404s on an unknown agent, so the reverse order answers "does
   // this agent exist?" to a caller that is not allowed to read agents at all —
-  // 403-vs-404 enumerates the space's private catalog (#1341). The order is
+  // 403-vs-404 enumerates the space's private catalog. The order is
   // enforced by `test/integration/middleware/agent-lookup-permission-order.test.ts`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/proxy`,

@@ -286,7 +286,7 @@ type EnrichedRunRow = {
  *     spread-the-whole-row mapper leaked the credential ciphertext.
  *
  * The DB TS field names stay camelCase (Better Auth blocker); universal
- * DB-convention fields (id, *Id, *At) stay camelCase on the wire per Phase 3.
+ * DB-convention fields (id, *Id, *At) stay camelCase on the wire (`docs/CASING_CONVENTIONS.md`).
  */
 // The explicit `: RunWireDto` return annotation is the drift guard: tsc fails
 // if the mapper produces a field not on the wire DTO (the original bug leaked
@@ -1592,7 +1592,7 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 
     // Now that admission is held, "no active runs" is a fact for the rest of
     // this transaction rather than a stale reading. This is the ONLY check —
-    // the route no longer pre-checks, because a non-transactional count that
+    // the route does not pre-check, because a non-transactional count that
     // the real guard has to repeat anyway is just a second place to drift.
     const active = await countActiveRunsForPackage(tx, scope, packageId);
     if (active > 0) {
@@ -1961,7 +1961,7 @@ export async function listRunLogs(args: {
  * `runs.result` is only written at finalize from the RunResult the runner
  * posts. Every platform-synthesised terminal (cancel, timeout, stall,
  * orphan sweep) therefore has to recover the deliverable from here, or it
- * drops a payload that is already on disk (issue #1020).
+ * drops a payload that is already on disk.
  *
  * Ordered by the append-only `run_logs.id` DESC: `output` has
  * replace-on-emit semantics, so the highest id is the payload the agent

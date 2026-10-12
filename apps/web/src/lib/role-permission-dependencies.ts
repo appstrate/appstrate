@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The role editor's dependent permissions (issue #1513). The server refuses a role missing
+ * The role editor's dependent permissions. The server refuses a role missing
  * a read; the picker applies the vocabulary's `requires_one_of` before the save instead.
  */
 

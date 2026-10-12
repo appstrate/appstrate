@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * React Query hooks for the AFPS integration marketplace (Phase 1.3).
+ * React Query hooks for the AFPS integration marketplace.
  *
  * Hooks backed by `/api/integrations/*` through the typed OpenAPI client.
  * Query keys are the openapi-react-query `[method, path, init]` triples; the

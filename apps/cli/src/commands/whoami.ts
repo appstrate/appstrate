@@ -38,7 +38,7 @@ interface ProfileResponse {
  * `io` is injected so tests own their own sink. Reassigning the global
  * stdout/stderr streams used to be the only way to read this command's
  * output, and in a single-process `bun test` run that buffer collected
- * writes from every other suite too (issue #1180). Production callers pass
+ * writes from every other suite too. Production callers pass
  * nothing and get `DEFAULT_IO`, so `cli.ts` is unchanged.
  */
 export async function whoamiCommand(

@@ -10,7 +10,7 @@
  *    chat session) consumes it (`createFileFromUpload`). The bytes move
  *    from the ephemeral `uploads` bucket to the durable file bucket
  *    (`files` on the wire — see {@link FILES_BUCKET}).
- *  - `agent_output` — a deliverable an agent published from a run (Phase 2).
+ *  - `agent_output` — a deliverable an agent published from a run.
  *
  * Access is never a per-file grant (D2): `getFileForActor` derives it from
  * the container (run read-ACL, or chat-session owner) at check time.

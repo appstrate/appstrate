@@ -182,10 +182,9 @@ async function fireBroadcast(runId: string): Promise<void> {
       return;
     }
     // Persist the running cost on the run row so a hard refresh during
-    // a streaming run sees the latest value, not stale `null`. The SSE
-    // payload was previously the only path delivering `cost_so_far`, so
-    // a refresh refetched `runs.cost` (null until finalize) and the UI
-    // jumped back to $0. Bounded by the throttle (one UPDATE per 250 ms
+    // a streaming run sees the latest value, not stale `null`. Without
+    // it the SSE payload is the only path delivering `cost_so_far`: a refresh
+    // refetches `runs.cost` (null until finalize) and the UI jumps back to $0. Bounded by the throttle (one UPDATE per 250 ms
     // window per run). Monotonic-max via WHERE keeps a late finalize
     // race or out-of-order tick from regressing the persisted aggregate.
     //

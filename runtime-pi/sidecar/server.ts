@@ -185,7 +185,7 @@ const proxy = createForwardProxy({
   listenHost: env.listenHost,
   isPeerAllowed: (peer) => admitsAgentProxyPeer(peerAttribution, peer),
 });
-// The platform notices a sidecar that EXITS (#1561), not one alive without its
+// The platform notices a sidecar that EXITS, not one alive without its
 // proxy — whose port another process may then be holding for the agent's traffic.
 proxy.ready.catch((err: unknown) => {
   logger.error("Forward proxy could not bind, exiting", {
@@ -201,7 +201,7 @@ const oauthTokenCache = new OAuthTokenCache({
   getRunToken: () => config.runToken,
 });
 
-// Phase 1.4 — bootstrap declared integrations IN THE BACKGROUND so the
+// Bootstrap declared integrations IN THE BACKGROUND so the
 // sidecar's `/mcp` listener comes up immediately (the agent retries the
 // MCP handshake; the per-connection spawn + listTools handshake can
 // take several seconds for a fresh node_modules tree). The agent's

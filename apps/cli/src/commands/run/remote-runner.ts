@@ -314,7 +314,7 @@ export async function runRemote(
   // one stderr line (the `⚠` advisory on `appstrate.error`): leaving it unset
   // would silently fall back to the sink's own `process.stderr.write` default,
   // so a caller that injected `writeStderr` would still get that line on the
-  // global stream — the very leak this seam exists to close (issue #1180).
+  // global stream — the very leak this seam exists to close.
   const consoleSink: EventSink = createConsoleSink({
     json: opts.json,
     verbosity: opts.verbosity ?? "normal",

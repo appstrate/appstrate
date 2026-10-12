@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AFPS integration storage tables (Phase 1.1 — credential layer).
+ * AFPS integration storage tables.
  *
  * The integration credential model is keyed per-auth:
  *
@@ -22,7 +22,7 @@
  *     either a dashboard user (`userId`) or a headless end-user
  *     (`endUserId`), enforced by a check constraint.
  *
- * The runtime spawn flow (Phase 1.2a) hits this table once per declared
+ * The runtime spawn flow hits this table once per declared
  * auth at integration boot, decrypts with the v1 credential envelope, and
  * feeds `resolveIntegrationCredentials`
  * (packages/connect/integration-credentials.ts).

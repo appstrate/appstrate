@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.4 — resolve `agent.dependencies.integrations[*]` into the
+ * Resolve `agent.dependencies.integrations[*]` into the
  * `IntegrationSpawnSpec` payloads the sidecar consumes at boot.
  *
  * For each integration the agent declares the resolver:
@@ -95,7 +95,7 @@ interface ResolveIntegrationsInput {
    * `dependencies.integrations` (§4.1), tool/scope selections from the
    * top-level `integrations_configuration` block (§4.4, niveau 2 scope
    * model). The resolver propagates the per-id `tools[]` to
-   * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement (Phase 3).
+   * `IntegrationSpawnSpec.toolAllowlist` for sidecar-side enforcement.
    */
   agentManifest: Record<string, unknown>;
   /** The kickoff snapshot (`runs.resolved_connections`), never re-picked here. */
@@ -252,9 +252,9 @@ export async function resolveIntegrationSpawns(
         // An unsatisfiable referenced-mcp-server pin is a hard failure: the run
         // must NOT silently spawn without the integration's tools. resolveOne
         // raises a DEPENDENCY_UNRESOLVED BundleError for it; let it propagate so
-        // the pipeline maps it to a structured 422 (#686), matching the skill
-        // closure (#666). Every other failure (not active / not connected /
-        // missing referenced package) stays a per-integration skip — now a
+        // the pipeline maps it to a structured 422, matching the skill
+        // closure. Every other failure (not active / not connected /
+        // missing referenced package) stays a per-integration skip, a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
         // A key missing from the keyring fails the run (503) rather than dropping the integration.
@@ -333,7 +333,7 @@ async function resolveOne(
   // (including `[]` "zero tools" and `"*"` wildcard); only an unspecified
   // selection (`undefined`) falls back to the integration's declared
   // `default_tools` (AFPS §4.4). Computed once here and used for both the
-  // api_call filter (below) and the sidecar `toolAllowlist` (Phase 3) so the
+  // api_call filter (below) and the sidecar `toolAllowlist` so the
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
   const wildcardSelection = isToolsWildcard(effectiveSelection);
@@ -353,7 +353,7 @@ async function resolveOne(
   if (boundConnections?.length === 0) return drop("unbound");
 
   // (c) Resolve connections + build spawnEnv from delivery.env mappings
-  // AND httpDeliveryAuths from delivery.http (Phase 1.5).
+  // AND httpDeliveryAuths from delivery.http.
   //
   // Note: bundle bytes are NOT inlined into the spec — the sidecar fetches
   // them via `GET /internal/mcp-server-bundle/...` at boot because base64
@@ -438,7 +438,7 @@ async function resolveOne(
     // There is nothing to narrow and nothing to default: `getRemoteSource`
     // returns the union or null, and null already skipped this integration
     // above. Anything else here would be a rewrite of what the manifest
-    // said, which is how a malformed transport used to reach the sidecar
+    // said, and would send a malformed transport to the sidecar
     // wearing a valid one's name.
     //
     // `server.type` is intentionally omitted — the sidecar dispatches on
@@ -960,7 +960,7 @@ async function resolveDeliveries(
     }
   }
 
-  // ─── delivery.http (Phase 1.5) ───
+  // ─── delivery.http ───
   const httpDecl = auth.delivery?.http;
   if (httpDecl) {
     const plan = resolveAfpsHttpDelivery(
@@ -1010,7 +1010,7 @@ async function resolveDeliveries(
     }
   }
 
-  // Local runner egress (#1458) — mtls included: the CONNECT plane relays TLS blindly.
+  // Local runner egress — mtls included: the CONNECT plane relays TLS blindly.
   const egress =
     getIntegrationSourceKind(manifest) === "local" && resolvedAtLeastOne
       ? runnerEgressFor(auth, renderedUris)

@@ -31,7 +31,7 @@ import { chatSessions } from "./chat.ts";
  *    `uploads` bucket to the durable files bucket; the persisted run
  *    input is rewritten `upload://` → `appfile://` so a rerun re-resolves from
  *    durable storage instead of the upload retention window.
- *  - `agent_output` — a deliverable an agent published from a run (Phase 2).
+ *  - `agent_output` — a deliverable an agent published from a run.
  *
  * Access is NEVER a per-file grant — it is inherited from the container at
  * check time (`getFileForActor`): a run-container file reuses the run's

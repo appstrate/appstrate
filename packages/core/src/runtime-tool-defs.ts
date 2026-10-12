@@ -11,9 +11,7 @@
  * {@link buildPublishFileDef} because it needs an injected HTTP uploader
  * only the runtime entrypoint can supply.
  *
- * These were previously Pi-SDK extension factories baked into the runtime
- * image (`@appstrate/runner-pi/runtime-tools/builtin/*`). They are now plain
- * tool definitions so the SAME logic can be hosted two ways:
+ * They are plain tool definitions so the SAME logic can be hosted two ways:
  *
  *   1. As in-process MCP tools served by the credential-isolating sidecar
  *      (`runtime-pi/sidecar/server.ts`), exposed on the agent-facing `/mcp`

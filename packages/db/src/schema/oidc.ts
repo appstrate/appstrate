@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OIDC tables — centralized into the core schema (formerly owned by the OIDC
- * module). The system migration pipeline creates them at boot; they exist
+ * OIDC tables — centralized into the core schema. The system migration pipeline creates them at boot; they exist
  * regardless of whether the OIDC module is loaded in `MODULES`. Behavior
  * (routes, Better Auth plugins, RBAC, realm resolver) stays in
  * `apps/api/src/modules/oidc`.

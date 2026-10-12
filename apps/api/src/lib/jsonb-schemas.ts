@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Zod validators for the JSONB columns that previously accepted any
- * `Record<string, unknown>` from internal callers. The columns store data
+ * Zod validators for the JSONB columns internal callers write as
+ * `Record<string, unknown>`. The columns store data
  * produced by trusted services (run finalize, hooks, sinks), but lack of
  * structural enforcement at the write boundary means a single rogue caller
  * can poison the column with `Date` objects, functions, or oversized blobs

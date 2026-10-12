@@ -141,9 +141,8 @@ export interface LogEntry {
  * whereas JSON-RPC mandates a required integer code. Runtime callers that
  * need wire-compatible JSON-RPC errors must map `code` themselves.
  *
- * All fields beyond `message` are optional and additive — runners that
- * previously emitted `{ message, stack? }` continue to round-trip through
- * the type unchanged.
+ * All fields beyond `message` are optional and additive — a runner that
+ * emits `{ message, stack? }` round-trips through the type unchanged.
  */
 export interface RunError {
   /**

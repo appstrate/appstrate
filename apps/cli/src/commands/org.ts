@@ -17,7 +17,7 @@
  * `deps` at all, and "io is always the last argument" is the only rule that
  * holds for all four. `cli.ts` passes neither, so production keeps writing
  * to the real streams; tests inject a per-test sink instead of swapping the
- * process-wide ones (issue #1180).
+ * process-wide ones.
  *
  * Cascade invariant (issue #217): the pinned `spaceId` is always scoped to
  * the pinned `orgId`. `org switch` and `org create` therefore clear the

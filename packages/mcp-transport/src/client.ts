@@ -157,7 +157,7 @@ export interface AppstrateMcpClient {
    * `connect()` yet — callers must check before branching on
    * `tools` / `resources` / `prompts` / `logging` support.
    *
-   * Phase 6 (#276): the agent uses this to skip `resources/list`
+   * The agent uses this to skip `resources/list`
    * against servers that didn't advertise the capability instead of
    * paying for a round-trip + JSON-RPC error.
    */

@@ -14,7 +14,7 @@
  *
  * `data` is `undefined` for a ZERO-BYTE body on a fully successful 200:
  * openapi-fetch short-circuits on `Content-Length: "0"` before `parseAs` is
- * ever honoured (#1118). So `undefined` here does not mean "the request
+ * ever honoured. So `undefined` here does not mean "the request
  * failed" — a non-2xx throws in the client middleware and never reaches this
  * function — it means "the read succeeded and there was nothing to read", and
  * that has to download as an empty file. Without the `?? ""`,

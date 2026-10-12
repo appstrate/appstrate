@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fourth smoke VM (#1547) — integration runner egress on the real guest kernel.
+ * Fourth smoke VM — integration runner egress on the real guest kernel.
  *
  * The REAL in-guest sidecar boots three local integrations (specs through the
  * ordinary `SidecarLaunchSpec.integrations` → INTEGRATIONS_TO_SPAWN_JSON path,

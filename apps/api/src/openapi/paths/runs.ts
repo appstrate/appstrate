@@ -154,7 +154,7 @@ const canonicalRunsPaths = {
                   additionalProperties: { type: "string" },
                 },
               },
-              // An unknown field is a 400, never a silent drop (#1187) — the
+              // An unknown field is a 400, never a silent drop — the
               // same rule `POST /api/runs/remote` and `POST /api/runs/inline`
               // apply. A caller pinned to an older field name learns it stopped
               // being honoured instead of getting a run with other parameters.

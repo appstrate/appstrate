@@ -1354,8 +1354,7 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
 
 /**
  * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
- * single home for the client-selection precedence (previously inlined in
- * `OAuth2Strategy.begin`). New connections always use the **default**
+ * single home for the client-selection precedence. New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
  * Auto-provisioned remote-MCP auths (DCR/CIMD) use the org's machine client
  * and are never served by a system entry. Throws the operator-facing error when

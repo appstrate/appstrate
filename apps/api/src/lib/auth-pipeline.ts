@@ -316,7 +316,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
 
     // Appstrate-User rejection under cookie auth is enforced centrally by the
     // auth-conditional header guard below (see AUTH_CONDITIONAL_HEADERS), so it
-    // cannot drift per-branch the way it previously did.
+    // cannot drift per-branch.
 
     c.set("user", {
       id: session.user.id,

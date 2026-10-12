@@ -550,7 +550,7 @@ export function shouldRaiseSweepDone(args: {
 }
 
 /**
- * The derived auto-present rule (issue #1177). Nothing the agent declares takes
+ * The derived auto-present rule. Nothing the agent declares takes
  * part in it: the run either produced exactly ONE file — which is then opened
  * for the user — or it did not, and the card just lists what there is.
  *

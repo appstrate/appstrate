@@ -749,7 +749,7 @@ export class PiRunner {
       ? <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortPromise])
       : <T>(promise: Promise<T>): Promise<T> => promise;
 
-    // Mid-run wall-clock steering (#1029). The agent has no clock: the budget is
+    // Mid-run wall-clock steering. The agent has no clock: the budget is
     // stated once in the turn-1 system prompt and never again, so it over-explores
     // and the watchdog kills it at 100% with nothing delivered.
     //
