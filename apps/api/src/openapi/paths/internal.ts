@@ -117,7 +117,7 @@ export const internalPaths = {
           name: "limit",
           in: "query",
           description: "Max number of runs to return (1-50, default 10)",
-          schema: { type: "integer", default: 10 },
+          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
         },
         {
           name: "fields",
@@ -157,6 +157,11 @@ export const internalPaths = {
             },
           },
         },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry.",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -184,7 +189,7 @@ export const internalPaths = {
           name: "limit",
           in: "query",
           description: "Max number of memories to return (1-50, default 10).",
-          schema: { type: "integer", default: 10 },
+          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
         },
       ],
       responses: {

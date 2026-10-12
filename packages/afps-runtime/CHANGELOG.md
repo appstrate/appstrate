@@ -74,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `unresolvedPlaceholders` accepts a `Readonly<Record<string, unknown>>` (it
   reads only the keys); a `Record<string, string>` still passes.
+- `substituteRequest` (`./resolvers`) throws `UnencodableInputError` naming a
+  `null` or `undefined` input a template references, where `null` rendered as
+  the text `null`. (#1913)
 
 ### Added — the integrations a run starts without (#1830)
 

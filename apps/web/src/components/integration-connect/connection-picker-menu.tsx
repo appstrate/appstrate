@@ -94,7 +94,6 @@ export function PickerMenu({
     canApply,
     ownerLabel,
     setLabel,
-    scopeFitOf,
     manifest,
     missingScopeLabels,
     connectsWithAgentScopes,
@@ -181,7 +180,7 @@ export function PickerMenu({
         </DropdownMenuLabel>
         {candidates.map((c) => {
           const tl = typeLabel(c.auth_key);
-          const fit = scopeFitOf(c);
+          const fit = c.scope_fit;
           const missing = missingScopeLabels(c).join(", ");
           const isChecked = checkedIds.includes(c.id);
           const isDefault =

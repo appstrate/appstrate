@@ -26,6 +26,8 @@ import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_SOURCES,
+  CONNECTION_SCOPE_FITS,
+  INSUFFICIENT_SCOPES_REMEDIES,
   CONNECTION_RESOLUTION_WARNING_CODES,
   CONNECT_FLOW_CODES,
   INTEGRATION_MANIFEST_FAILURE_CODES,
@@ -213,7 +215,15 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["id", "label", "account_id", "owned_by_actor", "needs_reconnection"],
+          required: [
+            "id",
+            "label",
+            "account_id",
+            "owned_by_actor",
+            "needs_reconnection",
+            "scopes_granted",
+            "missing_scopes",
+          ],
           properties: {
             id: { type: "string" },
             label: {
@@ -235,6 +245,17 @@ export const schemas = {
               description:
                 "True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected.",
             },
+            scopes_granted: {
+              type: "array",
+              items: { type: "string" },
+              description: "OAuth scopes the connection holds; empty off `oauth2`.",
+            },
+            missing_scopes: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Scopes the agent's selected tools require that the connection lacks; empty when it covers them. A run naming a candidate with a non-empty list fails with `insufficient_scopes`. Always empty on the credential proxy, which selects no tool.",
+            },
           },
         },
         description:
@@ -243,13 +264,19 @@ export const schemas = {
       connection_id: {
         type: "string",
         description:
-          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
+          "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow.",
       },
       missing_scopes: {
         type: "array",
         items: { type: "string" },
         description:
-          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names. When `source` is `admin_pin`, `org_default_enforced` or `schedule_override`, an admin, or the schedule's owner, must switch that binding instead.",
+          "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks.",
+      },
+      remedy: {
+        type: "string",
+        enum: [...INSUFFICIENT_SCOPES_REMEDIES],
+        description:
+          "Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them.",
       },
       owned_by_actor: {
         type: "boolean",
@@ -2242,7 +2269,7 @@ export const schemas = {
       candidates: {
         type: "array",
         description:
-          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth.",
+          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
         items: {
           type: "object",
           required: [
@@ -2259,6 +2286,7 @@ export const schemas = {
             "shared_here",
             "needs_reconnection",
             "missing_scopes",
+            "scope_fit",
             "is_own",
           ],
           properties: {
@@ -2281,6 +2309,12 @@ export const schemas = {
             origin_space_id: originSpaceIdSchema,
             needs_reconnection: { type: "boolean" },
             missing_scopes: { type: "array", items: { type: "string" } },
+            scope_fit: {
+              type: "string",
+              enum: [...CONNECTION_SCOPE_FITS],
+              description:
+                "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`).",
+            },
             is_own: { type: "boolean" },
           },
         },

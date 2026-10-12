@@ -34,11 +34,11 @@ export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./
 export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";
 
-// The one token-endpoint symbol that crosses the package boundary: apps/api's
-// integration refresh classifies on it. `parseTokenResponse`, the request
+// The token-endpoint symbols that cross the package boundary: apps/api's
+// integration refresh classifies on the first and reads its grant with the second. `parseTokenResponse`, the request
 // builders and the error classifier stay internal — `token-exchange.ts` /
 // `token-refresh.ts` are the only callers and they import the concrete module.
-export { ClientAuthInvariantError } from "./token-utils.ts";
+export { ClientAuthInvariantError, withProvenScopes } from "./token-utils.ts";
 
 // Credential-proxy primitives, in the shape the /api/credential-proxy/proxy
 // route's service layer consumes them. The in-container sidecar runs the same

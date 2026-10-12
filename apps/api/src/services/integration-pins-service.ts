@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
@@ -32,7 +32,6 @@ import type {
   IntegrationCandidate,
   IntegrationPin,
 } from "@appstrate/shared-types";
-import { missingScopesForConnection } from "@appstrate/core/integration";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { activatePackageWithin, isPackageActiveHere, placedRowFilter } from "./space-packages.ts";
 import { activeHereSql } from "./package-activation.ts";
@@ -61,6 +60,7 @@ import {
   translateResolutionError,
   isUserConnectionCreationBlocked,
   requirementOf,
+  rankByLeastPrivilege,
   servingCandidates,
 } from "./integration-connection-resolver.ts";
 import type {
@@ -460,7 +460,7 @@ export async function listMemberPinsForAgent(
 
 /**
  * List the connections an actor can pick from for a given
- * (space, integration). Used by the UI picker:
+ * (space, integration), oldest first. Used by the UI picker:
  * own + shared, with caller-facing labels.
  *
  * Same set — and the same predicate (`usableInSpace`) — as `listIntegrationConnections`
@@ -482,7 +482,8 @@ export async function listAccessibleConnections(
         eq(integrationConnections.integrationId, integrationId),
         usableInSpace(scope.spaceId, actor),
       ),
-    );
+    )
+    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
   const ownerName = await resolveConnectionOwnerNames(rows);
   const shares = await loadConnectionShares(
     db,
@@ -560,7 +561,7 @@ async function resolveAgentIntegrationPick(args: {
   const actor = principal.actor;
 
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
-  // AFPS §4.4 — preserve the wildcard literal `"*"` so `missingScopesForConnection`
+  // AFPS §4.4 — preserve the wildcard literal `"*"` so the scope diff
   // can route through the default-scopes branch of `requiredScopesForAgent`.
   // Coercing `"*"` to `[]` here would silently bypass the scope diff and let
   // a connection with zero default scopes appear "fully connected".
@@ -592,18 +593,24 @@ async function resolveAgentIntegrationPick(args: {
     manifest && agentEntry
       ? servingCandidates(requirementOf(agentEntry, manifest), candidatesRaw, (c) => c.auth_key)
       : candidatesRaw;
-  const candidates: IntegrationCandidate[] = candidateRows.map((c) => ({
-    ...c,
-    missing_scopes: manifest
-      ? missingScopesForConnection({
-          manifest,
-          authKey: c.auth_key,
-          granted: c.scopes_granted,
-          agentTools,
-          agentScopes,
-        })
-      : [],
-    is_own: actor.type === "user" ? c.owner_user_id === actor.id : c.owner_end_user_id === actor.id,
+  const scoped = candidateRows.map((c) => ({
+    c,
+    authKey: c.auth_key,
+    scopesGranted: c.scopes_granted,
+    needsReconnection: c.needs_reconnection,
+  }));
+  // Without a manifest nothing is judged: the listing order stands.
+  const ranked = manifest
+    ? rankByLeastPrivilege({ manifest, agentTools, agentScopes }, scoped)
+    : scoped.map((row) => ({ row, scopeFit: "unjudged" as const, missingScopes: [] }));
+  const candidates: IntegrationCandidate[] = ranked.map(({ row, scopeFit, missingScopes }) => ({
+    ...row.c,
+    missing_scopes: missingScopes,
+    scope_fit: scopeFit,
+    is_own:
+      actor.type === "user"
+        ? row.c.owner_user_id === actor.id
+        : row.c.owner_end_user_id === actor.id,
   }));
 
   // `[]` (bound to none, or switched off here) has no member to name a source.

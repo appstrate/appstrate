@@ -312,4 +312,16 @@ describe("substituteRequest — refusals name the field, never the value", () =>
     expect(render("cookie", "abc-123_~!")).toBe("sid=abc-123_~!");
     expect(render("X-Other", "x; y")).toBe("sid=x; y");
   });
+
+  it("refuses a null input its template names, and ignores one it does not", () => {
+    const render = (body: string) =>
+      substituteRequest(
+        { url: "https://h.example/", headers: {}, body, contentType: "text/plain" },
+        { port: 5432, gone: null },
+      ).body;
+    expect(render("{{port}}")).toBe("5432");
+    expect(() => render("{{port}} {{gone}}")).toThrow(
+      expect.objectContaining({ name: "UnencodableInputError", field: "gone" }),
+    );
+  });
 });

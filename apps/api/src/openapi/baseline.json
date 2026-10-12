@@ -2208,6 +2208,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -3126,6 +3130,10 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5507,6 +5515,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it)."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -5611,6 +5623,10 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7072,7 +7088,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Invalid body or credentials. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer."
+            "description": "Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer."
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
@@ -7081,7 +7097,18 @@
             "$ref": "#/components/responses/NotFound"
           },
           "502": {
-            "description": "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`).",
+            "description": "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7173,9 +7200,10 @@
                   "scopes": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[\\x21\\x23-\\x5b\\x5d-\\x7e]+$"
                     },
-                    "description": "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
+                    "description": "OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
                   },
                   "force_account_select": {
                     "type": "boolean"
@@ -7294,9 +7322,10 @@
                   "scopes": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "string",
+                      "pattern": "^[\\x21\\x23-\\x5b\\x5d-\\x7e]+$"
                     },
-                    "description": "OAuth scopes to request. The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
+                    "description": "OAuth scopes to request, each one RFC 6749 §3.3 scope token (no space, quote or backslash). The auth's `default_scopes` is always requested and `scopes` widens it; omitted, the connection gets `default_scopes` alone. A reconnect also keeps what the target connection already holds. Forward `required_scopes` from a readiness `integrations.<id>` error verbatim. Each value must belong to the auth's `scope_catalog` when one is declared (400 `scope_not_in_catalog` otherwise)."
                   },
                   "force_account_select": {
                     "type": "boolean"
@@ -7737,7 +7766,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `invalid_request` on `credentials`, its `detail` starting `Login failed:`. A credential value the declarative login request cannot carry where it is placed, or a submitted base URL it may not reach, is `invalid_request` on `credentials.<field>`. Neither echoes a credential value nor the service's answer. The page session survives: the form can be submitted again."
+            "description": "Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again."
           },
           "403": {
             "description": "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
@@ -7757,7 +7786,18 @@
             "$ref": "#/components/responses/RateLimited"
           },
           "502": {
-            "description": "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`bad_gateway`). The page session survives.",
+            "description": "oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. The page session survives.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "Retry-After": {
+                "$ref": "#/components/headers/RetryAfter"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10988,6 +11028,10 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -14464,7 +14508,7 @@
         "operationId": "upsertMyIntegrationPin",
         "tags": ["Profile"],
         "summary": "Pin connections for the caller's runs of an agent",
-        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin one whose `scopes_granted` covers what the agent needs, rather than upgrading one other agents use.",
+        "description": "Persists the caller's preference for an integration on this agent. Sits at cascade layer 4 — wins over a soft org default and the fallback, loses to an admin pin, an enforced org default and the launch override (the run's or the schedule's `connection_overrides`). The body carries the WHOLE set and this write replaces it — `[]` pins none: the run starts without the integration, or is refused when the agent requires it; `DELETE` clears the pin. Idempotent — repeated calls rewrite the same set. Path-addressed like the admin pins; encode each id with `encodePackageIdPath`. This is how to pick among several connections (`must_choose_connection`): pin a candidate whose `missing_scopes` is empty, rather than upgrading one other agents use.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -15670,6 +15714,8 @@
             "description": "Max number of runs to return (1-50, default 10)",
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
               "default": 10
             }
           },
@@ -15725,6 +15771,10 @@
               }
             }
           },
+          "400": {
+            "$ref": "#/components/responses/ValidationError",
+            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -15766,6 +15816,8 @@
             "description": "Max number of memories to return (1-50, default 10).",
             "schema": {
               "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
               "default": 10
             }
           }
@@ -29417,7 +29469,7 @@
         "name": "offset",
         "in": "query",
         "required": false,
-        "description": "Number of items to skip before the first returned item.",
+        "description": "Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`).",
         "schema": {
           "type": "integer",
           "minimum": 0,
@@ -29624,7 +29676,7 @@
         }
       },
       "RetryAfter": {
-        "description": "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down`.",
+        "description": "Seconds to wait before retrying. Present on every 429, and on any error whose problem body carries `retry_after` (the two always agree), such as the 503 `shutting_down` or a 502 `login_upstream_unavailable` relaying the service's own.",
         "schema": {
           "type": "integer"
         }
@@ -29674,7 +29726,15 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["id", "label", "account_id", "owned_by_actor", "needs_reconnection"],
+              "required": [
+                "id",
+                "label",
+                "account_id",
+                "owned_by_actor",
+                "needs_reconnection",
+                "scopes_granted",
+                "missing_scopes"
+              ],
               "properties": {
                 "id": {
                   "type": "string"
@@ -29694,6 +29754,20 @@
                 "needs_reconnection": {
                   "type": "boolean",
                   "description": "True when the connection's credentials died: it is listed so the choice is complete, but a run naming it fails with `needs_reconnection` until it is reconnected."
+                },
+                "scopes_granted": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "OAuth scopes the connection holds; empty off `oauth2`."
+                },
+                "missing_scopes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Scopes the agent's selected tools require that the connection lacks; empty when it covers them. A run naming a candidate with a non-empty list fails with `insufficient_scopes`. Always empty on the credential proxy, which selects no tool."
                 }
               }
             },
@@ -29701,14 +29775,24 @@
           },
           "connection_id": {
             "type": "string",
-            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it; see `missing_scopes` for the least-privilege fix. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow."
+            "description": "Populated on `needs_reconnection` and `insufficient_scopes`. On `needs_reconnection`, forward it as the connect kickoff's `connection_id`, with no `scopes`, so the existing connection is reconnected in place (what it holds plus the auth's `default_scopes`) rather than duplicated. On `insufficient_scopes`, forwarding it upgrades that connection, which widens every agent that uses it: only under `remedy: upgrade_or_new`. Populated on `auth_serves_no_selected_tool` too, naming the connection an explicit set (pin, org default, run or schedule override) binds whose auth exposes none of the agent's selected tools: the remedy is taking it out of the set, not a connect flow."
           },
           "missing_scopes": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks. The least-privilege fix is a NEW connection: a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind it through the layer `source` names. When `source` is `admin_pin`, `org_default_enforced` or `schedule_override`, an admin, or the schedule's owner, must switch that binding instead."
+            "description": "Populated on `insufficient_scopes`. OAuth scopes the agent's selected tools require that the connection lacks."
+          },
+          "remedy": {
+            "type": "string",
+            "enum": [
+              "new_connection",
+              "upgrade_or_new",
+              "rebind_by_admin",
+              "rebind_by_schedule_owner"
+            ],
+            "description": "Populated on `insufficient_scopes`: how it clears. `new_connection` — start a connect kickoff without `connection_id`, with `scopes: required_scopes`, then bind the new connection (a pin, or `connection_overrides`). `upgrade_or_new` — the same, or, the connection being the caller's own, forward `connection_id` to upgrade it in place, which widens every agent that uses it. `rebind_by_admin` — an admin pin or an enforced org default binds the connection: an admin must switch that binding, and no connect flow clears it. `rebind_by_schedule_owner` — the schedule's `connection_overrides` bind it: the schedule's owner must switch them."
           },
           "owned_by_actor": {
             "type": "boolean",
@@ -32519,7 +32603,7 @@
           },
           "candidates": {
             "type": "array",
-            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries. An integration with no selection keeps every auth.",
+            "description": "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
             "items": {
               "type": "object",
               "required": [
@@ -32536,6 +32620,7 @@
                 "shared_here",
                 "needs_reconnection",
                 "missing_scopes",
+                "scope_fit",
                 "is_own"
               ],
               "properties": {
@@ -32600,6 +32685,11 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "scope_fit": {
+                  "type": "string",
+                  "enum": ["exact", "unjudged", "broader", "missing"],
+                  "description": "The granted scopes against the agent's selection. `exact` — covers it and grants nothing beyond it and the auth's `default_scopes`. `unjudged` — covers it on an auth that is not `oauth2` or declares no `scope_catalog`, so breadth is unknown. `broader` — covers it and grants more. `missing` — does not cover it (`missing_scopes`)."
                 },
                 "is_own": {
                   "type": "boolean"

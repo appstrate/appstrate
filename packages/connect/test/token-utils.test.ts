@@ -23,9 +23,9 @@ describe("parseTokenResponse", () => {
     expect(result.scopesReturned).toEqual(["read:user", "repo"]);
   });
 
-  it("parses mixed comma and space separators", () => {
-    const result = parseTokenResponse({ ...baseToken, scope: "read:user, repo workflow" });
-    expect(result.scopesReturned).toEqual(["read:user", "repo", "workflow"]);
+  it("keeps a comma inside a scope of a space-separated response", () => {
+    const result = parseTokenResponse({ ...baseToken, scope: "files:read,write repo" });
+    expect(result.scopesReturned).toEqual(["files:read,write", "repo"]);
   });
 
   it("parses %20-separated scopes", () => {

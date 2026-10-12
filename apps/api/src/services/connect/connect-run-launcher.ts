@@ -104,7 +104,7 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 function loginToolDiagnostic(msg: string): string | null {
   if (!msg.startsWith(CONNECT_LOGIN_TOOL_ERROR_PREFIX)) return null;
   const detail = msg.slice(CONNECT_LOGIN_TOOL_ERROR_PREFIX.length).replace(/^:\s*/, "").trim();
-  if (!detail) return "the integration rejected the submitted credentials.";
+  if (!detail) return "The integration rejected the submitted credentials.";
   // The text is authored by the integration package — clip it so a runaway
   // upstream body can't be pasted wholesale into an API response.
   const clipped =

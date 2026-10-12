@@ -9,13 +9,19 @@
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
+import { jsonTextMap } from "@appstrate/afps-shared/json-text";
 import {
   headerNamed,
   placeholderBodyEncoding,
   urlTemplateAuthority,
   type BodyEncoding,
 } from "@appstrate/afps-shared/request-template";
-import { referencesField, substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
+import {
+  referencesField,
+  substituteVars,
+  unresolvedPlaceholders,
+  type PlaceholderEncoder,
+} from "./template-vars.ts";
 
 const CANNOT_CARRY = "contains a character this request cannot carry where it is placed";
 
@@ -200,7 +206,8 @@ function headerEncoder(name: string): PlaceholderEncoder {
 /**
  * `request` with each `{{name}}` of `inputs` encoded in place (others left intact). The body's media
  * type is its `Content-Type` header's, else `contentType`. Throws {@link UnencodableInputError}
- * for a value, {@link RequestTemplateError} for a body as written.
+ * for a value (a `null` one a template names included), {@link RequestTemplateError} for a body as
+ * written.
  */
 export function substituteRequest<B extends string | null | undefined>(
   request: {
@@ -211,9 +218,12 @@ export function substituteRequest<B extends string | null | undefined>(
   },
   inputs: Readonly<Record<string, unknown>>,
 ): { url: string; headers: Record<string, string>; body: B extends string ? string : B } {
-  const text: Record<string, string> = {};
-  for (const [key, value] of Object.entries(inputs)) {
-    text[key] = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
+  const text = jsonTextMap(inputs);
+  for (const template of [request.url, ...Object.values(request.headers), request.body ?? ""]) {
+    const absent = unresolvedPlaceholders(template, text).find((name) =>
+      Object.hasOwn(inputs, name),
+    );
+    if (absent !== undefined) throw new UnencodableInputError(absent, "is null");
   }
   const render: Render = (template, encode) => substituteWellFormed(template, text, encode);
   const headers: Record<string, string> = {};

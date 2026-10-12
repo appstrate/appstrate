@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useTranslation } from "react-i18next";
+import { isSecretField } from "@appstrate/core/form";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Textarea } from "@appstrate/ui/components/textarea";
@@ -17,13 +18,8 @@ import { deriveFieldNames, fieldSchemas } from "./credential-schema";
 // certificate chains), detected by name so manifest-declared properties get the
 // right affordance. Key material matches by substring, since a single-line input
 // would strip a PEM's newlines; there is no generic `*_key` suffix, which also
-// matches single-line secrets like `api_key` that must stay masked.
+// matches single-line secrets like `api_key`. Masking is the manifest's to say.
 const MULTILINE_FIELD_PATTERN = /cert|private_key|public_key|^(?:client_key|key)$/i;
-
-// An SSH `host_key` is a single-line public key, not a secret: never masked.
-const HOST_KEY_PATTERN = /^host_key$/i;
-
-const SENSITIVE_KEYWORDS = ["password", "secret", "token", "key"];
 
 interface CredentialFieldsProps {
   auth: IntegrationManifestAuth;
@@ -39,9 +35,6 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
   return (
     <>
       {fields.map((field) => {
-        const isHostKey = HOST_KEY_PATTERN.test(field);
-        const isSensitive =
-          !isHostKey && SENSITIVE_KEYWORDS.some((k) => field.toLowerCase().includes(k));
         const isMultiline = MULTILINE_FIELD_PATTERN.test(field);
         const schema = schemas[field];
         // Three sources, most specific first: a localized override, then the
@@ -73,7 +66,7 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
             ) : (
               <Input
                 id={`field-${field}`}
-                type={isSensitive ? "password" : "text"}
+                type={schema && isSecretField(schema) ? "password" : "text"}
                 value={value}
                 onChange={(e) => onChange({ ...values, [field]: e.target.value })}
                 autoComplete="off"

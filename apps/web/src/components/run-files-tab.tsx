@@ -47,7 +47,7 @@ export function RunFilesTab({ runId }: { runId: string }) {
       runId={runId}
       filesDenied={!can("files:read")}
       files={data?.data ?? []}
-      // The route clamps `limit` to 100 and answers `hasMore` with no cursor
+      // The route takes a `limit` of 100 at most and answers `hasMore` with no cursor
       // field. `hasMore` describes the run's file CONTAINER — every row this
       // pane lists — so here, unlike on the Outcome pane, it is exactly the
       // right predicate and needs no correction.

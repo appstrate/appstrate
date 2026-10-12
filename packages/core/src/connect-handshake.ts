@@ -56,6 +56,8 @@ export interface IntegrationConnectCompletion {
   packageId?: string | undefined;
   /** User-facing failure reason; present only when `ok` is `false`. */
   error?: string | undefined;
+  /** Requested OAuth scopes a successful consent left out. */
+  scopesDenied?: string[] | undefined;
 }
 
 /** Mint a completion payload with the shared discriminator applied. */
@@ -64,6 +66,7 @@ export function buildIntegrationConnectCompletion(detail: {
   state?: string | undefined;
   packageId?: string | undefined;
   error?: string | undefined;
+  scopesDenied?: string[] | undefined;
 }): IntegrationConnectCompletion {
   return { type: INTEGRATION_CONNECT_MESSAGE_TYPE, ...detail };
 }

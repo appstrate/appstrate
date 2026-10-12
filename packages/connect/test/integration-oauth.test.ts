@@ -776,6 +776,50 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(result.scopesRequested).toEqual(["openid", "email", "profile"]);
   });
 
+  describe("scopes the response proves without echoing them", () => {
+    const granted = async (requested: string[], response: Record<string, unknown>) => {
+      const { state } = await seedState({ scopes: requested });
+      const stub = (async () =>
+        new Response(JSON.stringify({ access_token: "AT", token_type: "Bearer", ...response }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })) as unknown as typeof fetch;
+      const result = await handleIntegrationOAuthCallback(
+        store,
+        resolverFor(),
+        "CODE",
+        state,
+        stub,
+      );
+      return result.scopesGranted;
+    };
+
+    it("counts a requested offline_access as granted when a refresh token came back", async () => {
+      expect(
+        await granted(["Mail.Read", "offline_access"], { scope: "Mail.Read", refresh_token: "RT" }),
+      ).toEqual(["Mail.Read", "offline_access"]);
+    });
+
+    it("counts a requested openid as granted when an id_token came back", async () => {
+      expect(
+        await granted(["openid", "Mail.Read"], { scope: "Mail.Read", id_token: "a.b.c" }),
+      ).toEqual(["Mail.Read", "openid"]);
+    });
+
+    it("leaves them out when the response carries neither token, or they were not requested", async () => {
+      expect(
+        await granted(["openid", "Mail.Read", "offline_access"], { scope: "Mail.Read" }),
+      ).toEqual(["Mail.Read"]);
+      expect(
+        await granted(["Mail.Read"], {
+          scope: "Mail.Read",
+          refresh_token: "RT",
+          id_token: "a.b.c",
+        }),
+      ).toEqual(["Mail.Read"]);
+    });
+  });
+
   it("reports the requested scopes as granted when the token response omits `scope` (RFC 6749 §5.1)", async () => {
     const { state } = await seedState({ scopes: ["openid", "email", "profile"] });
     const stub = (async () =>

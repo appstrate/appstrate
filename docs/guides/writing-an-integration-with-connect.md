@@ -344,7 +344,9 @@ document (local-fragment `$ref` only, no external `$ref`).
       "schema": {
         "type": "object",
         "required": ["api_key"],
-        "properties": { "api_key": { "type": "string", "description": "Service API key" } }
+        "properties": {
+          "api_key": { "type": "string", "writeOnly": true, "description": "Service API key" }
+        }
       }
     },
     "delivery": {
@@ -372,7 +374,7 @@ document (local-fragment `$ref` only, no external `$ref`).
         "required": ["username", "password"],
         "properties": {
           "username": { "type": "string" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -445,7 +447,7 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
         "required": ["email", "password"],
         "properties": {
           "email":    { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -517,7 +519,7 @@ target, a header or a substituted text body, where a refused value is a
   URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
   never `https://example.com{{path}}`, whose `/` would be encoded. A path segment its
   placeholders render empty, `.` or `..` is refused: no encoding keeps it one segment. A URL refused
-  for its host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request`
+  for its host (malformed, blocked, outside `authorized_uris`) is a `400 login_url_refused`
   naming the inputs in its authority.
 - `body` — by the media type of the `Content-Type` header, else of `content_type`. A
   body holding a `{{name}}` needs one of these, written without a `{{name}}` (a value
@@ -545,15 +547,17 @@ target, a header or a substituted text body, where a refused value is a
   or a character above U+00FF is refused, and in a `Cookie` header any character outside
   RFC 6265 `cookie-octet` too (`;`, `,`, space, `"`, `\`).
 
-A value refused where it is placed is a `400 invalid_request` naming `credentials.<name>`.
+A value refused where it is placed is a `400 login_input_unencodable` naming
+`credentials.<name>`.
 
-A login the service refuses is a `400 invalid_request` on `credentials` whose detail
-starts `Login failed:`, as for a `connect.tool` login: the declared `success_criteria`
+A login the service refuses is a `400 login_rejected` on `credentials`, as for a
+`connect.tool` login: the declared `success_criteria`
 failed on an answer below 500, or, with none declared, the service answered 400, 401,
 403 or 422. A 404, 405 or 410 (whatever the criteria) and any other answer below 500
 that no criterion judges (a 302) are a defect of the integration, a `500`. A service
-that cannot be reached, answers 429 or answers 5xx is a `502 bad_gateway`, and one that
-does not answer within `request_timeout_ms` a `504 timeout`.
+that cannot be reached, answers 429 or answers 5xx is a `502 login_upstream_unavailable`
+relaying its `Retry-After`, and one that does not answer within `request_timeout_ms` a
+`504 timeout`.
 
 **A form login should declare `success_criteria`.** AFPS makes them optional, and without
 them any 2xx counts as success — but most web apps answer a wrong password with `200` and
@@ -616,8 +620,16 @@ delivery.
 
 A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
 like a pasted credential, by the one required string field of `credentials.schema` that
-is not a secret (`format: "password"` or `writeOnly`), masked (`al****.com`), else
-`Connexion N`. Mark the password field as a secret so the username names the connection.
+is not a secret, masked (`al****.com`), else, when the only required string field is one
+secret that is not `format: "password"`, by that key, masked (`fc****f10b`), else
+`Connexion N`.
+
+**Mark every secret field `writeOnly: true`** (an API key, a token) or
+`format: "password"` (a password a human chose, which never names a connection). It is
+the one rule the platform reads, never the field's name. The connect form masks the
+input of a secret and shows any other field in clear, and a secret beside a non-secret
+field never names the connection — so marking the password is also what lets the
+username do it.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).
@@ -646,7 +658,7 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
         "required": ["email", "password"],
         "properties": {
           "email":    { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -1109,7 +1121,7 @@ GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by U
 ```
 
 Coolify — always self-hosted, so no `default`, and a team token the user pastes
-(`scripts/system-packages/integration-coolify-mcp-1.0.0/manifest.json`):
+(`scripts/system-packages/integration-coolify-mcp-1.0.1/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1131,7 +1143,7 @@ Coolify — always self-hosted, so no `default`, and a team token the user paste
     "credentials": {
       "schema": {
         "type": "object",
-        "properties": { "token": { "type": "string" } },
+        "properties": { "token": { "type": "string", "writeOnly": true } },
         "required": ["token"]
       }
     },

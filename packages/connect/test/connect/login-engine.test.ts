@@ -389,6 +389,42 @@ describe("runLogin — security limits", () => {
     expect(err).toMatchObject({ reason: "upstream_failed", upstreamStatus: 503 });
   });
 
+  it("carries a throttling target's Retry-After as seconds, from either form of the header", async () => {
+    const now = Date.parse("2026-01-01T00:00:00Z");
+    for (const [header, seconds] of [
+      ["42", 42],
+      ["0", 0],
+      ["Thu, 01 Jan 2026 00:01:30 GMT", 90],
+      // A date already past.
+      ["Wed, 31 Dec 2025 23:00:00 GMT", 0],
+      // Capped at a day.
+      ["999999", 86_400],
+      ["Fri, 01 Jan 2027 00:00:00 GMT", 86_400],
+      // Neither delay-seconds nor an HTTP-date.
+      ["soon", undefined],
+      ["-5", undefined],
+      ["1.5", undefined],
+      ["2026-01-01", undefined],
+      ["9".repeat(32), 86_400],
+      ["9".repeat(400), 86_400],
+    ] as const) {
+      const { impl } = fakeFetch([{ status: 429, headers: { "Retry-After": header } }]);
+      const err = await runLogin(
+        { login: baseLogin },
+        {
+          inputs: {},
+          authorizedUris: ALLOW,
+          allowAllUris: false,
+          fetchImpl: impl,
+          resolveHost: TEST_RESOLVE,
+          now: () => now,
+        },
+      ).catch((e: unknown) => e);
+      expect(err).toMatchObject({ reason: "upstream_failed", upstreamStatus: 429 });
+      expect((err as LoginError).retryAfterSeconds).toBe(seconds);
+    }
+  });
+
   it("classifies a request that never reached the target as `upstream_failed`", async () => {
     const refused = (async () => {
       throw new TypeError("connect ECONNREFUSED");
