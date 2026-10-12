@@ -6,7 +6,8 @@ import {
 } from "@appstrate/core/integration";
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
-import { type ActorValue, sameActor } from "./schedule-payload";
+import { withConnectionOverride } from "./connection-set";
+import { type ActorValue, type RunOverridesValue, sameActor } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
@@ -108,6 +109,36 @@ export function picksAfterActorChange(args: {
   return args.stored && sameActor(args.nextRunsAs, args.stored.actor)
     ? args.stored.picks
     : undefined;
+}
+
+/** What {@link withDefaultConnections} reads of one integration's readiness entry. */
+interface DefaultBindingEntry {
+  integration_package_id: string;
+  resolution: Pick<
+    components["schemas"]["IntegrationAgentResolution"],
+    "source" | "error_code" | "resolved_connection_ids"
+  >;
+}
+
+/**
+ * `overrides` as a schedule running as the viewer holds them: each integration with no pick
+ * (`[]` is one) stands on what readiness binds by default (`fallback_auto`, the actor's one own
+ * connection), which an armed schedule write wants named. A pin or an org default names its own
+ * set, and the verdict judges the viewer only.
+ */
+export function withDefaultConnections(
+  overrides: RunOverridesValue,
+  args: { actorIsViewer: boolean; readiness: readonly DefaultBindingEntry[] | undefined },
+): RunOverridesValue {
+  if (!args.actorIsViewer) return overrides;
+  let next = overrides;
+  for (const { integration_package_id: id, resolution } of args.readiness ?? []) {
+    const { source, error_code: code, resolved_connection_ids: bound } = resolution;
+    if (source !== "fallback_auto" || code !== null || bound.length === 0) continue;
+    if (next.connection_overrides?.[id] !== undefined) continue;
+    next = withConnectionOverride(next, id, bound);
+  }
+  return next;
 }
 
 /**

@@ -2,7 +2,7 @@
 
 /**
  * Connection rules a schedule write must pass: whose connections it may bind, and that its fire
- * is left with no connection choice to make.
+ * is left with no connection choice to make and no default to take.
  */
 
 import { and, inArray } from "drizzle-orm";
@@ -119,12 +119,14 @@ export function sameRecord<T>(
 }
 
 /**
- * Refuse arming a schedule whose fire would fail on its own connection choice: an unattended run
- * cannot ask, so the choice is made at write time. The fire's readiness, keeping only
- * {@link isScheduleOwned} verdicts (the rest stay failed runs at the tick); non-throwing, so no
- * `onRunConnectionMissing` fires for a run nobody launched. Worded for whoever writes
- * ({@link scheduleWriteFor}). Returns the fire's warnings, or `null` to a caller writing for
- * another member, who must not learn how many connections the actor holds.
+ * Refuse arming a schedule whose fire would fail on its own connection choice, or bind its
+ * actor's one own connection by default: an unattended run cannot ask, and a second connection
+ * made later would open the choice, so every set a fire binds is named at write time (a pin, an
+ * org default or the schedule's `connection_overrides`). The fire's readiness without the
+ * default binding, keeping only {@link isScheduleOwned} verdicts (the rest stay failed runs at
+ * the tick); non-throwing, so no `onRunConnectionMissing` fires for a run nobody launched. Worded
+ * for whoever writes ({@link scheduleWriteFor}). Returns the fire's warnings, or `null` to a
+ * caller writing for another member, who must not learn how many connections the actor holds.
  */
 export async function assertScheduleConnectionsChosen(params: {
   /** The agent at the version the schedule fires (`version_override` resolved). */
@@ -146,6 +148,7 @@ export async function assertScheduleConnectionsChosen(params: {
     spaceId: params.spaceId,
     actor: params.actor,
     launchOverrides: toLaunchOverrides(params.connectionOverrides, "schedule_override"),
+    bindsOwnByDefault: false,
     manifestCache,
   });
   const writeFor = scheduleWriteFor(params.caller, params.actor);

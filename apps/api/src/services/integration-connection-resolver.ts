@@ -10,7 +10,8 @@
  *   4. member pin (`integration_pins`, user_id = actor)  — per agent
  *   5. soft org default
  *   6. fallback — the actor's ONE own usable connection on an auth serving the selection;
- *      several → `must_choose_connection`; none → as below.
+ *      several → `must_choose_connection`; none → as below. A resolution that binds no own
+ *      connection by default (`bindsOwnByDefault: false`) answers one like several.
  *
  * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
  * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
@@ -145,6 +146,8 @@ interface ResolveConnectionsInput {
   includeInert?: boolean;
   /** Declared integrations switched off in the space: never walked through the cascade. */
   inactiveIntegrationIds?: ReadonlySet<string>;
+  /** `false`: layer 6 binds nothing, the actor's one own serving connection being a choice too. */
+  bindsOwnByDefault?: boolean;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
@@ -248,6 +251,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       accessibleIndex,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
+      bindsOwnByDefault: input.bindsOwnByDefault ?? true,
       auth,
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
     });
@@ -285,6 +289,7 @@ interface ResolveOneArgs {
   accessibleIndex: ReadonlyMap<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  bindsOwnByDefault: boolean;
   /** Already applied to the candidates; kept to name the connect target on `not_connected`. */
   auth: AuthFilter;
   /** Set when the dep's `auth_key` filtered out every live row: the auths those rows use. */
@@ -466,11 +471,11 @@ function resolveOne(args: ResolveOneArgs): ResolveOneResult {
   const serving = args.candidates.filter((c) => servesSelection(args.auth, c.authKey));
   // Health never switches the pick: a dead own row is still bound and answers needs_reconnection.
   const own = serving.filter((c) => isOwnedByActor(args, c));
-  if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
-  if (own.length > 1) {
+  if (own.length === 1 && args.bindsOwnByDefault) return bindSet(args, own, "fallback_auto");
+  if (own.length > 0) {
     return errorOf(args, {
       code: "must_choose_connection",
-      message: `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
+      message: `Integration '${args.integrationId}' needs a connection choice — pick one.`,
       candidateConnections: rankedCandidates(args, serving),
     });
   }
@@ -830,6 +835,7 @@ interface ResolveConnectionsForRunInput {
   scope: SpaceScope;
   launchOverrides?: LaunchOverrides | null;
   includeInert?: boolean;
+  bindsOwnByDefault?: boolean;
   manifestCache?: IntegrationManifestCache;
 }
 
@@ -863,6 +869,7 @@ export async function resolveConnectionsForRun(
     actorUserId,
     actorEndUserId,
     includeInert: input.includeInert ?? false,
+    bindsOwnByDefault: input.bindsOwnByDefault,
     inactiveIntegrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
   });
 }
@@ -991,7 +998,7 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   override_outranked: "Override Outranked By Governance",
-  must_choose_connection: "Multiple Connections Available — Pick One",
+  must_choose_connection: "Connection Choice Required",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",

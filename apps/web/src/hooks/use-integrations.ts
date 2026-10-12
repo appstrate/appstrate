@@ -214,8 +214,8 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
  * every declared integration's management verdict (includeInert) + a
  * `run_blocking` flag. Replaces the former N per-integration round-trips.
  */
-export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
-  return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
+export function useAgentConnectionReadiness(agentPackageId: string | undefined, version?: string) {
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version));
 }
 
 type AgentConnectionReadiness =

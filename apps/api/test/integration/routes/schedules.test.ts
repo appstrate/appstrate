@@ -508,12 +508,14 @@ describe("Schedules API", () => {
 
     it("merges (RFC 7396): an absent field is kept, `null` clears a nullable one", async () => {
       const { agent, integration, ids } = await agentWithConnections("merge-agent", 1);
+      // Disabled: armed, clearing the set would leave the actor's one connection unnamed (409).
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         name: "Kept",
+        enabled: false,
       });
       const patch = (body: Record<string, unknown>) =>
         app.request(`/api/schedules/${schedule.id}`, {

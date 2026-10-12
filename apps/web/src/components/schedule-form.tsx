@@ -38,6 +38,7 @@ import {
   pendingConnectionChoices,
   picksAfterActorChange,
   refusalForActor,
+  withDefaultConnections,
 } from "../lib/connection-choice";
 import {
   withConnectionOverride,
@@ -53,6 +54,7 @@ import {
   scheduleOverridePayload,
 } from "../lib/schedule-payload";
 import { useAuth } from "../hooks/use-auth";
+import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { usePackageDetail } from "../hooks/use-packages";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -278,26 +280,38 @@ export function ScheduleForm(props: ScheduleFormProps) {
   const setConnectionPick = (integrationId: string, connectionIds: ConnectionSet) =>
     setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds));
 
+  // Rows come from the definition every fire runs: inherit is the latest published version,
+  // never the draft this page would otherwise project for an author.
+  const firedVersion = versionOverride ?? VERSION_PUBLISHED;
+  const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
+    ?.dependencies.integrations;
+
+  // Derived, not seeded: the viewer's default binding stands as a pick, so the save names it.
+  // The verdict judges the viewer, so it is read for a schedule running as them only.
+  const { data: readiness } = useAgentConnectionReadiness(
+    actorIsViewer ? packageId : undefined,
+    firedVersion,
+  );
+  const shownOverrides = withDefaultConnections(overrides, {
+    actorIsViewer,
+    readiness: readiness?.integrations,
+  });
+
   // Derived, not synced: a refusal is stale once the actor moves, answered once a pick moves.
   const [submitted, setSubmitted] = useState<SubmittedPicks | null>(null);
   const refused = refusalForActor(connectionChoices, submitted, runsAs);
   const pending = pendingConnectionChoices(
     refused,
     submitted?.picks,
-    overrides.connection_overrides,
+    shownOverrides.connection_overrides,
   );
   // Open while a refusal speaks for this actor, so answering it does not fold the pick away.
   const overridesShown = overridesOpen || refused.length > 0;
 
-  // Rows come from the definition every fire runs: inherit is the latest published version,
-  // never the draft this page would otherwise project for an author.
-  const firedVersion = versionOverride ?? VERSION_PUBLISHED;
-  const firedIntegrations = usePackageDetail("agent", packageId, { version: firedVersion }).data
-    ?.dependencies.integrations;
   // The saved map replaces the stored one: a key the fired version no longer declares is
   // dropped (the server refuses it), whichever picker — or none — the form shows.
   const declaredOverrides = withDeclaredConnections(
-    overrides,
+    shownOverrides,
     firedIntegrations?.map((i) => i.id),
   );
   const showActorChoice =
@@ -566,7 +580,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
                   {...(actorIsViewer && firedIntegrations
                     ? { agentIntegrations: firedIntegrations }
                     : {})}
-                  value={overrides}
+                  value={shownOverrides}
                   onChange={setOverrides}
                   version={firedVersion}
                   scheduled

@@ -15,8 +15,9 @@
  *   4. integration_pins (user_id = actor.id)     → member preference
  *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
  *   6. fallback: own + shared accessible
- *      → exactly one OWN = auto, two or more = must_choose; no own row =
- *        not_connected / must_choose when `required`, else bound to none + warning
+ *      → exactly one OWN = auto (must_choose under `bindsOwnByDefault: false`), two or more =
+ *        must_choose; no own row = not_connected / must_choose when `required`, else bound to
+ *        none + warning
  *
  * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
  * An integration switched off in the space is not resolved (a warning, or an error when `required`).
@@ -844,6 +845,75 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
           needs_reconnection: true,
         },
       ],
+    });
+  });
+
+  describe("binding no own connection by default (`bindsOwnByDefault: false`)", () => {
+    type Input = Parameters<typeof resolveConnectionsPure>[0];
+    const requirementsOf = (required: boolean) => [{ ...req(oauth2Manifest()), required }];
+    const resolve = (rows: ConnectionRow[], over: Partial<Input> = {}) =>
+      resolveConnections({
+        requirements: requirementsOf(false),
+        accessibleConnections: rows,
+        pins: [],
+        bindsOwnByDefault: false,
+        ...over,
+      });
+
+    for (const required of [true, false]) {
+      it(`${required ? "required" : "non-required"}: own 1 → must_choose_connection listing it, bound to none`, () => {
+        for (const rows of [[own()], [shared(), own()], [own(DEAD)]]) {
+          const result = resolve(rows, { requirements: requirementsOf(required) });
+          expect(result.resolved[INTEG]).toBeUndefined();
+          expect(result.warnings).toEqual([]);
+          expect(result.errors.map((e) => [e.code, e.source])).toEqual([
+            ["must_choose_connection", undefined],
+          ]);
+          expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual(
+            rows.map((row) => row.id),
+          );
+        }
+      });
+    }
+
+    it("answers own N and own 0 as a resolution that binds by default does", () => {
+      const others: [rows: ConnectionRow[], code: ConnectionResolutionWarningCode][] = [
+        [[own(), own({ authKey: "pat" })], "must_choose_connection"],
+        [[own(), shared(), own()], "must_choose_connection"],
+        [[shared()], "must_choose_connection"],
+        [[], "not_connected"],
+      ];
+      for (const [rows, code] of others) {
+        for (const required of [true, false]) {
+          const requirements = requirementsOf(required);
+          const result = resolve(rows, { requirements });
+          expect(result).toEqual(
+            resolveConnections({ requirements, accessibleConnections: rows, pins: [] }),
+          );
+          expect([...result.errors, ...result.warnings].map((item) => item.code)).toEqual([code]);
+        }
+      }
+    });
+
+    it("binds the set every layer names", () => {
+      const mine = own();
+      const named = { [INTEG]: [mine.id] };
+      const orgDefault = (enforce: boolean) => ({
+        orgDefaults: { [INTEG]: { connectionIds: [mine.id], enforce } },
+      });
+      const layers: [ConnectionResolutionSource, Partial<Input>][] = [
+        ["admin_pin", { pins: [pin(mine.id)] }],
+        ["org_default_enforced", orgDefault(true)],
+        ["run_override", { launchOverrides: runOverride(named) }],
+        ["schedule_override", { launchOverrides: scheduleOverride(named) }],
+        ["member_pin", { pins: [memberPin(mine.id)] }],
+        ["org_default", orgDefault(false)],
+      ];
+      for (const [source, layer] of layers) {
+        const result = resolve([mine], layer);
+        expect(result.errors).toEqual([]);
+        expect(result.resolved[INTEG]).toMatchObject([{ connectionId: mine.id, source }]);
+      }
     });
   });
 });
