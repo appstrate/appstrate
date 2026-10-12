@@ -13,7 +13,11 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
 import { MissingRow } from "../missing-connections-modal.tsx";
-import { retryDecision } from "../../lib/connection-choice.ts";
+import {
+  canRememberPicks,
+  retryDecision,
+  retryRememberingPicks,
+} from "../../lib/connection-choice.ts";
 import type { MissingIntegrationFieldError } from "../../lib/connection-choice.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
 
@@ -171,5 +175,65 @@ describe("retryDecision", () => {
       canRetry: true,
     });
     expect(retryDecision([fieldError("integration_not_active")], {}).showRetry).toBe(false);
+  });
+});
+
+describe("remembering a must-choose pick", () => {
+  const WEB_IDS = [WEB];
+  const mustChoose = [fieldError("must_choose_connection")];
+
+  it("is offered on a must-choose refusal of an agent run only", () => {
+    expect(canRememberPicks(mustChoose, AGENT)).toBe(true);
+    expect(canRememberPicks(mustChoose, undefined)).toBe(false);
+    expect(canRememberPicks([fieldError("not_connected")], AGENT)).toBe(false);
+  });
+
+  it("writes the pin for each picked integration, then re-runs with the picks", async () => {
+    const writes: unknown[] = [];
+    const retried: unknown[] = [];
+    await retryRememberingPicks({
+      errors: mustChoose,
+      picks: { [INTEGRATION]: WEB_IDS },
+      agentPackageId: AGENT,
+      remember: true,
+      writePin: async (pin) => {
+        writes.push(pin);
+      },
+      onRetry: (overrides) => retried.push(overrides),
+    });
+    expect(writes).toEqual([
+      { agentPackageId: AGENT, integrationId: INTEGRATION, connectionIds: WEB_IDS },
+    ]);
+    expect(retried).toEqual([{ [INTEGRATION]: WEB_IDS }]);
+  });
+
+  it("writes no pin when unchecked, and still re-runs with the override", async () => {
+    const writes: unknown[] = [];
+    const retried: unknown[] = [];
+    await retryRememberingPicks({
+      errors: mustChoose,
+      picks: { [INTEGRATION]: WEB_IDS },
+      agentPackageId: AGENT,
+      remember: false,
+      writePin: async (pin) => {
+        writes.push(pin);
+      },
+      onRetry: (overrides) => retried.push(overrides),
+    });
+    expect(writes).toEqual([]);
+    expect(retried).toEqual([{ [INTEGRATION]: WEB_IDS }]);
+  });
+
+  it("still re-runs when a pin write rejects, since the override carries the choice", async () => {
+    const retried: unknown[] = [];
+    await retryRememberingPicks({
+      errors: mustChoose,
+      picks: { [INTEGRATION]: WEB_IDS },
+      agentPackageId: AGENT,
+      remember: true,
+      writePin: () => Promise.reject(new Error("refused")),
+      onRetry: (overrides) => retried.push(overrides),
+    });
+    expect(retried).toEqual([{ [INTEGRATION]: WEB_IDS }]);
   });
 });

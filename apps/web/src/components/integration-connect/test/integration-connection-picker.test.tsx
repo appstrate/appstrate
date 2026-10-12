@@ -1159,3 +1159,38 @@ function summaryOf(node: unknown): string | undefined {
   if (node.type === ScopeSummaryText) return render(node);
   return summaryOf(node.props.children);
 }
+
+describe("IntegrationConnectionPicker — override trigger without a pick", () => {
+  const t = (key: string) => i18n.t(`agents:detail.integrationMemberPicker.${key}`);
+  const inherit: Persistence = { mode: "override", value: null, onChange: () => {} };
+
+  it("asks to connect when the member has no connection to inherit, warning while runs are blocked", () => {
+    const html = renderPicker(
+      resolution({ candidates: [], resolved_connection_ids: [] }),
+      true,
+      inherit,
+    );
+    expect(html).toContain(t("connectLabel"));
+    expect(html).not.toContain(t("inherit"));
+    expect(html).toContain("text-amber-600");
+  });
+
+  it("asks for a choice when the verdict says the member must choose", () => {
+    const html = renderPicker(
+      resolution({ source: null, error_code: "must_choose_connection" }),
+      true,
+      inherit,
+    );
+    expect(html).toContain(t("chooseLabel"));
+    expect(html).not.toContain(t("inherit"));
+  });
+
+  it("still inherits a resolved fallback", () => {
+    const html = renderPicker(
+      resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] }),
+      false,
+      inherit,
+    );
+    expect(html).toContain(t("inherit"));
+  });
+});

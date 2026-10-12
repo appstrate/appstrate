@@ -40,7 +40,8 @@ function triggerKind(p: ConnectionPicker): TriggerKind {
   if (p.pickedNone) return "none";
   if (p.displayConns.length === 1) return "one";
   if (p.displayConns.length > 1) return "many";
-  if (p.overrideMode) return "inherit";
+  // Override mode inherits only a cascade that binds something; otherwise there is nothing to inherit.
+  if (p.overrideMode && p.resolvedConnectionIds.length > 0) return "inherit";
   return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
 }
 
@@ -151,7 +152,8 @@ export function PickerMenu({
     ? underScopedConns.length > 0 ||
       unavailableIds.length > 0 ||
       deadConns.length > 0 ||
-      (pickedNone && required)
+      (pickedNone && required) ||
+      ((trigger === "connect" || trigger === "choose") && runBlocking)
     : runBlocking;
   const TriggerIcon = triggerWarn ? AlertTriangle : TRIGGER_ICONS[trigger];
 

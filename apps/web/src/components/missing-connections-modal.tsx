@@ -6,15 +6,24 @@ import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
-import { useIntegrationDetail, useIntegrationReadinessEntry } from "../hooks/use-integrations";
+import {
+  useAgentConnectionReadiness,
+  useIntegrationDetail,
+  useIntegrationReadinessEntry,
+} from "../hooks/use-integrations";
+import { useUpsertMemberIntegrationPin } from "../hooks/use-member-integration-pins";
 import { usePermissions } from "../hooks/use-permissions";
 import {
+  canRememberPicks,
   integrationIdOfField,
   isStructuralCode,
   retryDecision,
+  retryRememberingPicks,
   type ConnectionOverridesMap,
   type MissingIntegrationFieldError,
 } from "../lib/connection-choice";
@@ -55,13 +64,38 @@ export function MissingConnectionsModal({
 }: MissingConnectionsModalProps) {
   const { t } = useTranslation(["agents"]);
   const [picks, setPicks] = useState<ConnectionOverridesMap>({});
+  const [rememberChoice, setRememberChoice] = useState(true);
+  const upsertPin = useUpsertMemberIntegrationPin();
+  // The live verdict of the launched version: a row it still blocks waits for a pick.
+  const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
+  const stillBlocking = readiness
+    ? new Set(
+        readiness.integrations.filter((i) => i.run_blocking).map((i) => i.integration_package_id),
+      )
+    : undefined;
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
-  const { mustChoose, showRetry, canRetry } = retryDecision(integrationErrors, picks, retrying);
+  const { mustChoose, showRetry, canRetry } = retryDecision(
+    integrationErrors,
+    picks,
+    retrying,
+    stillBlocking,
+  );
+  const showRememberChoice = canRememberPicks(integrationErrors, agentPackageId);
 
   // A `null` pick drops the key: the re-run falls back to the cascade.
   const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
     setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
+
+  const retry = () =>
+    retryRememberingPicks({
+      errors: integrationErrors,
+      picks,
+      agentPackageId,
+      remember: showRememberChoice && rememberChoice,
+      writePin: (pin) => upsertPin.mutateAsync(pin),
+      onRetry: onRetryWithOverrides,
+    });
 
   return (
     <Modal
@@ -75,8 +109,8 @@ export function MissingConnectionsModal({
           </Button>
           {showRetry && (
             <Button
-              onClick={() => onRetryWithOverrides(picks)}
-              disabled={!canRetry}
+              onClick={() => void retry()}
+              disabled={!canRetry || upsertPin.isPending}
               data-testid="must-choose-retry"
             >
               {retrying && <Spinner />}
@@ -105,6 +139,18 @@ export function MissingConnectionsModal({
           />
         ))}
       </div>
+      {showRememberChoice && (
+        <div className="mt-3 flex items-center gap-2 text-sm">
+          <Checkbox
+            id="missing-connections-remember"
+            checked={rememberChoice}
+            onCheckedChange={(checked) => setRememberChoice(checked === true)}
+          />
+          <Label htmlFor="missing-connections-remember">
+            {t("missingConnections.rememberChoice")}
+          </Label>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -176,13 +222,9 @@ export function MissingRow({
           <Puzzle className="text-muted-foreground size-4 shrink-0" />
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{displayName}</div>
-            <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
-              <Icon className="size-3" />
-              {/* `title` because the row TRUNCATES: a structural message can
-                  carry the server's diagnosis (e.g. the manifest schema issues
-                  behind `integration_invalid_manifest`), and a cause clipped at
-                  the row width is a cause the user never reads. */}
-              <span className="truncate" title={resolved ? undefined : message}>
+            <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
+              <Icon className="mt-0.5 size-3 shrink-0" />
+              <span className="min-w-0 break-words">
                 {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
               </span>
             </div>

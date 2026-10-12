@@ -147,18 +147,74 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
-/** Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), others don't. */
+/**
+ * Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), and so does a row
+ * `stillBlocking` names (undefined = verdict not loaded, nothing gated).
+ */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
   picks: ConnectionOverridesMap,
   retrying = false,
+  stillBlocking?: ReadonlySet<string>,
 ): { mustChoose: boolean; showRetry: boolean; canRetry: boolean } {
   const mustChooseIds = errors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => integrationIdOfField(e.field));
+  const awaitsPick = (id: string) => stillBlocking?.has(id) === true && picks[id] === undefined;
   return {
     mustChoose: mustChooseIds.length > 0,
     showRetry: errors.some((e) => !isStructuralCode(e.code)),
-    canRetry: !retrying && mustChooseIds.every((id) => picks[id] !== undefined),
+    canRetry:
+      !retrying &&
+      mustChooseIds.every((id) => picks[id] !== undefined) &&
+      !errors.some((e) => awaitsPick(integrationIdOfField(e.field))),
   };
+}
+
+/** The "remember this choice" box shows for a must-choose refusal of an agent run (not inline). */
+export function canRememberPicks(
+  errors: MissingIntegrationFieldError[],
+  agentPackageId: string | undefined,
+): boolean {
+  return agentPackageId !== undefined && errors.some((e) => e.code === "must_choose_connection");
+}
+
+/** The member pins a re-run remembers: each must-choose pick that names at least one connection. */
+export function pinsToRemember(
+  errors: MissingIntegrationFieldError[],
+  picks: ConnectionOverridesMap,
+): { integrationId: string; connectionIds: string[] }[] {
+  return errors
+    .filter((e) => e.code === "must_choose_connection")
+    .flatMap((e) => {
+      const integrationId = integrationIdOfField(e.field);
+      const connectionIds = picks[integrationId];
+      return connectionIds && connectionIds.length > 0 ? [{ integrationId, connectionIds }] : [];
+    });
+}
+
+/**
+ * Writes the pins to remember, then re-runs with the picks. A failed write does not hold the
+ * re-run back: the override still carries the choice for this run.
+ */
+export async function retryRememberingPicks(args: {
+  errors: MissingIntegrationFieldError[];
+  picks: ConnectionOverridesMap;
+  agentPackageId: string | undefined;
+  remember: boolean;
+  writePin: (pin: {
+    agentPackageId: string;
+    integrationId: string;
+    connectionIds: string[];
+  }) => Promise<unknown>;
+  onRetry: (picks: ConnectionOverridesMap) => void;
+}): Promise<void> {
+  const { agentPackageId } = args;
+  if (args.remember && agentPackageId !== undefined) {
+    const writes = pinsToRemember(args.errors, args.picks).map((pin) =>
+      args.writePin({ agentPackageId, ...pin }),
+    );
+    await Promise.all(writes).catch(() => undefined);
+  }
+  args.onRetry(args.picks);
 }
