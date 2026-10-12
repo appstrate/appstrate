@@ -37,6 +37,19 @@ async function seedPersona(page: Page, persona: Persona) {
   ] as const);
 }
 
+/**
+ * The preview is a deed of the page's Actions menu (Roles, Space members): open
+ * the menu, take the entry by its test id, and answer the modal it opens over
+ * the settings overlay.
+ */
+async function openViewAs(page: Page, entry: "view-as-button" | "view-as-space-button") {
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByTestId(entry).click();
+  const dialog = page.getByRole("dialog", { name: /Prévisualiser un rôle|Preview a role/ });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
 const banner = (page: Page) => page.getByTestId("view-as-banner");
 /** The detail header renders a wide and a compact variant of the same action. */
 const runButton = (page: Page) => page.getByRole("button", { name: /^(Lancer|Run)$/ });
@@ -55,16 +68,18 @@ test.describe("View as role", () => {
     // Start in ANOTHER open space: entering a space-scoped preview has to land
     // where the persona's role applies, not leave the user where they were.
     const elsewhere = await createSpace(apiClient, `elsewhere-${Date.now()}`);
-    await page.goto("/org-settings/roles");
+    // (The settings overlay covers the sidebar, so the switch is made before
+    // opening it, and the overlay is reached by the app's own links: a fresh page
+    // load would restore the default space.)
+    await page.goto("/agents");
     await new Sidebar(page).switchSpace(elsewhere.name);
+    await page.getByRole("link", { name: "Paramètres", exact: true }).click();
+    await page.getByRole("link", { name: "Rôles", exact: true }).click();
 
-    await page.getByTestId("view-as-button").click();
-
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
+    const dialog = await openViewAs(page, "view-as-button");
     // Only the two roles a preview can be: previewing owner/admin would remove
     // nothing, and the server refuses it.
-    await expect(dialog.getByRole("radio", { name: /Utilisateur standard/ })).toBeVisible();
+    await expect(dialog.getByRole("radio", { name: /^(Membre|Member)\b/ })).toBeVisible();
     await expect(dialog.getByRole("radio", { name: /^Invité/ })).toBeVisible();
     await expect(dialog.getByRole("radio", { name: /Administrateur/ })).toHaveCount(0);
     // Space defaults to the one the user is in; the role is chosen here.
@@ -115,9 +130,8 @@ test.describe("View as role", () => {
       await route.continue();
     });
 
-    await page.goto("/org-settings/space/members");
-    await page.getByTestId("view-as-space-button").click();
-    const dialog = page.getByRole("dialog");
+    await page.goto("/workspace-settings/members");
+    const dialog = await openViewAs(page, "view-as-space-button");
 
     await expect(dialog.getByRole("status")).toBeVisible();
     await expect(dialog).not.toContainText("Aucun rôle prévisualisable");
@@ -129,10 +143,8 @@ test.describe("View as role", () => {
   });
 
   test("is entered from Space members, as a guest with no space", async ({ authedPage: page }) => {
-    await page.goto("/org-settings/space/members");
-    await page.getByTestId("view-as-space-button").click();
-
-    const dialog = page.getByRole("dialog");
+    await page.goto("/workspace-settings/members");
+    const dialog = await openViewAs(page, "view-as-space-button");
     await dialog.getByRole("radio", { name: /^Invité/ }).click();
     // A guest belongs to no space unless assigned; drop the space half so the
     // persona is the org role alone.
@@ -201,9 +213,8 @@ test.describe("View as role", () => {
       },
     );
 
-    await page.goto("/org-settings/space/members");
-    await page.getByTestId("view-as-space-button").click();
-    const dialog = page.getByRole("dialog");
+    await page.goto("/workspace-settings/members");
+    const dialog = await openViewAs(page, "view-as-space-button");
     await dialog.locator("#view-as-space").click();
     await page.getByRole("option", { name: "Aucun espace" }).click();
     await dialog.getByTestId("view-as-submit").click();
@@ -216,7 +227,8 @@ test.describe("View as role", () => {
 
     await expect(banner(page)).toHaveCount(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY)).toBeNull();
-    // Still the owner's own authority: this trigger is hidden from a member.
+    // Still the owner's own authority: this entry is hidden from a member.
+    await page.getByRole("button", { name: "Actions", exact: true }).click();
     await expect(page.getByTestId("view-as-space-button")).toBeVisible();
 
     // Nothing was persisted, so a reload has no preview to resume either.
@@ -229,7 +241,7 @@ test.describe("View as role", () => {
   }) => {
     await page.goto("/org-settings");
     await page.locator('a[href="/org-settings/roles"]').first().click();
-    await expect(page.getByTestId("view-as-button")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Actions", exact: true })).toBeVisible();
 
     let release = () => {};
     const stalled = new Promise<void>((resolve) => {
@@ -246,8 +258,7 @@ test.describe("View as role", () => {
       },
     );
 
-    await page.getByTestId("view-as-button").click();
-    const dialog = page.getByRole("dialog");
+    const dialog = await openViewAs(page, "view-as-button");
     await dialog.locator("#view-as-space").click();
     await page.getByRole("option", { name: "Aucun espace" }).click();
     await dialog.getByTestId("view-as-submit").click();
@@ -310,7 +321,7 @@ test.describe("View as role", () => {
     expect((await previewedSpaces).headers()["x-view-as-active"]).toBe("1");
 
     await expect(banner(page)).toBeVisible();
-    await expect(banner(page)).toContainText(/Utilisateur standard|Standard user/);
+    await expect(banner(page)).toContainText(/Membre|Member/);
     await expect(banner(page)).toContainText("Lecteur");
     await expect(banner(page)).toContainText("Default");
     await expect(runButton(page)).toHaveCount(0);
@@ -424,7 +435,12 @@ test.describe("View as role", () => {
     browserCtx,
   }) => {
     await page.goto("/org-settings/members");
-    await expect(page.getByTestId("invite-org-user-button")).toBeVisible();
+    const actions = page.getByRole("button", { name: "Actions", exact: true });
+    await actions.click();
+    await expect(
+      page.getByRole("menuitem", { name: /^(Inviter un membre|Invite a member)$/ }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await seedPersona(page, {
       orgId: browserCtx.org.orgId,
@@ -434,6 +450,8 @@ test.describe("View as role", () => {
     await page.goto("/org-settings/members");
 
     await expect(banner(page)).toBeVisible();
-    await expect(page.getByTestId("invite-org-user-button")).toHaveCount(0);
+    // Nothing is left to offer, so the page has no Actions menu at all.
+    await expect(page.getByRole("heading", { name: "Utilisateurs" })).toBeVisible();
+    await expect(actions).toHaveCount(0);
   });
 });

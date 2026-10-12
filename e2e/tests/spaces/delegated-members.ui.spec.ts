@@ -1,10 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import type { SpaceRolePreset } from "@appstrate/core/permissions";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient, createOrgOnlyClient } from "../../helpers/api-client.ts";
+import { openRowMenuItem } from "../../helpers/table.ts";
+
+/**
+ * Workspace settings › Members: « Ajouter un membre » is a deed of the page's
+ * Actions menu, and opens its modal over the settings overlay (a second dialog).
+ */
+async function openAddMember(page: Page) {
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByTestId("add-space-member-button").click();
+  const dialog = page.getByRole("dialog", {
+    name: /Ajouter un membre à l.espace|Add a member to the space/,
+  });
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
 
 test("Guest space admins assign preset roles by email without an organization directory", async ({
   request,
@@ -33,9 +48,8 @@ test("Guest space admins assign preset roles by email without an organization di
   const context = await createAuthedContext(browser, guest, browserCtx.org.orgId, spaceId);
   const page = await context.newPage();
   try {
-    await page.goto("/org-settings/space/members");
-    await page.getByTestId("add-space-member-button").click();
-    const dialog = page.getByRole("dialog");
+    await page.goto("/workspace-settings/members");
+    const dialog = await openAddMember(page);
     await expect(dialog.locator("#space-member-user")).toHaveCount(0);
     await expect(dialog.locator("#space-member-external")).toHaveCount(0);
     const email = dialog.locator("#space-member-email");
@@ -86,13 +100,14 @@ test("resetting an explicit viewer explains and confirms the default operator ac
       })
     ).status(),
   ).toBe(200);
-  await page.goto("/org-settings/space/members");
+  await page.goto("/workspace-settings/members");
   const row = page.getByRole("row").filter({ hasText: target.email });
   await expect(row.getByRole("combobox")).toContainText(/Lecteur|Viewer/);
-  await row
-    .getByRole("button", { name: /Rétablir le rôle par défaut|Restore default role/i })
-    .click();
-  const dialog = page.getByRole("dialog");
+  // The row's « … » menu holds the deed; it opens its own confirmation.
+  await openRowMenuItem(page, target.email, "Rétablir le rôle par défaut");
+  const dialog = page.getByRole("dialog", {
+    name: /Rétablir le rôle par défaut|Restore default role/i,
+  });
   await expect(dialog).toContainText(/Opérateur|Operator/);
   await expect(dialog).toContainText(/davantage de permissions|more permissions/i);
   const before = await orgOnlyClient.get(`/spaces/${spaceId}/members`);
@@ -131,13 +146,17 @@ test("space settings retain edits and expose a forbidden save response", async (
         })
       : route.continue(),
   );
-  await page.goto("/org-settings/space/general");
-  const name = page.locator("#space-name");
+  await page.goto("/workspace-settings/general");
+  // The name saves itself on Enter or blur; there is no form and no save button.
+  const name = page.getByRole("textbox", { name: "Nom", exact: true });
   await name.fill("Unpersisted name");
-  await page.locator('form button[type="submit"]').click();
-  await expect(
-    page.getByRole("alert").filter({ hasText: "Space update denied for this role" }),
-  ).toBeVisible();
+  const refused = page.waitForResponse(
+    (response) => response.request().method() === "PATCH" && response.status() === 403,
+  );
+  await name.press("Enter");
+  await refused;
+  // The refusal is said next to the setting, and what was typed stays typed.
+  await expect(page.getByText("Space update denied for this role").first()).toBeVisible();
   await expect(name).toHaveValue("Unpersisted name");
   const persisted = await orgOnlyClient.get(`/spaces/${browserCtx.org.defaultSpaceId}`);
   expect((await persisted.json()).name).not.toBe("Unpersisted name");
@@ -149,9 +168,8 @@ test("organization administrators invite an external guest directly into the sel
   orgOnlyClient,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/org-settings/space/members");
-  await page.getByTestId("add-space-member-button").click();
-  const dialog = page.getByRole("dialog");
+  await page.goto("/workspace-settings/members");
+  const dialog = await openAddMember(page);
   await dialog.locator("#space-member-external").click();
   const address = `space-guest-${Date.now()}@test.com`;
   await dialog.locator("#space-member-email").fill(address);
@@ -184,7 +202,7 @@ test("organization administrators invite an external guest directly into the sel
     space_assignments: [{ spaceId: browserCtx.org.defaultSpaceId, preset_role: "viewer" }],
   });
   await page.keyboard.press("Escape");
-  await page.getByTestId("add-space-member-button").click();
+  await openAddMember(page);
   await expect(dialog.locator("#space-member-existing")).toHaveAttribute("aria-checked", "true");
   await expect(dialog.getByRole("button", { name: /Copier le lien|Copy link/i })).toHaveCount(0);
   await dialog.locator("#space-member-external").click();
@@ -204,15 +222,23 @@ test("a pending guest invitation shows in the space and a second invite for the 
   });
   expect(created.status()).toBe(201);
   const invitation = await created.json();
-  await page.goto("/org-settings/space/members");
-  const card = page.locator(`[data-invitation-id="${invitation.id}"]`);
-  await expect(card).toContainText(address);
-  await expect(card).toContainText(/Invitation en attente|Pending invitation/);
-  await expect(card).toContainText(/Lecteur|Viewer/);
-  await expect(page.getByRole("row").filter({ hasText: address })).toHaveCount(0);
+  await page.goto("/workspace-settings/members");
+  // The invitation sits in the « Invitations en attente » table, with the role it
+  // gives here, and is not a row of the members table: it is not a member yet.
+  const pendingRow = page
+    .getByRole("table", { name: /Invitations en attente|Pending invitations/ })
+    .getByRole("row")
+    .filter({ hasText: address });
+  await expect(pendingRow).toBeVisible();
+  await expect(pendingRow).toContainText(/Lecteur|Viewer/);
+  await expect(
+    page
+      .getByRole("table", { name: /^(Membres|Members)$/ })
+      .getByRole("row")
+      .filter({ hasText: address }),
+  ).toHaveCount(0);
 
-  await page.getByTestId("add-space-member-button").click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openAddMember(page);
   await dialog.locator("#space-member-external").click();
   await dialog.locator("#space-member-email").fill(address.toUpperCase());
   const submitted = page.waitForResponse(
@@ -373,8 +399,11 @@ test("an operator's runs page and run detail hold only its own runs", async ({
   const page = await context.newPage();
   try {
     await page.goto("/runs");
-    await expect(page.locator(`a[href$="/runs/${aliceRun}"]`)).toBeVisible();
-    await expect(page.locator(`a[href$="/runs/${bobRun}"]`)).toHaveCount(0);
+    // A row links its run twice: a cover over the whole row (aria-hidden) and the
+    // run's own name. The name is the one a reader follows.
+    const runLink = (id: string) => page.locator(`a[href$="/runs/${id}"]:not([aria-hidden])`);
+    await expect(runLink(aliceRun)).toBeVisible();
+    await expect(runLink(bobRun)).toHaveCount(0);
     // Not a 403: a run the caller may not read is indistinguishable from one
     // that does not exist, so the detail page stays on its URL and renders the
     // "not found or not accessible" panel — no redirect, none of the run.
@@ -383,7 +412,8 @@ test("an operator's runs page and run detail hold only its own runs", async ({
       page.getByText(/Élément introuvable ou inaccessible|Not found, or not accessible/),
     ).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/runs/${bobRun}$`));
-    await expect(page.getByRole("tab")).toHaveCount(0);
+    // The shell's own Studio / Chat tabs stay; the page itself offers none.
+    await expect(page.getByRole("main").getByRole("tab")).toHaveCount(0);
   } finally {
     await context.close();
   }

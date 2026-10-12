@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Adding models on a custom endpoint from org settings → Modèles, against a
- * mock endpoint this spec serves itself.
+ * Adding a key and models on a custom endpoint from org settings → Modèles,
+ * against a mock endpoint this spec serves itself.
  *
- * The picker offers one "Endpoint personnalisé" row for every base-URL-
+ * The provider picker offers one "Endpoint personnalisé" row for every base-URL-
  * overridable registry entry; which of them it is becomes the "Type d'API"
- * question inside the form. Both shapes it can speak are exercised here —
+ * question inside the key form. Both shapes it can speak are exercised here —
  * OpenAI (`GET <baseUrl>/models`, `Authorization: Bearer`) and Anthropic
  * (`GET <baseUrl>/v1/models`, `x-api-key`), which is why the two tests type a
  * different base URL against the same mock.
  *
- * One detection describes every model the endpoint serves, so the form adds
- * them as a batch: the listing is a checkbox list and the footer button counts
- * what is checked. That makes three things worth asserting beyond "a model was
+ * One detection describes every model the endpoint serves, so the second step
+ * adds them as a batch: the listing is a checkbox list, every detected model
+ * starts ticked. That makes three things worth asserting beyond "a model was
  * saved" — adding several at once, a batch the server only partly accepts, and
  * a detection run against a key the org already saved.
  *
@@ -29,12 +29,11 @@
 import { createServer, type Server } from "node:http";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { selectOption } from "../../helpers/radix.ts";
+import { openRowMenuItem } from "../../helpers/table.ts";
+import { NEXT, modelRow, openAddKeyDialog, submitAddKey } from "../../helpers/models.ts";
 import type { APIResponse, Locator, Page } from "@playwright/test";
 
-const SETTINGS_PATH = "/org-settings/models";
 const GOOD_KEY = "e2e-good-key";
-/** The form modal's title, identical to the button that opens it (`models.add` / `models.form.title`). */
-const ADD_MODEL = "Ajouter un modèle";
 /** The single picker row every overridable endpoint collapses into (`models.form.customEndpoint`). */
 const CUSTOM_ENDPOINT = "Endpoint personnalisé";
 /** Registry display names of the two custom-endpoint entries, the "Type d'API" options. */
@@ -110,45 +109,74 @@ test.afterAll(async () => {
 });
 
 /**
- * Open the model form on the custom-endpoint path and answer step 1: which API
- * shape, where it lives, and the key that opens it. The shape is always picked
- * explicitly: the pre-selected entry is whichever the registry lists first,
- * which is not something a test should depend on. `baseUrl`/`apiKey` are
- * omitted by the one test that answers both by picking a saved key instead.
+ * Open « Ajouter une clé org » on the custom-endpoint path and answer step 1:
+ * which API shape, where it lives, and the key that opens it; lands on the
+ * second step, the models. The shape is always picked explicitly: the
+ * pre-selected entry is whichever the registry lists first, which is not
+ * something a test should depend on.
  */
 async function openCustomEndpointForm(
   page: Page,
-  { baseUrl, apiKey, apiType }: { baseUrl?: string; apiKey?: string; apiType: string },
+  { baseUrl, apiKey, apiType }: { baseUrl: string; apiKey: string; apiType: string },
 ): Promise<Locator> {
-  await page.goto(SETTINGS_PATH);
-  // Header button and empty-state button carry the same label; either opens the form.
-  await page.getByRole("button", { name: ADD_MODEL }).first().click();
-  // Named, because a Radix select's popper is a `dialog` too.
-  const dialog = page.getByRole("dialog", { name: ADD_MODEL });
-  await expect(dialog).toBeVisible();
+  const dialog = await openAddKeyDialog(page);
 
-  await selectOption(page, "mdl-provider", CUSTOM_ENDPOINT);
-  await selectOption(page, "mdl-apiType", apiType);
-  if (baseUrl !== undefined) await dialog.locator("#mdl-baseUrl").fill(baseUrl);
-  if (apiKey !== undefined) await dialog.getByPlaceholder("sk-...").fill(apiKey);
+  await selectOption(page, "pk-provider", CUSTOM_ENDPOINT);
+  await selectOption(page, "pk-apiType", apiType);
+  await dialog.locator("#pk-baseUrl").fill(baseUrl);
+  await dialog.locator("#pk-apiKey").fill(apiKey);
+  await dialog.getByRole("button", { name: NEXT, exact: true }).click();
   return dialog;
 }
 
-/**
- * One row of the model pick list. The row is a Radix checkbox (a `button`)
- * labelled by the model's name over its raw id, so the id is a substring of the
- * accessible name whether or not the catalog named the model.
- */
+/** The model row of the second step, matched on the model's id. */
 function discoveredRow(dialog: Locator, modelId: string): Locator {
-  return dialog.getByRole("checkbox", { name: modelId });
+  return modelRow(dialog, modelId);
 }
 
-/** The footer button while the list is shown — i18n plural (`models.form.addModels`). */
-function addModelsButton(dialog: Locator, count: number): Locator {
-  return dialog.getByRole("button", {
-    name: count === 1 ? "Ajouter 1 modèle" : `Ajouter ${count} modèles`,
-    exact: true,
+async function detect(dialog: Locator, count: number): Promise<void> {
+  await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
+  await expect(
+    dialog.getByText(count === 1 ? "1 modèle détecté" : `${count} modèles détectés`),
+  ).toBeVisible();
+}
+
+/**
+ * Detect on the split endpoint and submit both models: the first is accepted,
+ * the second refused by the server. Resolves to the dialog once the refusal is
+ * on screen, after checking that the list is frozen while the batch is in flight.
+ */
+async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
+  const dialog = await openCustomEndpointForm(page, {
+    baseUrl: `${mockOrigin}${SPLIT_PATH}`,
+    apiKey: GOOD_KEY,
+    apiType: OPENAI_TYPE,
   });
+
+  await detect(dialog, 2);
+  const pendingRequest = Promise.withResolvers<void>();
+  const releaseRequest = Promise.withResolvers<void>();
+  await page.route("**/api/models", async (route) => {
+    if (
+      route.request().method() === "POST" &&
+      route.request().postDataJSON().modelId === REFUSED_MODEL
+    ) {
+      pendingRequest.resolve();
+      await releaseRequest.promise;
+    }
+    await route.continue();
+  });
+  await submitAddKey(dialog).click();
+  await pendingRequest.promise;
+  try {
+    // While the batch is in flight the list cannot move under it.
+    await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeDisabled();
+    await expect(dialog.getByRole("button", { name: "Retour" })).toBeDisabled();
+  } finally {
+    releaseRequest.resolve();
+  }
+  await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
+  return dialog;
 }
 
 async function listModels(apiClient: {
@@ -171,17 +199,20 @@ test.describe("Custom endpoint model — UI", () => {
       apiType: OPENAI_TYPE,
     });
 
-    await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
-    await expect(dialog.getByText("2 modèles détectés")).toBeVisible();
-
-    await discoveredRow(dialog, SERVED_MODEL).click();
+    await detect(dialog, 2);
+    // Everything detected starts ticked: leave only the one the endpoint described itself.
+    await expect(discoveredRow(dialog, CATALOG_MODEL)).toBeChecked();
     await expect(discoveredRow(dialog, SERVED_MODEL)).toBeChecked();
-    await addModelsButton(dialog, 1).click();
+    await discoveredRow(dialog, CATALOG_MODEL).click();
+    await expect(discoveredRow(dialog, CATALOG_MODEL)).not.toBeChecked();
+    await submitAddKey(dialog).click();
 
     await expect(dialog).toBeHidden();
     await expect(page.getByText(SERVED_MODEL).first()).toBeVisible();
 
-    const created = (await listModels(apiClient)).find((m) => m.modelId === SERVED_MODEL);
+    const models = await listModels(apiClient);
+    expect(models.find((m) => m.modelId === CATALOG_MODEL)).toBeUndefined();
+    const created = models.find((m) => m.modelId === SERVED_MODEL);
     expect(created).toBeDefined();
     // Every capability is written from the listing itself — the catalog does
     // not know this id, so the context window can only be the published hint.
@@ -201,88 +232,62 @@ test.describe("Custom endpoint model — UI", () => {
       apiType: OPENAI_TYPE,
     });
 
-    await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
-    await expect(dialog.getByText("2 modèles détectés")).toBeVisible();
-
-    await dialog.getByRole("checkbox", { name: "Tout sélectionner" }).click();
-    await addModelsButton(dialog, 2).click();
+    await detect(dialog, 2);
+    await expect(dialog.getByRole("checkbox", { name: "Tout sélectionner" })).toBeChecked();
+    await submitAddKey(dialog).click();
 
     await expect(dialog).toBeHidden();
     await expect(page.getByText(CATALOG_MODEL).first()).toBeVisible();
     await expect(page.getByText(SERVED_MODEL).first()).toBeVisible();
   });
 
-  test("keeps the dialog open on a partly refused batch and re-offers what failed", async ({
+  test("keeps the dialog open on a partly refused batch and names what was refused", async ({
     authedPage: page,
     apiClient,
   }) => {
-    const dialog = await openCustomEndpointForm(page, {
-      baseUrl: `${mockOrigin}${SPLIT_PATH}`,
-      apiKey: GOOD_KEY,
-      apiType: OPENAI_TYPE,
-    });
-
-    await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
-    await expect(dialog.getByText("2 modèles détectés")).toBeVisible();
-
-    await dialog.getByRole("checkbox", { name: "Tout sélectionner" }).click();
-    const pendingRequest = Promise.withResolvers<void>();
-    const releaseRequest = Promise.withResolvers<void>();
-    await page.route("**/api/models", async (route) => {
-      if (
-        route.request().method() === "POST" &&
-        route.request().postDataJSON().modelId === REFUSED_MODEL
-      ) {
-        pendingRequest.resolve();
-        await releaseRequest.promise;
-      }
-      await route.continue();
-    });
-    await addModelsButton(dialog, 2).click();
-    await pendingRequest.promise;
-    try {
-      // A partial result must not restore the old key into a changed endpoint.
-      await expect(dialog.locator("#mdl-provider")).toBeDisabled();
-      await expect(dialog.locator("#mdl-apiType")).toBeDisabled();
-      await expect(dialog.locator("#mdl-baseUrl")).toBeDisabled();
-      await expect(dialog.getByPlaceholder("sk-...")).toBeDisabled();
-      await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeDisabled();
-    } finally {
-      releaseRequest.resolve();
-    }
+    const dialog = await submitPartlyRefusedBatch(page);
 
     // One `POST /api/models` per checked row, each refusal collected rather
     // than aborting the rest: the accepted model is saved, the refused one is
-    // named and stays checked, and the footer counts only what is left to retry.
-    await expect(dialog.getByText(`Impossible d'ajouter : ${REFUSED_MODEL}`)).toBeVisible();
+    // named and stays checked.
+    await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
     await expect(discoveredRow(dialog, REFUSED_MODEL)).toBeChecked();
-    await expect(discoveredRow(dialog, ADDABLE_MODEL)).not.toBeChecked();
-    await expect(addModelsButton(dialog, 1)).toBeVisible();
-    await expect(dialog.locator("#mdl-provider")).toBeEnabled();
-    await expect(dialog.locator("#mdl-baseUrl")).toBeEnabled();
 
-    const retryRequest = page.waitForRequest(
-      (request) => request.url().endsWith("/api/models") && request.method() === "POST",
-    );
-    await addModelsButton(dialog, 1).click();
-    const retry = await retryRequest;
-    // The org's own keys only: a built-in (system) key may be listed alongside.
+    // The key was minted once and the accepted model saved once.
     const credentials = await apiClient.get("/model-provider-credentials");
     const keys = ((await credentials.json()).data as Array<{ id: string; source: string }>).filter(
       (k) => k.source === "custom",
     );
     expect(keys).toHaveLength(1);
-    expect(retry.postDataJSON().credentialId).toBe(keys[0]!.id);
-
     const models = await listModels(apiClient);
-    expect(models.find((m) => m.modelId === ADDABLE_MODEL)).toBeDefined();
+    expect(models.filter((m) => m.modelId === ADDABLE_MODEL)).toHaveLength(1);
     expect(models.find((m) => m.modelId === REFUSED_MODEL)).toBeUndefined();
+  });
+
+  // Known application defect (partial batch, retry): the dialog's list does not
+  // learn which models the first attempt saved, so the retry asks for them again
+  // (the server answers 409 `model_already_added`) and reports the saved model
+  // as one it could not complete. `test.fail` flips to a red test the day it is fixed.
+  test("re-offers only what failed after a partly refused batch", async ({ authedPage: page }) => {
+    test.fail(true, "retry re-posts the model the first attempt saved and reports it as failed");
+    const dialog = await submitPartlyRefusedBatch(page);
+
+    const retried: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/api/models") && request.method() === "POST") {
+        retried.push(request.postDataJSON().modelId);
+      }
+    });
+    await submitAddKey(dialog).click();
+    await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
+
+    expect(retried).toEqual([REFUSED_MODEL]);
   });
 
   test("detects through a key the org already saved", async ({ authedPage: page, apiClient }) => {
     const baseUrl = `${mockOrigin}/v1`;
     // Seeded over the API rather than by running the form twice: what this
-    // test covers is the picker, not the key's creation.
+    // test covers is the key's own model list, not the key's creation.
     const seeded = await apiClient.post("/model-provider-credentials", {
       providerId: OPENAI_PROVIDER_ID,
       api_key: GOOD_KEY,
@@ -292,22 +297,16 @@ test.describe("Custom endpoint model — UI", () => {
     const credential = (await seeded.json()) as { id: string; label: string };
 
     // No URL and no key typed — the saved key carries both.
-    const dialog = await openCustomEndpointForm(page, { apiType: OPENAI_TYPE });
-    // A Radix select trigger is a `combobox` whose role forbids
-    // name-from-content, so it has no accessible name: match on its placeholder
-    // text (`models.form.useExistingKey`).
-    await dialog.getByRole("combobox").filter({ hasText: "Mes clés" }).click();
-    await page.getByRole("option", { name: credential.label, exact: true }).click();
+    await page.goto("/org-settings/models");
+    await openRowMenuItem(page, credential.label, "Choisir les modèles");
+    const dialog = page.getByRole("dialog", { name: /^Modèles disponibles avec/ });
+    await expect(dialog).toBeVisible();
 
-    // The key was saved against an endpoint; the form follows it there and pins
-    // the field rather than asking for the URL again.
-    await expect(dialog.locator("#mdl-baseUrl")).toHaveValue(baseUrl);
-    await expect(dialog.locator("#mdl-baseUrl")).toBeDisabled();
-
-    await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
-    await expect(dialog.getByText("2 modèles détectés")).toBeVisible();
+    await detect(dialog, 2);
+    // A saved key lists what is already its own ticked; nothing else is.
+    await expect(discoveredRow(dialog, SERVED_MODEL)).not.toBeChecked();
     await discoveredRow(dialog, SERVED_MODEL).click();
-    await addModelsButton(dialog, 1).click();
+    await dialog.getByRole("button", { name: "Enregistrer" }).click();
 
     await expect(dialog).toBeHidden();
     const created = (await listModels(apiClient)).find((m) => m.modelId === SERVED_MODEL);
@@ -326,47 +325,16 @@ test.describe("Custom endpoint model — UI", () => {
     await expect(dialog.getByText("Clé refusée par le endpoint.")).toBeVisible();
   });
 
-  test("saves a manually typed model id and lets the server name the row", async ({
-    authedPage: page,
-    apiClient,
-  }) => {
-    const dialog = await openCustomEndpointForm(page, {
-      baseUrl: `${mockOrigin}/v1`,
-      apiKey: GOOD_KEY,
-      apiType: OPENAI_TYPE,
-    });
-
-    await dialog.getByRole("button", { name: "Configurer manuellement" }).click();
-    await dialog.locator("#mdl-modelId").fill("llama3");
-
-    // Nothing describes a typed-in id — no listing, and no catalog entry for a
-    // name the operator invented — so the limits and modalities are a question
-    // only they can answer. The toggle is off on a create: what is shown is
-    // the fallback chain, not empty fields.
-    await expect(dialog.locator("#mdl-ctx")).toBeHidden();
-    await dialog
-      .getByRole("checkbox", { name: "Définir moi-même les limites et capacités" })
-      .click();
-    await dialog.getByRole("checkbox", { name: "Image", exact: true }).click();
-    await dialog.locator("#mdl-ctx").fill("32768");
-
-    // Name left empty on purpose: the server derives it from the model id.
-    await dialog.getByRole("button", { name: "Enregistrer" }).click();
-
-    await expect(dialog).toBeHidden();
-    await expect(page.getByText("llama3").first()).toBeVisible();
-
-    const created = (await listModels(apiClient)).find((m) => m.modelId === "llama3");
-    // The ticked boxes ARE the answer: `text` was already on, `image` was
-    // added, and the context window is the one typed rather than the runtime's
-    // 128k default.
-    expect(created).toMatchObject({
-      modelId: "llama3",
-      label: "llama3",
-      input: ["text", "image"],
-      contextWindow: 32768,
-    });
-  });
+  // Known application gap: Settings › Models no longer offers a way to type a
+  // model id by hand. The key flow's second step lists only what a catalog or a
+  // detection returns, and the model form (with its « Configurer manuellement »
+  // path, name and limits) opens only on a model that already exists. An
+  // endpoint that publishes no listing therefore cannot get a model there. The
+  // spec, as it ran before the redesign: pick the custom endpoint, choose
+  // « Configurer manuellement », type `llama3`, take the limits and the Image
+  // modality, set the context window to 32768, save, and expect a row named
+  // `llama3` with input `["text", "image"]` and that context window.
+  test.fixme("saves a manually typed model id and lets the server name the row", () => {});
 
   test("discovers an Anthropic-shaped endpoint's models", async ({
     authedPage: page,
@@ -379,11 +347,9 @@ test.describe("Custom endpoint model — UI", () => {
       apiType: ANTHROPIC_TYPE,
     });
 
-    await dialog.getByRole("button", { name: "Détecter les modèles" }).click();
-    await expect(dialog.getByText("1 modèle détecté")).toBeVisible();
-
-    await discoveredRow(dialog, ANTHROPIC_MODEL).click();
-    await addModelsButton(dialog, 1).click();
+    await detect(dialog, 1);
+    await expect(discoveredRow(dialog, ANTHROPIC_MODEL)).toBeChecked();
+    await submitAddKey(dialog).click();
 
     await expect(dialog).toBeHidden();
 

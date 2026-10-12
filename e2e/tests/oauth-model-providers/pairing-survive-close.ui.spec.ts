@@ -31,16 +31,20 @@
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import type { Page } from "@playwright/test";
+import type { APIResponse, Page } from "@playwright/test";
 
-const SETTINGS_PATH = "/org-settings/models";
+/**
+ * A subscription is personal, so it is added from Preferences › Mes clés de
+ * modèles (never from the organization's settings).
+ */
+const SETTINGS_PATH = "/preferences/models";
 const PROVIDER_ID = "claude-code";
 const PROVIDER_LABEL = /Claude Code/;
 const STORAGE_KEY = "appstrate_pending_pairings";
-
-const CREDENTIAL_DIALOG = "Ajouter un fournisseur";
+const CREDENTIAL_DIALOG = "Ajouter une clé perso ou un abonnement";
 const CONFIRM_DIALOG = "Fermer la fenêtre de connexion ?";
-const SUCCESS_TOAST = "Provider OAuth connecté avec succès";
+const SUCCESS_TOAST = "Abonnement connecté avec succès";
+const CREDENTIAL_LABEL = "E2E survive-close";
 
 interface MintedPairing {
   token: string;
@@ -48,13 +52,36 @@ interface MintedPairing {
 }
 
 /**
- * Open the credentials sub-tab, launch the add-credential modal, pick the
+ * Preferences only offers the providers whose key would serve a model the
+ * organization opened to personal keys: leave one of the provider's models to
+ * each person's own subscription before adding it.
+ */
+async function openModelToPersonalKeys(apiClient: {
+  get(path: string): Promise<APIResponse>;
+  post(path: string, data?: unknown): Promise<APIResponse>;
+}): Promise<void> {
+  const registry = await apiClient.get("/model-provider-credentials/registry");
+  expect(registry.status()).toBe(200);
+  const provider = (
+    (await registry.json()).data as Array<{ providerId: string; models: { id: string }[] }>
+  ).find((p) => p.providerId === PROVIDER_ID);
+  expect(provider?.models[0], `a catalogued ${PROVIDER_ID} model`).toBeDefined();
+  const created = await apiClient.post("/models", {
+    modelId: provider!.models[0]!.id,
+    credentialId: null,
+    providerId: PROVIDER_ID,
+  });
+  expect(created.status()).toBe(201);
+}
+
+/**
+ * Launch the add-subscription modal from the page's Actions menu, pick the
  * OAuth provider, and return the freshly-minted command + bearer token read
  * straight from the rendered CLI command.
  */
 async function mintPairingViaUi(page: Page): Promise<MintedPairing> {
-  await page.getByRole("tab", { name: "Fournisseurs", exact: true }).click();
-  await page.getByRole("button", { name: "Ajouter un fournisseur", exact: true }).first().click();
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: CREDENTIAL_DIALOG }).click();
 
   const dialog = page.getByRole("dialog", { name: CREDENTIAL_DIALOG });
   await dialog.locator("#pk-provider").click();
@@ -75,7 +102,7 @@ async function helperRedeem(page: Page, token: string) {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     data: {
       providerId: PROVIDER_ID,
-      label: "E2E survive-close",
+      label: CREDENTIAL_LABEL,
       access_token: `fake-${PROVIDER_ID}-access`,
       refresh_token: `fake-${PROVIDER_ID}-refresh`,
       expiresAt: Date.now() + 3_600_000,
@@ -103,6 +130,7 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
       }
     });
 
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await mintPairingViaUi(page);
 
@@ -120,17 +148,19 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     expect(stored).not.toContain(token);
     expect(stored).not.toContain("appp_");
 
-    // Close the modal while busy → confirm-on-close guard, then confirm. Both
-    // are the dialog's own text button, not its corner ✕: the ✕ carries the
-    // same accessible name ("Fermer") through a screen-reader-only label, which
-    // is what tells the two apart.
-    const closeButton = (dialogName: string) =>
-      page
-        .getByRole("dialog", { name: dialogName })
-        .getByRole("button", { name: "Fermer", exact: true })
-        .filter({ hasNot: page.locator(".sr-only") });
-    await closeButton(CREDENTIAL_DIALOG).click();
-    await closeButton(CONFIRM_DIALOG).click();
+    // Close the modal while busy → confirm-on-close guard, then confirm. The
+    // busy modal has no footer, so its corner ✕ is the way out; the guard has
+    // its own text button, which the ✕ shares its accessible name ("Fermer")
+    // with through a screen-reader-only label: that label tells the two apart.
+    await page
+      .getByRole("dialog", { name: CREDENTIAL_DIALOG })
+      .getByRole("button", { name: "Fermer", exact: true })
+      .click();
+    await page
+      .getByRole("dialog", { name: CONFIRM_DIALOG })
+      .getByRole("button", { name: "Fermer", exact: true })
+      .filter({ hasNot: page.locator(".sr-only") })
+      .click();
     await expect(page.getByRole("dialog", { name: CREDENTIAL_DIALOG })).toBeHidden();
 
     // Helper redeems AFTER the modal is gone — the watcher must complete it.
@@ -139,7 +169,9 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     try {
       // Watcher side effects: success toast + credential-list refresh.
       await expect(page.getByText(SUCCESS_TOAST)).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByText(/Connecté en tant que/).first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByRole("row").filter({ hasText: CREDENTIAL_LABEL })).toBeVisible({
+        timeout: 15_000,
+      });
 
       // Store cleared once completed; no cancel ever fired.
       await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
@@ -151,13 +183,19 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
   });
 
   test("pairing survives a full page reload", async ({ authedPage: page, apiClient }) => {
+    await openModelToPersonalKeys(apiClient);
     await page.goto(SETTINGS_PATH);
     const { token } = await mintPairingViaUi(page);
     expect(await readStore(page)).not.toBeNull();
 
-    // Hard reload — the modal is gone; only the persisted pairing remains.
+    // Hard reload — the modal is addressed by the URL, so it comes back empty;
+    // only the persisted pairing remains. Dismiss it to reach the page.
     await page.reload();
-    await expect(page.getByRole("tab", { name: "Modèles", exact: true })).toBeVisible({
+    await page
+      .getByRole("dialog", { name: CREDENTIAL_DIALOG })
+      .getByRole("button", { name: "Annuler", exact: true })
+      .click();
+    await expect(page.getByRole("heading", { name: "Mes clés de modèles" })).toBeVisible({
       timeout: 15_000,
     });
 

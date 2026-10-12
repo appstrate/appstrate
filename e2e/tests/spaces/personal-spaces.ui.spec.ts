@@ -13,6 +13,7 @@ import type { APIRequestContext, Page } from "@playwright/test";
 import { test, expect, createAuthedContext } from "../../fixtures/browser.fixture.ts";
 import { createAgent, registerUser, type AuthResult } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
+import { Sidebar } from "../../pages/sidebar.ts";
 
 /** Every space `GET /api/spaces` shows this session, personal flag included. */
 async function listSpaces(
@@ -45,18 +46,19 @@ test("the switcher pins the caller's own space above the team spaces", async ({
   const personalId = await personalSpaceOf(request, browserCtx.auth.cookie, browserCtx.org.orgId);
 
   await page.goto("/agents");
-  await page.getByTestId("org-switcher-button").click();
-  await page.getByTestId("space-submenu-trigger").click();
+  // The switcher opens on the caller's own context: the workspaces column
+  // already lists the current organisation's spaces.
+  await new Sidebar(page).openSwitcher();
 
-  const personalItem = page.getByTestId(`space-item-${personalId}`);
+  const personalItem = page.getByTestId(`app-item-${personalId}`);
   await expect(personalItem).toBeVisible();
   await expect(personalItem).toContainText(/^(Mon espace|My space)/);
 
   // Pinned: the personal entry comes before the default team space in the menu.
-  const items = await page.getByTestId(/^space-item-/).all();
+  const items = await page.getByTestId(/^app-item-/).all();
   const ids = await Promise.all(items.map((item) => item.getAttribute("data-testid")));
-  expect(ids[0]).toBe(`space-item-${personalId}`);
-  expect(ids).toContain(`space-item-${browserCtx.org.defaultSpaceId}`);
+  expect(ids[0]).toBe(`app-item-${personalId}`);
+  expect(ids).toContain(`app-item-${browserCtx.org.defaultSpaceId}`);
 });
 
 test("an agent authored in a personal space is invisible to a colleague and to the admin", async ({
