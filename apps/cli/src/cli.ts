@@ -65,6 +65,7 @@ import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
+import { parseConnectionFlags } from "./commands/run/connection-flag.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
 import {
   startCommand,
@@ -1127,6 +1128,12 @@ program
     "Proxy id to associate with the run (overrides per-space run-config inheritance)",
   )
   .option(
+    "--connection <integration=id>",
+    "Connection the run binds to an integration, as <integration>=<connection id> (repeatable; several values for one integration form its set). Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
+    collect,
+    [],
+  )
+  .option(
     "--no-inherit",
     "Skip the per-space run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
   )
@@ -1162,6 +1169,7 @@ program
       reportFallback: parseReportFallback(opts.reportFallback),
       sinkTtl: parseSinkTtl(opts.sinkTtl),
       proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
+      connectionOverrides: parseConnectionFlags(opts.connection as string[]),
       // Same `--no-X` mapping: commander stores the negated flag at
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.

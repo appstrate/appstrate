@@ -172,6 +172,26 @@ describe("startReportSession — source discrimination", () => {
     expect(src.prompt).toBeUndefined();
   });
 
+  it("sends --connection picks as connection_overrides, and no key without them", async () => {
+    const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
+    const connectionOverrides = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
+    await startReportSession(
+      reportSource,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort", connectionOverrides },
+      SNAPSHOT,
+    );
+    await startReportSession(
+      reportSource,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+
+    expect(stub.calls[0]!.body.connection_overrides).toEqual(connectionOverrides);
+    expect("connection_overrides" in stub.calls[1]!.body).toBe(false);
+  });
+
   it("omits spec on draft registry sources", async () => {
     const reportSource: ReportSource = {
       kind: "registry",
@@ -321,6 +341,56 @@ describe("startReportSession — integration readiness", () => {
     expect((err as ReportStartError).responseSnippet).toBe(
       "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (required_integration_unbound)" +
         "\n    @appstrate/clickup: must_choose_connection (must_choose_connection)",
+    );
+  });
+
+  it("lists a must_choose_connection item's candidates with the flag that names each", async () => {
+    const WORK = "11111111-1111-4111-8111-111111111111";
+    const OPS = "22222222-2222-4222-8222-222222222222";
+    stub = installStubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            status: 409,
+            code: "missing_integration_connection",
+            errors: [
+              {
+                field: "integrations.@appstrate/clickup",
+                code: "must_choose_connection",
+                message: "Integration '@appstrate/clickup' has 2 usable connections; choose one",
+                candidate_connections: [
+                  {
+                    id: WORK,
+                    label: "Work",
+                    account_id: "work@acme.com",
+                    owned_by_actor: true,
+                    needs_reconnection: false,
+                    scopes_granted: [],
+                    missing_scopes: [],
+                  },
+                  {
+                    id: OPS,
+                    label: "Ops",
+                    account_id: "ops@acme.com",
+                    owned_by_actor: false,
+                    needs_reconnection: true,
+                    scopes_granted: [],
+                    missing_scopes: [],
+                  },
+                  // Nothing to pass without an id: dropped, not printed half-formed.
+                  { label: "No id" },
+                ],
+              },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/problem+json" } },
+        ),
+    );
+    const err = await session().catch((e: unknown) => e);
+    expect((err as ReportStartError).responseSnippet).toBe(
+      "@appstrate/clickup: Integration '@appstrate/clickup' has 2 usable connections; choose one (must_choose_connection)" +
+        `\n      Work (work@acme.com, yours): --connection @appstrate/clickup=${WORK}` +
+        `\n      Ops (ops@acme.com, shared, needs reconnection): --connection @appstrate/clickup=${OPS}`,
     );
   });
 

@@ -56,6 +56,7 @@ import {
   type LaunchItem,
 } from "./launch-warnings.ts";
 import type { Verbosity } from "./format.ts";
+import type { ConnectionOverrides } from "./connection-flag.ts";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -190,6 +191,8 @@ export interface RunRemoteOptions {
   modelId?: string | null;
   /** Proxy id override (or `"none"` to disable). */
   proxyId?: string | null;
+  /** `--connection` picks, sent as the trigger body's `connection_overrides`. */
+  connectionOverrides?: ConnectionOverrides | undefined;
 
   /** `Idempotency-Key` for the trigger POST. */
   idempotencyKey?: string | undefined;
@@ -578,6 +581,7 @@ async function triggerRun(
   };
   if (opts.modelId != null) body.modelId = opts.modelId;
   if (opts.proxyId != null) body.proxyId = opts.proxyId;
+  if (opts.connectionOverrides) body.connection_overrides = opts.connectionOverrides;
 
   const headers = platformHeaders(opts, { "Content-Type": "application/json" });
   // ALWAYS attach an Idempotency-Key before the retry loop. Prefer the

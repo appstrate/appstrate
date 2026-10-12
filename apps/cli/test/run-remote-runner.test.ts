@@ -406,6 +406,36 @@ describe("runRemote — happy path", () => {
     const body = JSON.parse(trigger.body!);
     expect(body.modelId).toBe("claude-opus-4-7");
     expect(body.proxyId).toBe("px_test");
+    expect("connection_overrides" in body).toBe(false);
+  });
+
+  it("forwards --connection picks to the trigger as connection_overrides", async () => {
+    const calls: FetchCall[] = [];
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@scope/agent/run": { status: 201, body: { id: "run_co" } },
+        "GET /api/runs/run_co/logs": {
+          status: 200,
+          body: { object: "list", data: [], hasMore: false },
+        },
+        "GET /api/runs/run_co": {
+          status: 200,
+          body: recordSummary({ id: "run_co", status: "success" }),
+        },
+      },
+      calls,
+    );
+    const connectionOverrides = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
+
+    await runRemote(
+      withCapturedWriters(
+        buildBaseOpts({ fetchImpl, scope: "@scope", name: "agent", connectionOverrides }),
+      ),
+      new AbortController().signal,
+    );
+
+    const trigger = calls.find((c) => c.method === "POST" && c.url.includes("/run"))!;
+    expect(JSON.parse(trigger.body!).connection_overrides).toEqual(connectionOverrides);
   });
 
   it("forwards Idempotency-Key when provided", async () => {
@@ -1019,6 +1049,47 @@ describe("runRemote — error paths", () => {
       "the launch was refused:\n" +
         "  @appstrate/gmail: Integration '@appstrate/gmail' is not connected (not_connected)\n" +
         "  @appstrate/clickup: must_choose_connection (must_choose_connection)",
+    );
+  });
+
+  it("lists a must_choose_connection item's candidates under it, each with its --connection flag", async () => {
+    const WORK = "11111111-1111-4111-8111-111111111111";
+    const fetchImpl = makeFetchImpl(
+      {
+        "POST /api/agents/@system/hello-world/run": {
+          status: 409,
+          contentType: "application/problem+json",
+          body: {
+            code: "missing_integration_connection",
+            errors: [
+              {
+                field: "integrations.@appstrate/clickup",
+                code: "must_choose_connection",
+                candidate_connections: [
+                  {
+                    id: WORK,
+                    label: "Work",
+                    account_id: "work@acme.com",
+                    owned_by_actor: true,
+                    needs_reconnection: false,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      [],
+    );
+
+    const err = await runRemote(
+      withCapturedWriters(buildBaseOpts({ fetchImpl })),
+      new AbortController().signal,
+    ).catch((e: unknown) => e);
+    expect((err as RemoteRunError).hint).toBe(
+      "the launch was refused:\n" +
+        "  @appstrate/clickup: must_choose_connection (must_choose_connection)\n" +
+        `    Work (work@acme.com, yours): --connection @appstrate/clickup=${WORK}`,
     );
   });
 

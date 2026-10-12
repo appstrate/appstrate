@@ -51,7 +51,11 @@ import {
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { collectFileRefs } from "../services/input-parser.ts";
-import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
+import {
+  assertConnectionOverridesAllowed,
+  connectionOverridesSchema,
+  dependencyOverridesSchema,
+} from "../lib/launch-schemas.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
@@ -60,6 +64,10 @@ import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import {
+  toLaunchOverrides,
+  type LaunchOverrides,
+} from "../services/integration-connection-resolver.ts";
 import { versionRefOf } from "../services/agent-version-resolver.ts";
 import { assertSpaceInScope } from "../services/spaces.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
@@ -134,6 +142,11 @@ export const CreateRemoteRunBodySchema = z
     // platform run route's value gate (`isValidDependencyOverride`); the KEY
     // gate + pin resolution happen in `freezeRunSpawnDependencies`.
     dependency_overrides: dependencyOverridesSchema.optional(),
+    // Per-run connection picks (the launch-override layer) — run-level, applies
+    // to both source shapes. The KEY gate needs the effective manifest, so each
+    // branch asks it below; a set of several is refused by `createRun`
+    // (`remote_binds_one_connection`), the one place that rule lives.
+    connection_overrides: connectionOverridesSchema.optional(),
     contextSnapshot: z
       .record(z.string(), z.unknown())
       .optional()
@@ -245,6 +258,10 @@ export function createRunsRemoteRouter() {
       // Seeded by the inline preflight only — the registry branch resolves no
       // pins of its own, so `createRun` creates its own Map there.
       let manifestCache: IntegrationManifestCache | undefined;
+      // The caller's connection picks, as ONE value per branch: the readiness
+      // pass and `createRun`'s cascade both read it, so the two cannot disagree
+      // about which connection the run uses.
+      let launchOverrides: LaunchOverrides | null;
       // Normalize an empty map to null (mirrors the platform run route): a
       // non-null map on the row means the run carried explicit overrides.
       const dependencyOverrides =
@@ -287,6 +304,13 @@ export function createRunsRemoteRouter() {
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
+        // Same gate, same place as on the platform run route: FORM (the key
+        // names a declared integration) ahead of the authority asked below.
+        assertConnectionOverridesAllowed(
+          agentForRun.manifest as unknown as Record<string, unknown>,
+          body.connection_overrides,
+        );
+        launchOverrides = toLaunchOverrides(body.connection_overrides, "run_override");
         await assertDependencyDraftOverridesAllowed(
           c,
           dependencyOverrides,
@@ -338,6 +362,7 @@ export function createRunsRemoteRouter() {
           orgId,
           spaceId,
           actor,
+          launchOverrides,
         });
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
@@ -364,6 +389,9 @@ export function createRunsRemoteRouter() {
             manifest: src.manifest,
             prompt: src.prompt,
             input: body.input,
+            // The preflight refuses an undeclared key itself, with the rule the
+            // registry branch asks above (`connectionOverrideRefusals`).
+            connection_overrides: body.connection_overrides,
           },
         });
 
@@ -372,6 +400,7 @@ export function createRunsRemoteRouter() {
 
         effectiveInput = preflight.effectiveInput;
         warnings = preflight.warnings;
+        launchOverrides = preflight.launchOverrides;
         // Already seeded with the PINNED integration manifests — `createRun`
         // reuses it instead of resolving every pin a second time.
         manifestCache = preflight.manifestCache;
@@ -411,6 +440,7 @@ export function createRunsRemoteRouter() {
         // Normalize an empty map to null (mirrors the platform run route): a
         // non-null map on the row means the run carried explicit overrides.
         dependencyOverrides,
+        launchOverrides,
         apiKeyId: c.get("apiKeyId") ?? undefined,
         sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
         contextSnapshot: body.contextSnapshot,

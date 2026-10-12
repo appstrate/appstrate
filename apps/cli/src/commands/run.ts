@@ -72,6 +72,7 @@ import {
   type ReportSource,
 } from "./run/report.ts";
 import { announceLaunch } from "./run/launch-warnings.ts";
+import type { ConnectionOverrides } from "./run/connection-flag.ts";
 import {
   attachStdoutBridge,
   CompositeSink,
@@ -136,6 +137,13 @@ export interface RunCommandOptions {
    * platform applies the override to the spawned container.
    */
   proxy?: string;
+  /**
+   * `--connection <integration>=<connection id>`, folded per integration: the
+   * launch body's `connection_overrides`. It names connections for the run the
+   * instance creates — the trigger in remote mode, the `--report` registration
+   * in local mode — so a local run that registers none refuses it.
+   */
+  connectionOverrides?: ConnectionOverrides | undefined;
   /**
    * When true, ignore the per-space `run-config` (model / proxy /
    * generation / stored inputs) and rely only on flags + env vars + defaults. Useful
@@ -697,6 +705,7 @@ async function runCommandRemote(
       input,
       ...(opts.model != null ? { modelId: opts.model } : {}),
       ...(opts.proxy != null ? { proxyId: opts.proxy } : {}),
+      ...(opts.connectionOverrides ? { connectionOverrides: opts.connectionOverrides } : {}),
       idempotencyKey,
       json: opts.json ?? false,
       ...(opts.output != null ? { outputPath: opts.output } : {}),
@@ -1036,7 +1045,17 @@ async function resolveReportSession(
     }
     throw err;
   }
-  if (!enabled || !reportCtx) return null;
+  if (!enabled || !reportCtx) {
+    // Accept-and-ignore would run on whichever connection the credential proxy
+    // binds by default while the caller believes they named one.
+    if (opts.connectionOverrides) {
+      throw new ReportConfigError(
+        "--connection names connections for the run registered on the instance, and this run registers none",
+        "Drop --report=false and run with a profile or API key (remote integrations), or drop --connection.",
+      );
+    }
+    return null;
+  }
 
   // The bundle is sourced one of two ways:
   //   - From a local file (path mode) → we have no registry handle, so
@@ -1061,7 +1080,12 @@ async function resolveReportSession(
     return await startReportSession(
       reportSource,
       reportCtx,
-      { mode, fallback, ttlSeconds: opts.sinkTtl },
+      {
+        mode,
+        fallback,
+        ttlSeconds: opts.sinkTtl,
+        connectionOverrides: opts.connectionOverrides,
+      },
       {
         os: `${process.platform} ${process.arch}`,
         cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",

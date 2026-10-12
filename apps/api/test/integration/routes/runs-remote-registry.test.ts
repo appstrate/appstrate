@@ -22,6 +22,7 @@ import {
   authHeaders,
   createTestContext,
   createTestUser,
+  memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -40,6 +41,7 @@ import {
   integrationPins,
 } from "@appstrate/db/schema";
 import {
+  inlineAgentManifest,
   seedConnectionTestIntegration,
   seedIntegrationConnection,
 } from "../../helpers/run-connection-fixtures.ts";
@@ -784,6 +786,97 @@ describe("POST /api/runs/remote — kind: registry", () => {
         { integration_package_id: INTEG, code: "integration_unbound", source: "member_pin" },
       ]);
     });
+
+    // The body's `connection_overrides` is the launch-override layer on both
+    // source shapes: the registry branch asks the key gate and readiness itself,
+    // the inline one through `runInlinePreflight`, and `createRun` snapshots the
+    // same value. Two own connections and no pin: only a named set can bind.
+    const sources = {
+      registry: () => ({
+        kind: "registry",
+        packageId: "@acme/briefing",
+        stage: "published",
+        spec: "1.2.3",
+      }),
+      inline: () => ({ kind: "inline", manifest: inlineAgentManifest([INTEG]), prompt: PROMPT }),
+    };
+
+    for (const [kind, source] of Object.entries(sources)) {
+      describe(`connection_overrides on a ${kind} source`, () => {
+        function launchWith(connectionOverrides?: Record<string, string[]>) {
+          return post({
+            source: source(),
+            spaceId: ctx.defaultSpaceId,
+            input: {},
+            ...(connectionOverrides ? { connection_overrides: connectionOverrides } : {}),
+          });
+        }
+
+        /** The items of a `409 missing_integration_connection`. */
+        async function refusalItems(res: Response) {
+          const problem = await expectProblem(res, 409, { code: "missing_integration_connection" });
+          return problem.errors as {
+            field: string;
+            code: string;
+            message: string;
+            candidate_connections?: { id: string }[];
+          }[];
+        }
+
+        it("answers must_choose_connection when no set is named, listing both candidates", async () => {
+          const items = await refusalItems(await launchWith());
+          expect(items.map((e) => [e.field, e.code])).toEqual([
+            [`integrations.${INTEG}`, "must_choose_connection"],
+          ]);
+          expect(items[0]!.candidate_connections!.map((c) => c.id).sort()).toEqual([a, b].sort());
+          expect(await db.select().from(runs)).toHaveLength(0);
+        });
+
+        it("creates the run on the connection it names, kept on the row as run_override", async () => {
+          const res = await launchWith({ [INTEG]: [b] });
+          expect(res.status, await res.clone().text()).toBe(201);
+          const { id } = (await res.json()) as { id: string };
+
+          const [run] = await db.select().from(runs).where(eq(runs.id, id));
+          expect(run!.connectionOverrides).toEqual({ [INTEG]: [b] });
+          expect(run!.resolvedConnections![INTEG]).toHaveLength(1);
+          expect(run!.resolvedConnections![INTEG]![0]).toMatchObject({
+            connectionId: b,
+            source: "run_override",
+          });
+        });
+
+        it("refuses a key the manifest does not declare (400), as the agent-run route does", async () => {
+          const problem = await expectProblem(
+            await launchWith({ [INTEG]: [a], "@acme/typo": [b] }),
+            400,
+            { code: "invalid_request", param: "connection_overrides" },
+          );
+          expect(problem.detail).toContain("@acme/typo");
+          expect(await db.select().from(runs)).toHaveLength(0);
+        });
+
+        it("refuses a set of several (409, remote_binds_one_connection item)", async () => {
+          const items = await refusalItems(await launchWith({ [INTEG]: [a, b] }));
+          expect(items.map((e) => [e.field, e.code])).toEqual([
+            [`integrations.${INTEG}`, "remote_binds_one_connection"],
+          ]);
+          expect(items[0]!.message).toContain("connection_overrides");
+          expect(await db.select().from(runs)).toHaveLength(0);
+        });
+
+        it("refuses a connection the actor cannot reach (409, override_connection_unavailable item)", async () => {
+          const colleague = await memberContext(ctx, "member");
+          const theirs = await seedIntegrationConnection(colleague, INTEG);
+
+          const items = await refusalItems(await launchWith({ [INTEG]: [theirs] }));
+          expect(items.map((e) => [e.field, e.code])).toEqual([
+            [`integrations.${INTEG}`, "override_connection_unavailable"],
+          ]);
+          expect(await db.select().from(runs)).toHaveLength(0);
+        });
+      });
+    }
   });
 
   describe("a non-required integration nobody connected", () => {

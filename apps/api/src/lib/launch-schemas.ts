@@ -5,9 +5,10 @@
  *
  * There are four: `POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline`
  * (+ `/inline/validate`), `POST /api/runs/remote`, and schedule create/update.
- * They do NOT all accept both maps — see the breakdown below. What this module
- * is for is that the surfaces which DO accept a given map import its rule from
- * here rather than restating it.
+ * All four accept `connection_overrides`; they do NOT all accept
+ * `dependency_overrides` — see the breakdown below. What this module is for is
+ * that the surfaces which accept a given map import its rule from here rather
+ * than restating it.
  * Until it existed the rules lived in comments instead of in code: `runs.ts`
  * noted `.min(1)` was set "for the same reason it is set on the inline schema
  * below", `schedules.ts` noted it was "for the same reason the run route sets
@@ -17,12 +18,12 @@
  *
  * What each surface actually declares, and why the split is correct:
  *
- *   - `connection_overrides` — agent run, inline (+ validate) and schedules all
- *     take {@link connectionOverridesSchema}. The remote surface declares none,
- *     and `run-creation.ts` relies on that: it passes `launchOverrides: null` to
- *     the connection cascade and stamps `connectionOverrides: null` on the row,
- *     so the readiness pass and the snapshot resolve the identical cascade.
- *     Accepting the field here without threading it would break that equality.
+ *   - `connection_overrides` — all four take {@link connectionOverridesSchema}
+ *     and refuse an undeclared key through {@link connectionOverrideRefusals}.
+ *     A launch hands the ONE parsed value to its readiness pass and to the
+ *     cascade that snapshots the run, so the two resolve the identical cascade.
+ *     The remote surface adds a rule of its own in `run-creation.ts`: a run
+ *     binds one connection per integration (`remote_binds_one_connection`).
  *   - `dependency_overrides` — the remote surface and schedules take
  *     {@link dependencyOverridesSchema}. Inline declares it not at all: it was
  *     accepted and then silently dropped, so since #1187 `.strict()` turns it
