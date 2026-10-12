@@ -7,9 +7,10 @@ import { InvalidHeaderValueError, isHttpFieldValue } from "@appstrate/afps-share
 import {
   RequestTemplateError,
   substituteRequest,
+  substituteWellFormed,
   UnencodableInputError,
 } from "./request-template.ts";
-import { substituteVars, unresolvedPlaceholders } from "./template-vars.ts";
+import { unresolvedPlaceholders } from "./template-vars.ts";
 
 export interface PreparedApiCallRequest {
   /** Holds decrypted values: for the wire, never for a message. */
@@ -21,6 +22,8 @@ export interface PreparedApiCallRequest {
   credentialHeaders: string[];
   /** Every template of the call (target, headers, body, body parts): `credentialUrlPolicy`'s input. */
   templates: string[];
+  /** A `bodyParts` string with the fields substituted, as is: the caller's serializer encodes it. */
+  renderPart: (template: string) => string;
 }
 
 type Prepared =
@@ -54,8 +57,8 @@ function repairAuthScheme(headerName: string, template: string): string {
 }
 
 /**
- * `bodyParts` are the strings of a structured body (JSON leaves, multipart fields) the caller
- * substitutes itself, where its serializer does the encoding. Only `credential_unusable` blames a value.
+ * `bodyParts` are the strings of a structured body (JSON leaves, multipart fields), rendered by the
+ * returned `renderPart`. Only `credential_unusable` blames a value.
  */
 export function prepareApiCallRequest(call: {
   target: string;
@@ -71,12 +74,17 @@ export function prepareApiCallRequest(call: {
   if (missingInTarget.length > 0) return unresolved("target", missingInTarget);
 
   const templates: Record<string, string> = {};
+  const names = new Set<string>();
   for (const [name, written] of Object.entries(call.headers)) {
+    const invalidHeader = (message: string): Prepared => ({
+      ok: false,
+      refusal: { kind: "invalid_header", message },
+    });
+    if (names.has(name.toLowerCase())) return invalidHeader(`Header "${name}" is written twice`);
+    names.add(name.toLowerCase());
     const template = repairAuthScheme(name, written);
-    if (!isHttpFieldValue(template)) {
-      const { message } = new InvalidHeaderValueError(name);
-      return { ok: false, refusal: { kind: "invalid_header", message } };
-    }
+    if (!isHttpFieldValue(template))
+      return invalidHeader(new InvalidHeaderValueError(name).message);
     const missing = missingIn(template);
     if (missing.length > 0) return unresolved(`header "${name}"`, missing);
     templates[name] = template;
@@ -85,28 +93,20 @@ export function prepareApiCallRequest(call: {
   const missingInBody = [...(body === null ? [] : [body]), ...bodyParts].flatMap(missingIn);
   if (missingInBody.length > 0) return unresolved("body", missingInBody);
 
+  const renderPart = (template: string) => substituteWellFormed(template, fields);
   let rendered;
   try {
     rendered = substituteRequest({ url: target, headers: templates, body }, fields);
-    // A part's serializer encodes any well-formed string, and only those.
-    for (const part of bodyParts) {
-      substituteVars(part, fields, {
-        encode: (value, key) => {
-          if (value.isWellFormed()) return value;
-          throw new UnencodableInputError(key, "is not well-formed Unicode");
-        },
-      });
-    }
+    bodyParts.forEach(renderPart);
   } catch (err) {
-    const { message } = err as Error;
-    if (err instanceof UnencodableInputError) {
-      return { ok: false, refusal: { kind: "credential_unusable", message } };
-    }
-    if (err instanceof RequestTemplateError) {
-      const kind = err.part === "headers" ? "invalid_header" : "invalid_body";
-      return { ok: false, refusal: { kind, message } };
-    }
-    throw err;
+    const kind =
+      err instanceof UnencodableInputError
+        ? "credential_unusable"
+        : err instanceof RequestTemplateError
+          ? "invalid_body"
+          : null;
+    if (kind === null) throw err;
+    return { ok: false, refusal: { kind, message: (err as Error).message } };
   }
   return {
     ok: true,
@@ -121,6 +121,7 @@ export function prepareApiCallRequest(call: {
         ...(body === null ? [] : [body]),
         ...bodyParts,
       ],
+      renderPart,
     },
   };
 }

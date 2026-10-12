@@ -31,6 +31,7 @@ import {
 import {
   classifyApiCallFailure,
   cookieScope,
+  credentialUnusableMessage,
   credentialUrlPolicy,
   fetchApiCall,
   prepareApiCallRequest,
@@ -268,17 +269,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   let redactFields = redactionFields(policy, fields);
   const redactedHost = templateHost(input.target);
 
-  // Every header carrying a decrypted credential (a caller `{{field}}`, or the injected one under
-  // any vendor name): a redirect leaving the allowlist strips them.
+  // Every header carrying a decrypted credential: a redirect leaving the allowlist strips them.
   const sensitiveHeaderNames = new Set<string>();
-  /** Throws `InvalidHeaderValueError` on a credential no header can carry. */
   const outbound = (request: PreparedApiCallRequest, payload: typeof resolved) => {
     const headers = new Headers(request.headers);
     const injection = applyInjectedCredentialHeaderToHeaders(headers, payload);
     const carrier = credentialCarryingHeader(injection);
     for (const name of request.credentialHeaders) sensitiveHeaderNames.add(name);
     if (carrier) sensitiveHeaderNames.add(carrier);
-    // The substituted text body (opt-in), else the caller's bytes or stream as is.
     return { headers, injection, body: request.body ?? input.body ?? undefined };
   };
   let first;
@@ -386,6 +384,13 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         );
         // A refreshed set that no longer fills the call is not replayed: the 401 stands.
         const again = refreshed ? prepareFor(refreshed.credentials) : null;
+        if (again && !again.ok) {
+          logger.warn("credential-proxy: refreshed credential does not fit the call, 401 relayed", {
+            integrationId: input.integrationId,
+            connectionId,
+            reason: again.refusal.message,
+          });
+        }
         if (refreshed && again?.ok) {
           const next = outbound(again.request, refreshed);
           credentialInjection = next.injection;
@@ -473,15 +478,14 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   };
 }
 
-/** A header the connection's credential makes invalid (`message` names the header, no value). */
 function unusableCredential(
-  message: string,
+  problem: string,
   integrationId: string,
   connectionId?: string,
 ): ProxyCallError {
   return new ProxyCallError(
     "credential_unusable",
-    `Integration ${integrationId}: the connection's credential is unusable (${message} once substituted or injected); reconnect it with a valid value.`,
+    credentialUnusableMessage(integrationId, problem),
     connectionId,
   );
 }

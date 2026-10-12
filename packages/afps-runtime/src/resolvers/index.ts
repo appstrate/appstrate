@@ -56,7 +56,6 @@ export { substituteVars, templateHost, unresolvedPlaceholders } from "./template
 
 // `{{name}}` into a whole HTTP request, each value encoded for its place: `api_call` and the login paths.
 export {
-  headerNamed,
   RequestTemplateError,
   substituteRequest,
   UnencodableInputError,
@@ -70,6 +69,7 @@ export {
   beyondBoundReason,
   credentialStaysWithinBound,
   credentialUrlPolicy,
+  credentialUnusableMessage,
   redactionFields,
   urlPolicyRefusalMessage,
   type CredentialUrlPolicy,

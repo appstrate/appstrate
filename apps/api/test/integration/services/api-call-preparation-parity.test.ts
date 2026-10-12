@@ -321,19 +321,43 @@ describe("api_call — one prepared request on the three paths", () => {
     expect(await cli(call, { ...fields, v })).toEqual(refused);
   });
 
-  it.each<[string, Record<string, string>]>([
-    ["no Content-Type", {}],
-    ["a media type with no encoder", { "Content-Type": "application/graphql" }],
-  ])(
-    "refuses to substitute a body under %s as the request's fault, sending nothing",
-    async (_what, headers) => {
-      const call = { target: "https://api.acme.com/x", headers, body: '{"k":"{{v}}"}' };
-      const onSidecar = await sidecar(call, fields);
-      if (!("refused" in onSidecar)) throw new Error("the sidecar sent the request");
-      expect(onSidecar.refused).toContain("Content-Type");
-      expect(onSidecar.refused).not.toContain(HOSTILE);
-      expect(await platform(call, fields)).toEqual({ refused: "invalid_request" });
-      expect(await cli(call, fields)).toEqual({ refused: "RESOLVER_BODY_INVALID" });
-    },
-  );
+  // One refusal of the shared preparation, under each door's own code for it.
+  const BODY = {
+    platform: "invalid_request",
+    sidecar: "invalid_body",
+    cli: "RESOLVER_BODY_INVALID",
+  };
+  const HEADER = {
+    platform: "invalid_request",
+    sidecar: "invalid_header",
+    cli: "RESOLVER_HEADER_INVALID",
+  };
+  const json = '{"k":"{{v}}"}';
+  it.each<[string, Omit<Call, "target">, typeof BODY]>([
+    ["a body with a placeholder and no Content-Type", { body: json }, BODY],
+    [
+      "a body with a placeholder under a media type with no encoder",
+      { headers: { "Content-Type": "application/graphql" }, body: json },
+      BODY,
+    ],
+    [
+      "a body with a placeholder under a Content-Type that is one",
+      { headers: { "Content-Type": "{{base}}" }, body: json },
+      BODY,
+    ],
+    [
+      "a multipart part header with a placeholder outside a quoted string",
+      {
+        headers: { "Content-Type": "multipart/form-data; boundary=B" },
+        body: "--B\r\nContent-Disposition: form-data; name={{v}}\r\n\r\nx\r\n--B--",
+      },
+      BODY,
+    ],
+    ["one header name written twice", { headers: { "X-A": "1", "x-a": "2" } }, HEADER],
+  ])("refuses %s as the request's fault, sending nothing", async (_what, call, codes) => {
+    const request = { target: "https://api.acme.com/x", ...call };
+    expect(await platform(request, fields)).toEqual({ refused: codes.platform });
+    expect(await sidecar(request, fields)).toEqual({ refused: codes.sidecar });
+    expect(await cli(request, fields)).toEqual({ refused: codes.cli });
+  });
 });

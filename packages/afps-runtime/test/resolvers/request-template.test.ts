@@ -193,26 +193,13 @@ describe("substituteRequest — bodies", () => {
     ]);
   });
 
-  it("the encoder follows the rendered Content-Type header", () => {
-    const hostile = 'q","admin":true,"z":"';
-    const { body: rendered } = substituteRequest(
-      { url: "https://h.example/", headers: { "Content-Type": "{{ct}}" }, body: '{"a":"{{a}}"}' },
-      { ct: "application/json", a: hostile },
-    );
-    expect(JSON.parse(rendered)).toEqual({ a: hostile });
-  });
-
-  it("refuses headers holding one name twice in different case", () => {
-    const twice = () =>
+  it("refuses a Content-Type that is itself a placeholder: a value would pick the encoder", () => {
+    expect(() =>
       substituteRequest(
-        {
-          url: "https://h.example/",
-          headers: { "Content-Type": "text/plain", "content-type": "application/json" },
-          body: undefined,
-        },
-        {},
-      );
-    expect(twice).toThrow(RequestTemplateError);
+        { url: "https://h.example/", headers: { "Content-Type": "{{ct}}" }, body: '{"a":"{{a}}"}' },
+        { ct: "application/json", a: "v" },
+      ),
+    ).toThrow(RequestTemplateError);
   });
 
   it("XML: a comment holding `<![CDATA[` opens no CDATA section", () => {
@@ -247,10 +234,23 @@ describe("substituteRequest — bodies", () => {
       );
     });
 
-    it("refuses a quote or a backslash in a value on a part-header line", () => {
+    it("refuses a quote or a backslash in a value inside a part header's quoted string", () => {
       for (const x of ['a"; name="admin', "a\\"]) {
         expect(() => part(header, x)).toThrow(UnencodableInputError);
       }
+    });
+
+    it("refuses a part header whose placeholder sits outside a quoted string, whatever the value", () => {
+      const bare = (line: string) => () => part(`--B\r\n${line}\r\n\r\nv\r\n--B--`, "ok");
+      for (const line of [
+        "Content-Disposition: form-data; name={{x}}",
+        "Content-Type: {{x}}",
+        'Content-Disposition: form-data; name="a"{{x}}',
+        "{{x}}: v",
+      ]) {
+        expect(bare(line)).toThrow(RequestTemplateError);
+      }
+      expect(() => part("--B{{x}}\r\n\r\nv\r\n--B--", "ok")).toThrow(RequestTemplateError);
     });
   });
 

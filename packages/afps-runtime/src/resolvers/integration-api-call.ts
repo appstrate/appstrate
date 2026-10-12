@@ -73,6 +73,7 @@ import { prepareApiCallRequest } from "./api-call-request.ts";
 import {
   credentialUrlPolicy,
   redactionFields,
+  credentialUnusableMessage,
   urlPolicyRefusalMessage,
 } from "./credential-guard.ts";
 import { resolvePackageRef } from "./bundle-adapter.ts";
@@ -472,9 +473,13 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
         const { kind, message } = prepared.refusal;
         if (kind === "invalid_header") throw headerInvalid(meta.name, message);
         if (kind === "credential_unusable") {
-          throw apiCallFailure(kind, `Integration ${meta.name}: ${message}`, meta, req.target, {
-            redirect: false,
-          });
+          throw apiCallFailure(
+            kind,
+            credentialUnusableMessage(meta.name, message),
+            meta,
+            req.target,
+            { redirect: false },
+          );
         }
         throw new ResolverError("RESOLVER_BODY_INVALID", `Integration ${meta.name}: ${message}`, {
           integration: meta.name,

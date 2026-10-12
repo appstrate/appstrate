@@ -11,7 +11,8 @@
  * `authRefreshed: true` escape-hatch (cannot be replayed server-side).
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -289,6 +290,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
     mockServer.setTokenResponse({ access_token: "fresh token", token_type: "Bearer" });
     const { sent, fakeFetch } = replayWire();
+    const warn = spyOn(logger, "warn");
 
     const res = await proxyCall({
       orgId: ctx.orgId,
@@ -303,6 +305,10 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
 
     expect(res.status).toBe(401);
     expect(sent).toEqual([{ tok: null, cookie: "sid=stale_token", body: "" }]);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain("{{access_token}}");
+    expect(logged).not.toContain("fresh token");
+    warn.mockRestore();
   });
 
   it("refreshes the connection the call used, even when a fresh selection would now be ambiguous", async () => {

@@ -274,9 +274,24 @@ describe("loginBlockIssues", () => {
       ).toEqual(["request.body"]);
     });
 
-    it("accepts a body without placeholder, and leaves a templated Content-Type to the engine", () => {
+    it("accepts a body without placeholder", () => {
       expect(paths({ request: { body: "grant_type=password" } })).toEqual([]);
-      expect(body({ headers: { "Content-Type": "{{ct}}" } })).toEqual([]);
     });
+
+    it("refuses a Content-Type that is itself a {{name}}: a value would pick the encoder", () => {
+      expect(body({ headers: { "Content-Type": "{{ct}}" } })).toEqual(["request.body"]);
+      expect(body({ content_type: "application/{{t}}" })).toEqual(["request.body"]);
+      expect(paths({ request: { body: "x=1", headers: { "Content-Type": "{{ct}}" } } })).toEqual(
+        [],
+      );
+    });
+  });
+
+  it("refuses headers holding one name twice in different case, which the engine cannot send", () => {
+    expect(
+      paths({
+        request: { headers: { "Content-Type": "a/b", Accept: "*/*", "content-type": "c/d" } },
+      }),
+    ).toEqual(["request.headers.content-type"]);
   });
 });

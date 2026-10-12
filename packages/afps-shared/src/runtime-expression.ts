@@ -8,7 +8,7 @@
 
 import { parseCredentialRef, templateExpressions } from "./credential-template.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "./jsonpath.ts";
-import { bodyEncoding } from "./mime.ts";
+import { headerNamed, placeholderBodyEncoding, placeholderKeys } from "./request-template.ts";
 
 export type ResponseExpression =
   { kind: "status" } | { kind: "body"; pointer?: string } | { kind: "header"; name: string };
@@ -135,9 +135,6 @@ export interface LoginBlockView {
 
 type IssuePath = (string | number)[];
 
-/** A `{{name}}` login input, as the request substitution reads it. */
-const LOGIN_INPUT = /\{\{\s*\w+\s*\}\}/;
-
 export interface LoginBlockIssue {
   message: string;
   /** Path inside the `connect.login` block. */
@@ -175,19 +172,18 @@ export function loginBlockIssues(login: LoginBlockView): LoginBlockIssue[] {
     }
   }
 
-  // A Content-Type that is itself a placeholder is the engine's to judge, once rendered.
-  const contentType =
-    Object.entries(request.headers ?? {}).find(([k]) => k.toLowerCase() === "content-type")?.[1] ??
-    request.content_type;
-  if (
-    LOGIN_INPUT.test(request.body ?? "") &&
-    !LOGIN_INPUT.test(contentType ?? "") &&
-    !bodyEncoding(contentType)
-  ) {
-    report(
-      `a body holding a {{name}} needs a content_type that tells how to encode it (JSON, form, XML, multipart with a boundary, text/plain), not ${contentType === undefined ? "none" : `'${contentType}'`}`,
-      ["request", "body"],
+  const headerNames = new Set<string>();
+  for (const name of Object.keys(request.headers ?? {})) {
+    if (headerNames.has(name.toLowerCase())) {
+      report(`header '${name}' is written twice`, ["request", "headers", name]);
+    }
+    headerNames.add(name.toLowerCase());
+  }
+  if (placeholderKeys(request.body ?? "").length > 0) {
+    const encoded = placeholderBodyEncoding(
+      headerNamed(request.headers ?? {}, "content-type") ?? request.content_type,
     );
+    if ("issue" in encoded) report(encoded.issue, ["request", "body"]);
   }
 
   const outputs = login.outputs ?? {};

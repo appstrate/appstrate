@@ -771,8 +771,7 @@ type ConnectInputSubstitutionResult =
  *
  * Fail-closed contract: a `{{name}}` that `inputs` does not hold returns
  * `{ failed: <name> }` rather than forwarding a half-substituted request
- * upstream; a value the request cannot carry returns `{ refused: <name> }`, a
- * body no encoder covers `{ unsubstitutable: <why> }`.
+ * upstream; `{ refused: <name> }` is a value the request cannot carry, `{ unsubstitutable }` a body no encoder covers.
  * A request with no placeholders is returned verbatim.
  */
 export function applyConnectInputSubstitution(

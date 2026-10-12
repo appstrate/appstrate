@@ -68,6 +68,12 @@ describe("prepareApiCallRequest — substitution", () => {
     expect(request.credentialHeaders).toEqual(["X-Key"]);
   });
 
+  it("renders a structured body's part as is, for the caller's serializer to encode", () => {
+    const token = 'a"b&c\\';
+    const { renderPart } = prepared({ bodyParts: ["k={{ token }}"] }, { token });
+    expect(renderPart("k={{ token }} {{other}}")).toBe(`k=${token} {{other}}`);
+  });
+
   it("leaves a body it is not given alone", () => {
     expect(prepared({}).body).toBeNull();
   });

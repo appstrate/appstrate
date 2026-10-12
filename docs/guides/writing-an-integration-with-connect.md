@@ -519,11 +519,12 @@ target, a header or a substituted text body, where a refused value is a
   placeholders render empty, `.` or `..` is refused: no encoding keeps it one segment. A URL refused
   for its host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request`
   naming the inputs in its authority.
-- `body` — by the media type of the `Content-Type` header (as rendered), else of
-  `content_type`. A body holding a `{{name}}` needs one of these; under any other media
-  type, or none, the manifest is refused when it is written and the connect fails as
-  `invalid_config` (a `Content-Type` that is itself a `{{name}}` is judged at connect; a
-  login tool's request is answered 400). A body with no placeholder is sent untouched:
+- `body` — by the media type of the `Content-Type` header, else of `content_type`. A
+  body holding a `{{name}}` needs one of these, written without a `{{name}}` (a value
+  would pick the encoder); otherwise the manifest is refused when it is written and the
+  connect fails as `invalid_config` (a login tool's request is answered 400). A header
+  name written twice in different case is refused the same way. A body with no
+  placeholder is sent untouched:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
   - JSON (`application/json`, `text/json`, `application/x-json`, `application/x-ndjson`,
     any `+json`) escapes a value inside a string literal. A bare `{{name}}` is one JSON
@@ -535,8 +536,10 @@ target, a header or a substituted text body, where a refused value is a
   - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
     in a CDATA section;
   - `multipart/*` (its `boundary` parameter required) refuses a value carrying CR, LF or
-    the boundary delimiter, so a value adds no part, and on a part's own header lines (a
-    `Content-Disposition` `filename="{{name}}"`) a value carrying `"` or `\` too;
+    the boundary delimiter, so a value adds no part. On a part's own header lines a
+    placeholder must sit inside a quoted string (`filename="{{name}}"`), where a value
+    carrying `"` or `\` is refused; outside one (`name={{name}}`, `Content-Type: {{name}}`)
+    the request is refused when sent, whatever the value;
   - `text/plain` takes the value as is.
 - header values — the value as is; one carrying a line break, another control character
   or a character above U+00FF is refused, and in a `Cookie` header any character outside

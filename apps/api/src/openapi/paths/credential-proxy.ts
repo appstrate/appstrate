@@ -35,12 +35,16 @@ const proxySharedDescription =
   "substitute the request body too (verbs that carry one), each value escaped for the " +
   "body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare " +
   "`{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break " +
-  'or the boundary delimiter is refused, as is `"` or `\\` in a part header) or ' +
-  "`text/plain` (as is). Under any other `Content-Type`, or none, a body holding a " +
-  "placeholder is a 400 `invalid_request`; a body with no placeholder is sent untouched. " +
+  "or the boundary delimiter is refused; in a part header a placeholder must sit inside a " +
+  'quoted string, where a value holding `"` or `\\` is refused) or `text/plain` (as is). ' +
+  "A body holding a placeholder under any other `Content-Type`, under none, or under one " +
+  "that itself holds a placeholder, is a 400 `invalid_request`, as is one header name " +
+  "written twice in different case; a body with no placeholder is sent untouched. " +
   "A value its place cannot carry (a line break in a header, a character outside RFC 6265 " +
-  "`cookie-octet` in a `Cookie` header, a path segment rendered empty, `.` or `..`) is a " +
-  "`credential_unusable` naming the placeholder, never encoded around.\n\n" +
+  "`cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a " +
+  "`credential_unusable` naming the placeholder, never encoded around. So is a path " +
+  "segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the " +
+  "connection lacks the value or the target should not use it.\n\n" +
   "Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) " +
   "take `1` or `0`; any other value is a 400.\n\n" +
   "Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an " +
@@ -299,10 +303,11 @@ const proxyResponses = {
       "`upstream_unresolvable` — the target's host has no DNS answer (`Proxy-Status` error " +
       "`dns_error`); `upstream_unreachable` — the connection to it failed, or the relayed " +
       "body broke off after its headers (`destination_unavailable`); `credential_unusable` — " +
-      "a header the connection's credential is substituted or injected into would not be a " +
-      "valid HTTP field value (CR, LF, NUL, another control character or a character above " +
-      "U+00FF); nothing was sent, the detail names the header, never the value " +
-      "(`proxy_configuration_error`).",
+      "a value of the connection cannot be sent where the call places it: a header it is " +
+      "substituted or injected into would not be a valid HTTP field value, or a `{{field}}` " +
+      "of the target, a header or the body takes a value its place cannot carry (or leaves a " +
+      "path segment empty). Nothing was sent; the detail names the header or the " +
+      "`{{field}}`, never the value (`proxy_configuration_error`).",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },

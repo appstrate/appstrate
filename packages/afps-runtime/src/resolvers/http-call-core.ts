@@ -26,6 +26,7 @@ import * as nodePath from "node:path";
 
 import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
+import { PLACEHOLDER } from "@appstrate/afps-shared/request-template";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { ResolverError } from "../errors.ts";
 
@@ -282,7 +283,7 @@ const responseModeSchema = z
 
 const httpUrl = z.url({ protocol: /^https?$/ });
 /** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…` (#1627). */
-const URL_FIELD_TARGET = /^\{\{\s*\w+\s*\}\}(?:\/.*)?$/;
+const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:/.*)?$`);
 
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({

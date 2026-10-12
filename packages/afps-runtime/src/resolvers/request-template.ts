@@ -9,7 +9,12 @@
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { bodyEncoding, multipartBoundary } from "@appstrate/afps-shared/mime";
+import {
+  headerNamed,
+  placeholderBodyEncoding,
+  urlTemplateAuthority,
+  type BodyEncoding,
+} from "@appstrate/afps-shared/request-template";
 import { referencesField, substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
 
 const CANNOT_CARRY = "contains a character this request cannot carry where it is placed";
@@ -25,12 +30,9 @@ export class UnencodableInputError extends Error {
   }
 }
 
-/** A request no value can be substituted into as written. Names a header or a media type, never a value. */
+/** A body no value can be substituted into as written. Names a media type, never a value. */
 export class RequestTemplateError extends Error {
-  constructor(
-    readonly part: "headers" | "body",
-    message: string,
-  ) {
+  constructor(message: string) {
     super(message);
     this.name = "RequestTemplateError";
   }
@@ -38,32 +40,40 @@ export class RequestTemplateError extends Error {
 
 const asIs: PlaceholderEncoder = (value) => value;
 
-/** URL: a leading placeholder is a base URL, as is (the caller gates it); any other is one component. */
-const urlComponent: PlaceholderEncoder = (value, _key, offset) =>
-  offset === 0 ? value : encodeURIComponent(value);
+type Render = (template: string, encode: PlaceholderEncoder) => string;
 
-const EMPTY_OR_DOT_SEGMENT = /^(?:\.|%2e){0,2}$/i;
+const DOT_SEGMENT = /^(?:\.|%2e){1,2}$/i;
 
-/** Refuses a path segment rendered empty, `.` or `..`, which percent-encoding does not neutralise. */
-function checkPathSegments(
-  template: string,
-  render: (segment: string, encode: PlaceholderEncoder) => string,
-): void {
-  const beforeQuery = template.split(/[?#]/, 1)[0]!;
-  const authority = /^[a-z][a-z\d+.-]*:\/\/[^/]*/i.exec(beforeQuery)?.[0].length ?? 0;
-  for (const segment of beforeQuery.slice(authority).split("/").slice(1)) {
+/**
+ * URL: a placeholder that starts it is a base URL, as is (the caller gates it); any other is one
+ * component. A path segment rendered empty, `.` or `..` is refused: percent-encoding neutralises
+ * neither.
+ */
+function renderUrl(template: string, render: Render): string {
+  const authority = urlTemplateAuthority(template);
+  const rest = template.slice(authority.length);
+  const pathEnd = /[?#]|$/.exec(rest)!.index;
+  const segments = rest.slice(0, pathEnd).split("/");
+  const path = segments.map((segment) => {
     let first: string | undefined;
     const rendered = render(segment, (value, key) => {
       first ??= key;
       return encodeURIComponent(value);
     });
-    if (first !== undefined && EMPTY_OR_DOT_SEGMENT.test(rendered)) {
-      throw new UnencodableInputError(
-        first,
-        "renders a URL path segment that is empty or a dot segment",
-      );
+    if (first === undefined) return rendered;
+    if (rendered === "") {
+      throw new UnencodableInputError(first, "is empty where the URL path needs a segment");
     }
-  }
+    if (DOT_SEGMENT.test(rendered)) {
+      throw new UnencodableInputError(first, "renders a dot segment in the URL path");
+    }
+    return rendered;
+  });
+  return (
+    render(authority, (value, _key, offset) => (offset === 0 ? value : encodeURIComponent(value))) +
+    path.join("/") +
+    render(rest.slice(pathEnd), encodeURIComponent)
+  );
 }
 
 /** One WHATWG `application/x-www-form-urlencoded` component. */
@@ -111,24 +121,42 @@ function xmlEncoder(template: string): PlaceholderEncoder {
       : value.replace(/[&<>"']/g, (ch) => XML_ENTITIES[ch]!);
 }
 
-/** multipart: nothing that ends a part (CR, LF, the delimiter) or, in its headers, a quoted parameter. */
+/**
+ * multipart: nothing that ends a part (CR, LF, the delimiter). On a part-header line a placeholder
+ * sits inside a quoted string, which its value cannot close; anywhere else there it would add a
+ * parameter.
+ */
 function multipartEncoder(template: string, boundary: string): PlaceholderEncoder {
   const delimiter = `--${boundary}`;
-  const headerLines: Array<readonly [number, number]> = [];
+  const NOT_HEADER = 0;
+  const BARE = 1;
+  const QUOTED = 2;
+  const place: number[] = [];
   let inHeaders = false;
   let start = 0;
   for (const line of template.split("\n")) {
     if (line.startsWith(delimiter)) inHeaders = true;
     else if (line === "" || line === "\r") inHeaders = false;
-    if (inHeaders) headerLines.push([start, start + line.length]);
+    let quoted = false;
+    let escaped = false;
+    for (let i = 0; i < line.length; i++) {
+      place[start + i] = !inHeaders ? NOT_HEADER : quoted ? QUOTED : BARE;
+      if (escaped) escaped = false;
+      else if (quoted && line[i] === "\\") escaped = true;
+      else if (line[i] === '"') quoted = !quoted;
+    }
     start += line.length + 1;
   }
   return (value, key, offset) => {
-    const onHeaderLine = headerLines.some(([from, to]) => offset >= from && offset < to);
+    if (place[offset] === BARE) {
+      throw new RequestTemplateError(
+        `{{${key}}} sits in a multipart part header outside a quoted string`,
+      );
+    }
     if (
       /[\r\n]/.test(value) ||
       value.includes(delimiter) ||
-      (onHeaderLine && /["\\]/.test(value))
+      (place[offset] === QUOTED && /["\\]/.test(value))
     ) {
       throw new UnencodableInputError(key, CANNOT_CARRY);
     }
@@ -136,25 +164,22 @@ function multipartEncoder(template: string, boundary: string): PlaceholderEncode
   };
 }
 
-/** By media type ({@link bodyEncoding}); null for one with no encoder. */
 function bodyEncoder(
   template: string,
-  contentType: string | undefined,
+  encoding: BodyEncoding,
   inputs: Readonly<Record<string, unknown>>,
-): PlaceholderEncoder | null {
-  switch (bodyEncoding(contentType)) {
+): PlaceholderEncoder {
+  switch (encoding.kind) {
     case "text":
       return asIs;
     case "form":
       return formComponent;
     case "multipart":
-      return multipartEncoder(template, multipartBoundary(contentType)!);
+      return multipartEncoder(template, encoding.boundary);
     case "json":
       return jsonEncoder(template, inputs);
     case "xml":
       return xmlEncoder(template);
-    case null:
-      return null;
   }
 }
 
@@ -174,8 +199,8 @@ function headerEncoder(name: string): PlaceholderEncoder {
 
 /**
  * `request` with each `{{name}}` of `inputs` encoded in place (others left intact). The body's media
- * type is its rendered `Content-Type` header's, else `contentType`. Throws
- * {@link UnencodableInputError} for a value, {@link RequestTemplateError} for the request as written.
+ * type is its `Content-Type` header's, else `contentType`. Throws {@link UnencodableInputError}
+ * for a value, {@link RequestTemplateError} for a body as written.
  */
 export function substituteRequest<B extends string | null | undefined>(
   request: {
@@ -190,52 +215,37 @@ export function substituteRequest<B extends string | null | undefined>(
   for (const [key, value] of Object.entries(inputs)) {
     text[key] = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
   }
-  const render = (template: string, encode: PlaceholderEncoder) =>
-    substituteVars(template, text, {
-      keepUnresolved: true,
-      encode: (value, key, offset) => {
-        if (!value.isWellFormed()) throw new UnencodableInputError(key, CANNOT_CARRY);
-        return encode(value, key, offset);
-      },
-    });
+  const render: Render = (template, encode) => substituteWellFormed(template, text, encode);
   const headers: Record<string, string> = {};
-  const names = new Set<string>();
   for (const [name, value] of Object.entries(request.headers)) {
-    if (names.has(name.toLowerCase())) {
-      throw new RequestTemplateError("headers", `Header "${name}" is written twice`);
-    }
-    names.add(name.toLowerCase());
     headers[name] = render(value, headerEncoder(name));
   }
   let body: string | null | undefined = request.body;
   if (typeof body === "string" && referencesField(body, text)) {
-    const written = headerNamed(request.headers, "content-type") ?? request.contentType;
-    const contentType = headerNamed(headers, "content-type") ?? request.contentType;
-    const encode = bodyEncoder(body, contentType, inputs);
-    if (!encode) {
-      // A Content-Type rendered from a value is not echoed.
-      const named =
-        contentType === undefined
-          ? "none"
-          : contentType === written
-            ? `"${contentType}"`
-            : "the one its header renders";
-      throw new RequestTemplateError(
-        "body",
-        `A body with placeholders needs a Content-Type that tells how to encode them (JSON, form, XML, multipart with a boundary, text/plain), not ${named}`,
-      );
-    }
-    body = render(body, encode);
+    const encoded = placeholderBodyEncoding(
+      headerNamed(request.headers, "content-type") ?? request.contentType,
+    );
+    if ("issue" in encoded) throw new RequestTemplateError(encoded.issue);
+    body = render(body, bodyEncoder(body, encoded.encoding, inputs));
   }
-  const url = render(request.url, urlComponent);
-  checkPathSegments(request.url, render);
-  return { url, headers, body: body as B extends string ? string : B };
+  return {
+    url: renderUrl(request.url, render),
+    headers,
+    body: body as B extends string ? string : B,
+  };
 }
 
-/** The value of header `name` (lower case), whatever its case. */
-export function headerNamed(
-  headers: Readonly<Record<string, string>>,
-  name: string,
-): string | undefined {
-  return Object.entries(headers).find(([k]) => k.toLowerCase() === name)?.[1];
+/** `template` with each `{{name}}` of `fields` rendered by `encode`; a lone surrogate is refused. */
+export function substituteWellFormed(
+  template: string,
+  fields: Readonly<Record<string, string>>,
+  encode: PlaceholderEncoder = asIs,
+): string {
+  return substituteVars(template, fields, {
+    keepUnresolved: true,
+    encode: (value, key, offset) => {
+      if (!value.isWellFormed()) throw new UnencodableInputError(key, CANNOT_CARRY);
+      return encode(value, key, offset);
+    },
+  });
 }
