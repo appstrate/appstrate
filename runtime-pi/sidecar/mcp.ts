@@ -93,7 +93,6 @@ import {
   API_CALL_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
-  substituteVars,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
 import type { LimitFunction } from "p-limit";
@@ -334,12 +333,12 @@ function resolveRequestBody(
       body: {
         kind: "formData",
         fieldTemplates: wants ? fields.map((f) => f.value) : [],
-        build: (activeCreds: Record<string, string>): FormData => {
+        build: (renderPart): FormData => {
           const fd = new FormData();
           // Field parts honour {{var}} substitution when opted in; binary
           // parts pass through (substituting into bytes would corrupt them).
           for (const f of fields) {
-            fd.append(f.name, wants ? substituteVars(f.value, activeCreds) : f.value);
+            fd.append(f.name, renderPart(f.value));
           }
           for (const file of files) {
             // Slice into a fresh ArrayBuffer so the Blob owns a copy

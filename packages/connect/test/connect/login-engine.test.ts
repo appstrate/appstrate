@@ -74,7 +74,12 @@ describe("runLogin — declarative login (AFPS)", () => {
     const { impl } = fakeFetch([{ status: 200, body: JSON.stringify({ access_token: "TOK" }) }]);
     const config: LoginConfig = {
       login: {
-        request: { method: "POST", url: "https://idp.example.com/token", body: "p={{password}}" },
+        request: {
+          method: "POST",
+          url: "https://idp.example.com/token",
+          content_type: "text/plain",
+          body: "p={{password}}",
+        },
         outputs: { access_token: "$response.body#/access_token" },
       },
     };
@@ -248,7 +253,10 @@ describe("runLogin — security limits", () => {
   it("fails closed on an unresolved placeholder", async () => {
     const { impl } = fakeFetch([{ status: 200, body: "{}" }]);
     const config: LoginConfig = {
-      login: { ...baseLogin, request: { ...baseLogin.request, body: "x={{missing}}" } },
+      login: {
+        ...baseLogin,
+        request: { ...baseLogin.request, content_type: "text/plain", body: "x={{missing}}" },
+      },
     };
     await expect(
       runLogin(config, {
@@ -301,7 +309,10 @@ describe("runLogin — security limits", () => {
   it("sends an input value containing {$…} as data, not as an expression", async () => {
     const { impl, calls } = fakeFetch([{ status: 200, body: JSON.stringify({ t: "x" }) }]);
     const config: LoginConfig = {
-      login: { ...baseLogin, request: { ...baseLogin.request, body: "p={{password}}" } },
+      login: {
+        ...baseLogin,
+        request: { ...baseLogin.request, content_type: "text/plain", body: "p={{password}}" },
+      },
     };
     await runLogin(config, {
       inputs: { password: "a{$b}c" },
@@ -311,6 +322,23 @@ describe("runLogin — security limits", () => {
       resolveHost: TEST_RESOLVE,
     });
     expect(calls[0]!.init.body).toBe("p=a{$b}c");
+  });
+
+  it("refuses, as the integration's defect, a body with placeholders and no media type to encode them by", async () => {
+    const { impl, calls } = fakeFetch([{ status: 200, body: "{}" }]);
+    const config: LoginConfig = {
+      login: { ...baseLogin, request: { ...baseLogin.request, body: '{"p":"{{password}}"}' } },
+    };
+    const err = await runLogin(config, {
+      inputs: { password: '","admin":true,"z":"' },
+      authorizedUris: ALLOW,
+      allowAllUris: false,
+      fetchImpl: impl,
+      resolveHost: TEST_RESOLVE,
+    }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ reason: "invalid_config" });
+    expect((err as Error).message).not.toContain("admin");
+    expect(calls).toHaveLength(0);
   });
 
   it("rejects a non-OK status without echoing the body", async () => {

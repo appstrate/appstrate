@@ -37,7 +37,7 @@
 
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import {
-  headerNamed,
+  RequestTemplateError,
   substituteRequest,
   UnencodableInputError,
   unresolvedPlaceholders,
@@ -55,6 +55,11 @@ import {
   simpleCriterionOperands,
   type SimpleOperand,
 } from "@appstrate/afps-shared/runtime-expression";
+import {
+  headerNamed,
+  placeholderKeys,
+  urlTemplateAuthority,
+} from "@appstrate/afps-shared/request-template";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "../oauth-egress.ts";
 
@@ -493,6 +498,11 @@ function renderRequest(
       inputs,
     );
   } catch (err) {
+    if (err instanceof RequestTemplateError) {
+      throw new LoginError(`connect.login request: ${err.message}`, "invalid_config", {
+        cause: err,
+      });
+    }
     if (!(err instanceof UnencodableInputError)) throw err;
     throw new LoginError(err.message, "invalid_input", { field: err.field, cause: err });
   }
@@ -511,12 +521,6 @@ function failedStatusReason(status: number, login: LoginRequestSpec): LoginError
   if (NOT_A_LOGIN_STATUSES.has(status)) return "unexpected_status";
   const judged = (login.success_criteria?.length ?? 0) > 0;
   return judged || REFUSAL_STATUSES.has(status) ? "rejected" : "unexpected_status";
-}
-
-/** The inputs that fill the authority of URL template `url`. */
-function authorityInputs(url: string): string[] {
-  const authority = url.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split(/[/?#]/)[0]!;
-  return unresolvedPlaceholders(authority, {});
 }
 
 /**
@@ -563,7 +567,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
     );
   }
   const { url, headers, body } = renderRequest(login.request, vars);
-  const urlFields = authorityInputs(login.request.url);
+  const urlFields = placeholderKeys(urlTemplateAuthority(login.request.url));
   const urlRefused = (message: string, options?: ErrorOptions) =>
     new LoginError(message, "url_not_allowed", {
       ...options,

@@ -3,32 +3,78 @@
 
 /**
  * `{{name}}` substitution into an HTTP request, each value encoded for its place so it cannot change
- * the request's structure (AFPS §7.7). Shared by the declarative `connect.login` engine and the
- * sidecar's `connect.tool` login. Not escaped: a multipart part's own headers, an unknown media type.
+ * the request's structure (AFPS §7.7). Shared by every `api_call` path, the declarative
+ * `connect.login` engine and the sidecar's `connect.tool` login. A body is substituted only under a
+ * media type it has an encoder for.
  */
 
 import { isHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
-import { normalizeMime } from "@appstrate/afps-shared/mime";
-import { substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
+import {
+  headerNamed,
+  placeholderBodyEncoding,
+  urlTemplateAuthority,
+  type BodyEncoding,
+} from "@appstrate/afps-shared/request-template";
+import { referencesField, substituteVars, type PlaceholderEncoder } from "./template-vars.ts";
 
 const CANNOT_CARRY = "contains a character this request cannot carry where it is placed";
 
-/** An input the request cannot carry where its placeholder sits. Names the field, never the value. */
+/** A value the request cannot carry where its placeholder sits. Names the placeholder, never the value. */
 export class UnencodableInputError extends Error {
   constructor(
     readonly field: string,
     problem: string,
   ) {
-    super(`input '${field}' ${problem}`);
+    super(`{{${field}}} ${problem}`);
     this.name = "UnencodableInputError";
+  }
+}
+
+/** A body no value can be substituted into as written. Names a media type, never a value. */
+export class RequestTemplateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RequestTemplateError";
   }
 }
 
 const asIs: PlaceholderEncoder = (value) => value;
 
-/** URL: a leading placeholder is a base URL, as is (the caller gates it); any other is one component. */
-const urlValue: PlaceholderEncoder = (value, _key, offset) =>
-  offset === 0 ? value : encodeURIComponent(value);
+type Render = (template: string, encode: PlaceholderEncoder) => string;
+
+const DOT_SEGMENT = /^(?:\.|%2e){1,2}$/i;
+
+/**
+ * URL: a placeholder that starts it is a base URL, as is (the caller gates it); any other is one
+ * component. A path segment rendered empty, `.` or `..` is refused: percent-encoding neutralises
+ * neither.
+ */
+function renderUrl(template: string, render: Render): string {
+  const authority = urlTemplateAuthority(template);
+  const rest = template.slice(authority.length);
+  const pathEnd = /[?#]|$/.exec(rest)!.index;
+  const segments = rest.slice(0, pathEnd).split("/");
+  const path = segments.map((segment) => {
+    let first: string | undefined;
+    const rendered = render(segment, (value, key) => {
+      first ??= key;
+      return encodeURIComponent(value);
+    });
+    if (first === undefined) return rendered;
+    if (rendered === "") {
+      throw new UnencodableInputError(first, "is empty where the URL path needs a segment");
+    }
+    if (DOT_SEGMENT.test(rendered)) {
+      throw new UnencodableInputError(first, "renders a dot segment in the URL path");
+    }
+    return rendered;
+  });
+  return (
+    render(authority, (value, _key, offset) => (offset === 0 ? value : encodeURIComponent(value))) +
+    path.join("/") +
+    render(rest.slice(pathEnd), encodeURIComponent)
+  );
+}
 
 /** One WHATWG `application/x-www-form-urlencoded` component. */
 const formComponent: PlaceholderEncoder = (value) =>
@@ -64,43 +110,77 @@ const XML_ENTITIES: Record<string, string> = {
   "'": "&apos;",
 };
 
-/** XML: a value is entity-escaped, except in a CDATA section, where only `]]>` is split. */
+/** XML: a value is entity-escaped, except in a CDATA section (none opens in a comment), where only `]]>` is split. */
 function xmlEncoder(template: string): PlaceholderEncoder {
-  const sections = [...template.matchAll(/<!\[CDATA\[[\s\S]*?(?:\]\]>|$)/g)].map(
-    (m) => [m.index, m.index + m[0].length] as const,
-  );
+  const sections = [...template.matchAll(/<!--[\s\S]*?(?:-->|$)|<!\[CDATA\[[\s\S]*?(?:\]\]>|$)/g)]
+    .filter((m) => m[0].startsWith("<![CDATA["))
+    .map((m) => [m.index, m.index + m[0].length] as const);
   return (value, _key, offset) =>
     sections.some(([start, end]) => offset > start && offset < end)
       ? value.replaceAll("]]>", "]]]]><![CDATA[>")
       : value.replace(/[&<>"']/g, (ch) => XML_ENTITIES[ch]!);
 }
 
-const JSON_MEDIA_TYPES: ReadonlySet<string> = new Set([
-  "application/json",
-  "text/json",
-  "application/x-json",
-]);
+/**
+ * multipart: nothing that ends a part (CR, LF, the delimiter). On a part-header line a placeholder
+ * sits inside a quoted string, which its value cannot close; anywhere else there it would add a
+ * parameter.
+ */
+function multipartEncoder(template: string, boundary: string): PlaceholderEncoder {
+  const delimiter = `--${boundary}`;
+  const NOT_HEADER = 0;
+  const BARE = 1;
+  const QUOTED = 2;
+  const place: number[] = [];
+  let inHeaders = false;
+  let start = 0;
+  for (const line of template.split("\n")) {
+    if (line.startsWith(delimiter)) inHeaders = true;
+    else if (line === "" || line === "\r") inHeaders = false;
+    let quoted = false;
+    let escaped = false;
+    for (let i = 0; i < line.length; i++) {
+      place[start + i] = !inHeaders ? NOT_HEADER : quoted ? QUOTED : BARE;
+      if (escaped) escaped = false;
+      else if (quoted && line[i] === "\\") escaped = true;
+      else if (line[i] === '"') quoted = !quoted;
+    }
+    start += line.length + 1;
+  }
+  return (value, key, offset) => {
+    if (place[offset] === BARE) {
+      throw new RequestTemplateError(
+        `{{${key}}} sits in a multipart part header outside a quoted string`,
+      );
+    }
+    if (
+      /[\r\n]/.test(value) ||
+      value.includes(delimiter) ||
+      (place[offset] === QUOTED && /["\\]/.test(value))
+    ) {
+      throw new UnencodableInputError(key, CANNOT_CARRY);
+    }
+    return value;
+  };
+}
 
-/** multipart: no CR or LF, which a part delimiter starts with. */
-const multipartValue: PlaceholderEncoder = (value, key) => {
-  if (/[\r\n]/.test(value)) throw new UnencodableInputError(key, CANNOT_CARRY);
-  return value;
-};
-
-/** By media type; one with no grammar here is as is. */
 function bodyEncoder(
   template: string,
-  contentType: string | undefined,
+  encoding: BodyEncoding,
   inputs: Readonly<Record<string, unknown>>,
 ): PlaceholderEncoder {
-  const mime = normalizeMime(contentType);
-  if (mime === "application/x-www-form-urlencoded") return formComponent;
-  if (mime.startsWith("multipart/")) return multipartValue;
-  if (JSON_MEDIA_TYPES.has(mime) || mime.endsWith("+json")) return jsonEncoder(template, inputs);
-  if (mime === "application/xml" || mime === "text/xml" || mime.endsWith("+xml")) {
-    return xmlEncoder(template);
+  switch (encoding.kind) {
+    case "text":
+      return asIs;
+    case "form":
+      return formComponent;
+    case "multipart":
+      return multipartEncoder(template, encoding.boundary);
+    case "json":
+      return jsonEncoder(template, inputs);
+    case "xml":
+      return xmlEncoder(template);
   }
-  return asIs;
 }
 
 /** RFC 6265 `cookie-octet`: a cookie value without `;`, `,`, space, `"`, `\` or a CTL. */
@@ -119,7 +199,8 @@ function headerEncoder(name: string): PlaceholderEncoder {
 
 /**
  * `request` with each `{{name}}` of `inputs` encoded in place (others left intact). The body's media
- * type is its `Content-Type` header's, else `contentType`. Throws {@link UnencodableInputError}.
+ * type is its `Content-Type` header's, else `contentType`. Throws {@link UnencodableInputError}
+ * for a value, {@link RequestTemplateError} for a body as written.
  */
 export function substituteRequest<B extends string | null | undefined>(
   request: {
@@ -134,34 +215,37 @@ export function substituteRequest<B extends string | null | undefined>(
   for (const [key, value] of Object.entries(inputs)) {
     text[key] = typeof value === "string" ? value : (JSON.stringify(value) ?? String(value));
   }
-  const render = (template: string, encode: PlaceholderEncoder) =>
-    substituteVars(template, text, {
-      keepUnresolved: true,
-      encode: (value, key, offset) => {
-        if (!value.isWellFormed()) throw new UnencodableInputError(key, CANNOT_CARRY);
-        return encode(value, key, offset);
-      },
-    });
-  const contentType = headerNamed(request.headers, "content-type") ?? request.contentType;
+  const render: Render = (template, encode) => substituteWellFormed(template, text, encode);
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(request.headers)) {
     headers[name] = render(value, headerEncoder(name));
   }
-  const body =
-    typeof request.body === "string"
-      ? render(request.body, bodyEncoder(request.body, contentType, inputs))
-      : request.body;
+  let body: string | null | undefined = request.body;
+  if (typeof body === "string" && referencesField(body, text)) {
+    const encoded = placeholderBodyEncoding(
+      headerNamed(request.headers, "content-type") ?? request.contentType,
+    );
+    if ("issue" in encoded) throw new RequestTemplateError(encoded.issue);
+    body = render(body, bodyEncoder(body, encoded.encoding, inputs));
+  }
   return {
-    url: render(request.url, urlValue),
+    url: renderUrl(request.url, render),
     headers,
     body: body as B extends string ? string : B,
   };
 }
 
-/** The value of header `name` (lower case), whatever its case. */
-export function headerNamed(
-  headers: Readonly<Record<string, string>>,
-  name: string,
-): string | undefined {
-  return Object.entries(headers).find(([k]) => k.toLowerCase() === name)?.[1];
+/** `template` with each `{{name}}` of `fields` rendered by `encode`; a lone surrogate is refused. */
+export function substituteWellFormed(
+  template: string,
+  fields: Readonly<Record<string, string>>,
+  encode: PlaceholderEncoder = asIs,
+): string {
+  return substituteVars(template, fields, {
+    keepUnresolved: true,
+    encode: (value, key, offset) => {
+      if (!value.isWellFormed()) throw new UnencodableInputError(key, CANNOT_CARRY);
+      return encode(value, key, offset);
+    },
+  });
 }

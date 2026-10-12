@@ -1182,7 +1182,12 @@ describe("integrationManifestSchema — connect.login", () => {
 describe("findUnevaluableExpressions — write-path expression rule (§7.6/§7.7)", () => {
   const login = (overrides: Record<string, unknown> = {}) => ({
     login: {
-      request: { method: "POST", url: "https://api.example.com/login", body: "p={{password}}" },
+      request: {
+        method: "POST",
+        url: "https://api.example.com/login",
+        content_type: "application/x-www-form-urlencoded",
+        body: "p={{password}}",
+      },
       outputs: { token: "$response.body#/token" },
       ...overrides,
     },
@@ -2597,7 +2602,12 @@ describe("connection variables (§7.12) — rule (1g) and the write-path rules",
   it("findUnevaluableExpressions refuses a variable in a login request url", () => {
     const login = {
       login: {
-        request: { method: "POST", url: "{$variable.base_url}/login", body: "p={{password}}" },
+        request: {
+          method: "POST",
+          url: "{$variable.base_url}/login",
+          content_type: "application/x-www-form-urlencoded",
+          body: "p={{password}}",
+        },
         outputs: { token: "$response.body#/token" },
       },
     };

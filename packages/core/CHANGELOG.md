@@ -96,6 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `findUnevaluableExpressions`** (`@appstrate/core/integration`)
+  refuses a `connect.login` request `body` holding a `{{name}}` with no
+  `content_type` / `Content-Type` an encoder covers (JSON, form, XML,
+  multipart with a boundary, `text/plain`) and written without a `{{name}}`,
+  and a login header name written twice in different case, through
+  afps-shared's `loginBlockIssues`. (#1915)
 - **Breaking for module consumers:** the `credentialSource` unions in
   `BeforeUsageParams`, `LlmUsageLedgerRow` and `PlatformServices.usage.list`,
   and `RunStatusChangeParams.modelSource`, now take `ModelPayer`, which adds

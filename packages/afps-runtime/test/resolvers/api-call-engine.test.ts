@@ -14,6 +14,7 @@ import {
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
   ApiCallRefusedError,
+  redactCredentialHost,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
 import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/api-call-failure-codes.ts";
@@ -782,6 +783,14 @@ describe("fetchApiCall — the target's host in a message", () => {
     });
     expect(err?.kind).toBe("unresolvable");
     expect(err?.message).toBe("Target host could not be resolved ({{sub}}.example.com)");
+  });
+});
+
+describe("redactCredentialHost", () => {
+  it("scrubs the other values when one is not well-formed Unicode", () => {
+    expect(
+      redactCredentialHost("https://acme.example.com/x", { broken: "a\ud800", sub: "acme" }),
+    ).toBe("{{sub}}.example.com");
   });
 });
 
