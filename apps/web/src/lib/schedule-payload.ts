@@ -57,7 +57,6 @@ export interface ScheduleEditOverrides {
 }
 
 interface ScheduleOverrideArgs {
-  /** The overrides the form holds. */
   overrides: RunOverridesValue;
   /** The caller's readiness entries when the schedule runs as them; none for another actor. */
   readiness: readonly FallbackBindingEntry[] | undefined;

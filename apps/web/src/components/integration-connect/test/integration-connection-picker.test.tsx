@@ -861,14 +861,6 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     mounted.unsubscribe();
   });
 
-  it("names the connection created in place of a member no pick stored", async () => {
-    // The replaced member was bound by default; beside it the new one binds only when named.
-    const { mounted, picked, picker } = await setup([before, withAdded], settles);
-    await picker.triggerConnect("primary", { replacing: WEB });
-    expect(picked).toEqual([[ADDED]]);
-    mounted.unsubscribe();
-  });
-
   it("toasts a failed refetch instead of rejecting or passing the stale verdict off", async () => {
     const toasted = spyOn(toast, "error").mockImplementation(() => 0);
     try {

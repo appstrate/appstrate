@@ -19,7 +19,6 @@ import {
 import { useUpsertMemberIntegrationPin } from "../hooks/use-member-integration-pins";
 import { usePermissions } from "../hooks/use-permissions";
 import {
-  canRememberPicks,
   integrationIdOfField,
   isStructuralCode,
   retryDecision,
@@ -68,11 +67,9 @@ export function MissingConnectionsModal({
   const upsertPin = useUpsertMemberIntegrationPin();
   // The live verdict of the launched version: a row it still blocks waits for a pick.
   const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
-  const stillBlocking = readiness
-    ? new Set(
-        readiness.integrations.filter((i) => i.run_blocking).map((i) => i.integration_package_id),
-      )
-    : undefined;
+  const stillBlocking = readiness?.integrations
+    .filter((i) => i.run_blocking)
+    .map((i) => i.integration_package_id);
 
   const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
   const { mustChoose, showRetry, canRetry } = retryDecision(
@@ -81,7 +78,7 @@ export function MissingConnectionsModal({
     retrying,
     stillBlocking,
   );
-  const showRememberChoice = canRememberPicks(integrationErrors, agentPackageId);
+  const showRememberChoice = mustChoose && agentPackageId !== undefined;
 
   // A `null` pick drops the key: the re-run falls back to the cascade.
   const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
@@ -140,7 +137,7 @@ export function MissingConnectionsModal({
         ))}
       </div>
       {showRememberChoice && (
-        <div className="mt-3 flex items-center gap-2 text-sm">
+        <div className="mt-3 flex items-center gap-2">
           <Checkbox
             id="missing-connections-remember"
             checked={rememberChoice}

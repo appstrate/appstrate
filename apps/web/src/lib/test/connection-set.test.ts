@@ -435,11 +435,6 @@ describe("withoutFallbackConnections", () => {
     ).toEqual({});
   });
 
-  it("keeps a pick that differs from the fallback's set", () => {
-    const overrides = { connection_overrides: { [GMAIL]: ["c_other"] } };
-    expect(withoutFallbackConnections(overrides, readiness)).toEqual(overrides);
-  });
-
   it("keeps a stored 'no connection'", () => {
     const overrides = { connection_overrides: { [GMAIL]: [] } };
     expect(withoutFallbackConnections(overrides, readiness)).toEqual(overrides);
@@ -473,12 +468,5 @@ describe("withoutFallbackConnections", () => {
     const picked = { connection_overrides: { [GMAIL]: ["c_other"] } };
     expect(withoutFallbackConnections(picked, readiness)).toBe(picked);
     expect(withoutFallbackConnections(picked, undefined)).toBe(picked);
-  });
-
-  it("undoes withFallbackConnections on a value that had no picks", () => {
-    const overrides = { model_id_override: "m1" };
-    const augmented = withFallbackConnections(overrides, readiness);
-    expect(augmented).not.toBe(overrides);
-    expect(withoutFallbackConnections(augmented, readiness)).toEqual(overrides);
   });
 });

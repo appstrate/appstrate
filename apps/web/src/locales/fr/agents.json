@@ -552,7 +552,7 @@
   "actorSelect.badgeMember": "Utilisateur",
   "actorSelect.badgeEndUser": "Utilisateur final",
   "schedule.connectionOverrides.label": "Connexions d'intégration",
-  "schedule.connectionOverrides.hint": "Forcez les connexions de chaque intégration dont dépend l'agent. « Hériter » applique à chaque déclenchement la résolution habituelle de l'agent : règle admin, puis choix de l'utilisateur, puis défaut de l'espace, puis son unique connexion personnelle, que ce formulaire désigne de lui-même pour une planification active à votre nom. Avec « Aucune connexion », l'agent s'exécute sans l'intégration, quand il ne l'exige pas.",
+  "schedule.connectionOverrides.hint": "Forcez les connexions de chaque intégration dont dépend l'agent. « Hériter » applique à chaque déclenchement la résolution habituelle de l'agent : règle admin, puis choix de l'utilisateur, puis défaut de l'espace, puis son unique connexion personnelle, que ce formulaire désigne de lui-même pour une planification à votre nom. Avec « Aucune connexion », l'agent s'exécute sans l'intégration, quand il ne l'exige pas.",
   "schedule.connectionOverrides.mustChoose": "Une planification s'exécute sans personne pour choisir : sélectionnez les connexions à utiliser.",
   "schedule.connectionOverrides.unavailable": "La connexion choisie n'est plus accessible à cette identité : retirez ce choix puis enregistrez.",
   "schedule.connectionOverrides.otherActor": "Cette planification s'exécute sous une autre identité : ses connexions sont résolues pour elle, pas pour vous. Un enregistrement qui désigne une connexion que cette identité n'a pas partagée est refusé, de même que, tant que la planification est active, un enregistrement qui laisserait un choix de connexion ouvert ; le refus s'affiche ici.",

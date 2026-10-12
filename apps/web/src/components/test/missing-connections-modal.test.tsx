@@ -13,11 +13,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import { render } from "../../test/render.tsx";
 import { MissingRow } from "../missing-connections-modal.tsx";
-import {
-  canRememberPicks,
-  retryDecision,
-  retryRememberingPicks,
-} from "../../lib/connection-choice.ts";
+import { retryDecision, retryRememberingPicks } from "../../lib/connection-choice.ts";
 import type { MissingIntegrationFieldError } from "../../lib/connection-choice.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
 
@@ -176,17 +172,20 @@ describe("retryDecision", () => {
     });
     expect(retryDecision([fieldError("integration_not_active")], {}).showRetry).toBe(false);
   });
+
+  it("holds the retry while a row the live readiness still blocks has no pick", () => {
+    const errors = [fieldError("not_connected")];
+    expect(retryDecision(errors, {}, false, [INTEGRATION]).canRetry).toBe(false);
+    // A pick in the modal answers the row, so the re-run can succeed.
+    expect(retryDecision(errors, { [INTEGRATION]: [] }, false, [INTEGRATION]).canRetry).toBe(true);
+    // A blocked row the live readiness does not name is not gated.
+    expect(retryDecision(errors, {}, false, ["@acme/gmail"]).canRetry).toBe(true);
+  });
 });
 
 describe("remembering a must-choose pick", () => {
   const WEB_IDS = [WEB];
   const mustChoose = [fieldError("must_choose_connection")];
-
-  it("is offered on a must-choose refusal of an agent run only", () => {
-    expect(canRememberPicks(mustChoose, AGENT)).toBe(true);
-    expect(canRememberPicks(mustChoose, undefined)).toBe(false);
-    expect(canRememberPicks([fieldError("not_connected")], AGENT)).toBe(false);
-  });
 
   it("writes the pin for each picked integration, then re-runs with the picks", async () => {
     const writes: unknown[] = [];

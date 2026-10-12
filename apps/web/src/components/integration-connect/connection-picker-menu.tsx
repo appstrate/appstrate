@@ -40,8 +40,8 @@ function triggerKind(p: ConnectionPicker): TriggerKind {
   if (p.pickedNone) return "none";
   if (p.displayConns.length === 1) return "one";
   if (p.displayConns.length > 1) return "many";
-  // Override mode inherits only a cascade that binds something; otherwise there is nothing to inherit.
   if (p.overrideMode && p.resolvedConnectionIds.length > 0) return "inherit";
+  // Nothing bound by the cascade: nothing to inherit.
   return p.emptyPickerPrompt === "choose" ? "choose" : "connect";
 }
 
@@ -147,7 +147,8 @@ export function PickerMenu({
   // Amber on exactly the states that gate a run: pin mode reads the server's
   // `run_blocking` (same verdict as the launch badge and the kickoff 409); in
   // override mode an unset pick inherits, so only an under-scoped, unavailable or dead set
-  // warns — or a stored "no connection" for an integration the agent now requires.
+  // warns — or a stored "no connection" for an integration the agent now requires, or a
+  // connect or choose prompt that blocks the run.
   const triggerWarn = overrideMode
     ? underScopedConns.length > 0 ||
       unavailableIds.length > 0 ||

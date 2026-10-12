@@ -155,12 +155,13 @@ export function retryDecision(
   errors: MissingIntegrationFieldError[],
   picks: ConnectionOverridesMap,
   retrying = false,
-  stillBlocking?: ReadonlySet<string>,
+  stillBlocking?: readonly string[],
 ): { mustChoose: boolean; showRetry: boolean; canRetry: boolean } {
   const mustChooseIds = errors
     .filter((e) => e.code === "must_choose_connection")
     .map((e) => integrationIdOfField(e.field));
-  const awaitsPick = (id: string) => stillBlocking?.has(id) === true && picks[id] === undefined;
+  const awaitsPick = (id: string) =>
+    stillBlocking?.includes(id) === true && picks[id] === undefined;
   return {
     mustChoose: mustChooseIds.length > 0,
     showRetry: errors.some((e) => !isStructuralCode(e.code)),
@@ -169,28 +170,6 @@ export function retryDecision(
       mustChooseIds.every((id) => picks[id] !== undefined) &&
       !errors.some((e) => awaitsPick(integrationIdOfField(e.field))),
   };
-}
-
-/** The "remember this choice" box shows for a must-choose refusal of an agent run (not inline). */
-export function canRememberPicks(
-  errors: MissingIntegrationFieldError[],
-  agentPackageId: string | undefined,
-): boolean {
-  return agentPackageId !== undefined && errors.some((e) => e.code === "must_choose_connection");
-}
-
-/** The member pins a re-run remembers: each must-choose pick that names at least one connection. */
-export function pinsToRemember(
-  errors: MissingIntegrationFieldError[],
-  picks: ConnectionOverridesMap,
-): { integrationId: string; connectionIds: string[] }[] {
-  return errors
-    .filter((e) => e.code === "must_choose_connection")
-    .flatMap((e) => {
-      const integrationId = integrationIdOfField(e.field);
-      const connectionIds = picks[integrationId];
-      return connectionIds && connectionIds.length > 0 ? [{ integrationId, connectionIds }] : [];
-    });
 }
 
 /**
@@ -211,9 +190,15 @@ export async function retryRememberingPicks(args: {
 }): Promise<void> {
   const { agentPackageId } = args;
   if (args.remember && agentPackageId !== undefined) {
-    const writes = pinsToRemember(args.errors, args.picks).map((pin) =>
-      args.writePin({ agentPackageId, ...pin }),
-    );
+    // The member pins to remember: each must-choose pick that names at least one connection.
+    const pins = args.errors
+      .filter((e) => e.code === "must_choose_connection")
+      .flatMap((e) => {
+        const integrationId = integrationIdOfField(e.field);
+        const connectionIds = args.picks[integrationId];
+        return connectionIds && connectionIds.length > 0 ? [{ integrationId, connectionIds }] : [];
+      });
+    const writes = pins.map((pin) => args.writePin({ agentPackageId, ...pin }));
     await Promise.all(writes).catch(() => undefined);
   }
   args.onRetry(args.picks);

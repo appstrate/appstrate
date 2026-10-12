@@ -56,7 +56,6 @@ export function withDeclaredConnections(
 /** What {@link withFallbackConnections} reads of one integration's readiness entry. */
 export interface FallbackBindingEntry {
   integration_package_id: string;
-  /** Nothing a run would start: it resolves no connection, whatever `resolution` reports. */
   inert: boolean;
   resolution: Pick<
     components["schemas"]["IntegrationAgentResolution"],
@@ -93,15 +92,14 @@ export function withoutFallbackConnections(
   overrides: RunOverridesValue,
   readiness: readonly FallbackBindingEntry[] | undefined,
 ): RunOverridesValue {
-  const { connection_overrides: picks, ...rest } = overrides;
-  if (!picks || !readiness) return overrides;
-  const kept = Object.entries(picks).filter(([id, ids]) => {
-    const entry = readiness.find((e) => e.integration_package_id === id);
-    const bound = entry ? fallbackBoundIds(entry) : null;
-    return bound === null || !sameSet(ids, bound);
-  });
-  if (kept.length === Object.keys(picks).length) return overrides;
-  return kept.length > 0 ? { ...rest, connection_overrides: Object.fromEntries(kept) } : rest;
+  let next = overrides;
+  for (const entry of readiness ?? []) {
+    const id = entry.integration_package_id;
+    const bound = fallbackBoundIds(entry);
+    const pick = next.connection_overrides?.[id];
+    if (bound && pick && sameSet(pick, bound)) next = withConnectionOverride(next, id, null);
+  }
+  return next;
 }
 
 export function keepAvailable(ids: string[], availableIds: string[]): string[] {

@@ -288,7 +288,7 @@ export function ScheduleForm(props: ScheduleFormProps) {
     ?.dependencies.integrations;
 
   // The verdict judges the viewer: it is read for a schedule running as them only, whose save
-  // names what the fallback binds. Derived, not seeded.
+  // names what the fallback binds.
   const { data: readiness, isLoading: readinessLoading } = useAgentConnectionReadiness(
     actorIsViewer ? packageId : undefined,
     firedVersion,

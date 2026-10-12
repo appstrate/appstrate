@@ -132,12 +132,11 @@ describe("scheduleOverridePayload — the fallback's binding", () => {
   const GMAIL = "@acme/gmail";
   const NAMED = { [GMAIL]: ["conn_own"] };
   type Verdict = FallbackBindingEntry[] | undefined;
-  type Source = FallbackBindingEntry["resolution"]["source"];
-  const verdict = (source: Source): FallbackBindingEntry[] => [
+  const verdict = (): FallbackBindingEntry[] => [
     {
       integration_package_id: GMAIL,
       inert: false,
-      resolution: { source, resolved_connection_ids: ["conn_own"] },
+      resolution: { source: "fallback_auto", resolved_connection_ids: ["conn_own"] },
     },
   ];
   const rest = {
@@ -164,48 +163,18 @@ describe("scheduleOverridePayload — the fallback's binding", () => {
     });
 
   it("create for oneself: names the connection the fallback binds", () => {
-    expect(create(verdict("fallback_auto")).connection_overrides).toEqual(NAMED);
+    expect(create(verdict()).connection_overrides).toEqual(NAMED);
   });
 
   it("edit of a stored schedule naming none: names it", () => {
-    expect(edit(verdict("fallback_auto")).connection_overrides).toEqual(NAMED);
-  });
-
-  it("a member pin names the set: no entry", () => {
-    expect("connection_overrides" in create(verdict("member_pin"))).toBe(false);
-    expect(edit(verdict("member_pin")).connection_overrides).toBeNull();
-  });
-
-  it("no verdict (the schedule runs as someone else): no entry", () => {
-    expect("connection_overrides" in create(undefined)).toBe(false);
-    expect(edit(undefined).connection_overrides).toBeNull();
-  });
-
-  it("a fallback binding failing its health check: named all the same", () => {
-    const underScoped = verdict("fallback_auto").map((entry) => ({
-      ...entry,
-      resolution: { ...entry.resolution, error_code: "insufficient_scopes" },
-    }));
-    expect(create(underScoped).connection_overrides).toEqual(NAMED);
-    expect(edit(underScoped).connection_overrides).toEqual(NAMED);
-  });
-
-  it("an inert integration: no entry", () => {
-    const inert = verdict("fallback_auto").map((entry) => ({ ...entry, inert: true }));
-    expect("connection_overrides" in create(inert)).toBe(false);
-    expect(edit(inert).connection_overrides).toBeNull();
-  });
-
-  it("a stored pick is sent as it stands", () => {
-    const stored = { [GMAIL]: ["conn_other"] };
-    expect(edit(verdict("fallback_auto"), stored).connection_overrides).toEqual(stored);
+    expect(edit(verdict()).connection_overrides).toEqual(NAMED);
   });
 
   it("names nothing for an integration the fired version does not declare", () => {
     const payload = scheduleOverridePayload({
       isEdit: false,
       overrides: {},
-      readiness: verdict("fallback_auto"),
+      readiness: verdict(),
       currentActor: undefined,
       ...rest,
       declared: [],

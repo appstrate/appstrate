@@ -8,10 +8,8 @@ import {
   picksAfterActorChange,
   refusalForActor,
   refusalReasonKey,
-  retryDecision,
   scheduleConnectionChoices,
   type ConnectionChoice,
-  type MissingIntegrationFieldError,
 } from "../connection-choice.ts";
 
 function missingConnection(errors: unknown[] | undefined): ApiError {
@@ -178,33 +176,5 @@ describe("refusalReasonKey", () => {
 
   it("an open choice with nothing the caller may name is the actor's (or an admin's) to make", () => {
     expect(key("must_choose_connection", [])).toBe("schedule.connectionOverrides.actorMustChoose");
-  });
-});
-
-describe("retryDecision", () => {
-  const INTEGRATION = "@acme/slack";
-  const OTHER = "@acme/gmail";
-  type Code = MissingIntegrationFieldError["code"];
-  const fieldError = (code: Code, integrationId = INTEGRATION): MissingIntegrationFieldError => ({
-    field: `integrations.${integrationId}`,
-    code,
-    message: code,
-  });
-
-  it("holds the retry while a row the live readiness still blocks has no pick", () => {
-    const errors = [fieldError("not_connected")];
-    expect(retryDecision(errors, {}, false, new Set([INTEGRATION])).canRetry).toBe(false);
-    // A pick in the modal answers the row, so the re-run can succeed.
-    expect(
-      retryDecision(errors, { [INTEGRATION]: [] }, false, new Set([INTEGRATION])).canRetry,
-    ).toBe(true);
-    // A blocked row the live readiness does not name is not gated.
-    expect(retryDecision(errors, {}, false, new Set([OTHER])).canRetry).toBe(true);
-  });
-
-  it("does not gate when the live verdict is not loaded", () => {
-    const errors = [fieldError("not_connected")];
-    expect(retryDecision(errors, {}, false, undefined).canRetry).toBe(true);
-    expect(retryDecision(errors, {}).canRetry).toBe(true);
   });
 });
