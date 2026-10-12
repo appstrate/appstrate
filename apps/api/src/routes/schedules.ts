@@ -657,9 +657,9 @@ export function createSchedulesRouter() {
     // re-points the row at a definition that may no longer declare the skill
     // the stored map pins, so the map has to be re-judged against the new
     // target even though not one of its entries moved. Gated on `movedDeps`
-    // it was not: the row answered 200 and then 400-ed in
-    // `freezeRunSpawnDependencies` at every tick, forever, exactly the silent
-    // permanent failure `assertScheduleTargetValid` exists to prevent. So the
+    // alone, the write would answer 200 and the row would 400 in
+    // `freezeRunSpawnDependencies` at every tick: the silent permanent
+    // failure `assertScheduleTargetValid` exists to prevent. So the
     // form half runs whenever EITHER half of the pair moves, over the WHOLE
     // effective map — the one the row will replay, not the patch's delta.
     //

@@ -331,7 +331,8 @@ export const runs = pgTable(
      * The member whose own credential pays this run's inference: set iff
      * `model_source = 'user'`, stamped at launch, the one fact every later
      * door compares against. No FK: it outlives the member and the credential.
-     * NULL = not recorded.
+     * NULL = no member pays (an organization or platform credential does), or
+     * the run records no model source at all.
      */
     payerUserId: text("payer_user_id"),
   },
@@ -654,7 +655,7 @@ export const llmUsage = pgTable(
     // is append-only and a credential can be deleted after the fact.
     credentialId: uuid("credential_id"),
     // The member whose own credential paid the call: set iff `credential_source
-    // = 'user'`. No FK, same reason as `credentialId`. NULL = not recorded.
+    // = 'user'`. No FK, same reason as `credentialId`. NULL = no member pays, or no source is recorded.
     payerUserId: text("payer_user_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),

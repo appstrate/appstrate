@@ -1528,7 +1528,7 @@ export const schemas = {
       unread: {
         type: "boolean",
         description:
-          "True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
+          "True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
       },
       runNumber: {
         type: ["integer", "null"],
@@ -1566,7 +1566,7 @@ export const schemas = {
       dependency_overrides: {
         type: ["object", "null"],
         description:
-          'Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
+          'Per-run dependency version overrides. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency\'s mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions.',
         additionalProperties: { type: "string" },
       },
       connections_used: {
@@ -1710,7 +1710,7 @@ export const schemas = {
       dependency_overrides: {
         type: ["object", "null"],
         description:
-          'Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run\'s `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.',
+          'Per-dependency version overrides frozen on the schedule row. Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run\'s `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them.',
         additionalProperties: { type: "string" },
       },
       last_run_at: { type: ["string", "null"], format: "date-time" },
@@ -1930,7 +1930,7 @@ export const schemas = {
       apiShape: {
         type: ["string", "null"],
         description:
-          "Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider.",
+          "Protocol family. `null` for a built-in credential whose every model is managed — the binding is not exposed, so the endpoint doesn't reveal the provider.",
       },
       base_url: {
         type: ["string", "null"],

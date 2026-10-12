@@ -182,16 +182,21 @@ integration_connections WHERE shared_with_org;` tells whether the step
 ### Changed
 
 - **BREAKING (API): an undeclared override key has its own code, on both
-  maps.** A run launch, an inline launch or validation, a remote run and a
-  schedule create or update that name, in `connection_overrides` or
-  `dependency_overrides`, an id the agent does not declare answer
-  `400 validation_failed` with one `errors[]` item:
-  `{ field: "connection_overrides.<id>", code: "undeclared_connection_override" }`
-  or
-  `{ field: "dependency_overrides.<id>", code: "undeclared_dependency_override" }`,
-  the shape `required_integration_unbound` has there. Before, both answered
-  `400 invalid_request` with `param` naming the map and the key only in
-  `detail`. (#1914)
+  maps.** A key naming an id the agent does not declare answers
+  `400 validation_failed` with one `errors[]` item, the shape
+  `required_integration_unbound` has there:
+  - `connection_overrides` (agent run, inline run and its validation,
+    schedule create and update):
+    `{ field: "connection_overrides.<id>", code: "undeclared_connection_override" }`.
+  - `dependency_overrides` (agent run, remote run, schedule create and
+    update):
+    `{ field: "dependency_overrides.<id>", code: "undeclared_dependency_override" }`.
+
+  Before, both answered `400 invalid_request` with `param` naming the map and
+  the key only in `detail`. The inline run declares no `dependency_overrides`
+  and the remote run no `connection_overrides`: each stays an unrecognized-key
+  400 there. (#1914)
+
 - **`token_usage` and `integrations_unbound` of a run are read under one
   policy** by the REST reads, the `run_metric` stream and event ingestion: a
   stored value that does not match its schema reads as not recorded (`null`)

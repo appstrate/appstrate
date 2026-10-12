@@ -872,8 +872,8 @@ export async function resolveTier(
 
   // --yes path: bypass the clack.select call entirely (never enters raw
   // mode → never trips the Bun macOS keypress regression) and
-  // accept the Docker-aware default interactive
-  // picks. The note() call is still informative so the user sees which
+  // accept the Docker-aware default the interactive picker preselects.
+  // The note() call is still informative so the user sees which
   // tier was chosen and how to override it on the next run.
   if (deps.autoConfirm === true) {
     const dockerOk = await probe();

@@ -345,7 +345,7 @@ export interface paths {
         post?: never;
         /**
          * Bulk-delete persistence rows for an agent
-         * @description Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).
+         * @description Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204.
          */
         delete: operations["deleteAgentPersistence"];
         options?: never;
@@ -453,7 +453,7 @@ export interface paths {
         post?: never;
         /**
          * Delete all runs for an agent
-         * @description Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).
+         * @description Delete all completed runs for an agent. Requires both `runs:delete` and `runs:read-all`: the deletion spans every run of the agent in the space, including colleagues' and end-users', so it takes the space-wide read as well as the mutation. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204.
          */
         delete: operations["deleteAgentRuns"];
         options?: never;
@@ -560,7 +560,7 @@ export interface paths {
         put?: never;
         /**
          * Claim ownership of an unattended install
-         * @description Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.
+         * @description Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance. Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.
          */
         post: operations["redeemBootstrapToken"];
         delete?: never;
@@ -680,7 +680,7 @@ export interface paths {
         put?: never;
         /**
          * Request a device + user code (RFC 8628 §3.2)
-         * @description Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/cli/token` with (issue #165). Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.
+         * @description Initiates a device-authorization grant. The CLI calls this first and receives a short `user_code` to display plus an opaque `device_code` to poll `/api/auth/cli/token` with. Accepts both `application/x-www-form-urlencoded` (RFC 8628 §3.2, preferred) and `application/json` — the server normalizes form-urlencoded bodies to JSON before Better Auth's `deviceAuthorization()` plugin sees them. Clients are gated by `validateClient` — only OAuth clients registered with the device-code grant are accepted.
          */
         post: operations["deviceAuthorizationCode"];
         delete?: never;
@@ -1628,7 +1628,7 @@ export interface paths {
         put?: never;
         /**
          * Mint a hosted Connect portal session (interactive, auth-type-agnostic)
-         * @description Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).
+         * @description Porte A — the hosted **Connect** portal, the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).
          */
         post: operations["initiateIntegrationConnect"];
         delete?: never;
@@ -4470,7 +4470,7 @@ export interface paths {
         };
         /**
          * Fetch the run bundle archive (HMAC)
-         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
+         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
          */
         get: operations["fetchRunWorkspace"];
         put?: never;
@@ -5218,7 +5218,7 @@ export interface paths {
         };
         /**
          * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).
          */
         get: operations["getMcpServerBundle"];
         put?: never;
@@ -6044,7 +6044,7 @@ export interface components {
         ModelProviderCredential: {
             id: string;
             label: string;
-            /** @description Protocol family. `null` for a built-in credential whose every model is managed (#727) — the binding is not exposed, so the endpoint doesn't reveal the provider. */
+            /** @description Protocol family. `null` for a built-in credential whose every model is managed — the binding is not exposed, so the endpoint doesn't reveal the provider. */
             apiShape: string | null;
             /** @description Endpoint base URL. `null` for a managed-only built-in credential (see apiShape). */
             base_url: string | null;
@@ -6717,7 +6717,7 @@ export interface components {
             } | null;
             /** @description Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted. */
             inline_prompt?: string | null;
-            /** @description True when the requesting recipient has an unread notification for this run (issue #667). Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
+            /** @description True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
             unread: boolean;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
             runNumber: number | null;
@@ -6736,7 +6736,7 @@ export interface components {
             connection_overrides: {
                 [key: string]: string[];
             } | null;
-            /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions. */
+            /** @description Per-run dependency version overrides. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. A `"draft"` value means the run consumed a dependency's mutable working copy — so it is NOT reproducible from `version_ref` alone. Null when the run resolved the manifest pins verbatim against published versions. */
             dependency_overrides: {
                 [key: string]: string;
             } | null;
@@ -6873,7 +6873,7 @@ export interface components {
             connection_overrides: {
                 [key: string]: string[];
             } | null;
-            /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them. */
+            /** @description Per-dependency version overrides frozen on the schedule row. Flat map: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run's `dependency_overrides` so a scheduled run resolves its dependencies exactly as the schedule froze them. */
             dependency_overrides: {
                 [key: string]: string;
             } | null;
@@ -8102,7 +8102,7 @@ export interface operations {
     getAgentConnectionReadiness: {
         parameters: {
             query?: {
-                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents. */
+                /** @description Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it, so the modal and badge never disagree with the actual run. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -8595,7 +8595,7 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string[];
                     };
-                    /** @description Per-run dependency version overrides (#666). Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
+                    /** @description Per-run dependency version overrides. Flat map: `{ "@scope/skill": "draft" | "<semver|dist-tag>" }`. By default every skill in the agent's closure resolves against PUBLISHED versions honoring its manifest pin; an entry here overrides that for a single run — `"draft"` pulls the dependency's mutable working copy (the skill edit loop: edit → run → observe, no republish) and requires WRITE authority on THAT dependency (`403 draft_not_writable` naming it otherwise: an unpublished definition runs for its author, whichever package declared it), any other value replaces the pin with that spec. Run-scoped only (never stored in the manifest) and recorded on the run object so a run that consumed draft bytes is never mistaken for a reproducible one. An unsatisfiable pin (including a never-published dependency) returns 422 `dependency_unresolved` before the run starts — pass an override or publish the dependency to fix it. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
                     dependency_overrides?: {
                         [key: string]: string;
                     };
@@ -8603,7 +8603,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time per #635), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`. */
+            /** @description Run created (fire-and-forget — execution continues asynchronously). The body is the created run resource, same shape as `GET /runs/{id}`: resolved `model_label` / `model_source` (detect org-default drift at trigger time), `status`, `version_ref`, `agent_scope`, etc., so no follow-up GET is needed — plus the launch's `warnings`. */
             201: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -8939,11 +8939,11 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string[];
                     };
-                    /** @description Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
+                    /** @description Per-dependency version overrides frozen on the schedule row. Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
                     dependency_overrides?: {
                         [key: string]: string;
                     };
-                    /** @description Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. */
+                    /** @description Execution identity for runs this schedule fires. Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. */
                     actor?: {
                         userId?: string;
                         endUserId?: string;
@@ -10102,7 +10102,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Sign-up blocked by the platform signup gate (issue #228): signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason. */
+            /** @description Sign-up blocked by the platform signup gate: signups disabled, email domain not in the allowlist, or an invitation is required; `code` names the reason. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16832,7 +16832,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule, #657): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is the provider's offer (Pi's model registry), derived with no upstream call: every OAuth provider is a subscription provider (`codex`, `claude-code`) whose models are never enumerated. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
+            /** @description Credential created or reconnected in model_provider_credentials. Deliberate operation-result shape (NOT the credential resource — flow-completion exception to the bare-resource rule): the helper's bearer is single-use and consumed by this very request, so it cannot fetch anything afterwards, so the models the helper prints in its terminal summary have to travel back in this response. `available_model_ids` is the provider's offer (Pi's model registry), derived with no upstream call: every OAuth provider is a subscription provider (`codex`, `claude-code`) whose models are never enumerated. The dashboard obtains the resulting credential via `GET /pairing/{id}` polling (`credentialId`) + the credentials list. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19224,7 +19224,7 @@ export interface operations {
     getAgentPackage: {
         parameters: {
             query?: {
-                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
+                /** @description Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes — so the run-with-options modal stays consistent with the selected version. Ignored for system agents. */
                 version?: string;
             };
             header?: {
@@ -23057,7 +23057,7 @@ export interface operations {
                     spaceId: string;
                     /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `appfile://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
                     input?: Record<string, never>;
-                    /** @description Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
+                    /** @description Per-run dependency version overrides. Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy and needs WRITE authority on THAT dependency — `403 draft_not_writable` naming it otherwise, since running an unpublished definition answers to its author whichever package declared it. Any other value replaces the manifest pin; an unsatisfiable pin aborts the run with `dependency_unresolved` (422). A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant. */
                     dependency_overrides?: {
                         [key: string]: string;
                     };
@@ -24179,11 +24179,11 @@ export interface operations {
                     connection_overrides?: {
                         [key: string]: string[];
                     } | null;
-                    /** @description Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing. */
+                    /** @description Per-dependency version overrides frozen on the schedule. Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing. */
                     dependency_overrides?: {
                         [key: string]: string;
                     } | null;
-                    /** @description Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. A schedule already running as another member takes the same for any patch, this field included. */
+                    /** @description Re-point the schedule's execution identity. Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. A schedule already running as another member takes the same for any patch, this field included. */
                     actor?: {
                         userId?: string;
                         endUserId?: string;

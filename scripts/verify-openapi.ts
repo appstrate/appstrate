@@ -1619,9 +1619,9 @@ for (const m of indexSrc.matchAll(
 // see below).
 //
 // So widening this set IS a silent coverage hole for a new file, and the size
-// assertion under it is the barrier. It is one literal rather than the
-// `ALLOWED_SKIP_FILES` twin-set it replaces — that duplicate went stale under a
-// rename without failing, whereas a count cannot disagree with itself.
+// assertion under it is the barrier. It is one literal rather than a
+// second set of names: a duplicate set goes stale under a rename without
+// failing, whereas a count cannot disagree with itself.
 const SKIP_FILES = new Set<string>([
   // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
   // …)` — a call, not a string/template literal). The path can't be captured

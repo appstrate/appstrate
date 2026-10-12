@@ -32,6 +32,13 @@ async function rowById(id: number) {
   return row;
 }
 
+/** What a refused write says: the constraint name sits in the message or the cause, per driver. */
+async function refusalText(write: Promise<unknown>): Promise<string> {
+  const error = await write.catch((err: unknown) => err);
+  const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+  return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+}
+
 describe("recordLlmUsage — plain insert (proxy / chat)", () => {
   let ctx: TestContext;
 
@@ -214,11 +221,8 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
       pricingStatus: "priced" as const,
       requestId: `req_ledger_payer_${credentialSource}_${payerUserId}`,
     });
-    const refusal = async (...args: Parameters<typeof entry>) => {
-      const error = await recordLlmUsage(entry(...args)).catch((err: unknown) => err);
-      const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
-      return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
-    };
+    const refusal = (...args: Parameters<typeof entry>) =>
+      refusalText(recordLlmUsage(entry(...args)));
 
     expect(typeof (await recordLlmUsage(entry("user", ctx.user.id)))).toBe("number");
     expect(typeof (await recordLlmUsage(entry("org", null)))).toBe("number");
@@ -244,11 +248,7 @@ describe("runs — a payer only on a run a member's own credential pays", () => 
         modelSource,
         payerUserId,
       });
-    const refusal = async (...args: Parameters<typeof run>) => {
-      const error = await run(...args).catch((err: unknown) => err);
-      const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
-      return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
-    };
+    const refusal = (...args: Parameters<typeof run>) => refusalText(run(...args));
 
     expect((await run("user", ctx.user.id)).payerUserId).toBe(ctx.user.id);
     expect((await run("org", null)).payerUserId).toBeNull();

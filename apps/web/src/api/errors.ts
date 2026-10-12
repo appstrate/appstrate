@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** RFC 9457 §3.2 extension members; `version_ref` is the one a launch refusal carries. */
-type ProblemExtensions = { version_ref?: string } & Record<string, unknown>;
-
 /**
  * RFC 9457 problem-details error thrown by the typed OpenAPI client
  * (`src/api/client.ts`) on any non-2xx response, so React Query errors are
@@ -16,7 +13,7 @@ export class ApiError extends Error {
     /** RFC 9457 `errors` — the field-level items, polymorphic by `code`. */
     public errors?: unknown[],
     /** RFC 9457 §3.2 extension members (`member_count`, `active_version`, `version_ref`). */
-    public details?: ProblemExtensions,
+    public details?: Record<string, unknown>,
     public requestId?: string,
     /**
      * RFC 9457 `param` — the request member the error is about, dotted from the
