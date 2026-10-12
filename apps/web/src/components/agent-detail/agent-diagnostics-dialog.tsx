@@ -12,6 +12,7 @@ import {
   agentDiagnosticCorrectionTarget,
   agentDiagnosticKey,
   agentDiagnosticLocateTarget,
+  agentDiagnosticText,
 } from "../../lib/agent-diagnostics";
 
 function agentDiagnosticsLabel(
@@ -70,35 +71,42 @@ export function AgentDiagnosticsDialog({
           )}
         </div>
         <ul className="divide-y">
-          {result.diagnostics.map((diagnostic) => (
-            <li key={agentDiagnosticKey(diagnostic)} className="py-4 first:pt-0 last:pb-0">
-              <p className="text-sm font-medium">{diagnostic.title}</p>
-              <p className="text-muted-foreground mt-0.5 text-xs">{diagnostic.explanation}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                <Link
-                  to={agentDiagnosticCorrectionTarget(
-                    diagnostic,
-                    location.pathname,
-                    location.search,
-                  )}
-                  onClick={onClose}
-                  className="text-primary hover:underline"
-                >
-                  {t("detail.diagnostics.fix")}
-                </Link>
-                {/* "Locate" opens the map, served by the opt-in agent-map module. */}
-                {diagnostic.target.node && features.agentMap && (
+          {result.diagnostics.map((diagnostic) => {
+            const text = agentDiagnosticText(diagnostic, t);
+            return (
+              <li key={agentDiagnosticKey(diagnostic)} className="py-4 first:pt-0 last:pb-0">
+                <p className="text-sm font-medium">{text.title}</p>
+                <p className="text-muted-foreground mt-0.5 text-xs">{text.explanation}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
                   <Link
-                    to={agentDiagnosticLocateTarget(diagnostic, location.pathname, location.search)}
+                    to={agentDiagnosticCorrectionTarget(
+                      diagnostic,
+                      location.pathname,
+                      location.search,
+                    )}
                     onClick={onClose}
-                    className="text-muted-foreground hover:text-foreground hover:underline"
+                    className="text-primary hover:underline"
                   >
-                    {t("detail.diagnostics.locate")}
+                    {t("detail.diagnostics.fix")}
                   </Link>
-                )}
-              </div>
-            </li>
-          ))}
+                  {/* "Locate" opens the map, served by the opt-in agent-map module. */}
+                  {diagnostic.target.node && features.agentMap && (
+                    <Link
+                      to={agentDiagnosticLocateTarget(
+                        diagnostic,
+                        location.pathname,
+                        location.search,
+                      )}
+                      onClick={onClose}
+                      className="text-muted-foreground hover:text-foreground hover:underline"
+                    >
+                      {t("detail.diagnostics.locate")}
+                    </Link>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </Modal>

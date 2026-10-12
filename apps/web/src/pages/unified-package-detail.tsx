@@ -53,6 +53,7 @@ import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
+import { agentDiagnosticText } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 
 type DetailTab =
@@ -101,7 +102,7 @@ function AgentReadinessBadge({
           <ul className="mt-3 space-y-2">
             {result.diagnostics.slice(0, 4).map((item) => (
               <li key={`${item.code}:${item.field}`} className="text-xs">
-                {item.title}
+                {agentDiagnosticText(item, t).title}
               </li>
             ))}
           </ul>

@@ -2097,7 +2097,8 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       const runId = parts[parts.length - 2] ?? "";
       const run = f.runs.find((candidate) => candidate.id === runId);
       const journal = runId === "run_03" ? f.rqRunLogs : f.runLogs;
-      const rows = journal.data.map((row, index) => ({
+      const entries = runId === "run_10" ? [f.modelFallbackLog, ...journal.data] : journal.data;
+      const rows = entries.map((row, index) => ({
         ...row,
         id: index + 1,
         runId,
@@ -2214,7 +2215,9 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
           ? f.agentDiagnosticsWarnings
           : packageId === "@tractr/analyse-recurrence-articles-tastet"
             ? f.agentDiagnosticsBlocking
-            : f.agentDiagnosticsHealthy;
+            : packageId === "@tractr/rq-entreprise-communications"
+              ? f.agentDiagnosticsModelUnavailable
+              : f.agentDiagnosticsHealthy;
       return {
         status: 200,
         body:
@@ -2237,7 +2240,9 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         ? { ...f.agentModel, modelId: "mdl_haiku" }
         : url.pathname.includes("compta-trimestrielle")
           ? { ...f.agentModel, modelId: "mdl_gpt" }
-          : f.agentModel,
+          : url.pathname.includes("rq-entreprise-communications")
+            ? { ...f.agentModel, modelId: "mdl_local" }
+            : f.agentModel,
     }),
   },
   {

@@ -431,5 +431,6 @@
   "nav.toggleSidebar": "Toggle sidebar",
   "switcher.spaceOnRequest": "On request",
   "apiError.missing_model": "No usable model is configured for this agent or organization.",
-  "apiError.schedule_version_differs": "A schedule of this agent is pinned to another version than the one shown."
+  "apiError.schedule_version_differs": "A schedule of this agent is pinned to another version than the one shown.",
+  "apiError.pinned_model_unavailable": "The model that was set is no longer available: the default model will be used instead."
 }

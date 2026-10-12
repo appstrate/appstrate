@@ -17,7 +17,7 @@ import { getSpacePackageSettings } from "./space-packages.ts";
 import { collectAgentReadiness } from "./agent-readiness.ts";
 import { resolveAgentRunVersion, VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
-import { resolveModel } from "./org-models.ts";
+import { resolveModelCascade } from "./org-models.ts";
 import { listPackageSchedules } from "./scheduler.ts";
 
 export type AgentDiagnosticSeverity = "blocking" | "warning";
@@ -168,7 +168,7 @@ export async function getAgentDiagnostics(args: {
 
   // Connections are reported by their dedicated bulk service; the core
   // readiness pass keeps only its non-connection errors to avoid duplicates.
-  const [readinessErrors, connections, model, schedules] = await Promise.all([
+  const [readinessErrors, connections, modelCascade, schedules] = await Promise.all([
     collectBundleReadinessErrors({
       agent,
       orgId: scope.orgId,
@@ -183,7 +183,7 @@ export async function getAgentDiagnostics(args: {
       canConfigureIntegrations,
       version: versionRef,
     }),
-    resolveModel(scope.orgId, agent.id, packageConfig.modelId, payerUserId),
+    resolveModelCascade(scope.orgId, agent.id, packageConfig.modelId, payerUserId),
     listPackageSchedules(scope, agent.id, actor, undefined),
   ]);
 
@@ -194,7 +194,7 @@ export async function getAgentDiagnostics(args: {
     severity: "blocking",
   }));
 
-  if (!model) {
+  if (!modelCascade) {
     blocking.push({
       code: "missing_model",
       severity: "blocking",
@@ -207,27 +207,52 @@ export async function getAgentDiagnostics(args: {
     });
   }
 
-  const warnings: AgentDiagnostic[] = schedules
-    .filter(
-      (schedule) =>
-        schedule.enabled &&
-        Boolean(schedule.version_override) &&
-        schedule.version_override !== versionRef,
-    )
-    .map((schedule) => ({
-      code: "schedule_version_differs",
-      severity: "warning" as const,
-      title: "Schedule uses another version",
-      explanation: `Schedule '${schedule.name ?? schedule.id}' is pinned to '${schedule.version_override}' while this view inspects '${versionRef}'.`,
-      field: `schedules.${schedule.id}.version`,
-      target: { node: "schedules" as const, item: schedule.id },
+  const warnings: AgentDiagnostic[] = [];
+
+  // The same cascade and the same test as the launch (`buildRunContext`'s
+  // `unavailablePinnedModelId`), so this warning and the run's `model_fallback`
+  // marker cannot disagree: a pin that does not load is replaced by the default.
+  if (modelCascade && packageConfig.modelId && !modelCascade.fromExplicit) {
+    const fallback = modelCascade.model.label;
+    warnings.push({
+      code: "pinned_model_unavailable",
+      severity: "warning",
+      title: "Model unavailable",
+      explanation: `The model set for this agent ('${packageConfig.modelId}') is no longer usable; the next run uses the default model '${fallback}' instead.`,
+      field: "model",
+      target: { node: "model", item: null },
       correction: {
-        destination: "schedule" as const,
-        section: "version",
-        params: { scheduleId: schedule.id },
+        destination: "configuration",
+        section: "model",
+        params: { defaultModel: fallback },
       },
       recoverable_on_launch: false,
-    }));
+    });
+  }
+
+  warnings.push(
+    ...schedules
+      .filter(
+        (schedule) =>
+          schedule.enabled &&
+          Boolean(schedule.version_override) &&
+          schedule.version_override !== versionRef,
+      )
+      .map((schedule) => ({
+        code: "schedule_version_differs",
+        severity: "warning" as const,
+        title: "Schedule uses another version",
+        explanation: `Schedule '${schedule.name ?? schedule.id}' is pinned to '${schedule.version_override}' while this view inspects '${versionRef}'.`,
+        field: `schedules.${schedule.id}.version`,
+        target: { node: "schedules" as const, item: schedule.id },
+        correction: {
+          destination: "schedule" as const,
+          section: "version",
+          params: { scheduleId: schedule.id },
+        },
+        recoverable_on_launch: false,
+      })),
+  );
 
   const diagnostics = [...blocking, ...warnings];
   return {

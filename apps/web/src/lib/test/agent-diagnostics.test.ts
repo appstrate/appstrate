@@ -3,6 +3,7 @@
 import { describe, expect, it } from "bun:test";
 import type { AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
 import {
+  agentDiagnosticText,
   agentDiagnosticCorrectionTarget,
   agentDiagnosticLocateTarget,
   agentDiagnosticMapNodeId,
@@ -65,6 +66,34 @@ describe("agent diagnostics routing", () => {
       pathname: "/agents/@tractr/demo",
       search: "?agentSettings=skills",
       hash: "#settings",
+    });
+  });
+});
+
+describe("agentDiagnosticText", () => {
+  const t = (key: string, options?: Record<string, unknown>) =>
+    `${key}|${String(options?.model ?? "")}`;
+
+  it("words the unavailable-model point by code, with the model that will serve", () => {
+    const unavailable = diagnostic({
+      code: "pinned_model_unavailable",
+      title: "Model unavailable",
+      correction: {
+        destination: "configuration",
+        section: "model",
+        params: { defaultModel: "Mistral Medium" },
+      },
+    });
+    expect(agentDiagnosticText(unavailable, t)).toEqual({
+      title: "detail.diagnostics.pinnedModelUnavailable.title|",
+      explanation: "detail.diagnostics.pinnedModelUnavailable.explanation|Mistral Medium",
+    });
+  });
+
+  it("keeps the server's text for every other diagnostic", () => {
+    expect(agentDiagnosticText(diagnostic(), t)).toEqual({
+      title: "Missing value",
+      explanation: "A value is required.",
     });
   });
 });

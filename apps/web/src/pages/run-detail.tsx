@@ -42,6 +42,7 @@ import { Badge } from "../components/status-badge";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
+import { findModelFallback } from "../lib/run-model-fallback";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -135,6 +136,7 @@ export function RunDetailPage() {
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
+  const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories } = useRunMemories(packageId, runId);
   const { data: runPinned } = useRunPinned(packageId, runId);
@@ -360,6 +362,7 @@ export function RunDetailPage() {
                   logs={allLogs}
                   structuredOutput={finalOutput}
                   memoryChangeCount={runMemoryCount}
+                  modelFallback={modelFallback}
                   onOpenJournal={(filter) => {
                     const search = new URLSearchParams(location.search);
                     if (filter) search.set("journalFilter", filter);

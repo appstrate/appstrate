@@ -823,6 +823,23 @@ export const runs: Run[] = [
     error: "Le rapprochement a dépassé la durée maximale de 30 minutes.",
     input: { trimestre: "2025-Q4", documents: ["appfile://doc_lab_3"] },
   }),
+  // The model chosen for this run (« Mistral local », switched off since) did not load: the
+  // journal carries the `model_fallback` marker (`modelFallbackLog`), the overview says it.
+  makeRun({
+    id: "run_10",
+    status: "success",
+    packageId: "@tractr/rq-entreprise-communications",
+    agent_name: "rq-entreprise-communications",
+    model_label: "Claude Sonnet 5",
+    duration: 96_000,
+    cost: 0.21,
+    input: { entreprise: "clicSÉQUR", periode: "2026-07" },
+    result: { output: { etape: "archivage", communications_archivees: 12 } },
+    file_counts: { input: 0, output: 0 },
+    runNumber: 128,
+    started_at: ago(5_760),
+    completed_at: ago(5_758),
+  }),
   makeRun({
     id: "run_03",
     status: "failed",
@@ -2498,6 +2515,24 @@ export const rqRunLogs: Json200<"/api/runs/{id}/logs", "get"> = {
   ],
 };
 
+/** What `recordModelFallback` writes at kickoff, first in the journal of `run_10`. */
+export const modelFallbackLog: Json200<"/api/runs/{id}/logs", "get">["data"][number] = {
+  id: 1,
+  runId: "run_10",
+  type: "system",
+  level: "warn",
+  event: "model_fallback",
+  message:
+    "the model set for this run ('mdl_local') is no longer usable — the run uses the default model 'Claude Sonnet 5' instead",
+  data: {
+    platform: true,
+    pinnedModelId: "mdl_local",
+    model: "Claude Sonnet 5",
+    reason: "pinned_model_unavailable",
+  } as unknown as components["schemas"]["RunLog"]["data"],
+  createdAt: ago(5_760),
+};
+
 /** A handful of log lines, so a run detail is not an empty console. */
 export const runLogs: Json200<"/api/runs/{id}/logs", "get"> = {
   object: "list",
@@ -2975,6 +3010,34 @@ export const agentDiagnosticsWarnings: AgentDiagnostics = {
         destination: "schedule",
         section: "version",
         params: { scheduleId: "sch_04" },
+      },
+      recoverable_on_launch: false,
+    },
+  ],
+};
+
+/**
+ * An agent whose model was switched off: not blocking (the run still starts, on the
+ * organisation default), so it reads as a single point to check.
+ */
+export const agentDiagnosticsModelUnavailable: AgentDiagnostics = {
+  status: "warning",
+  blocking_count: 0,
+  warning_count: 1,
+  can_launch: true,
+  diagnostics: [
+    {
+      code: "pinned_model_unavailable",
+      severity: "warning",
+      title: "Model unavailable",
+      explanation:
+        "The model set for this agent ('mdl_local') is no longer usable; the next run uses the default model 'Claude Sonnet 5' instead.",
+      field: "model",
+      target: { node: "model", item: null },
+      correction: {
+        destination: "configuration",
+        section: "model",
+        params: { defaultModel: "Claude Sonnet 5" },
       },
       recoverable_on_launch: false,
     },

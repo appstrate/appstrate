@@ -164,6 +164,14 @@ export const SCREENS = [
     name: "run-overview-empty-input",
   },
   {
+    path: "/agents/@tractr/rq-entreprise-communications/runs/run_10",
+    name: "run-overview-model-fallback",
+  },
+  {
+    path: "/agents/@tractr/rq-entreprise-communications",
+    name: "agent-overview-model-unavailable",
+  },
+  {
     path: "/agents/@tractr/compta-trimestrielle/runs/run_02#journal",
     name: "run-journal-success",
   },

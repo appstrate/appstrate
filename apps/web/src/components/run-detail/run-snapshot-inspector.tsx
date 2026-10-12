@@ -33,6 +33,7 @@ import { RunDuration } from "../run-duration";
 import { DetailSectionCard as RunDetailCard } from "../detail-section-card";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { useModalParam } from "../../hooks/use-modal-param";
+import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { RunWarnings } from "./run-warnings";
 
 export function RunSnapshotInspector({
@@ -41,6 +42,7 @@ export function RunSnapshotInspector({
   logs,
   structuredOutput,
   memoryChangeCount,
+  modelFallback,
   onOpenJournal,
   onOpenResults,
   cardHeaders = false,
@@ -51,6 +53,8 @@ export function RunSnapshotInspector({
   logs: ExecutionEntry[];
   structuredOutput: Record<string, unknown> | null;
   memoryChangeCount: number;
+  /** The `model_fallback` marker of the run's journal, when it has one. */
+  modelFallback: RunModelFallback | null;
   onOpenJournal: (filter?: JournalOverviewFilter) => void;
   onOpenResults: () => void;
   cardHeaders?: boolean;
@@ -155,7 +159,7 @@ export function RunSnapshotInspector({
             </HealthCard>
           </div>
         )}
-        <RunWarnings run={run} cardHeaders={cardHeaders} />
+        <RunWarnings run={run} modelFallback={modelFallback} cardHeaders={cardHeaders} />
         <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
           <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
             <RunDetailCard
