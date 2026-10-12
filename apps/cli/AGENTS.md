@@ -126,7 +126,9 @@ appstrate api POST /api/runs/inline -d @manifest.json
 # `appstrate run` prints each candidate under the refused integration — label,
 # account, yours or shared, needs reconnection — with the flag that names it.
 # Which account to use is the human's call: show them the list, then pass
-# their choice. Repeat --connection for another integration.
+# their choice. Repeat --connection for another integration. Several values for
+# one integration form its set under --remote; a run executed locally binds one
+# connection per integration.
 appstrate run @acme/email-sorter --connection @acme/gmail=<connection-id>
 
 # Through the API the same choice is `connection_overrides` on the launch body

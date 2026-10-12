@@ -1129,7 +1129,7 @@ program
   )
   .option(
     "--connection <integration>=<connection-id>",
-    "Connection the run binds to an integration (repeatable; several values for one integration form its set). Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
+    "Connection the run binds to an integration (repeatable). Several values for one integration form its set under --remote; a run executed locally binds one connection per integration. Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
     collect,
     [],
   )

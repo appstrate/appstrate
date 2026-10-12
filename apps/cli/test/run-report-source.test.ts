@@ -461,18 +461,45 @@ describe("resolveReportSession — --connection needs a registered run", () => {
     await expect(resolve({ connectionOverrides: CONNECTION }, null)).rejects.toThrow(REFUSAL);
   });
 
-  it("refuses it when --report=true has no profile and falls back to console", async () => {
+  it("refuses it when --report=true has no profile and falls back to console, with the cause", async () => {
     stub = installStubFetch(() => ok());
-    await expect(
-      resolve({ report: "true", reportFallback: "console", connectionOverrides: CONNECTION }, null),
-    ).rejects.toThrow(REFUSAL);
+    const err = await resolve(
+      { report: "true", reportFallback: "console", connectionOverrides: CONNECTION },
+      null,
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(REFUSAL);
+    expect((err as Error & { hint: string }).hint).toBe(
+      "Cause: --report=true requires an Appstrate profile or API key",
+    );
   });
 
-  it("refuses it when the registration fails and falls back to console", async () => {
-    stub = installStubFetch(() => new Response("upstream down", { status: 503 }));
-    await expect(
-      resolve({ reportFallback: "console", connectionOverrides: CONNECTION }, REPORT_CTX),
-    ).rejects.toThrow(REFUSAL);
+  // `--json` prints no fallback warning: the refusal is where the caller reads why.
+  it("refuses it when the registration fails and falls back to console, with the failure", async () => {
+    stub = installStubFetch(
+      () =>
+        new Response(
+          JSON.stringify({
+            code: "missing_integration_connection",
+            errors: [
+              {
+                field: "integrations.@appstrate/clickup",
+                code: "override_connection_unavailable",
+                message: "Connection named for '@appstrate/clickup' is not available",
+              },
+            ],
+          }),
+          { status: 409, headers: { "Content-Type": "application/problem+json" } },
+        ),
+    );
+    const err = await resolve(
+      { reportFallback: "console", connectionOverrides: CONNECTION },
+      REPORT_CTX,
+    ).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(REFUSAL);
+    expect((err as Error & { hint: string }).hint).toBe(
+      "Cause: POST /api/runs/remote failed with HTTP 409" +
+        "\n    @appstrate/clickup: Connection named for '@appstrate/clickup' is not available (override_connection_unavailable)",
+    );
     expect(stub.calls).toHaveLength(1);
   });
 

@@ -1009,9 +1009,10 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 /**
- * The run registered on the instance, or null for a console-only run. `--connection` is refused
- * on the latter, whatever left it unregistered: its credential-proxy calls bind the caller's own
- * connection by default, not the one named.
+ * The run registered on the instance, or null for a console-only run: reporting off, or a
+ * failed registration `--report-fallback console` degrades. `--connection` is refused on a
+ * console-only run, with the failure when there was one: its credential-proxy calls bind the
+ * caller's own connection by default, not the one named.
  */
 async function resolveReportSession(
   opts: RunCommandOptions,
@@ -1019,16 +1020,35 @@ async function resolveReportSession(
   bundleSource: BundleSource,
   resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
 ): Promise<ReportSession | null> {
-  const session = await registerReportSession(opts, bundle, bundleSource, resolverInputs);
+  let session: ReportSession | null = null;
+  let failure: ReportConfigError | ReportStartError | null = null;
+  try {
+    session = await registerReportSession(opts, bundle, bundleSource, resolverInputs);
+  } catch (err) {
+    if (!(err instanceof ReportConfigError || err instanceof ReportStartError)) throw err;
+    if (opts.reportFallback !== "console") throw err;
+    failure = err;
+  }
   if (!session && opts.connectionOverrides) {
     throw new ReportConfigError(
       "--connection names a connection for the run registered on the instance, and no run is registered",
-      "Run with reporting on (a profile or API key, no --report=false) and a registration that succeeds, or drop --connection.",
+      failure
+        ? `Cause: ${failure.message}`
+        : "Run with reporting on (a profile or API key, no --report=false), or drop --connection.",
     );
+  }
+  if (failure && !opts.json) {
+    if (failure instanceof ReportConfigError) {
+      process.stderr.write(`warn: ${failure.message} — reporting disabled\n`);
+    } else {
+      process.stderr.write(`warn: remote reporting failed — falling back to console-only\n`);
+      process.stderr.write(`  ${failure.message}\n`);
+    }
   }
   return session;
 }
 
+/** Null when reporting is off; throws what {@link resolveReportSession} may degrade. */
 async function registerReportSession(
   opts: RunCommandOptions,
   bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
@@ -1048,20 +1068,7 @@ async function registerReportSession(
         } satisfies ReportContext)
       : null;
 
-  let enabled: boolean;
-  try {
-    enabled = shouldReport(mode, reportCtx);
-  } catch (err) {
-    if (err instanceof ReportConfigError) {
-      if (fallback === "console") {
-        if (!opts.json) process.stderr.write(`warn: ${err.message} — reporting disabled\n`);
-        return null;
-      }
-      throw err;
-    }
-    throw err;
-  }
-  if (!enabled || !reportCtx) return null;
+  if (!shouldReport(mode, reportCtx) || !reportCtx) return null;
 
   // The bundle is sourced one of two ways:
   //   - From a local file (path mode) → we have no registry handle, so
@@ -1081,33 +1088,21 @@ async function registerReportSession(
         }
       : { kind: "inline", bundle };
 
-  const identity = bundleIdentity(bundle);
-  try {
-    return await startReportSession(
-      reportSource,
-      reportCtx,
-      {
-        mode,
-        fallback,
-        ttlSeconds: opts.sinkTtl,
-        connectionOverrides: opts.connectionOverrides,
-      },
-      {
-        os: `${process.platform} ${process.arch}`,
-        cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
-        bundle: identity,
-      },
-    );
-  } catch (err) {
-    if (err instanceof ReportStartError && fallback === "console") {
-      if (!opts.json) {
-        process.stderr.write(`warn: remote reporting failed — falling back to console-only\n`);
-        process.stderr.write(`  ${err.message}\n`);
-      }
-      return null;
-    }
-    throw err;
-  }
+  return startReportSession(
+    reportSource,
+    reportCtx,
+    {
+      mode,
+      fallback,
+      ttlSeconds: opts.sinkTtl,
+      connectionOverrides: opts.connectionOverrides,
+    },
+    {
+      os: `${process.platform} ${process.arch}`,
+      cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
+      bundle: bundleIdentity(bundle),
+    },
+  );
 }
 
 function appendResolverHeaders(
