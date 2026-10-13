@@ -45,9 +45,10 @@ const {
   pairingStore,
   addPendingPairing,
   removePendingPairing,
+  clearPendingPairings,
   readPersistedPairings,
   resumablePairing,
-  showPairing,
+  markPairingShown,
   isPairingShown,
   STORAGE_KEY,
   UNPOLLED_RETENTION_MS,
@@ -184,6 +185,14 @@ describe("pairingStore", () => {
     expect(readPersistedPairings().map((p) => p.id)).toEqual(["creation", "reconnect"]);
   });
 
+  it("clear empties the list and its persisted copy", () => {
+    addPendingPairing(pairing({ id: "pair_1" }), COMMAND);
+    addPendingPairing(pairing({ id: "pair_2", orgId: "org_b" }), COMMAND);
+    clearPendingPairings();
+    expect(pairingStore.getState().pairings).toEqual([]);
+    expect(fakeStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
   it("hydrate keeps a pairing past its TTL (reload, cross-tab sync)", () => {
     writePersisted([
       pairing({ id: "past_ttl", expiresAt: pastTtl() }),
@@ -243,24 +252,33 @@ describe("resumablePairing", () => {
     expect(resumablePairing(match)).toBeNull();
   });
 
-  it("forgets the command once the entry leaves the store", () => {
+  // The entry is put back through storage: only the command can be missing.
+  function expectCommandForgotten(leave: () => void) {
     addPendingPairing(pairing({ id: "pair_1" }), COMMAND);
     const persisted = fakeStorage.getItem(STORAGE_KEY) as string;
-    removePendingPairing("pair_1");
+    leave();
     fakeStorage.setItem(STORAGE_KEY, persisted);
     pairingStore.getState().hydrate();
     expect(pairingStore.getState().pairings.map((p) => p.id)).toEqual(["pair_1"]);
     expect(resumablePairing(match)).toBeNull();
+  }
+
+  it("forgets the command once the entry is removed", () => {
+    expectCommandForgotten(() => removePendingPairing("pair_1"));
+  });
+
+  it("forgets the command once the store is cleared", () => {
+    expectCommandForgotten(clearPendingPairings);
   });
 });
 
-describe("showPairing", () => {
+describe("markPairingShown", () => {
   it("marks a pairing as shown until its cleanup runs", () => {
     expect(isPairingShown("pair_1")).toBe(false);
-    const hide = showPairing("pair_1");
+    const unmark = markPairingShown("pair_1");
     expect(isPairingShown("pair_1")).toBe(true);
     expect(isPairingShown("pair_2")).toBe(false);
-    hide();
+    unmark();
     expect(isPairingShown("pair_1")).toBe(false);
   });
 });

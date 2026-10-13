@@ -48,9 +48,8 @@ export function useModelProviderPairingStatus(id: string | null): {
       enabled: !!id && mayRead,
       refetchInterval: (q) =>
         pairingPollState(q.state.data?.status, q.state.error) === "pending" ? 2500 : false,
-      // Pairing rows are short-lived ephemera — no point caching beyond the
-      // polling window. Always refetch on mount so closing+reopening the
-      // modal can't see a stale "connected" hit from a prior session.
+      // A pairing's status is only meaningful while something observes it:
+      // nothing is cached beyond that.
       staleTime: 0,
       gcTime: 0,
     },

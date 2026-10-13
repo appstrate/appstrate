@@ -20,8 +20,10 @@
  *
  * An entry leaves the store when its poll ends: the server is the one that
  * states the outcome, and a pairing redeemed while the tab was hidden or
- * closed is still read as `connected` after its TTL. The clock only bounds
- * the entries no poll reaches (`UNPOLLED_RETENTION_MS`).
+ * closed is still read as `connected` after its TTL. The client clock also
+ * drops any entry `UNPOLLED_RETENTION_MS` past its expiry, a margin wide
+ * enough that only the entries no poll reaches get that far. The end of a
+ * session empties the store.
  */
 
 import { createStore } from "zustand/vanilla";
@@ -31,11 +33,12 @@ import type { PairingTarget } from "../lib/oauth-pairing";
 export const STORAGE_KEY = "appstrate_pending_pairings";
 
 /**
- * How long past its `expiresAt` an entry stays in the store. This is a bound
- * for the entries no poll ends (minted in an org the user never returns to),
- * not what completes a pairing: it is sized past the point where the server
- * row can still exist (1 h of grace after the TTL + a 15 min sweep), so an
- * entry is never dropped while its status route can still answer.
+ * How long past its `expiresAt` an entry stays in the store, by the client
+ * clock and for every entry. It bounds the entries no poll ends (minted in an
+ * org the user never returns to) and is not what completes a pairing: it is
+ * sized past the lifetime of the server row (1 h of grace after the TTL + a
+ * 15 min sweep), so a polled entry reaches its outcome first on any client
+ * clock within that margin of the server's.
  */
 export const UNPOLLED_RETENTION_MS = 2 * 60 * 60_000;
 
@@ -57,6 +60,8 @@ interface PairingState {
   remove: (id: string) => void;
   /** Drop pairings past `UNPOLLED_RETENTION_MS` (keeps the list bounded). */
   prune: () => void;
+  /** Empty the list and its persisted copy (session teardown). */
+  clear: () => void;
   /** Re-read the persisted list (used by the cross-tab `storage` sync). */
   hydrate: () => void;
 }
@@ -152,6 +157,10 @@ export const pairingStore = createStore<PairingState>()((set) => ({
       persist(next);
       return { pairings: next };
     }),
+  clear: () => {
+    persist([]);
+    set({ pairings: [] });
+  },
   hydrate: () => set({ pairings: readPersistedPairings() }),
 }));
 
@@ -194,9 +203,17 @@ export function removePendingPairing(id: string): void {
   pairingStore.getState().remove(id);
 }
 
+export function clearPendingPairings(): void {
+  pairingStore.getState().clear();
+}
+
 /**
  * The most recent pairing of that org, provider and target a modal can show
- * again: its TTL has not elapsed and this tab holds its command.
+ * again: its TTL has not elapsed and this tab holds its command. The command
+ * lives in this tab's memory, so after a reload or in another tab nothing is
+ * resumable and the body mints. No margin is asked of the remaining TTL: the
+ * pairing shown stays the one whose command the user may already be running,
+ * and one that expires under the user says so in the body.
  */
 export function resumablePairing(
   match: Pick<PendingPairing, "orgId" | "providerId" | "target">,
@@ -220,7 +237,7 @@ export function resumablePairing(
 }
 
 /** Marks `id` as shown by a modal; returns the cleanup that unmarks it. */
-export function showPairing(id: string): () => void {
+export function markPairingShown(id: string): () => void {
   shown.add(id);
   return () => {
     shown.delete(id);

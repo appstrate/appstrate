@@ -12,7 +12,7 @@
  * to its end and owns the global side effects (toasts, list invalidation). So a
  * body that mounts shows the pairing already in flight for its org, provider
  * and target, and mints one only when there is none: the command on screen is
- * the one the user copied. While it shows a pairing it says so (`showPairing`),
+ * the one the user copied. While it shows a pairing it says so (`markPairingShown`),
  * and the watcher leaves the failure to the inline message.
  */
 
@@ -27,7 +27,7 @@ import {
   useModelProviderPairingStatus,
 } from "../hooks/use-model-provider-pairing";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { addPendingPairing, resumablePairing, showPairing } from "../stores/pairing-store";
+import { addPendingPairing, markPairingShown, resumablePairing } from "../stores/pairing-store";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { pairingRequestBody, type PairingTarget } from "../lib/oauth-pairing";
 
@@ -82,7 +82,7 @@ function PairingBody({
   }, []);
 
   // The watcher leaves the failure of a shown pairing to the inline message.
-  useEffect(() => (pairingId ? showPairing(pairingId) : undefined), [pairingId]);
+  useEffect(() => (pairingId ? markPairingShown(pairingId) : undefined), [pairingId]);
 
   // Notify the parent for in-context behavior (auto-select the resulting
   // credential, close the modal). Deferred via queueMicrotask so the parent's
