@@ -4,6 +4,7 @@ import { classifyNetworkErrorKind } from "../../lib/http-classify.ts";
 import { buildBody, type BuiltBody } from "./body.ts";
 import type { ApiCommandOptions, ApiCommandIO } from "./types.ts";
 import { writeVerboseRequest, writeVerboseResponse } from "./verbose.ts";
+import { sleepUnlessAborted } from "../../lib/abortable-sleep.ts";
 
 /**
  * HTTP status codes considered transient and therefore retryable.
@@ -64,30 +65,6 @@ function computeRetryDelayMs(res: Response, baseSeconds: number, attempt: number
     }
   }
   return baseSeconds * 1000 * Math.pow(2, attempt - 1);
-}
-
-/**
- * Sleep that resolves early on abort. Used between retry attempts so
- * SIGINT / --max-time interrupts a long backoff without waiting for
- * the timer to expire.
- */
-function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
-    if (signal.aborted) {
-      clearTimeout(t);
-      resolve();
-      return;
-    }
-    signal.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }
 
 interface RetryContext {
@@ -161,7 +138,7 @@ export async function executeWithRetry(ctx: RetryContext): Promise<Response> {
         const delayMs = retryDelay * 1000 * Math.pow(2, attempt - 1);
         if (performance.now() + delayMs > retryBudgetEnd) throw err;
         if (opts.verbose) io.stderr.write(`* retry after ${delayMs}ms (network error)\n`);
-        await sleepWithAbort(delayMs, ac.signal);
+        await sleepUnlessAborted(delayMs, ac.signal);
         continue;
       }
       throw err;
@@ -184,7 +161,7 @@ export async function executeWithRetry(ctx: RetryContext): Promise<Response> {
       } catch {
         /* ignore — body may already be consumed */
       }
-      await sleepWithAbort(delayMs, ac.signal);
+      await sleepUnlessAborted(delayMs, ac.signal);
       continue;
     }
 

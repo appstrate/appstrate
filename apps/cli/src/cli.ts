@@ -65,7 +65,11 @@ import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { exitRunWithError, runCommand } from "./commands/run.ts";
-import { commandFromArgv, ExcessArgumentsError } from "./commands/run/mode.ts";
+import {
+  commandFromArgv,
+  ExcessArgumentsError,
+  optionGivenSeparator,
+} from "./commands/run/mode.ts";
 import { parseConnectionFlags } from "./commands/run/connection-flag.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
 import {
@@ -1153,6 +1157,21 @@ program
     "Suppress per-tool output lines (name, args, result). Errors and final summary still print.",
   )
   .action(async (bundle: string, rest: string[], opts, self: Command) => {
+    // `--` is no option's value, of `run` or of the program: an option that
+    // took it has its argument missing, in commander's own words and exit.
+    const takenAsValue = optionGivenSeparator(
+      [program, self].flatMap((owner) =>
+        owner.options.map(
+          (option) => [option.flags, owner.getOptionValue(option.attributeName())] as const,
+        ),
+      ),
+    );
+    if (takenAsValue) {
+      self.error(
+        `error: option '${takenAsValue}' argument missing: \`--\` is not a value, it ends the options`,
+        { code: "commander.optionMissingArgument" },
+      );
+    }
     // Operands past <bundle> are a command only behind a `--` that follows the
     // bundle. Any other is the excess argument commander refuses on its own
     // for a command without a variadic argument: raised here through the same

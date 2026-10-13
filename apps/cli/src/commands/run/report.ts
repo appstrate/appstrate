@@ -35,9 +35,12 @@ import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./lau
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
 
+/**
+ * What a registration sends. Whether to report at all ({@link ReportMode}) and
+ * what a refused registration means ({@link ReportFallback}) are decided by
+ * the caller, around this call.
+ */
 interface ReportOptions {
-  mode: ReportMode;
-  fallback: ReportFallback;
   /** Requested sink TTL in seconds. Clamped by the server. */
   ttlSeconds?: number;
   /** `--connection` picks, sent as the body's `connection_overrides`. */

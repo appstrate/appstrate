@@ -246,7 +246,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // Build integration resolver inputs FIRST so preset mode can reuse the
   // bearer token — they share the same auth surface.
-  const resolverInputs = requireSpaceForLocalRun(await buildResolverInputs(mode, opts));
+  const resolverInputs = requireSpaceId(await buildResolverInputs(mode, opts));
 
   // ─── 1a. Inherited run-config ────────────────────────────────────
   // When the user runs an agent by id with a remote integration context,
@@ -767,7 +767,7 @@ async function runCommandUnderRun(
   opts: RunCommandOptions,
   target: ReturnType<typeof parseRunTarget>,
 ): Promise<void> {
-  const resolverInputs = requireSpaceForLocalRun(await buildResolverInputs("remote", opts));
+  const resolverInputs = requireSpaceId(await buildResolverInputs("remote", opts));
   if (
     target.kind !== "id" ||
     !opts.command ||
@@ -990,12 +990,13 @@ async function buildHeadlessRemoteInputs(
 type SpacedRemoteResolverInputs = RemoteResolverInputs & { spaceId: string };
 
 /**
- * A run this CLI is the runner of — an agent executed locally, or a command — registers
- * its run record and calls the credential proxy, and the former also reads the space's
- * run-config: all of which name the space. An API key leaves it unset unless
- * `APPSTRATE_SPACE_ID` spells it out; a remote run needs no id (the key pins it).
+ * Remote inputs that name their space, or a refusal. A run this CLI is the runner of — an
+ * agent executed locally, or a command — registers its run record and calls the credential
+ * proxy, and the former also reads the space's run-config: all of which name the space. An
+ * API key leaves it unset unless `APPSTRATE_SPACE_ID` spells it out; a run the instance
+ * executes needs no id (the key pins it).
  */
-function requireSpaceForLocalRun(
+function requireSpaceId(
   inputs: RemoteResolverInputs | LocalResolverInputs | null,
 ): SpacedRemoteResolverInputs | LocalResolverInputs | null {
   if (!inputs || !("bearerToken" in inputs)) return inputs;
@@ -1121,7 +1122,6 @@ async function registerReportSession(
   resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
 ): Promise<ReportSession | null> {
   const mode: ReportMode = opts.report ?? "auto";
-  const fallback: ReportFallback = opts.reportFallback ?? "abort";
 
   const reportCtx =
     resolverInputs && "bearerToken" in resolverInputs ? reportContextOf(resolverInputs) : null;
@@ -1148,12 +1148,7 @@ async function registerReportSession(
   return startReportSession(
     reportSource,
     reportCtx,
-    {
-      mode,
-      fallback,
-      ttlSeconds: opts.sinkTtl,
-      connectionOverrides: opts.connectionOverrides,
-    },
+    { ttlSeconds: opts.sinkTtl, connectionOverrides: opts.connectionOverrides },
     { ...hostSnapshot(), bundle: bundleIdentity(bundle) },
   );
 }

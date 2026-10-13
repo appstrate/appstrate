@@ -139,6 +139,29 @@ describe("startSinkHeartbeat", () => {
     expect(closed).toBe(1);
   });
 
+  it("does not report a closed sink to a caller that has already stopped", async () => {
+    // A 410 that answers a heartbeat sent before `stop()`: the run is being
+    // torn down by its own runner, which has nothing left to be told.
+    const answer = Promise.withResolvers<Response>();
+    let closed = 0;
+    const handle = startSinkHeartbeat({
+      url: "https://api/runs/r_3/events/heartbeat",
+      runSecret: "a".repeat(43),
+      intervalMs: 20,
+      jitter: 0,
+      // Leaves the request pending whatever its abort signal says.
+      fetch: (() => answer.promise) as unknown as typeof fetch,
+      onError: () => {},
+      onClosed: () => closed++,
+    });
+
+    await wait(40);
+    handle.stop();
+    answer.resolve(new Response(null, { status: 410 }));
+    await wait(20);
+    expect(closed).toBe(0);
+  });
+
   it("surfaces non-410 errors through onError without crashing the loop", async () => {
     const { fetchImpl, calls, respondWith } = collectingFetch();
     respondWith(503);

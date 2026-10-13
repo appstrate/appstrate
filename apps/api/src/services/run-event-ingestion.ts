@@ -980,8 +980,8 @@ function runHadZeroTokens(usage: TokenUsage): boolean {
  * contract requires (nothing called `output`) — an output the runner does send
  * is validated like any other. Both halves are needed. `runner_kind` is a
  * header the caller sets at run creation: on a platform-executed run it labels
- * the client that triggered the run, while the runner is still the platform's
- * own agent runtime, which both verdicts hold for. Only on a remote run is the
+ * the client that triggered the run, and the runner is the platform's own
+ * agent runtime, which both verdicts hold for. Only on a remote run is the
  * caller the runner.
  */
 function isCommandRun(run: Pick<RunSinkContext, "runOrigin" | "runnerKind">): boolean {

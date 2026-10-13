@@ -16,6 +16,7 @@ import { Command } from "commander";
 import {
   commandFromArgv,
   ExcessArgumentsError,
+  optionGivenSeparator,
   resolveExecutionMode,
   validateOptsForMode,
   ExecutionModeError,
@@ -280,6 +281,70 @@ describe("commandFromArgv", () => {
         command as string[] | undefined,
       );
     }
+  });
+});
+
+describe("optionGivenSeparator", () => {
+  it("names the option whose value is `--`, alone or among a repeated option's values", () => {
+    expect(optionGivenSeparator([["--input <json>", "--"]])).toBe("--input <json>");
+    expect(
+      optionGivenSeparator([
+        ["--input <json>", "{}"],
+        ["--connection <i>=<c>", ["@a/x=1", "--"]],
+      ]),
+    ).toBe("--connection <i>=<c>");
+  });
+
+  it("names none when no option took it: absent values, flags, a `--` inside a value", () => {
+    expect(
+      optionGivenSeparator([
+        ["-p, --profile <name>", undefined],
+        ["--json", true],
+        ["--input <json>", '{"a":"--"}'],
+        ["--connection <i>=<c>", []],
+      ]),
+    ).toBeUndefined();
+  });
+
+  /**
+   * The value-taking options of `run` and of the program as `src/cli.ts`
+   * declares them, read the way its action reads them: what commander stores
+   * for each when a `--` follows it.
+   */
+  function given(argv: string[]): string | undefined {
+    const program = new Command();
+    program.exitOverride().option("-p, --profile <name>");
+    const run = program
+      .command("run")
+      .argument("<bundle>")
+      .argument("[command...]")
+      .option("--input <json>")
+      .option(
+        "--connection <integration>=<connection-id>",
+        "",
+        (v, all: string[]) => [...all, v],
+        [],
+      )
+      .action(() => {});
+    program.parse(["node", "appstrate", ...argv]);
+    return optionGivenSeparator(
+      [program, run].flatMap((owner) =>
+        owner.options.map(
+          (option) => [option.flags, owner.getOptionValue(option.attributeName())] as const,
+        ),
+      ),
+    );
+  }
+
+  it.each([
+    [["run", "@a/b", "--input", "--", "cmd"], "--input <json>"],
+    [["run", "@a/b", "--connection", "--", "cmd"], "--connection <integration>=<connection-id>"],
+    [["run", "@a/b", "-p", "--", "cmd"], "-p, --profile <name>"],
+    [["run", "@a/b", "--input", "--", "--", "cmd"], "--input <json>"],
+    [["run", "@a/b", "--input", "{}", "--", "cmd", "--input", "--"], undefined],
+    [["run", "--", "@a/b"], undefined],
+  ] as const)("%j → %p", (argv, flags) => {
+    expect(given([...argv])).toBe(flags as string | undefined);
   });
 });
 

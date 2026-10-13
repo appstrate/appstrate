@@ -84,9 +84,25 @@ export class ExecutionModeError extends Error {
 }
 
 /**
- * More operands than `appstrate run` takes. Worded as commander 15 words the
- * error it raises on its own for a command that declares no variadic argument
- * (`_excessArguments`), which `run` no longer gets since it declares one.
+ * The flags of the first option that was given `--` as its value, if any.
+ * Commander hands an option that takes a value the next argument whatever it
+ * is, so `run @a/b -p -- cmd` reads `--` as the profile. `--` is the value of
+ * no option of `run`, nor of a global one: with it refused, the first literal
+ * `--` of the arguments is the separator {@link commandFromArgv} takes it for.
+ */
+export function optionGivenSeparator(
+  options: Iterable<readonly [flags: string, value: unknown]>,
+): string | undefined {
+  for (const [flags, value] of options) {
+    if (value === "--" || (Array.isArray(value) && value.includes("--"))) return flags;
+  }
+  return undefined;
+}
+
+/**
+ * More operands than `appstrate run` takes. `run` declares a variadic argument,
+ * so commander raises nothing for them itself; this is worded as commander 15
+ * words the error it raises for a command that declares none (`_excessArguments`).
  */
 export class ExcessArgumentsError extends Error {
   override readonly name = "ExcessArgumentsError";
@@ -110,6 +126,8 @@ export class ExcessArgumentsError extends Error {
  * precedes that `--`. Ahead of the bundle a `--` merely ends option parsing:
  * `run -- @a/b` is a plain run of `@a/b`. Operands that are neither the
  * bundle nor the command raise {@link ExcessArgumentsError}.
+ *
+ * Assumes no option took a `--` as its value ({@link optionGivenSeparator}).
  */
 export function commandFromArgv(
   argv: readonly string[],

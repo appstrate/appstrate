@@ -49,6 +49,7 @@ import { TERMINAL_RUN_STATUSES, type RunWireDto } from "@appstrate/shared-types"
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
+import { sleepUnlessAborted } from "../../lib/abortable-sleep.ts";
 import { createConsoleSink } from "./sink.ts";
 import {
   announceLaunch,
@@ -460,10 +461,9 @@ export async function runRemote(
     tick++;
 
     // Wait for the next tick — abortable so cancellation kicks in fast.
-    await sleepAbortable(pollIntervalMs, signal).catch(() => {
-      // Sleep aborts are normal once the user hits Ctrl-C — we still
-      // want the next loop iteration to fetch the now-cancelled status.
-    });
+    // An abort ends the wait early, normal once the user hits Ctrl-C: the
+    // next loop iteration fetches the cancelled status.
+    await sleepUnlessAborted(pollIntervalMs, signal);
 
     // Detach is checked here rather than at the top of the loop so the
     // logs fetched by the iteration in flight when the signal landed are
@@ -944,24 +944,4 @@ function createBoundedIdSet(capacity: number): {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      // Resolve immediately on an already-aborted signal — the caller's
-      // next loop iteration runs the terminal-status check.
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      reject(new Error("aborted"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }

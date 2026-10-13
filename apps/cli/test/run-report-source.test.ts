@@ -121,12 +121,7 @@ describe("startReportSession — source discrimination", () => {
 
   it("posts kind: inline with manifest+prompt for path-mode bundles", async () => {
     const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
-    await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
+    await startReportSession(reportSource, REPORT_CTX, {}, SNAPSHOT);
 
     expect(stub.calls).toHaveLength(1);
     const src = (
@@ -145,12 +140,7 @@ describe("startReportSession — source discrimination", () => {
       spec: "1.0.0",
       integrity: "sha256-bundle-hash",
     };
-    await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
+    await startReportSession(reportSource, REPORT_CTX, {}, SNAPSHOT);
 
     expect(stub.calls).toHaveLength(1);
     const src = (
@@ -180,18 +170,8 @@ describe("startReportSession — source discrimination", () => {
   it("sends --connection picks as connection_overrides, and no key without them", async () => {
     const reportSource: ReportSource = { kind: "inline", bundle: makeBundle() };
     const connectionOverrides = { "@appstrate/clickup": ["11111111-1111-4111-8111-111111111111"] };
-    await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort", connectionOverrides },
-      SNAPSHOT,
-    );
-    await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
+    await startReportSession(reportSource, REPORT_CTX, { connectionOverrides }, SNAPSHOT);
+    await startReportSession(reportSource, REPORT_CTX, {}, SNAPSHOT);
 
     expect(stub.calls[0]!.body.connection_overrides).toEqual(connectionOverrides);
     expect("connection_overrides" in stub.calls[1]!.body).toBe(false);
@@ -208,15 +188,10 @@ describe("startReportSession — source discrimination", () => {
     await startReportSession(
       reportSource,
       REPORT_CTX,
-      { mode: "true", fallback: "abort", input: { since: "2026-01-01" }, runnerKind: "command" },
+      { input: { since: "2026-01-01" }, runnerKind: "command" },
       { os: SNAPSHOT.os, cliVersion: SNAPSHOT.cliVersion },
     );
-    await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
+    await startReportSession(reportSource, REPORT_CTX, {}, SNAPSHOT);
 
     expect(stub.calls[0]!.body.input).toEqual({ since: "2026-01-01" });
     expect(stub.calls[0]!.headers.get("x-appstrate-runner-kind")).toBe("command");
@@ -236,12 +211,7 @@ describe("startReportSession — source discrimination", () => {
       packageId: "@scope/agent",
       stage: "draft",
     };
-    await startReportSession(
-      reportSource,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
+    await startReportSession(reportSource, REPORT_CTX, {}, SNAPSHOT);
 
     const src = stub.calls[0]!.body.source as { stage: string; spec?: string };
     expect(src.stage).toBe("draft");
@@ -264,12 +234,7 @@ describe("startReportSession — integration readiness", () => {
 
   it("returns the registration's warnings", async () => {
     stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
-    const session = await startReportSession(
-      SOURCE,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    );
+    const session = await startReportSession(SOURCE, REPORT_CTX, {}, SNAPSHOT);
     expect(session.warnings).toEqual([WARNING]);
   });
 
@@ -288,8 +253,7 @@ describe("startReportSession — integration readiness", () => {
     return out;
   }
 
-  const session = () =>
-    startReportSession(SOURCE, REPORT_CTX, { mode: "true", fallback: "abort" }, SNAPSHOT);
+  const session = () => startReportSession(SOURCE, REPORT_CTX, {}, SNAPSHOT);
 
   it("announces the run with its warnings under --json", async () => {
     stub = installStubFetch(() => ok({ ...SUCCESS_BODY, warnings: [WARNING] }));
@@ -368,12 +332,7 @@ describe("startReportSession — integration readiness", () => {
           { status: 409, headers: { "Content-Type": "application/problem+json" } },
         ),
     );
-    const err = await startReportSession(
-      SOURCE,
-      REPORT_CTX,
-      { mode: "true", fallback: "abort" },
-      SNAPSHOT,
-    ).catch((e: unknown) => e);
+    const err = await startReportSession(SOURCE, REPORT_CTX, {}, SNAPSHOT).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ReportStartError);
     expect((err as ReportStartError).responseSnippet).toBe(
       "@appstrate/gmail: Integration '@appstrate/gmail' is not connected (required_integration_unbound)" +

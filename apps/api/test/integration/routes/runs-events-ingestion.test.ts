@@ -1341,7 +1341,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   // A command runner (`appstrate run @scope/agent -- <command>`) calls no LLM:
   // zero tokens is its normal outcome. The exemption needs BOTH facts — on a
   // platform-executed run `runner_kind` only labels the client that triggered
-  // it, and the platform's own agent runtime is still the runner.
+  // it, and the runner is the platform's own agent runtime.
   describe("zero-token success, by who runs the run", () => {
     const zeroTokenSuccess = {
       status: "success",
@@ -1374,7 +1374,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       ["a remote run of another kind", { runOrigin: "remote", runnerKind: "cli" }],
       ["a remote run that declares no kind", { runOrigin: "remote", runnerKind: null }],
     ] as const) {
-      it(`still flips to failed for ${label}`, async () => {
+      it(`flips to failed for ${label}`, async () => {
         const runId = await seedRunWithSink(ctx, "@test/final-agent", {
           tokenUsage: null,
           ...seed,
@@ -2493,7 +2493,7 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
       { runOrigin: "platform", runnerKind: "command" },
     ],
   ] as const) {
-    it(`${label} still fails without the output the schema requires`, async () => {
+    it(`${label} fails without the output the schema requires`, async () => {
       const runId = await seedRunWithSink(ctx, "@test/schema-agent", seed);
 
       const res = await postFinalize(runId, {

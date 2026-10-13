@@ -23,6 +23,7 @@ import { emitRuntimeReady, type SinkHeartbeatHandle } from "@appstrate/runner-pi
 import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/runner";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
+import { sleepUnlessAborted } from "../../lib/abortable-sleep.ts";
 import { announceLaunch } from "./launch-warnings.ts";
 import { registryVersion, runTargetLabel } from "./package-spec.ts";
 import {
@@ -50,12 +51,14 @@ const COMMAND_RUNNER_KIND = "command";
 const STOP_GRACE_MS = 3_000;
 
 /**
- * How long a command that died of a signal waits for the CLI's own shutdown
+ * How long a command that did not exit 0 waits for the CLI's own shutdown
  * before its run is read as `failed`. A terminal's Ctrl-C signals the whole
- * foreground process group, so the command can be seen dead before this
- * process's handler has run; that handler is a matter of milliseconds.
+ * foreground process group, and the command may answer it by dying of it or by
+ * exiting with a code of its own (a shell's 130, a handler's `exit(1)`): either
+ * way it can be seen gone before this process's handler has run, which is a
+ * matter of milliseconds.
  */
-const SIGNAL_DEATH_SETTLE_MS = 100;
+const INTERRUPT_SETTLE_MS = 100;
 
 /**
  * Exit codes of a command that could not be started, as a shell reports them:
@@ -93,8 +96,8 @@ interface CommandRunOptions {
   // ─── Dependency injection (testing) ──────────────────────────────────
   /** Defaults to `process.stderr`. */
   writeStderr?: (chunk: string) => void;
-  /** Working directory of the command. Defaults to the CLI's own. */
-  cwd?: string;
+  /** Starts the command. Defaults to {@link spawnCommand}. */
+  spawn?: typeof spawnCommand;
   /** Overrides {@link STOP_GRACE_MS}. */
   stopGraceMs?: number;
   /** Overrides the heartbeat helper's interval. */
@@ -114,7 +117,13 @@ interface CommandOutcome {
   failure: string | null;
 }
 
-type Child = ReturnType<typeof Bun.spawn>;
+/** What the runner reads of the command's process. */
+type Child = Pick<ReturnType<typeof Bun.spawn>, "exited" | "exitCode" | "signalCode" | "kill">;
+
+/** The command as a child of this process: its stdio is the CLI's own. */
+function spawnCommand(command: readonly string[], env: Record<string, string | undefined>): Child {
+  return Bun.spawn([...command], { stdin: "inherit", stdout: "inherit", stderr: "inherit", env });
+}
 
 /**
  * Register the run, hold it while the command runs, finalize it with the
@@ -141,8 +150,6 @@ export async function runCommandAsRunner(
     { kind: "registry", packageId: opts.packageId, stage, ...(spec ? { spec } : {}) },
     opts.context,
     {
-      mode: "true",
-      fallback: "abort",
       ttlSeconds: opts.ttlSeconds,
       connectionOverrides: opts.connectionOverrides,
       input: opts.input,
@@ -184,7 +191,11 @@ export async function runCommandAsRunner(
     (closing ??= (async (): Promise<void> => {
       heartbeat?.stop();
       const cancelled = shutdown.signal.aborted;
-      const stopped = child ? stopChild(child, opts.stopGraceMs ?? STOP_GRACE_MS) : null;
+      // Handled where it is created: the finalize is awaited before it on a
+      // shutdown, and a command this user may not signal must not surface there.
+      const stopped = child
+        ? stopChild(child, opts.stopGraceMs ?? STOP_GRACE_MS).catch(warn("stopping the command"))
+        : null;
       // On a shutdown the run is `cancelled` whatever the command does next,
       // so it is closed at once — and the command's access with it — while the
       // command is being stopped. Otherwise the command's exit is the status.
@@ -193,6 +204,7 @@ export async function runCommandAsRunner(
         const result: TerminalRunResult = {
           ...emptyRunResult(),
           ...terminalFields(cancelled, outcome),
+          usage: ZERO_USAGE,
           durationMs: Math.round(performance.now() - registeredAt),
         };
         await finalizeWithin(
@@ -237,26 +249,20 @@ export async function runCommandAsRunner(
         onClosed: () => {
           closedOnInstance = true;
           writeStderr(
-            `warn: run ${session.runId} is closed on the instance: calls naming it are refused. The command keeps running.\n`,
+            `warn: run ${session.runId} is closed on the instance, which reports nothing more for it and stops serving the calls that name it. The command keeps running.\n`,
           );
         },
       });
       try {
-        child = Bun.spawn([...opts.command], {
-          ...(opts.cwd ? { cwd: opts.cwd } : {}),
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-          env: { ...process.env, ...opts.env, APPSTRATE_RUN_ID: session.runId },
+        child = (opts.spawn ?? spawnCommand)(opts.command, {
+          ...process.env,
+          ...opts.env,
+          APPSTRATE_RUN_ID: session.runId,
         });
       } catch (err) {
-        const failure = `Command could not be started: ${getErrorMessage(err)}`;
-        writeStderr(`error: ${failure}\n`);
-        const notExecutable = err instanceof Error && "code" in err && err.code === "EACCES";
-        outcome = {
-          exitCode: notExecutable ? EXIT_COMMAND_NOT_EXECUTABLE : EXIT_COMMAND_NOT_FOUND,
-          failure,
-        };
+        // The full text names the command's path: it stays on this terminal.
+        writeStderr(`error: Command could not be started: ${getErrorMessage(err)}\n`);
+        outcome = spawnFailure(err);
       }
       if (child) {
         const disarm = killOnProcessExit(child);
@@ -274,74 +280,90 @@ export async function runCommandAsRunner(
 }
 
 /**
- * SIGKILL `child` if this process exits while it is alive — a second Ctrl-C
- * that cuts the shutdown short, a crash — so that no exit of the CLI leaves the
- * command running under a run nobody holds. The `exit` event is the one hook
- * that runs whatever the cause, and it is synchronous. Returns the disarm, to
- * call once the child has exited.
+ * Why the command could not be started, as the platform is told: the kind of
+ * failure and never the spawn error's text, which names the command's path.
+ */
+function spawnFailure(err: unknown): CommandOutcome {
+  const code = err instanceof Error && "code" in err ? err.code : null;
+  if (code === "ENOENT") {
+    return { exitCode: EXIT_COMMAND_NOT_FOUND, failure: "Command could not be started: not found" };
+  }
+  if (code === "EACCES" || code === "ENOEXEC") {
+    return {
+      exitCode: EXIT_COMMAND_NOT_EXECUTABLE,
+      failure: "Command could not be started: not executable",
+    };
+  }
+  return {
+    exitCode: EXIT_COMMAND_NOT_FOUND,
+    failure: `Command could not be started: spawn error${typeof code === "string" ? ` ${code}` : ""}`,
+  };
+}
+
+/**
+ * SIGKILL the command's own process if this process exits while it is alive —
+ * a second Ctrl-C that cuts the shutdown short, a crash. The `exit` event is
+ * the one hook that runs whatever the cause, and it is synchronous. Processes
+ * the command started are not reached: they are the command's own to stop.
+ * Returns the disarm, to call once the child has exited.
  */
 function killOnProcessExit(child: Child): () => void {
-  const kill = (): void => child.kill("SIGKILL");
+  const kill = (): void => killQuietly(child);
   process.on("exit", kill);
   return () => {
     process.off("exit", kill);
   };
 }
 
+/** SIGKILL `child` from where nothing catches a throw (a timer, the `exit` event). */
+function killQuietly(child: Child): void {
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // Not this user's to signal, or gone already: nothing more to do here.
+  }
+}
+
 /** Wait for `child` and read how it ended. */
 async function commandOutcome(child: Child, shutdown: AbortSignal): Promise<CommandOutcome> {
   await child.exited;
   const { exitCode, signalCode } = child;
+  if (exitCode === 0) return { exitCode: 0, failure: null };
+  // Any other ending may be the command's answer to a signal this process
+  // received too: its own shutdown then makes the run `cancelled`, not `failed`.
+  await sleepUnlessAborted(INTERRUPT_SETTLE_MS, shutdown);
   if (signalCode !== null) {
-    // The signal may be one this process received too: its own shutdown then
-    // makes the run `cancelled`, not `failed` (see `SIGNAL_DEATH_SETTLE_MS`).
-    await abortedWithin(shutdown, SIGNAL_DEATH_SETTLE_MS);
     return {
       exitCode: 128 + (osConstants.signals[signalCode] ?? 0),
       failure: `Command terminated by ${signalCode}`,
     };
   }
-  if (exitCode === 0) return { exitCode: 0, failure: null };
   return { exitCode: exitCode ?? 1, failure: `Command exited with code ${exitCode}` };
-}
-
-/** Resolves when `signal` aborts or `ms` have passed, whichever comes first. */
-function abortedWithin(signal: AbortSignal, ms: number): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const settle = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", settle);
-      resolve();
-    };
-    const timer = setTimeout(settle, ms);
-    signal.addEventListener("abort", settle, { once: true });
-  });
 }
 
 /** The outcome half of the finalize body. */
 function terminalFields(
   cancelled: boolean,
   outcome: CommandOutcome,
-): Pick<TerminalRunResult, "status" | "error" | "usage"> {
+): Pick<TerminalRunResult, "status" | "error"> {
   if (cancelled) {
     return {
       status: "cancelled",
       error: { message: "Command cancelled (CLI received a signal)." },
-      usage: ZERO_USAGE,
     };
   }
-  if (outcome.failure !== null) {
-    return { status: "failed", error: { message: outcome.failure }, usage: ZERO_USAGE };
-  }
-  return { status: "success", usage: ZERO_USAGE };
+  if (outcome.failure !== null) return { status: "failed", error: { message: outcome.failure } };
+  return { status: "success" };
 }
 
-/** Ask `child` to terminate and SIGKILL it once `graceMs` has passed. Resolves when it is gone. */
+/**
+ * Ask the command's process to terminate and SIGKILL it once `graceMs` has
+ * passed. Resolves when it is gone; rejects when it cannot be signalled.
+ */
 async function stopChild(child: Child, graceMs: number): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
-  const timer = setTimeout(() => child.kill("SIGKILL"), graceMs);
+  const timer = setTimeout(() => killQuietly(child), graceMs);
   try {
     await child.exited;
   } finally {
