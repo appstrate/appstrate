@@ -16,6 +16,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reads (`docs/ENV.md` § Unread keys). The SSH MCP server is ssh-mcp 1.0.3 (see
   Changed).
 
+- **Under `RUN_ADAPTER=firecracker`, set `EGRESS_ALLOW_INTERNAL_HOSTS` on the
+  runner host too** (#1925). Guest sidecars take the list from the
+  `appstrate-runner` daemon's own environment, not from the platform's, and the
+  daemon now refuses to start on a malformed list, where each run failed in the
+  guest before. Add the line to `/etc/appstrate-runner/env` and restart
+  `appstrate-runner`. `appstrate runner update` keeps it;
+  `appstrate runner install` re-renders the file and drops it.
+
+- **The schema catalog lists migration-installed triggers** (#1925). The
+  production comparison of the release runbook (`scripts/schema-catalog.sql`
+  run on production and piped to `diff` against
+  `packages/db/schema-catalog.txt`; `bun run verify:schema-catalog` is its CI
+  form) now covers `oauth_clients_level_immutable` (migration `0003`) and the
+  two `0091` triggers. A trigger missing, disabled or with a different body,
+  compared modulo whitespace, shows as drift on the first comparison.
+
+- **The unread-keys boot warning covers `GITHUB_*` and `RUNNER_*`** (#1925). A
+  misspelled `GITHUB_CLIENT_ID` or `RUNNER_IMAGE_*` is named, and so is a
+  `GITHUB_TOKEN` inherited from a shell: the line is a warning and changes
+  nothing else.
+
 - **Before the deploy, mark `required: true` on every agent integration a run
   cannot do without** (#1830). After it, a declared integration blocks a run
   only when the agent marks it `required` (below): an agent whose user has no
@@ -244,6 +265,23 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   and `runs_payer_iff_user_source`: `payer_user_id` is set iff the row's
   `credential_source` / `model_source` is `user`). Schema only; each constraint
   validates the existing rows as it is added. (#1925)
+- **The database holds the two rules that span a connection and its shares**
+  (migration `0091`, triggers `ics_share_invariants` on
+  `integration_connection_shares`, before insert or update, and
+  `ics_connection_keeps_shares` on `integration_connections`, before an update
+  of `space_id` or `user_id`): only a member's connection is shared, and a
+  space-scoped connection is shared into its own space only. A violation is a
+  `check_violation` (SQLSTATE `23514`) whose constraint is
+  `ics_end_user_not_shared` or `ics_space_shares_own`.
+  Schema only, no pre-flight: the triggers judge writes, not the existing
+  rows. `scripts/migration/0044-connection-shares.ts`, of the same release,
+  copies under `ics_share_invariants`, which locks each copied connection
+  `FOR SHARE` until the script commits; the CHECKs on the column it copies from
+  guarantee every copied row passes. Run it with the app stopped, as
+  `scripts/migration/README.md` orders, and include 0044 after `0091` in the
+  dump rehearsal. (#1925)
+- **The connection reuse hint says what it counts**: "N agents de ses espaces
+  déclarent l'intégration". (#1925)
 - **The starter agent's publication is audited**: a new organization's
   `hello-world` 1.0.0 writes a `package.version_created` line, actor `system`,
   in its default space. (#1914)
@@ -989,6 +1027,13 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **`integration.connection.scope_widened` is recorded once, by the write that
+  moved the row.** A reconnect completing while a client promotion widened the
+  same row recorded it twice. (#1925)
+- **MCP: a `run_and_wait` refusal carries a code true of every argument it
+  lists**, and `space_id: null` is a `missing_argument`. The
+  `/oauth2/authorize` gate attempts no write when the space's resource row
+  exists. (#1925)
 - **An `Idempotency-Key` sent to the credential proxy reaches the upstream.**
   On `/api/credential-proxy/proxy` the header is the upstream's
   (Stripe's, for one): it is relayed with the caller's other headers,

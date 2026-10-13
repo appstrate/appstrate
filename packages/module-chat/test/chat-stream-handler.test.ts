@@ -46,6 +46,7 @@ import type { PiChatInput } from "../src/pi-chat/engine.ts";
 import {
   INJECTED_SKILLS_AUTH_EXTRA,
   type ChatAttachmentRequest,
+  type ChatUsageRecord,
 } from "@appstrate/core/chat-contract";
 import type { ModuleInitContext, PrincipalKind } from "@appstrate/core/module";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "../src/platform-services.ts";
@@ -284,6 +285,8 @@ describe("handleChatStream", () => {
       apiShape?: string;
       /** Stand in for the platform's credential resolution. */
       resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
+      /** Stand in for the platform's usage writer. */
+      recordChatUsage?: ChatPlatformDeps["recordChatUsage"];
       /** Scripted `/api/me/context` body, to vary the payload between turns. */
       context?: () => Response;
       /** Replace the whole scripted dispatch (to observe request timing). */
@@ -323,6 +326,7 @@ describe("handleChatStream", () => {
       ),
       dispatch: overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.context),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
+      ...(overrides?.recordChatUsage ? { recordChatUsage: overrides.recordChatUsage } : {}),
       ...(overrides?.resolveChatAttachment
         ? { resolveChatAttachment: overrides.resolveChatAttachment }
         : {}),
@@ -1049,6 +1053,83 @@ describe("handleChatStream", () => {
       .limit(1);
     expect(session?.activeStreamId).toBeNull();
   }, 20_000);
+
+  describe("the usage the engine reports", () => {
+    /** One turn whose engine reports usage once; what the platform's usage writer received. */
+    async function reportedUsage(overrides: {
+      apiShape?: string;
+      resolveChatModel: ChatPlatformDeps["resolveChatModel"];
+    }): Promise<ChatUsageRecord[]> {
+      const records: ChatUsageRecord[] = [];
+      const { engine } = scriptedEngine();
+      const res = await postChat(
+        mintSessionId(),
+        undefined,
+        (input) => {
+          input.recordUsage({
+            orgId: input.orgId,
+            userId: input.userId,
+            chatSessionId: input.chatSessionId,
+            presetId: input.presetId,
+            modelId: input.modelBinding.model.id,
+            apiShape: "anthropic-messages",
+            inputTokens: 3,
+            outputTokens: 5,
+            cost: null,
+          });
+          return engine(input);
+        },
+        {
+          ...overrides,
+          recordChatUsage: async (record) => {
+            records.push(record);
+          },
+        },
+      );
+      expect(res.status).toBe(200);
+      await res.text();
+      return records;
+    }
+
+    // The platform derives the turn's payer from this credential.
+    it("reaches the usage writer with the subscription credential the turn spends", async () => {
+      const records = await reportedUsage({
+        apiShape: "anthropic-messages",
+        resolveChatModel: async () => ({
+          subscription: true,
+          model: {
+            modelId: "claude-sonnet-4-20250514",
+            apiShape: "anthropic-messages",
+            baseUrl: "https://api.anthropic.test",
+            cost: null,
+            contextWindow: null,
+            maxTokens: null,
+            reasoning: false,
+            input: null,
+            accessToken: "at-test",
+            credentialId: "cred_subscription_turn",
+          },
+        }),
+      });
+
+      expect(records).toHaveLength(1);
+      expect(records[0]).toMatchObject({
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+        presetId: MODEL_PRESET_ID,
+        credentialId: "cred_subscription_turn",
+      });
+    });
+
+    it("reaches the usage writer with no credential on a proxy-bound turn", async () => {
+      const records = await reportedUsage({
+        resolveChatModel: async () => ({ subscription: false }),
+      });
+
+      expect(records).toHaveLength(1);
+      expect(records[0]!.credentialId).toBeNull();
+    });
+  });
 
   /**
    * The preamble overlap.

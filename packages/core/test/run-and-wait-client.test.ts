@@ -225,6 +225,33 @@ describe("run_and_wait client", () => {
     ]);
   });
 
+  it("gives a refusal a code that holds for every argument it lists", async () => {
+    const fetchImpl = fakeFetch(async () => {
+      throw new Error("should not fetch");
+    });
+    const refusal = async (args: Record<string, unknown>) => {
+      const [step] = await collectSteps(fetchImpl, { kind: "agent", ...args });
+      const { code, arguments: listed } = step as { code: string; arguments: string[] };
+      return { code, arguments: listed };
+    };
+
+    expect(await refusal({})).toEqual({ code: "missing_argument", arguments: ["scope", "name"] });
+    // Absent and unusable together: the absent one alone, as missing.
+    expect(await refusal({ scope: 42 })).toEqual({ code: "missing_argument", arguments: ["name"] });
+    expect(await refusal({ scope: 42, name: null })).toEqual({
+      code: "missing_argument",
+      arguments: ["name"],
+    });
+    expect(await refusal({ scope: 42, name: "writer" })).toEqual({
+      code: "invalid_argument",
+      arguments: ["scope"],
+    });
+    expect(await refusal({ scope: 42, name: "" })).toEqual({
+      code: "invalid_argument",
+      arguments: ["scope", "name"],
+    });
+  });
+
   it("refuses an undeclared argument as unknown_argument", async () => {
     const fetchImpl = fakeFetch(async () => {
       throw new Error("should not fetch");

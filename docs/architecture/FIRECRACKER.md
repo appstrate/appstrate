@@ -722,16 +722,25 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
 The daemon owns two schemas, neither part of `@appstrate/env` — the daemon
 boots on a bare KVM host with only these variables.
 
-### Daemon listen/link — `FIRECRACKER_RUNNER_*` (`runner/env.ts`)
+### Daemon listen/link — `FIRECRACKER_RUNNER_*` and `EGRESS_ALLOW_INTERNAL_HOSTS` (`runner/env.ts`)
 
-| Variable                          | Default   | Notes                                                                                                                                                                  |
-| --------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FIRECRACKER_RUNNER_TOKEN`        | —         | REQUIRED, ≥16 chars. Shared bearer secret; every request must present it. Must match the platform's `FIRECRACKER_RUNNER_TOKEN`                                         |
-| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                                                                         |
-| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                |
-| `FIRECRACKER_RUNNER_SOCKET`       | —         | Absolute path of a Unix domain socket to bind INSTEAD of HOST/PORT (UDS transport — see _Transport & auth_). Canonical: `/run/appstrate-runner/runner.sock`            |
-| `FIRECRACKER_RUNNER_SOCKET_MODE`  | `0660`    | Octal file mode of the bound socket. `0666` for a rootless / userns-remapped platform container (bearer token remains enforced)                                        |
-| `FIRECRACKER_RUNNER_PLATFORM_URL` | —         | REQUIRED. `http(s)://<IPv4>[:port]` guests use to reach the platform (IP literal — no DNS in guests). The daemon opens an explicit nft accept for exactly this ip:port |
+| Variable                          | Default   | Notes                                                                                                                                                                   |
+| --------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIRECRACKER_RUNNER_TOKEN`        | —         | REQUIRED, ≥16 chars. Shared bearer secret; every request must present it. Must match the platform's `FIRECRACKER_RUNNER_TOKEN`                                          |
+| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                                                                          |
+| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                 |
+| `FIRECRACKER_RUNNER_SOCKET`       | —         | Absolute path of a Unix domain socket to bind INSTEAD of HOST/PORT (UDS transport — see _Transport & auth_). Canonical: `/run/appstrate-runner/runner.sock`             |
+| `FIRECRACKER_RUNNER_SOCKET_MODE`  | `0660`    | Octal file mode of the bound socket. `0666` for a rootless / userns-remapped platform container (bearer token remains enforced)                                         |
+| `FIRECRACKER_RUNNER_PLATFORM_URL` | —         | REQUIRED. `http(s)://<IPv4>[:port]` guests use to reach the platform (IP literal — no DNS in guests). The daemon opens an explicit nft accept for exactly this ip:port  |
+| `EGRESS_ALLOW_INTERNAL_HOSTS`     | _(unset)_ | Internal hosts guest sidecars may reach, same grammar as the platform's (`docs/ENV.md`). Guests take it from HERE, not from the platform; a malformed list refuses boot |
+
+`appstrate runner install` renders `/etc/appstrate-runner/env` whole from its own
+options: a re-install keeps the token and a `FIRECRACKER_ARTIFACTS_PUBKEY`
+override and drops every other line added by hand, `EGRESS_ALLOW_INTERNAL_HOSTS`
+and any engine variable below included. `appstrate runner update` rewrites only
+`FIRECRACKER_ARTIFACTS_VERSION` and keeps the other lines. A hand-added line
+takes effect at `systemctl restart appstrate-runner` and is added again after a
+re-install.
 
 ### Engine host config — `FIRECRACKER_*` (`runner/host-env.ts`)
 

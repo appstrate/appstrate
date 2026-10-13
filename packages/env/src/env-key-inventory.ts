@@ -41,8 +41,6 @@ export const INFRA_ENV_KEYS: Readonly<Record<string, string>> = {
 const FOREIGN_ENV_SEGMENTS: Readonly<Record<string, string>> = {
   NODE: "the Node/Bun runtime (NODE_OPTIONS, NODE_EXTRA_CA_CERTS)",
   GIT: "git's own environment",
-  GITHUB: "the GitHub Actions runner namespace, where the e2e job boots the API with inherited env",
-  RUNNER: "the GitHub Actions runner namespace, where the e2e job boots the API with inherited env",
 };
 
 /** The namespace of a variable: the text before its first `_`, or the whole name. */

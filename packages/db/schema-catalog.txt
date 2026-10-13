@@ -1159,3 +1159,6 @@ index CREATE UNIQUE INDEX user_pkey ON public."user" USING btree (id)
 index CREATE UNIQUE INDEX verification_pkey ON public.verification USING btree (id)
 index CREATE UNIQUE INDEX webhook_deliveries_pkey ON public.webhook_deliveries USING btree (id)
 index CREATE UNIQUE INDEX webhooks_pkey ON public.webhooks USING btree (id)
+trigger CREATE TRIGGER ics_connection_keeps_shares BEFORE UPDATE OF space_id, user_id ON public.integration_connections FOR EACH ROW WHEN ((((new.user_id IS NULL) AND (old.user_id IS NOT NULL)) OR ((new.space_id IS NOT NULL) AND (new.space_id IS DISTINCT FROM old.space_id)))) EXECUTE FUNCTION ics_connection_keeps_shares_fn() enabled O body md5 249387bef3f242342d2fd7ee4ef5332d
+trigger CREATE TRIGGER ics_share_invariants BEFORE INSERT OR UPDATE ON public.integration_connection_shares FOR EACH ROW EXECUTE FUNCTION ics_share_invariants_fn() enabled O body md5 130cc49a6d6f0a09658e619cbc26a255
+trigger CREATE TRIGGER oauth_clients_level_immutable BEFORE UPDATE ON public.oauth_clients FOR EACH ROW EXECUTE FUNCTION oauth_clients_level_immutable_fn() enabled O body md5 7f996ac8926c88353638c30f47e9b7dc

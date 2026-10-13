@@ -108,12 +108,20 @@ export async function reconcileMcpAudiences(): Promise<void> {
  * AS gate hook: make a space's MCP resource mintable by writing its row, when
  * the URI names a space that exists in that org. Org URIs (rows written with
  * the org) and anything else are a no-op, so the AS answers `invalid_target`
- * for a space of another org or a space that does not exist. Idempotent.
+ * for a space of another org or a space that does not exist. It runs on
+ * unauthenticated requests: a row already written costs one read and no write.
  */
 export async function ensureMcpResourceMintable(uri: string): Promise<void> {
   const binding = parseMcpResourceUri(uri);
   if (binding?.spaceId === undefined) return;
   if (!orgIdSchema.safeParse(binding.orgId).success) return;
+  const row = mcpSpaceResourceRow(binding.orgId, binding.spaceId);
+  const [existing] = await db
+    .select({ id: oauthResource.id })
+    .from(oauthResource)
+    .where(eq(oauthResource.identifier, row.identifier))
+    .limit(1);
+  if (existing) return;
   const [space] = await db
     .select({ id: spaces.id })
     .from(spaces)
@@ -122,7 +130,7 @@ export async function ensureMcpResourceMintable(uri: string): Promise<void> {
   if (!space) return;
   await db
     .insert(oauthResource)
-    .values(mcpSpaceResourceRow(binding.orgId, binding.spaceId))
+    .values(row)
     .onConflictDoNothing({ target: oauthResource.identifier });
 }
 

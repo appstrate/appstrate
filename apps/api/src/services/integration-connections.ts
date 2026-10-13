@@ -281,7 +281,6 @@ export interface ReconnectTarget {
   id: string;
   /** `null`: the row serves its whole org, so its reconnect resolves no space client. */
   spaceId: string | null;
-  label: string;
   scopesGranted: string[];
 }
 
@@ -294,17 +293,24 @@ export async function assertConnectionBelongsToActor(
 ): Promise<ReconnectTarget> {
   const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
   if (!target) throw notFound("Connection not found");
-  if (principal.kind === "delegated" && target.spaceId !== input.spaceId) {
-    throw delegatedReconnectRefused();
-  }
+  assertDelegatedReconnect(principal.kind === "delegated", target.spaceId, input.spaceId);
   return target;
 }
 
-/** A delegated credential (API key, third-party token) acts from its space only. */
-function delegatedReconnectRefused(): ApiError {
-  return forbidden(
-    "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
-  );
+/**
+ * A delegated credential (API key, third-party token) reconnects only a row scoped to the space it
+ * acts in. Asked at the door and again under the write's row lock.
+ */
+function assertDelegatedReconnect(
+  delegated: boolean | undefined,
+  rowSpaceId: string | null,
+  spaceId: string,
+): void {
+  if (delegated && rowSpaceId !== spaceId) {
+    throw forbidden(
+      "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
+    );
+  }
 }
 
 function scopeNarrowingRefused(remedy: string): ApiError {
@@ -2586,6 +2592,8 @@ interface StoreConnectionInput {
   oauthResource?: string;
   /** See {@link PersistTarget}. */
   delegated?: boolean;
+  /** See {@link PersistTarget}; a reconnect only. */
+  onScopeWidened?: (widened: WidenedConnection) => void;
 }
 
 /**
@@ -2624,6 +2632,8 @@ export type PersistTarget =
       authKey: string;
       /** A delegated credential's write: the row must be scoped to `scope.spaceId`, never widened. */
       delegated?: boolean;
+      /** Called once the write committed, when it moved the row to org scope. */
+      onScopeWidened?: (widened: WidenedConnection) => void;
     }
   | {
       kind: "update-by-id";
@@ -3026,9 +3036,7 @@ export async function persistCredentialBundle(
         .limit(1)
         .for("update");
       if (!existing) return undefined;
-      if (target.delegated && existing.spaceId !== target.scope.spaceId) {
-        throw delegatedReconnectRefused();
-      }
+      assertDelegatedReconnect(target.delegated, existing.spaceId, target.scope.spaceId);
       if (clientSpace !== null && existing.spaceId !== clientSpace) {
         throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
       }
@@ -3055,9 +3063,10 @@ export async function persistCredentialBundle(
           `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
         );
       }
-      if (widens && existing.spaceId !== null) {
-        await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId));
-      }
+      const [widened] =
+        widens && existing.spaceId !== null
+          ? await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId))
+          : [];
       const [updated] = await tx
         .update(integrationConnections)
         .set(set)
@@ -3065,11 +3074,12 @@ export async function persistCredentialBundle(
         .returning();
       if (!updated) return undefined;
       const shares = (await loadConnectionShares(tx, [updated.id])).get(updated.id) ?? [];
-      return { updated, shares };
+      return { updated, shares, widened };
     });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
+    if (row.widened) target.onScopeWidened?.(row.widened);
     return serializeIntegrationConnection(row.updated, {
       here: target.scope.spaceId,
       shares: row.shares,
@@ -3289,6 +3299,7 @@ export async function saveIntegrationConnection(
           packageId: input.packageId,
           authKey: input.authKey,
           ...(input.delegated ? { delegated: true } : {}),
+          ...(input.onScopeWidened ? { onScopeWidened: input.onScopeWidened } : {}),
         },
         persistInput,
       )

@@ -8,7 +8,7 @@ const READ = new Set([
   "SMTP_PASS",
   "NODE_ENV",
   "GITHUB_CLIENT_ID",
-  "RUNNER_IMAGE_BUN",
+  "RUNNER_IMAGE_NODE",
   "GIT_SHA",
 ]);
 
@@ -20,14 +20,24 @@ describe("findUnreadEnvKeys", () => {
       "PATH",
       "HOME",
       "NODE_OPTIONS",
-      "GITHUB_SHA",
-      "RUNNER_OS",
       "GIT_SSH_COMMAND",
       "STRIPE_SECRET_KEY",
       "SMTP_PASSWORD",
       "modules",
     ];
     expect(findUnreadEnvKeys(present, READ)).toEqual(["RUN_TOKEN_SECRETS", "SMTP_PASSWORD"]);
+  });
+
+  it("reports a misspelled key under every platform namespace but the runtime's and git's", () => {
+    const present = [
+      "GITHUB_CLIENT_ID",
+      "GITHUB_CLIENT_IDD",
+      "RUNNER_IMAGE_NODE",
+      "RUNNER_IMAGE_NODEE",
+      "NODE_ENVV",
+      "GIT_SHAA",
+    ];
+    expect(findUnreadEnvKeys(present, READ)).toEqual(["GITHUB_CLIENT_IDD", "RUNNER_IMAGE_NODEE"]);
   });
 
   // Infra keys are known, and their namespaces are not the platform's.
