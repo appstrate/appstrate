@@ -44,9 +44,10 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
   names inherited from `default_tools` contribute no scope. (#1923)
 - **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
-  gating a call to `/api/credential-proxy/proxy` outside a run, on the
-  caller's own connections. `CorePermission` and `SpaceLevelPermission` gain
-  the string. (#1894)
+  gating a call to `/api/credential-proxy/proxy` outside a run: on the
+  caller's own connections, and with `credential-proxy:call-run` as well on
+  those usable in the space, shared ones included. `CorePermission` and
+  `SpaceLevelPermission` gain the string. (#1894, #1957)
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus
@@ -164,12 +165,13 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Changed
 
-- **BREAKING: `credential-proxy:call` is `credential-proxy:call-run`**
-  (`@appstrate/core/permissions`): `CoreResources["credential-proxy"]` is
-  `"call-run" | "call-own"` and `CORE_RESOURCE_ACTIONS["credential-proxy"]`
-  is `["call-run", "call-own"]`. `call-run` gates a call to
-  `/api/credential-proxy/proxy` for a run (`X-Run-Id`); a guard or a role
-  naming `credential-proxy:call` no longer type-checks. (#1894)
+- **BREAKING: `credential-proxy:call` is the pair `credential-proxy:call-run`
+  and `credential-proxy:call-own`** (`@appstrate/core/permissions`):
+  `CoreResources["credential-proxy"]` is `"call-run" | "call-own"` and
+  `CORE_RESOURCE_ACTIONS["credential-proxy"]` is `["call-run", "call-own"]`.
+  `call-run` gates a call to `/api/credential-proxy/proxy` for a run
+  (`X-Run-Id`); a guard or a role naming `credential-proxy:call` no longer
+  type-checks. (#1894, #1957)
 
 - **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
   `scopesGranted` and `missingScopes`, and a

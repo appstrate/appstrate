@@ -50,8 +50,8 @@ you the matching command).
 Grant the key the permissions the work needs on top of those two: what the
 server declares follows the key's scopes (see "The tool surface"). Calling a
 third-party API through one of your connections takes `credential-proxy:call-own`,
-which a key carries only from a creator who holds it (a space `admin`, or a
-custom role that lists it).
+which a key carries only from a creator who holds it (a space `admin` or
+`builder`, or a custom role that lists it).
 
 This is the recommended onboarding until you have HTTPS + the OAuth flow set up.
 
@@ -220,7 +220,7 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
 | `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
-| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own`                   | Your own connections callable outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                               |
+| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own`                   | The connections you can call outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                                |
 | `api_call`                 | `mcp:invoke` + `credential-proxy:call-own`                   | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
 
 `read_skill` needs `skills:read`, except for a skill a chat turn injected:
@@ -269,25 +269,32 @@ of the catalog, so `invoke_operation` does not reach it: these two tools are the
 MCP path, and each request re-enters the route with your credential, so its
 permission check, rate limit and call journal apply as over REST. They are
 declared to a caller authenticated by a bearer (an API key or an OAuth token)
-who holds both permissions. `credential-proxy:call-run`, the permission of a call
-made for a run, does not declare them; who holds `credential-proxy:call-own` is
-stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
+who holds `mcp:invoke` and `credential-proxy:call-own`.
+`credential-proxy:call-run`, the permission of a call made for a run, does not
+declare them; who holds `credential-proxy:call-own` is stated in
+`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
 
-- **What you reach.** Your OWN connections usable in the space, never one
-  another member shared: that one, and every connection of an integration under
-  an enforced organization default (`run_required` in the listing), is reached
-  by an agent run (`run_and_wait`). `list_connections` returns, per connection,
-  the `integration_package_id` and `connection_id` to pass, the `authorized_uris` a
-  target must match, and `needs_reconnection`. It never carries a credential
-  value: an entry that depends on one reads `{$credential.<field>}`, and you
-  target it by writing `{{<field>}}` at that place in `target`
-  (`{{webhook_url}}` for an entry that is `{$credential.webhook_url}` alone,
-  `https://{{host}}/v1/items` for `https://{$credential.host}/**`); the
-  platform fills it in.
+- **What you reach.** With `credential-proxy:call-own` alone, your OWN
+  connections usable in the space, never one another member shared: that one,
+  and every connection of an integration under an enforced organization default
+  (`run_required` in the listing), is reached by an agent run (`run_and_wait`).
+  With `credential-proxy:call-run` as well, the connections usable in the space,
+  yours and those another member shared into it, under the space's
+  organization defaults. A shared connection is used when you name it
+  (`connection_id`) or an organization default designates it, and under an
+  enforced default only the connections it holds are reachable.
+  `list_connections` returns what a call would accept: per connection, the
+  `integration_package_id` and `connection_id` to pass, `owned_by_actor`
+  (`false` for another member's), the `authorized_uris` a target must match,
+  and `needs_reconnection`. It never carries a credential value: an entry that
+  depends on one reads `{$credential.<field>}`, and you target it by writing
+  `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
+  is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
+  `https://{$credential.host}/**`); the platform fills it in.
 - **A call.** `requests` holds 1 to 50 requests, each naming an
   `integration_package_id`, a `method` and a `target`, with optional `headers`, `body`,
-  `substitute_body` and `connection_id` (which of your connections, when you
-  hold several of the integration). The platform injects the credential: a
+  `substitute_body` and `connection_id` (which connection, when several of the
+  integration are callable, or to use a shared one). The platform injects the credential: a
   header of your own platform request (`Authorization`, `Cookie`, …) or one of
   the proxy's control headers is refused in `headers`, and the whole call is
   refused before anything is sent when an argument is malformed. Requests run

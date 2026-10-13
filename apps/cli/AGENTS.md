@@ -146,23 +146,30 @@ echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
 #     bound. This is what a locally executed `appstrate run` does when its run is
 #     registered on the instance (--report, on by default with a profile or an
 #     API key). Launching runs (`agents:run`) does not include it.
-#   - outside a run: `credential-proxy:call-own`, and YOUR OWN connections only.
-#     A connection another member shared, or an integration under an enforced
-#     org default (403 run_required), is reachable through a run only.
+#   - outside a run: `credential-proxy:call-own`. With it alone, YOUR OWN
+#     connections only: a connection another member shared, or an integration
+#     under an enforced org default (403 run_required), takes
+#     `credential-proxy:call-run` as well, or an agent run the platform
+#     executes. With `credential-proxy:call-run` as well, the connections usable
+#     in the space: yours and those shared into it, under its org defaults. A
+#     shared connection is used when you name it (X-Connection-Id) or an org
+#     default designates it.
 #     `appstrate run --report=false` calls this way, and so does a call you make
 #     yourself, below.
 
-# What you can call outside a run, in the pinned space. An entry with
-# `run_required` or `needs_reconnection` set would still be refused. The list
-# holds no credential value: where an `authorized_uris` entry reads
-# `{$credential.<field>}`, write `{{<field>}}` at that place in X-Target and the
-# platform fills it in.
+# What a call outside a run would accept, in the pinned space: your connections,
+# and with both permissions those shared into the space (`owned_by_actor:
+# false`). An entry with `run_required` or `needs_reconnection` set
+# would still be refused. The list holds no credential value: where an
+# `authorized_uris` entry reads `{$credential.<field>}`, write `{{<field>}}` at
+# that place in X-Target and the platform fills it in.
 appstrate api GET /api/credential-proxy/connections \
-  | jq '.data[] | {integration_package_id, connection_id, label, authorized_uris, run_required}'
+  | jq '.data[] | {integration_package_id, connection_id, label, owned_by_actor, authorized_uris, run_required}'
 
 # One call: integration and target ride in headers, the method and the body are
 # the upstream's. X-Session-Id is a UUID v4 you choose (it scopes the cookie jar).
-# With several own connections of one integration, add `-H 'X-Connection-Id: <id>'`.
+# With several connections of one integration to choose from, or to use a shared
+# one, add `-H 'X-Connection-Id: <id>'`.
 # Each call is journaled: the connection's owner, and whoever holds
 # `integrations:configure` in the space, can read who called what.
 appstrate api GET /api/credential-proxy/proxy \
@@ -197,7 +204,7 @@ If you hit any of the following, stop and surface the issue to the human instead
 
 - `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed. With `APPSTRATE_API_KEY` set, the key itself was rejected instead: the human must supply a valid one.
 - `403 forbidden` — the pinned org doesn't have permission. Offer `appstrate org switch` or ask which org to use.
-- `403` from `/api/credential-proxy/*` naming `credential-proxy:call-own`, or `403 run_required` — a call made outside a run that the human's role, or an enforced org default on the integration, does not allow there. The same call goes through a run (`appstrate run` with reporting on, i.e. no `--report=false`) when the role holds `credential-proxy:call-run`; a `403` naming both permissions (`credential-proxy:call-run|credential-proxy:call-own`) means the role holds neither and cannot use the proxy at all. Do not look for another route to the credentials.
+- A `403` from `/api/credential-proxy/*` — a call the human's role does not allow. Naming `credential-proxy:call-own`: the role cannot call outside a run; if it holds `credential-proxy:call-run`, make the call through a run (`appstrate run` with reporting on, i.e. no `--report=false`), otherwise ask a space admin for the permission. `403 run_required`: the role holds `credential-proxy:call-own` without `credential-proxy:call-run` and an enforced org default governs the integration; ask a space admin for `credential-proxy:call-run`, or launch the agent on the platform (`POST /api/agents/{scope}/{name}/run`). Naming both permissions (`credential-proxy:call-run|credential-proxy:call-own`): the role holds neither and cannot use the proxy; launch the agent on the platform. Do not look for another route to the credentials.
 - `400 Space context required` — the profile has no `spaceId` pinned. Run `appstrate space current` to check, then `appstrate space switch` (or surface the error — the cascade at login should have handled this).
 - `404 Space '<id>' not found in this organization` — stale space pin from a previous org. Run `appstrate space switch` under the current org.
 - `Profile "<name>" … pins the retired key "applicationId"` — the profile on disk predates the space rename. Every command is blocked until the human deletes that line from `config.toml` and re-pins with `appstrate space switch`. Surface this to the human; do not edit their config yourself.
