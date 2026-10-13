@@ -63,7 +63,8 @@ export const openApiInfo = {
     { name: "Files", description: "Durable file store — inputs and agent outputs" },
     {
       name: "Credential Proxy",
-      description: "Server-side credential injection for external runners (CLI, GitHub Action)",
+      description:
+        "Server-side credential injection outside the sandbox: a remote run's calls, and calls on the caller's own connections outside a run",
     },
     {
       name: "LLM Proxy",

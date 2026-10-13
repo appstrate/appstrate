@@ -6,6 +6,8 @@
  * Within that reach, an actor uses their own rows and the rows shared into the space;
  * `block_user_connections` restricts their own rows to the shared ones and those made in the space
  * (`coalesce(space_id, origin_space_id)`: they passed its creation gate, or predate the block).
+ * A colleague's shared row is lent to a run: a credential-proxy call naming none reaches, of the
+ * rows usable in the space, those the actor owns ({@link ownUsableInSpace}).
  *
  * Every predicate is over the unaliased `integration_connections` table.
  */
@@ -92,6 +94,14 @@ export function sharedInSpace(spaceId: string): SQL {
 
 export function usableInSpace(spaceId: string, actor: Actor): SQL {
   return and(connectionInSpace(spaceId), or(sharedInto(spaceId), ownUsableIn(spaceId, actor)))!;
+}
+
+/**
+ * The rows of {@link usableInSpace} the actor owns: what a run of theirs could bind there, minus
+ * the colleagues' shared rows. An own row a block keeps out is back in once shared into the space.
+ */
+export function ownUsableInSpace(spaceId: string, actor: Actor): SQL {
+  return and(usableInSpace(spaceId, actor), actorFilter(actor, c))!;
 }
 
 /** The order candidates of equal standing keep, wherever the usable rows are listed. */

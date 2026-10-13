@@ -7,8 +7,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
@@ -22,14 +20,11 @@ import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { toolsFor } from "./helpers.ts";
+import { noExtra, parseResult, toolsFor } from "./helpers.ts";
 
 // The tools read the mounted route table (what each operation's guard requires)
 // to decide what this caller is shown.
 await registerTestPlatformApp();
-
-// The handlers ignore `extra`; supply a typed placeholder.
-const noExtra = {} as unknown as AppstrateRequestExtra;
 
 /**
  * Everything the full tool surface takes: the transport gate, invoke, launch
@@ -38,12 +33,6 @@ const noExtra = {} as unknown as AppstrateRequestExtra;
  * asserts on the tool it means to, not on whether it is declared.
  */
 const FULL_SURFACE = ["mcp:read", "mcp:invoke", "agents:run", "runs:read", "files:read"];
-
-function parseResult(result: CallToolResult): Record<string, unknown> {
-  const first = result.content[0];
-  if (!first || first.type !== "text") throw new Error("expected text content");
-  return JSON.parse(first.text) as Record<string, unknown>;
-}
 
 function makeTools(
   permissions: string[],
@@ -100,6 +89,28 @@ describe("mcp catalog", () => {
       expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
+  });
+
+  it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {
+    const operations = [...getCatalog().operations.values()];
+    expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(
+      [],
+    );
+    const { byName, calls } = makeTools(["mcp:read", "mcp:invoke", "agents:run"]);
+    const refused = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: "credentialProxyGet" }, noExtra);
+    expect(parseResult(refused).code).toBe("unknown_operation");
+    expect(calls).toHaveLength(0);
+    // The listing stays an operation: `deriveMcpSurface` reads its guard to declare the tools.
+    expect(operationIdGranted("listCredentialProxyConnections", new Set(), undefined)).toBe(false);
+    expect(
+      operationIdGranted(
+        "listCredentialProxyConnections",
+        new Set(["credential-proxy:call-own"]),
+        undefined,
+      ),
+    ).toBe(true);
   });
 });
 
@@ -650,7 +661,7 @@ describe("invoke_operation", () => {
   });
 
   it("auto-maps a declared header param supplied in query onto a real header", async () => {
-    const op = firstOp((o) => o.headerParams.includes("X-Integration-Id"));
+    const op = firstOp((o) => o.headerParams.includes("If-None-Match"));
     const values: Record<string, string> = {};
     for (const name of op.pathParams) values[name] = "x";
     const { byName, calls } = makeTools(["mcp:invoke"]);
@@ -658,14 +669,14 @@ describe("invoke_operation", () => {
       {
         operation_id: op.operationId,
         path_params: values,
-        query: { "X-Integration-Id": "int_1" },
+        query: { "If-None-Match": '"v1"' },
       },
       noExtra,
     );
     const req = calls[0]!;
-    expect(req.headers.get("X-Integration-Id")).toBe("int_1");
+    expect(req.headers.get("If-None-Match")).toBe('"v1"');
     // Promoted out of the query string, not duplicated there.
-    expect(new URL(req.url).searchParams.has("X-Integration-Id")).toBe(false);
+    expect(new URL(req.url).searchParams.has("If-None-Match")).toBe(false);
   });
 
   it("stamps the internal-dispatch marker so re-entry bypasses outbound audience confinement", async () => {

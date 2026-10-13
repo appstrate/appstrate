@@ -6,9 +6,10 @@
  * result upstream.
  *
  * Consumed by the `/api/credential-proxy/proxy` public endpoint, used
- * by external runners (CLI, GitHub Action, third-party agents) to
- * reach the space's integrations from outside Appstrate. The caller
- * authenticates via an API key scoped with `credential-proxy:call`.
+ * from outside Appstrate to reach the space's integrations: by a remote
+ * runner (CLI, GitHub Action, third-party agent) for the run it executes
+ * (`X-Run-Id`), or outside any run on the caller's own connections. Which
+ * of the two a caller may take is `access.ts`'s rule.
  *
  * Credentials are resolved from `integration_connections` (the same
  * machinery behind the sidecar's `/internal/integration-credentials/*`
@@ -81,8 +82,8 @@ interface ProxyCallInput {
   actor: Actor;
   /**
    * Optional `integration_connections` id pin (from the `X-Connection-Id`
-   * header). When set, narrows to that specific connection (validated
-   * against the actor's accessible set).
+   * header). When set, narrows to that specific connection: a member of the
+   * run's bound set, or outside a run one of the actor's own.
    */
   connectionId?: string;
   /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
@@ -363,8 +364,16 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     await jarStore.set(jarSessionId, connectionId, latest, jarTtl);
   };
 
-  // `finally`: hops received before a throw (off-allowlist redirect, SSRF, timeout) keep
-  // their Set-Cookie, as in the sidecar.
+  const logJarFault = (err: unknown) =>
+    logger.error("credential-proxy: could not save the session's cookies", {
+      integrationId: input.integrationId,
+      connectionId,
+      // The name only: the store's error may quote a cookie value.
+      error: err instanceof Error ? err.name : typeof err,
+    });
+
+  // The jar is saved on both ways out: hops received before a throw (off-allowlist redirect,
+  // SSRF, timeout) keep their Set-Cookie, as in the sidecar.
   let res: Response;
   try {
     res = await performFetch(fetchInit as RequestInit);
@@ -412,8 +421,21 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
         logRefreshFault(err, input.integrationId, connectionId);
       }
     }
-  } finally {
+  } catch (err) {
+    // The call's own error stays the one thrown; a store fault beside it is logged.
+    await persistJar().catch(logJarFault);
+    throw err;
+  }
+  try {
     await persistJar();
+  } catch (err) {
+    logJarFault(err);
+    // The upstream answered, so the fault names the connection. No `cause`: see `logJarFault`.
+    throw new ProxyCallError(
+      "session_store_unavailable",
+      `Integration ${input.integrationId}: the upstream was called, but the session's cookies could not be saved (host ${redactedHost})`,
+      connectionId,
+    );
   }
 
   if (
@@ -491,10 +513,14 @@ function unusableCredential(
 }
 
 /** A relayed body whose read failed after its headers arrived, as the proxy's typed error. */
-export function bodyReadError(err: unknown, redactedHost: string): ProxyCallError {
+export function bodyReadError(
+  err: unknown,
+  redactedHost: string,
+  connectionId: string,
+): ProxyCallError {
   const { code } = classifyApiCallFailure(err);
   const upstream = code === "upstream_timeout" ? code : "upstream_unreachable";
-  return new ProxyCallError(upstream, upstreamFailureDetail(redactedHost, upstream));
+  return new ProxyCallError(upstream, upstreamFailureDetail(redactedHost, upstream), connectionId);
 }
 
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */

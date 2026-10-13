@@ -77,13 +77,17 @@ import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
 import {
+  asRecord,
   asString,
+  dispatchHeaders,
   RESOURCE_BLOB_MAX_BYTES,
   jsonResult,
   refusalResult,
   ToolRefusal,
+  trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
+import { buildConnectionTools } from "./connection-tools.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 import {
@@ -113,6 +117,8 @@ export type McpToolName =
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
+  | "list_connections"
+  | "api_call"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -132,7 +138,7 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** Rows returned to the caller (after `limit`), not rows matched. */
+  /** Rows returned to the caller (after `limit`), not rows matched; `api_call`: its entries. */
   shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
@@ -225,8 +231,8 @@ export const FORWARDED_AUTH_HEADERS = [
 // Headers the caller may NOT set via the `headers` arg: the auth context is
 // forwarded from the inbound MCP request and must not be reshaped by the
 // model (no swapping credentials, switching org/space, or forging end-user
-// impersonation). Everything else (e.g. Credential-Proxy target headers) is
-// allowed — still bounded by RBAC on the dispatched route. The forwarded auth
+// impersonation). Everything else (an operation's own `in: header` parameters)
+// is allowed — still bounded by RBAC on the dispatched route. The forwarded auth
 // set plus the hop-by-hop headers we set ourselves (`host`, `content-length`)
 // and the internal self-dispatch marker: that marker is set by THIS layer (see
 // the dispatch request build below) and exempts the request from outbound
@@ -250,22 +256,6 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
-
-/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
-function trySetHeader(headers: Headers, name: string, value: string): boolean {
-  try {
-    headers.set(name, value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
 
 // --- files (resource_link + resources/read + list_files) -----------
 // The `appfile://` URI prefix, id shape, and parser are the canonical,
@@ -782,7 +772,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description:
             "Request headers (string values) for operations that declare an 'in: header' " +
-            "parameter, e.g. X-Integration-Id for the credential proxy. (Such params are also " +
+            "parameter, e.g. If-None-Match on a conditional read. (Such params are also " +
             "auto-detected if passed in `query`.) Auth headers (authorization, cookie, x-org-id, " +
             "…) are forwarded from your session and cannot be overridden here.",
           additionalProperties: { type: "string" },
@@ -893,8 +883,8 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
     // declared header value in `query` (or the operation simply requires a
-    // header it can't express otherwise, e.g. the Credential Proxy's
-    // X-Integration-Id). For each declared header param not already set,
+    // header it can't express otherwise, e.g. a conditional read's
+    // If-None-Match). For each declared header param not already set,
     // pull its value from `query` (case-insensitive) and move it to a header.
     for (const headerName of op.headerParams) {
       if (PROTECTED_HEADERS.has(headerName.toLowerCase())) continue;
@@ -1249,8 +1239,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     // marker (same as invoke_operation), and route the launch and poll fetches
     // back through the platform app. `launchRunAndWait` (shared with the chat
     // paths) owns the launch body construction + validation for both kinds.
-    const dispatchHeaders = new Headers(ctx.authHeaders);
-    dispatchHeaders.set(...internalDispatchHeader());
+    const forwarded = dispatchHeaders(ctx.authHeaders);
     const dispatchFetch = ((input, init) => {
       const request =
         input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
@@ -1259,7 +1248,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
 
     const launched = await launchRunAndWait(args, {
       origin: ctx.origin,
-      headers: dispatchHeaders,
+      headers: forwarded,
       fetch: dispatchFetch,
       signal,
       // The external MCP surface hands the link to the human driving its
@@ -1308,7 +1297,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const stopHeartbeat = startProgressHeartbeat(extra, runId);
     const waitOpts = {
       origin: ctx.origin,
-      headers: dispatchHeaders,
+      headers: forwarded,
       fetch: dispatchFetch,
       signal,
     };
@@ -1362,9 +1351,9 @@ const MAX_FILE_LIST_LIMIT = 100;
 
 /** Dispatch an in-process GET, forwarding the caller's auth + trusted marker. */
 function dispatchGet(ctx: McpToolContext, url: URL): Promise<Response> {
-  const headers = new Headers(ctx.authHeaders);
-  headers.set(...internalDispatchHeader());
-  return ctx.dispatch(new Request(url.toString(), { method: "GET", headers }));
+  return ctx.dispatch(
+    new Request(url.toString(), { method: "GET", headers: dispatchHeaders(ctx.authHeaders) }),
+  );
 }
 
 /** Project a `FileDto` onto the compact row the list tool returns. */
@@ -1677,13 +1666,11 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (): Promise<CallToolResult> => {
     const start = performance.now();
-    const headers = new Headers(ctx.authHeaders);
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
     // org-pinned MCP token reach a space-scoped route, in the space it entered.
-    headers.set(...internalDispatchHeader());
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",
-      headers,
+      headers: dispatchHeaders(ctx.authHeaders),
     });
     const response = await ctx.dispatch(request);
     emit(ctx, {
@@ -1723,12 +1710,16 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
+  /** `list_connections` and `api_call`: the credential proxy outside a run. */
+  proxies: boolean;
 }
 
 export function deriveMcpSurface(
   permissions: ReadonlySet<string>,
   ceiling: ReadonlySet<string> | undefined,
   actor: Actor,
+  /** The credential proxy accepts the credential this request carries (it is bearer-only). */
+  proxyAcceptsCredential: boolean,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
@@ -1744,6 +1735,10 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+    // `credential-proxy:call-own`, read off the listing's route: the proxy route
+    // also opens on `credential-proxy:call-run`, which declares nothing here.
+    // `mcp:invoke` is checked here and nowhere else.
+    proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
   };
 }
 
@@ -1809,6 +1804,15 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
       observe: (event) => emit(ctx, event),
     }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
+    ...(surface.proxies
+      ? buildConnectionTools({
+          origin: ctx.origin,
+          authHeaders: ctx.authHeaders,
+          dispatch: ctx.dispatch,
+          observe: (event) => emit(ctx, event),
+          runs: surface.runs,
+        })
+      : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
   ];
@@ -1834,6 +1838,8 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   read_skill: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
+  list_connections: "proxies",
+  api_call: "proxies",
   get_me: null,
   get_runtime_capabilities: false,
 };

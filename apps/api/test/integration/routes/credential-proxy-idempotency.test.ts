@@ -63,7 +63,7 @@ describe("Idempotency-Key through the credential proxy", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
-      scopes: ["credential-proxy:call"],
+      scopes: ["credential-proxy:call-own"],
     });
     apiKey = key.rawKey;
   });

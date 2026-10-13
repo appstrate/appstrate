@@ -57,6 +57,7 @@ const PROXY_PROBLEMS = {
     title: "Credential Exfiltration Refused",
     proxyError: "http_request_denied",
   },
+  run_required: { status: 403, title: "Run Required", proxyError: "http_request_denied" },
   credential_not_found: { status: 404, title: "Credential Not Found" },
   credential_unusable: {
     status: 502,
@@ -68,6 +69,8 @@ const PROXY_PROBLEMS = {
     title: "Service Unavailable",
     proxyError: "proxy_configuration_error",
   },
+  // After the upstream answered: a 500, not a 503 that would read as "nothing happened, retry".
+  session_store_unavailable: { status: 500, title: "Session Store Unavailable" },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
   invalid_request: { status: 400, title: "Invalid Request" },
   upstream_unresolvable: {

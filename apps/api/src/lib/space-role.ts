@@ -30,9 +30,14 @@ export interface CustomSpaceRole {
   permissions: readonly string[];
 }
 
-/** Two shapes, not one string: the DB stores presets under a CHECK and customs under an FK. */
+/**
+ * Two shapes, not one string: the DB stores presets under a CHECK and customs under an FK.
+ * `personalOwner` marks a preset held as the owner of a personal space (RBAC spec §3.6),
+ * the one standing no governor hands out; {@link spacePermissions} reads it.
+ */
 export type SpaceRoleRef =
-  { kind: "preset"; preset: SpaceRolePreset } | { kind: "custom"; role: CustomSpaceRole };
+  | { kind: "preset"; preset: SpaceRolePreset; personalOwner?: true }
+  | { kind: "custom"; role: CustomSpaceRole };
 
 export interface SpaceMemberRow {
   ref: SpaceRoleRef;
@@ -69,10 +74,15 @@ export function resolveSpaceRole(
   // invited to USE one thing; `admin` in their own space would let them author
   // and launch arbitrary agents on the organization's LLM budget, which is the
   // one thing their org role exists to withhold. `operator` is receive-and-run:
-  // exactly what a space shared TO them is for.
+  // exactly what a space shared TO them is for. Either way the ref says it is
+  // held as the space's owner, which `spacePermissions` narrows.
   if (space.ownerUserId !== null) {
     if (space.ownerUserId !== callerId) return null;
-    return { kind: "preset", preset: orgRole === "guest" ? "operator" : "admin" };
+    return {
+      kind: "preset",
+      preset: orgRole === "guest" ? "operator" : "admin",
+      personalOwner: true,
+    };
   }
   // By org role, which is why an explicit row for them is refused at write.
   if (orgRole === "owner" || orgRole === "admin") return { kind: "preset", preset: "admin" };
@@ -95,11 +105,19 @@ export function resolveSpaceRole(
  * both directions, so it does NOT fall back to an open space's default role.
  * Falling back would hand someone MORE than their bundle names on the very
  * replica that understands it least.
+ *
+ * The owner of a personal space holds its preset minus `credential-proxy:call-own`.
+ * Calling the proxy outside a run is what a space's governor hands out, and a
+ * personal space has none but its owner: nobody else sees what is called from
+ * it, and no team space's enforced default or `block_user_connections` applies.
+ * The preset, and so the role a listing shows, is unchanged.
  */
 export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
-  if (ref.kind === "preset") return presetPermissions(ref.preset);
-  return partitionSpacePermissions(ref.role.permissions).granted;
+  if (ref.kind === "custom") return partitionSpacePermissions(ref.role.permissions).granted;
+  const granted = presetPermissions(ref.preset);
+  if (ref.personalOwner) granted.delete("credential-proxy:call-own");
+  return granted;
 }
 
 /** Explicit-membership projection; joined onto `spaces` via {@link membershipOn} (RBAC spec §4.4). */

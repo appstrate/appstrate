@@ -118,9 +118,10 @@ export interface RunCommandOptions {
   json?: boolean;
   apiKey?: string;
   /**
-   * Stream telemetry back to the Appstrate instance via a signed sink.
-   * `auto` (default): on when a profile + app are available, off otherwise.
-   * `true`: force on, fail if no context. `false`: console-only.
+   * Register the run on the Appstrate instance and stream telemetry back via a signed sink.
+   * `auto` (default): on when a profile or API key is available, off otherwise.
+   * `true`: force on, fail if no context. `false`: console-only — the run's
+   * credential-proxy calls are then made outside a run.
    */
   report?: ReportMode;
   /**
@@ -274,7 +275,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
   // ─── 3b. Build the integration api_call resolver ──────────────────
-  // Thread X-Run-Id into credential-proxy calls when reporting is on.
+  // A registered run's credential-proxy calls carry its X-Run-Id: made for the
+  // run, they reach the connections it bound. With no run registered they are
+  // made outside a run, on the caller's own connections.
   // Serverless `apiCall` integrations (the unified integration
   // surface) get credential-injected HTTP calls; the resolver yields one
   // `{ns}__api_call` tool per integration.
@@ -1011,8 +1014,8 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
 /**
  * The run registered on the instance, or null for a console-only run: reporting off, or a
  * failed registration `--report-fallback console` degrades. `--connection` is refused on a
- * console-only run, with the failure when there was one: its credential-proxy calls bind the
- * caller's own connection by default, not the one named.
+ * console-only run, with the failure when there was one: its credential-proxy calls are made
+ * outside a run, where nothing carries the pick and only the caller's own connections answer.
  */
 async function resolveReportSession(
   opts: RunCommandOptions,

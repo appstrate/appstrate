@@ -8,7 +8,7 @@ duplicating the detail.
 
 - [**FIRECRACKER.md**](./FIRECRACKER.md) — Firecracker execution backend (`RUN_ADAPTER=firecracker`). One microVM per run behind a KVM hardware boundary; the platform → `appstrate-runner` host-daemon split. Opt-in built-in module.
 - [**SIDECAR.md**](./SIDECAR.md) — Sidecar protocol. Credential-isolating MCP server that injects secrets the agent never sees.
-- [**INTEGRATIONS_RUNTIME.md**](./INTEGRATIONS_RUNTIME.md) — AFPS integrations runtime: per-integration runner containers, MITM credential proxy, remote HTTP/SSE MCP transport.
+- [**INTEGRATIONS_RUNTIME.md**](./INTEGRATIONS_RUNTIME.md) — AFPS integrations runtime: per-integration runner containers, MITM credential proxy, remote HTTP/SSE MCP transport, and the platform credential proxy (`/api/credential-proxy/*`: who may call it, what a call reaches, its call journal).
 - [**RUN_COST.md**](./RUN_COST.md) — Run cost tracking. The `llm_usage` ledger and single `computeRunSpend` read path.
 
 ## Tenancy & data
