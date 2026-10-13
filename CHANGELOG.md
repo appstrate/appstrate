@@ -197,14 +197,24 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   (#1929): the write of an enabled schedule is refused `409` until they do;
   see Changed.
 
-- **Review who calls the credential proxy outside a run; there is nothing to
-  run** (#1894). From the deploy on, a call to `/api/credential-proxy/proxy`
-  without `X-Run-Id` requires the new permission `credential-proxy:direct`
-  and reaches the caller's own connections only; who holds the permission
-  and what such a call reaches are in Changed. `credential-proxy:call` keeps
-  its holders and now covers the calls made for a run only. For each caller
-  that names no run:
-  - a custom role gets `credential-proxy:direct` by being edited;
+- **Run `scripts/migration/0046-rename-credential-proxy-call-scope.ts --apply`
+  in the window, and review who calls the credential proxy outside a run**
+  (#1894). `credential-proxy:call` is renamed `credential-proxy:call-run` and
+  covers the calls made for a run only. A stored permission the release does
+  not know is ignored, so the script rewrites the name in `api_keys.scopes`
+  and `space_roles.permissions`. Run it dry
+  (`set -a && . ./.env && set +a && bun scripts/migration/0046-rename-credential-proxy-call-scope.ts`),
+  then with `--apply`, after the migrate step and before the new release
+  serves requests; never on the running previous release, which ignores the
+  new name. A client that mints keys naming `credential-proxy:call` sends
+  `credential-proxy:call-run` instead (`400` otherwise). Details:
+  `scripts/migration/README.md`.
+
+  From the deploy on, a call to `/api/credential-proxy/proxy` without
+  `X-Run-Id` requires the new permission `credential-proxy:call-own` and
+  reaches the caller's own connections only; who holds the permission and
+  what such a call reaches are in Changed. For each caller that names no run:
+  - a custom role gets `credential-proxy:call-own` by being edited;
   - an API key gets it by being minted anew by a creator who holds it, since
     a key's stored scopes are its ceiling, a space admin's key included;
   - a script that called a connection another member shared, or a connection
@@ -216,12 +226,16 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Changed
 
-- **BREAKING (API): outside a run, the credential proxy requires
-  `credential-proxy:direct` and reaches the caller's own connections only**
-  (#1894). A call to `/api/credential-proxy/proxy` without `X-Run-Id` took
-  `credential-proxy:call` and resolved through the space's org defaults and
-  the connections shared into it. It now requires `credential-proxy:direct`,
-  a new space-level permission: `admin` holds it alone among the presets
+- **BREAKING (API): the credential proxy has one permission per path,
+  `credential-proxy:call-run` and `credential-proxy:call-own`** (#1894).
+  `credential-proxy:call` no longer exists. A call made for a run
+  (`X-Run-Id`) requires `credential-proxy:call-run`: the same permission
+  under the name of what it reaches, with the same holders, still reaching
+  the connections the run bound, a colleague's shared one included. A call
+  without `X-Run-Id` took `credential-proxy:call` and resolved through the
+  space's org defaults and the connections shared into it. It now requires
+  `credential-proxy:call-own`, a new space-level permission that reaches the
+  caller's own connections only: `admin` holds it alone among the presets
   (`builder` does not), a custom role can list it, an API key carries it from
   a creator who holds it, and a personal space grants it to nobody, its owner
   included. The call reaches the caller's own connections usable in the space
@@ -237,10 +251,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     several, listing those and no one else's.
 
   `400 connection_not_in_org_default` no longer exists. The `403` of a caller
-  that holds `credential-proxy:call` without the new permission names
-  `credential-proxy:direct` and the run path. A call made for a run
-  (`X-Run-Id`) still requires `credential-proxy:call` and still reaches the
-  connections the run bound, a colleague's shared one included. The rule:
+  that holds `credential-proxy:call-run` without `credential-proxy:call-own`
+  names the latter and the run path. The rule:
   `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
   credential proxy (`/api/credential-proxy/*`)".
 
@@ -861,7 +873,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   `authorized_uris` entry templated on a credential field is given as the
   manifest declares it (`{$credential.<field>}`), and a caller targets it by
   writing `{{<field>}}` at that place in the target. Requires
-  `credential-proxy:direct`.
+  `credential-proxy:call-own`.
 
 - **A journal of the credential proxy's calls** (#1894). Every call that may
   have sent a connection's credential writes one row once its outcome is
@@ -886,7 +898,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   report that matches it reads the journal instead.
 
 - **MCP: `list_connections` and `api_call`** (#1894), declared to a bearer
-  caller holding `mcp:invoke` and `credential-proxy:direct`.
+  caller holding `mcp:invoke` and `credential-proxy:call-own`.
   `list_connections` is the listing above. `api_call` sends 1 to 50 requests
   through the credential proxy in one call, each with typed arguments
   (integration, method, target, headers, body, connection) in place of the

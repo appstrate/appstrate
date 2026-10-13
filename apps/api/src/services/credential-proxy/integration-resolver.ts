@@ -14,7 +14,7 @@
  * `X-Integration-Id` carries the integration package id (`@scope/name`); which
  * connection is decrypted is `selectAccessibleConnection`'s call: a member of the
  * `X-Run-Id` run's bound set, else one of the actor's own connections.
- * {@link listDirectProxyConnections} lists the latter with the same rows and rule.
+ * {@link listOwnProxyConnections} lists the latter with the same rows and rule.
  *
  * Both this external-runner path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
@@ -208,7 +208,7 @@ export async function forceRefreshIntegrationProxyCredentials(
 }
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
-interface DirectProxyConnection {
+interface OwnProxyConnection {
   integration_package_id: string;
   connection_id: string;
   label: string;
@@ -229,10 +229,10 @@ interface DirectProxyConnection {
  * not answer 404 for — active here, with a published version that declares the connection's auth.
  * It decrypts nothing: the answer reaches a model's context through the MCP module.
  */
-export async function listDirectProxyConnections(
+export async function listOwnProxyConnections(
   scope: { orgId: string; spaceId: string },
   actor: Actor,
-): Promise<DirectProxyConnection[]> {
+): Promise<OwnProxyConnection[]> {
   const rows = await listOwnUsableConnections({ spaceId: scope.spaceId, actor });
   const integrationIds = [...new Set(rows.map((row) => row.integrationId))];
   const [active, runRequired, manifests] = await Promise.all([
@@ -242,7 +242,7 @@ export async function listDirectProxyConnections(
   ]);
   const manifestOf = new Map(integrationIds.map((id, i) => [id, manifests[i]!]));
 
-  const listed = rows.flatMap((row): DirectProxyConnection[] => {
+  const listed = rows.flatMap((row): OwnProxyConnection[] => {
     const loaded = manifestOf.get(row.integrationId)!;
     if (!active.has(row.integrationId) || !loaded.ok) return [];
     const authDef = loaded.manifest.auths?.[row.authKey] as AfpsManifestAuth | undefined;

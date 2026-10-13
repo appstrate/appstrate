@@ -84,7 +84,7 @@ const MCP_TOOLS_DESCRIPTION =
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
   "(whatever guards the `listFiles` operation's own route), `import_package_file`, and " +
-  "`list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:direct`, on a " +
+  "`list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own`, on a " +
   "bearer credential the credential proxy accepts) — are " +
   "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
   "role. Together they let an MCP client discover and call platform API operations, " +

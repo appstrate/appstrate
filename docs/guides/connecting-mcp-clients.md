@@ -49,7 +49,7 @@ you the matching command).
 
 Grant the key the permissions the work needs on top of those two: what the
 server declares follows the key's scopes (see "The tool surface"). Calling a
-third-party API through one of your connections takes `credential-proxy:direct`,
+third-party API through one of your connections takes `credential-proxy:call-own`,
 which a key carries only from a creator who holds it (a space `admin`, or a
 custom role that lists it).
 
@@ -220,8 +220,8 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
 | `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
-| `list_connections`         | `mcp:invoke` + `credential-proxy:direct`                     | Your own connections callable outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                               |
-| `api_call`                 | `mcp:invoke` + `credential-proxy:direct`                     | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
+| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own`                   | Your own connections callable outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                               |
+| `api_call`                 | `mcp:invoke` + `credential-proxy:call-own`                   | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
 
 `read_skill` needs `skills:read`, except for a skill a chat turn injected:
 that turn's own bearer reads it at the definition injected (a draft only at the
@@ -269,8 +269,8 @@ of the catalog, so `invoke_operation` does not reach it: these two tools are the
 MCP path, and each request re-enters the route with your credential, so its
 permission check, rate limit and call journal apply as over REST. They are
 declared to a caller authenticated by a bearer (an API key or an OAuth token)
-who holds both permissions. `credential-proxy:call`, the permission of a call
-made for a run, does not declare them; who holds `credential-proxy:direct` is
+who holds both permissions. `credential-proxy:call-run`, the permission of a call
+made for a run, does not declare them; who holds `credential-proxy:call-own` is
 stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
 
 - **What you reach.** Your OWN connections usable in the space, never one

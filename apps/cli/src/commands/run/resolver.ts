@@ -15,8 +15,8 @@
  *     device-flow JWT access token from `appstrate login` (interactive
  *     CLI), sent as a single `Authorization: Bearer <token>` header — see
  *     `apps/cli/src/commands/run.ts` for the resolution priority. It must
- *     grant `credential-proxy:call` when `extraHeaders` names a registered
- *     run (`X-Run-Id`), `credential-proxy:direct` otherwise: the call then
+ *     grant `credential-proxy:call-run` when `extraHeaders` names a registered
+ *     run (`X-Run-Id`), `credential-proxy:call-own` otherwise: the call then
  *     reaches the caller's own connections only.
  *
  *   - `local`  — reads a local JSON creds file (integration-keyed) for

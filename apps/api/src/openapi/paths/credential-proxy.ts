@@ -5,7 +5,7 @@ import { problemContent } from "../responses.ts";
 
 /**
  * Credential proxy endpoint: a remote runner's calls for its run (`X-Run-Id`), and
- * direct calls on the caller's own connections outside any run.
+ * calls on the caller's own connections outside any run.
  *
  * Wire-compatible with the runtime-pi sidecar `/proxy` contract. Accepts
  * bearer auth: API keys (headless / GitHub Action) or OIDC-issued JWTs
@@ -28,11 +28,11 @@ const proxySharedDescription =
   "sessions are rejected. Session binding pins the `X-Session-Id` to the first principal " +
   "(API key or JWT user) that used it.\n\n" +
   "A call takes one of two paths, each with its own permission. **For a run** (`X-Run-Id`): " +
-  "requires `credential-proxy:call` — launching runs (`agents:run`) does not open it; the " +
+  "requires `credential-proxy:call-run` — launching runs (`agents:run`) does not open it; the " +
   "header names the caller's own in-flight run that the caller executes itself (a remote " +
   "run), and the call reaches the connections that run bound, a connection another member " +
   "shared into the space included. **Outside a run** (no " +
-  "`X-Run-Id`): requires `credential-proxy:direct`, and reaches the caller's OWN connections " +
+  "`X-Run-Id`): requires `credential-proxy:call-own`, and reaches the caller's OWN connections " +
   "only — `GET /api/credential-proxy/connections` lists them. A connection another member " +
   "shared into the space, and every connection of an integration governed by an enforced " +
   "org default, is reached through a run. Holding one permission never opens the other " +
@@ -172,7 +172,7 @@ const proxyParameters = [
     required: false,
     description:
       "Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it " +
-      "(`appstrate run --report`). Requires `credential-proxy:call`. Must name an in-flight " +
+      "(`appstrate run --report`). Requires `credential-proxy:call-run`. Must name an in-flight " +
       "run of the calling actor in this space, executed by the caller (`runOrigin: remote`): an " +
       "unknown id or one of another space is a `404`, another actor's run or a run the " +
       "platform executes a `403`, a finished run a `400`. It binds the call to the run's " +
@@ -184,7 +184,7 @@ const proxyParameters = [
       "another); none is a `404`, and so is a bound one no longer reachable (deleted or " +
       "unshared); a bound one that needs reconnecting is a " +
       "`409 needs_reconnection`. Without it the call is made outside a run: it requires " +
-      "`credential-proxy:direct` and reaches the caller's own connections only, as described " +
+      "`credential-proxy:call-own` and reaches the caller's own connections only, as described " +
       "under `X-Connection-Id`.",
     schema: { type: "string" },
   },
@@ -274,8 +274,8 @@ const proxyResponses = {
       "then names the host to list) (`http_request_denied`); `run_required` — no `X-Run-Id` " +
       "and an enforced org default governs the integration in this space: its connections are " +
       "reached through a run only (`http_request_denied`); `forbidden` — the principal lacks " +
-      "the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, " +
-      "`credential-proxy:direct` without, the detail naming it), session " +
+      "the permission of the path the call takes (`credential-proxy:call-run` with `X-Run-Id`, " +
+      "`credential-proxy:call-own` without, the detail naming it), session " +
       "bound to a different principal, cookie session used, or `X-Run-Id` names another " +
       "actor's run or a run the platform executes.",
     headers: PROXY_STATUS_HEADER,
@@ -406,7 +406,7 @@ function makeProxyOperation(verb: ProxyVerb) {
 }
 
 /** One connection `GET /api/credential-proxy/connections` lists. */
-const directProxyConnectionSchema = {
+const ownProxyConnectionSchema = {
   type: "object",
   required: [
     "integration_package_id",
@@ -480,7 +480,7 @@ export const credentialProxyPaths = {
         "listed — it is reached through a run. Grouped by integration, oldest first within " +
         "one. An integration with several entries needs `X-Connection-Id`; `run_required` and " +
         "`needs_reconnection` tell which entries a call would still refuse. No credential is " +
-        "decrypted to build it. Requires `credential-proxy:direct`.",
+        "decrypted to build it. Requires `credential-proxy:call-own`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -496,7 +496,7 @@ export const credentialProxyPaths = {
                 required: ["object", "data", "hasMore"],
                 properties: {
                   object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: directProxyConnectionSchema },
+                  data: { type: "array", items: ownProxyConnectionSchema },
                   hasMore: { type: "boolean" },
                 },
               },

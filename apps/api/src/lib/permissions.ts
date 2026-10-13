@@ -152,12 +152,12 @@ const BUILDER_EXCLUDED_PREFIXES = ["space-settings:", "space-members:", "api-key
 
 /**
  * `builder`: author and operate — admin minus the governance surfaces and
- * `credential-proxy:direct`, which `admin` alone holds among the presets.
+ * `credential-proxy:call-own`, which `admin` alone holds among the presets.
  */
 const BUILDER_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> = new Set<SpaceLevelPermission>(
   [...ADMIN_PRESET_PERMISSIONS].filter(
     (p) =>
-      p !== "credential-proxy:direct" &&
+      p !== "credential-proxy:call-own" &&
       !BUILDER_EXCLUDED_PREFIXES.some((prefix) => p.startsWith(prefix)),
   ),
 );
@@ -340,9 +340,9 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   // Credential proxy for a run (`X-Run-Id`) — BYOI ("Bring Your Own Instance")
   // for remote AFPS runs. A key minted with `scopes` omitted or empty carries
   // it when its creator holds it; a non-empty `scopes` mints a narrower key.
-  "credential-proxy:call",
+  "credential-proxy:call-run",
   // Credential proxy outside a run, under the same `scopes` rule.
-  "credential-proxy:direct",
+  "credential-proxy:call-own",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered
   // per-call in `llm_usage` (source='proxy'). A key minted with `scopes` omitted or

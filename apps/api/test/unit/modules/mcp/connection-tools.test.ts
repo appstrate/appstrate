@@ -26,8 +26,8 @@ await registerTestPlatformApp();
 
 const noExtra = {} as unknown as AppstrateRequestExtra;
 
-/** What declares both tools: the transport's two grants and the proxy's direct path. */
-const DIRECT = ["mcp:read", "mcp:invoke", "credential-proxy:direct"];
+/** What declares both tools: the transport's two grants and the proxy's permission outside a run. */
+const CALL_OWN = ["mcp:read", "mcp:invoke", "credential-proxy:call-own"];
 const TARGET = "https://api.example.com/v1/items";
 const INTEGRATION = "@acme/items";
 
@@ -128,7 +128,7 @@ async function apiCall(
   respond?: Respond,
   extra: AppstrateRequestExtra = noExtra,
 ) {
-  const made = makeTools(DIRECT, respond);
+  const made = makeTools(CALL_OWN, respond);
   const result = await made.byName.get("api_call")!.handler(args, extra);
   return { ...made, result, payload: parseResult(result) };
 }
@@ -141,18 +141,18 @@ describe("connection tools — declaration", () => {
     ...makeTools(permissions, undefined, proxyAcceptsCredential).byName.keys(),
   ];
 
-  it("declares both to a caller holding `credential-proxy:direct`", () => {
-    expect(names(DIRECT)).toContain("list_connections");
-    expect(names(DIRECT)).toContain("api_call");
+  it("declares both to a caller holding `credential-proxy:call-own`", () => {
+    expect(names(CALL_OWN)).toContain("list_connections");
+    expect(names(CALL_OWN)).toContain("api_call");
   });
 
   it("withholds both from a caller who only holds the run path's permission", () => {
-    // `credential-proxy:call` opens the proxy route for a call made FOR a run, which the tools
+    // `credential-proxy:call-run` opens the proxy route for a call made FOR a run, which the tools
     // never make.
     const declared = names([
       "mcp:read",
       "mcp:invoke",
-      "credential-proxy:call",
+      "credential-proxy:call-run",
       "agents:run",
       "runs:read",
     ]);
@@ -163,13 +163,13 @@ describe("connection tools — declaration", () => {
   });
 
   it("withholds both without `mcp:invoke`: a read-only connection calls nothing", () => {
-    const declared = names(["mcp:read", "credential-proxy:direct"]);
+    const declared = names(["mcp:read", "credential-proxy:call-own"]);
     expect(declared).not.toContain("list_connections");
     expect(declared).not.toContain("api_call");
   });
 
   it("withholds both when the proxy would refuse the credential the request carries", () => {
-    const declared = names(DIRECT, false);
+    const declared = names(CALL_OWN, false);
     expect(declared).not.toContain("list_connections");
     expect(declared).not.toContain("api_call");
     expect(declared).toContain("invoke_operation");
@@ -178,10 +178,10 @@ describe("connection tools — declaration", () => {
   it("names run_and_wait only to a caller who is offered it", () => {
     const description = (permissions: string[], name: string) =>
       makeTools(permissions).byName.get(name)!.descriptor.description!;
-    const runner = [...DIRECT, "agents:run", "runs:read"];
+    const runner = [...CALL_OWN, "agents:run", "runs:read"];
     for (const name of ["list_connections", "api_call"]) {
       expect(description(runner, name)).toContain("run_and_wait");
-      expect(description(DIRECT, name)).not.toContain("run_and_wait");
+      expect(description(CALL_OWN, name)).not.toContain("run_and_wait");
     }
   });
 });
@@ -200,7 +200,7 @@ describe("list_connections", () => {
   };
 
   it("reads the route in-process, as the caller, and returns its rows", async () => {
-    const { byName, calls, events } = makeTools(DIRECT, () =>
+    const { byName, calls, events } = makeTools(CALL_OWN, () =>
       Response.json({ object: "list", data: [row], hasMore: false }),
     );
     const result = await byName.get("list_connections")!.handler({}, noExtra);
@@ -227,7 +227,7 @@ describe("list_connections", () => {
   });
 
   it("relays the route's refusal as `{ status, body }`", async () => {
-    const { byName } = makeTools(DIRECT, () => problem(403, "forbidden", "Insufficient"));
+    const { byName } = makeTools(CALL_OWN, () => problem(403, "forbidden", "Insufficient"));
     const result = await byName.get("list_connections")!.handler({}, noExtra);
     expect(result.isError).toBe(true);
     const payload = parseResult(result);
@@ -473,7 +473,7 @@ describe("api_call — dispatch", () => {
 
   it("stops sending once the request is aborted", async () => {
     const controller = new AbortController();
-    const made = makeTools(DIRECT, async () => {
+    const made = makeTools(CALL_OWN, async () => {
       await Bun.sleep(1);
       controller.abort(new Error("client went away"));
       return relayedJson({ ok: true });

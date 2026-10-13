@@ -1735,8 +1735,8 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
-    // `credential-proxy:direct`, read off the listing's route: the proxy route
-    // also opens on `credential-proxy:call`, which declares nothing here.
+    // `credential-proxy:call-own`, read off the listing's route: the proxy route
+    // also opens on `credential-proxy:call-run`, which declares nothing here.
     // `mcp:invoke` is checked here and nowhere else.
     proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
   };

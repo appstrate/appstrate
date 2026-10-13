@@ -385,7 +385,7 @@ function buildListConnectionsTool(ctx: ConnectionToolContext): AppstrateToolDefi
       "List what api_call reaches in this space outside a run: your OWN connections, each with " +
       "the `integration_package_id` and `connection_id` to pass, the `authorized_uris` a target must " +
       "match (unless `allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy " +
-      "alone resolves, see api_call's `target`), its `scopes_granted`, and what a direct call " +
+      "alone resolves, see api_call's `target`), its `scopes_granted`, and what such a call " +
       "would still refuse: `needs_reconnection`, and `run_required` (an enforced organization " +
       "default governs the integration). A connection another member shared is never listed: " +
       "it and a `run_required` integration are reached through " +

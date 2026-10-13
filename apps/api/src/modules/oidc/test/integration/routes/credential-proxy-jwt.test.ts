@@ -18,8 +18,8 @@
  *      `Invalid or missing session` 401, not silently to 500.
  *
  *   4. The access rule is the API-key door's (`credential-proxy.test.ts`):
- *      `credential-proxy:call` for a run the caller executes,
- *      `credential-proxy:direct` outside one, on the caller's own connections only.
+ *      `credential-proxy:call-run` for a run the caller executes,
+ *      `credential-proxy:call-own` outside one, on the caller's own connections only.
  *
  * Injection itself is covered by `credential-proxy-injection.test.ts`. Here we
  * only care that the auth gate lets the right principals in, on the right
@@ -123,7 +123,7 @@ async function mintCliToken(ctx: TestContext): Promise<string> {
  * Create a user, own-role org + default space, and mint a device-flow
  * JWT for that user. Returns everything a request needs to hit
  * `/api/credential-proxy/proxy`. The owner is preset `admin` in the space,
- * which holds both `credential-proxy:call` and `credential-proxy:direct`.
+ * which holds both `credential-proxy:call-run` and `credential-proxy:call-own`.
  */
 async function createJwtPrincipal(): Promise<Principal> {
   const ctx = await createTestContext();
@@ -346,10 +346,10 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     return run.id;
   }
 
-  it("a builder, who holds credential-proxy:call alone, is refused outside a run and reaches the shared connection through a remote run of their own", async () => {
+  it("a builder, who holds credential-proxy:call-run alone, is refused outside a run and reaches the shared connection through a remote run of their own", async () => {
     const builder = await memberContext(owner, "member", "builder");
     const body = await expectProblem(await call(builder), 403, { code: "forbidden" });
-    expect(body.detail).toContain("credential-proxy:direct");
+    expect(body.detail).toContain("credential-proxy:call-own");
     expect(upstreamAuth).toEqual([]);
 
     const res = await call(builder, { "X-Run-Id": await remoteRunOf(builder) });
@@ -357,7 +357,7 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     expect(upstreamAuth).toEqual(["Bearer team"]);
   });
 
-  it("the owner, who holds credential-proxy:direct, reaches their own connection only", async () => {
+  it("the owner, who holds credential-proxy:call-own, reaches their own connection only", async () => {
     const refused = await call(owner, { "X-Connection-Id": shared });
     const body = await expectProblem(refused, 404, { code: "credential_not_found" });
     expect(body.detail).toContain("through a run (X-Run-Id)");

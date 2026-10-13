@@ -106,7 +106,7 @@ export function resolveSpaceRole(
  * Falling back would hand someone MORE than their bundle names on the very
  * replica that understands it least.
  *
- * The owner of a personal space holds its preset minus `credential-proxy:direct`.
+ * The owner of a personal space holds its preset minus `credential-proxy:call-own`.
  * Calling the proxy outside a run is what a space's governor hands out, and a
  * personal space has none but its owner: nobody else sees what is called from
  * it, and no team space's enforced default or `block_user_connections` applies.
@@ -116,7 +116,7 @@ export function spacePermissions(ref: SpaceRoleRef | null): Set<Permission> {
   if (!ref) return new Set<Permission>();
   if (ref.kind === "custom") return partitionSpacePermissions(ref.role.permissions).granted;
   const granted = presetPermissions(ref.preset);
-  if (ref.personalOwner) granted.delete("credential-proxy:direct");
+  if (ref.personalOwner) granted.delete("credential-proxy:call-own");
   return granted;
 }
 

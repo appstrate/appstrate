@@ -5,11 +5,11 @@
  * proxy (the REST route, and through it the MCP module's `api_call` tool, its one MCP path)
  * applies one rule. A call takes one of two paths, each with its own permission:
  *
- *   - for a run (`X-Run-Id`): `credential-proxy:call`, and the run is the actor's own, in flight,
+ *   - for a run (`X-Run-Id`): `credential-proxy:call-run`, and the run is the actor's own, in flight,
  *     and executed by the caller ({@link requireCallerRun}). It reaches what the run bound, a
  *     colleague's shared connection included, which is why launching runs (`agents:run`) is not
  *     enough: registering a remote run would otherwise hand out raw access to that connection.
- *   - outside a run: `credential-proxy:direct`. It reaches the actor's own connections only
+ *   - outside a run: `credential-proxy:call-own`. It reaches the actor's own connections only
  *     (`selectAccessibleConnection`).
  */
 
@@ -18,9 +18,9 @@ import { forbidden } from "../../lib/errors.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
 /** What a call made for a run requires. */
-export const PROXY_RUN_PERMISSION = "credential-proxy:call";
+export const PROXY_RUN_PERMISSION = "credential-proxy:call-run";
 /** What a call naming no run requires. */
-export const PROXY_DIRECT_PERMISSION = "credential-proxy:direct";
+export const PROXY_OWN_PERMISSION = "credential-proxy:call-own";
 
 interface ProxyAccessInput {
   /** The caller's effective permissions in the space. */
@@ -38,10 +38,10 @@ interface ProxyAccessInput {
 export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void> {
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
   if (runId === null) {
-    if (permissions.has(PROXY_DIRECT_PERMISSION)) return;
-    onDenied(PROXY_DIRECT_PERMISSION);
+    if (permissions.has(PROXY_OWN_PERMISSION)) return;
+    onDenied(PROXY_OWN_PERMISSION);
     throw forbidden(
-      `Insufficient permissions: ${PROXY_DIRECT_PERMISSION} required to call the credential proxy ` +
+      `Insufficient permissions: ${PROXY_OWN_PERMISSION} required to call the credential proxy ` +
         `outside a run. A call made for a run names it with X-Run-Id and requires ` +
         `${PROXY_RUN_PERMISSION} instead.`,
     );

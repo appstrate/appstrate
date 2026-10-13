@@ -1113,7 +1113,7 @@ program
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",
-    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:direct and reach your own connections only)",
+    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections only)",
   )
   .option(
     "--report-fallback <mode>",

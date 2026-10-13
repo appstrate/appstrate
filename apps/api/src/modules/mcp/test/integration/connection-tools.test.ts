@@ -6,7 +6,7 @@
  * authorization-code flow, `aud` = the organization's MCP resource):
  *
  *   - who is offered the two tools: a space admin and a custom role holding
- *     `credential-proxy:direct`, never a builder, a credential whose scopes omit it, or a
+ *     `credential-proxy:call-own`, never a builder, a credential whose scopes omit it, or a
  *     cookie session or the chat's loopback bearer, which the bearer-only proxy refuses;
  *   - `api_call` makes one proxy call per request and relays what each came back with: the
  *     upstream's answer, cut and filtered, or the proxy's own refusal, never reaching a
@@ -61,8 +61,8 @@ const INTEGRATION_ID = "@cporg/crm";
 const UPSTREAM = "https://1.1.1.1";
 const REDIRECT_URI = "http://localhost:9917/callback";
 const MCP_SCOPE = "openid mcp:read mcp:invoke";
-/** A custom role offered both tools: the transport's two grants and the proxy's direct path. */
-const DIRECT_ROLE = ["mcp:read", "mcp:invoke", "credential-proxy:direct"];
+/** A custom role offered both tools: the transport's two grants and the proxy's permission outside a run. */
+const CALL_OWN_ROLE = ["mcp:read", "mcp:invoke", "credential-proxy:call-own"];
 
 // ─── Upstream stub ────────────────────────────────────────
 // The proxy reaches its upstream through the global `fetch`. Only calls to the upstream host
@@ -275,24 +275,26 @@ describe("mcp connection tools", () => {
       );
       expect(builder).not.toContain("list_connections");
       expect(builder).not.toContain("api_call");
-      // The control: a builder runs agents and holds `credential-proxy:call`, the permission of
+      // The control: a builder runs agents and holds `credential-proxy:call-run`, the permission of
       // a proxy call made for a run. Neither is what declares the tools.
       expect(builder).toContain("run_and_wait");
     });
 
-    it("declares both to a custom role holding `credential-proxy:direct`", async () => {
-      const names = await toolNames(await instanceCaller(await memberHolding(owner, DIRECT_ROLE)));
+    it("declares both to a custom role holding `credential-proxy:call-own`", async () => {
+      const names = await toolNames(
+        await instanceCaller(await memberHolding(owner, CALL_OWN_ROLE)),
+      );
       expect(names).toContain("list_connections");
       expect(names).toContain("api_call");
     });
 
-    it("declares neither to a credential whose scopes omit `credential-proxy:direct`", async () => {
+    it("declares neither to a credential whose scopes omit `credential-proxy:call-own`", async () => {
       // Same creator, a space admin: only the key's own ceiling differs.
       const without = await toolNames(
         await keyCaller(owner, [
           "mcp:read",
           "mcp:invoke",
-          "credential-proxy:call",
+          "credential-proxy:call-run",
           "agents:run",
           "runs:read",
         ]),
@@ -301,7 +303,7 @@ describe("mcp connection tools", () => {
       expect(without).not.toContain("api_call");
       expect(without).toContain("run_and_wait");
 
-      const withIt = await toolNames(await keyCaller(owner, DIRECT_ROLE));
+      const withIt = await toolNames(await keyCaller(owner, CALL_OWN_ROLE));
       expect(withIt).toContain("list_connections");
       expect(withIt).toContain("api_call");
     });
@@ -325,7 +327,7 @@ describe("mcp connection tools", () => {
         name: owner.user.name,
         orgId: owner.orgId,
         orgRole: "owner",
-        permissions: [...DIRECT_ROLE, "credential-proxy:call", "agents:run", "runs:read"],
+        permissions: [...CALL_OWN_ROLE, "credential-proxy:call-run", "agents:run", "runs:read"],
       });
       const names = await toolNames({
         path: spacePath(owner),
@@ -338,7 +340,7 @@ describe("mcp connection tools", () => {
     });
 
     it("declares them per space on the organization's endpoint", async () => {
-      const member = await memberHolding(owner, DIRECT_ROLE);
+      const member = await memberHolding(owner, CALL_OWN_ROLE);
       const other = await seedSpace({ orgId: owner.orgId, name: "Atelier", visibility: "closed" });
       await seedSpaceMember({ spaceId: other.id, userId: member.user.id, presetRole: "builder" });
       await connect(member, "mine");

@@ -20,12 +20,10 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
-- **`credential-proxy:direct`** (`@appstrate/core/permissions`):
-  `CoreResources["credential-proxy"]` is `"call" | "direct"`, so `CorePermission`
-  and `SpaceLevelPermission` gain the string and
-  `CORE_RESOURCE_ACTIONS["credential-proxy"]` is `["call", "direct"]`. `direct`
-  gates a call to `/api/credential-proxy/proxy` outside a run, on the caller's
-  own connections; `call` gates a call for a run (`X-Run-Id`). (#1894)
+- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
+  gating a call to `/api/credential-proxy/proxy` outside a run, on the
+  caller's own connections. `CorePermission` and `SpaceLevelPermission` gain
+  the string. (#1894)
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus
@@ -142,6 +140,13 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   `off`, or when what it sends is not known. (#1774)
 
 ### Changed
+
+- **BREAKING: `credential-proxy:call` is `credential-proxy:call-run`**
+  (`@appstrate/core/permissions`): `CoreResources["credential-proxy"]` is
+  `"call-run" | "call-own"` and `CORE_RESOURCE_ACTIONS["credential-proxy"]`
+  is `["call-run", "call-own"]`. `call-run` gates a call to
+  `/api/credential-proxy/proxy` for a run (`X-Run-Id`); a guard or a role
+  naming `credential-proxy:call` no longer type-checks. (#1894)
 
 - **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
   `scopesGranted` and `missingScopes`, and a

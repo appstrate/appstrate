@@ -142,11 +142,11 @@ echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
 ```sh
 # The platform injects the credentials server-side; you never see them. A call
 # takes one of two paths, each with its own permission:
-#   - for a run (X-Run-Id): `credential-proxy:call`, the connections that run
+#   - for a run (X-Run-Id): `credential-proxy:call-run`, the connections that run
 #     bound. This is what a locally executed `appstrate run` does when its run is
 #     registered on the instance (--report, on by default with a profile or an
 #     API key). Launching runs (`agents:run`) does not include it.
-#   - outside a run: `credential-proxy:direct`, and YOUR OWN connections only.
+#   - outside a run: `credential-proxy:call-own`, and YOUR OWN connections only.
 #     A connection another member shared, or an integration under an enforced
 #     org default (403 run_required), is reachable through a run only.
 #     `appstrate run --report=false` calls this way, and so does a call you make
@@ -197,7 +197,7 @@ If you hit any of the following, stop and surface the issue to the human instead
 
 - `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed. With `APPSTRATE_API_KEY` set, the key itself was rejected instead: the human must supply a valid one.
 - `403 forbidden` — the pinned org doesn't have permission. Offer `appstrate org switch` or ask which org to use.
-- `403` from `/api/credential-proxy/*` naming `credential-proxy:direct`, or `403 run_required` — a call made outside a run that the human's role, or an enforced org default on the integration, does not allow there. The same call goes through a run (`appstrate run` with reporting on, i.e. no `--report=false`) when the role holds `credential-proxy:call`; a `403` naming both permissions (`credential-proxy:call|credential-proxy:direct`) means the role holds neither and cannot use the proxy at all. Do not look for another route to the credentials.
+- `403` from `/api/credential-proxy/*` naming `credential-proxy:call-own`, or `403 run_required` — a call made outside a run that the human's role, or an enforced org default on the integration, does not allow there. The same call goes through a run (`appstrate run` with reporting on, i.e. no `--report=false`) when the role holds `credential-proxy:call-run`; a `403` naming both permissions (`credential-proxy:call-run|credential-proxy:call-own`) means the role holds neither and cannot use the proxy at all. Do not look for another route to the credentials.
 - `400 Space context required` — the profile has no `spaceId` pinned. Run `appstrate space current` to check, then `appstrate space switch` (or surface the error — the cascade at login should have handled this).
 - `404 Space '<id>' not found in this organization` — stale space pin from a previous org. Run `appstrate space switch` under the current org.
 - `Profile "<name>" … pins the retired key "applicationId"` — the profile on disk predates the space rename. Every command is blocked until the human deletes that line from `config.toml` and re-pins with `appstrate space switch`. Surface this to the human; do not edit their config yourself.

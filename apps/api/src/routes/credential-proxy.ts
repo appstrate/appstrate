@@ -21,9 +21,9 @@
  *     sessions are rejected because the drive-by CSRF threat model
  *     doesn't fit an endpoint that reaches third-party providers.
  *   - One permission per path (`credential-proxy/access.ts`):
- *     `credential-proxy:call` with `X-Run-Id`, which must name the actor's own
+ *     `credential-proxy:call-run` with `X-Run-Id`, which must name the actor's own
  *     in-flight run that the caller executes (never one the platform executes);
- *     `credential-proxy:direct` without it
+ *     `credential-proxy:call-own` without it
  *   - Per-space scope (principal cannot reach providers in another space)
  *   - Run binding — `X-Run-Id` confines the call to its run's bound connections,
  *     a colleague's shared one included; outside a run only the actor's own
@@ -92,11 +92,11 @@ import { PROXY_CONTROL_HEADERS } from "../services/credential-proxy/control-head
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
 import {
   authorizeProxyCall,
-  PROXY_DIRECT_PERMISSION,
+  PROXY_OWN_PERMISSION,
   PROXY_RUN_PERMISSION,
 } from "../services/credential-proxy/access.ts";
 import {
-  listDirectProxyConnections,
+  listOwnProxyConnections,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -114,8 +114,8 @@ export function createCredentialProxyRouter() {
   router.use("/*", requireSpaceContext());
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
-  router.get("/connections", requirePermission("credential-proxy", "direct"), async (c) => {
-    const data = await listDirectProxyConnections(getSpaceScope(c), getActor(c));
+  router.get("/connections", requirePermission("credential-proxy", "call-own"), async (c) => {
+    const data = await listOwnProxyConnections(getSpaceScope(c), getActor(c));
     return c.json(listResponse(data));
   });
 
@@ -128,7 +128,7 @@ export function createCredentialProxyRouter() {
     rateLimit(limits.rate_per_min),
     // Either path's permission opens the route; `authorizeProxyCall` requires the one of the path
     // the call takes.
-    requireAnyPermission([PROXY_RUN_PERMISSION, PROXY_DIRECT_PERMISSION]),
+    requireAnyPermission([PROXY_RUN_PERMISSION, PROXY_OWN_PERMISSION]),
     async (c: Context<AppEnv>) => {
       // Accept headless API keys and bearer JWTs from the interactive CLI
       // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).

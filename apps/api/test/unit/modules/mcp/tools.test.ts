@@ -118,7 +118,7 @@ describe("mcp catalog", () => {
     expect(
       operationIdGranted(
         "listCredentialProxyConnections",
-        new Set(["credential-proxy:direct"]),
+        new Set(["credential-proxy:call-own"]),
         undefined,
       ),
     ).toBe(true);

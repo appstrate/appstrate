@@ -15,8 +15,8 @@
  *     → 403
  *   - `credential_not_found` (no connection / integration not installed) → 404
  *   - several own connections and no `X-Connection-Id` → 409 must_choose_connection
- *   - one permission per path: `credential-proxy:call` with `X-Run-Id` (the caller's own
- *     in-flight run, executed by the caller), `credential-proxy:direct` without
+ *   - one permission per path: `credential-proxy:call-run` with `X-Run-Id` (the caller's own
+ *     in-flight run, executed by the caller), `credential-proxy:call-own` without
  *   - `X-Run-Id` confines the call to the run's bound connections; without it
  *     only the caller's own connections are reachable
  *   - `GET /api/credential-proxy/connections` lists what a call without a run reaches
@@ -28,7 +28,7 @@
  * Auth is a Bearer API key — cookie sessions are refused by design and the
  * route only accepts API keys / device-flow JWTs (the JWT door is covered in
  * `modules/oidc/test/integration/routes/credential-proxy-jwt.test.ts`). Of
- * the space presets only `admin` grants `credential-proxy:direct`; the caller
+ * the space presets only `admin` grants `credential-proxy:call-own`; the caller
  * here is an org member holding it through a custom space role.
  */
 
@@ -193,7 +193,12 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
 }
 
 /** Both proxy paths: outside a run, and for one. */
-const BOTH_PATHS = ["credential-proxy:direct", "credential-proxy:call", "agents:run", "runs:read"];
+const BOTH_PATHS = [
+  "credential-proxy:call-own",
+  "credential-proxy:call-run",
+  "agents:run",
+  "runs:read",
+];
 
 /** A fresh org, as the member the proxy is called by: both paths are open to them. */
 async function proxyCallerContext(): Promise<TestContext> {
@@ -953,7 +958,7 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
     // Off the allowlist, a path the key's scopes do not open, and a connection the run did not bind.
     const offList = await call({ "X-Run-Id": runId, "X-Target": "https://evil.example.com/x" });
     expect(offList.status).toBe(403);
-    const runOnly = await mintProxyKey(ctx, ["credential-proxy:call"]);
+    const runOnly = await mintProxyKey(ctx, ["credential-proxy:call-run"]);
     const noPath = await call({ Authorization: `Bearer ${runOnly}`, "X-Connection-Id": own1 });
     expect(noPath.status).toBe(403);
     expect((await call({ "X-Run-Id": runId, "X-Connection-Id": own1 })).status).toBe(400);
@@ -1159,27 +1164,27 @@ describe("POST /api/credential-proxy/proxy — one permission per path", () => {
     return body.detail ?? "";
   }
 
-  it("X-Run-Id + credential-proxy:call: allowed on the caller's own remote run, credential-proxy:direct or not", async () => {
+  it("X-Run-Id + credential-proxy:call-run: allowed on the caller's own remote run, credential-proxy:call-own or not", async () => {
     const runId = await ownRun();
-    expect((await call(["credential-proxy:call"], runId)).status).toBe(200);
+    expect((await call(["credential-proxy:call-run"], runId)).status).toBe(200);
     expect((await call(BOTH_PATHS, runId)).status).toBe(200);
     expect(upstreamCalls).toBe(2);
   });
 
-  it("X-Run-Id without credential-proxy:call: 403, credential-proxy:direct and agents:run notwithstanding", async () => {
-    const scopes = ["credential-proxy:direct", "agents:run", "runs:read"];
+  it("X-Run-Id without credential-proxy:call-run: 403, credential-proxy:call-own and agents:run notwithstanding", async () => {
+    const scopes = ["credential-proxy:call-own", "agents:run", "runs:read"];
     const detail = await refusal(await call(scopes, await ownRun()));
-    expect(detail).toContain("credential-proxy:call");
+    expect(detail).toContain("credential-proxy:call-run");
   });
 
-  it("no X-Run-Id without credential-proxy:direct: 403 naming it and the run path", async () => {
-    const detail = await refusal(await call(["credential-proxy:call"]));
-    expect(detail).toContain("credential-proxy:direct");
+  it("no X-Run-Id without credential-proxy:call-own: 403 naming it and the run path", async () => {
+    const detail = await refusal(await call(["credential-proxy:call-run"]));
+    expect(detail).toContain("credential-proxy:call-own");
     expect(detail).toContain("X-Run-Id");
   });
 
   it("neither permission: the route guard refuses with or without X-Run-Id", async () => {
-    const required = "credential-proxy:call|credential-proxy:direct";
+    const required = "credential-proxy:call-run|credential-proxy:call-own";
     expect(await refusal(await call(["runs:read"]))).toContain(required);
     expect(await refusal(await call(["runs:read"], await ownRun()))).toContain(required);
   });
@@ -1201,7 +1206,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
     await flushRedis();
     ctx = await proxyCallerContext();
     colleague = await memberContext(ctx, "member");
-    apiKey = await mintProxyKey(ctx, ["credential-proxy:direct"]);
+    apiKey = await mintProxyKey(ctx, ["credential-proxy:call-own"]);
     await seedGmailIntegration(ctx);
     upstreamAuth = [];
     mockUpstream(async (_input, init) => {
@@ -1401,7 +1406,7 @@ describe("GET /api/credential-proxy/connections", () => {
   });
   afterEach(() => restoreFetch());
 
-  async function list(scopes: string[] = ["credential-proxy:direct"]): Promise<Response> {
+  async function list(scopes: string[] = ["credential-proxy:call-own"]): Promise<Response> {
     return app.request("/api/credential-proxy/connections", {
       headers: {
         Authorization: `Bearer ${await mintProxyKey(ctx, scopes)}`,
@@ -1411,11 +1416,11 @@ describe("GET /api/credential-proxy/connections", () => {
     });
   }
 
-  it("requires credential-proxy:direct: credential-proxy:call opens the proxy's run path, not this list", async () => {
-    const body = await expectProblem(await list(["credential-proxy:call"]), 403, {
+  it("requires credential-proxy:call-own: credential-proxy:call-run opens the proxy's run path, not this list", async () => {
+    const body = await expectProblem(await list(["credential-proxy:call-run"]), 403, {
       code: "forbidden",
     });
-    expect(body.detail).toContain("credential-proxy:direct");
+    expect(body.detail).toContain("credential-proxy:call-own");
   });
 
   it("lists the caller's own usable connections as the proxy serves them, never a colleague's", async () => {
@@ -1575,7 +1580,7 @@ describe("GET /api/credential-proxy/connections", () => {
   });
 });
 
-describe("POST /api/credential-proxy/proxy — a remote run lends what it bound to a launcher holding credential-proxy:call", () => {
+describe("POST /api/credential-proxy/proxy — a remote run lends what it bound to a launcher holding credential-proxy:call-run", () => {
   const SVC = "@cporg/svc";
   const AGENT = "@cporg/briefing";
 
@@ -1678,23 +1683,23 @@ describe("POST /api/credential-proxy/proxy — a remote run lends what it bound 
             ...extra,
           },
         });
-      return { viaRun: await proxy({ "X-Run-Id": runId }), direct: await proxy({}) };
+      return { viaRun: await proxy({ "X-Run-Id": runId }), outsideRun: await proxy({}) };
     };
 
-    // `builder` holds `credential-proxy:call` and no `credential-proxy:direct`: the run lends
+    // `builder` holds `credential-proxy:call-run` and no `credential-proxy:call-own`: the run lends
     // the shared connection, and outside it the same caller reaches nothing.
     const builder = await launchAndProxy(await memberContext(owner, "member", "builder"));
     expect(builder.viaRun.status, await builder.viaRun.clone().text()).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer team-token"]);
-    const direct = await expectProblem(builder.direct, 403, { code: "forbidden" });
-    expect(direct.detail).toContain("credential-proxy:direct");
+    const refusal = await expectProblem(builder.outsideRun, 403, { code: "forbidden" });
+    expect(refusal.detail).toContain("credential-proxy:call-own");
 
     // `operator` launches runs too (`agents:run`) and holds neither proxy permission: registering
     // a remote run is not a way to the colleague's connection.
     const operator = await launchAndProxy(await memberContext(owner, "member", "operator"));
-    for (const res of [operator.viaRun, operator.direct]) {
+    for (const res of [operator.viaRun, operator.outsideRun]) {
       const refused = await expectProblem(res, 403, { code: "forbidden" });
-      expect(refused.detail).toContain("credential-proxy:call|credential-proxy:direct");
+      expect(refused.detail).toContain("credential-proxy:call-run|credential-proxy:call-own");
     }
     expect(upstreamAuth).toHaveLength(1);
   });

@@ -45,7 +45,7 @@ describe("resolveSpaceRole on a personal space", () => {
     }
   });
 
-  it("grants its owner everything `admin` holds but credential-proxy:direct", () => {
+  it("grants its owner everything `admin` holds but credential-proxy:call-own", () => {
     // Calling the proxy outside a run is handed out by a space's governor, and
     // a personal space has none but its owner (RBAC spec §3.6).
     const admin = presetPermissions("admin");
@@ -54,7 +54,7 @@ describe("resolveSpaceRole on a personal space", () => {
       expect(
         [...admin].filter((permission) => !owned.has(permission)),
         orgRole,
-      ).toEqual(["credential-proxy:direct"]);
+      ).toEqual(["credential-proxy:call-own"]);
       expect([...owned].filter((permission) => !admin.has(permission))).toEqual([]);
     }
   });
