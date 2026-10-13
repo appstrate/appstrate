@@ -170,6 +170,18 @@ describe("full persona invariants", () => {
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
 
+  // #1923: an inherited default can be a whole MCP surface, and a run loads every schema it is given.
+  it("tells an inline composer to narrow a large default to the tools the task needs", () => {
+    expect(FULL).toContain(
+      "when the default is a large set, list only the exact tools the task needs",
+    );
+    // The context renders a long default as a count, so its names come from the detail read too.
+    expect(FULL).toMatch(
+      /beyond the default, or the default is shown as a count, first inspect .* `tool_catalog`/,
+    );
+    expect(REDUCED).not.toContain("when the default is a large set");
+  });
+
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {

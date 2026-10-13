@@ -145,6 +145,35 @@ describe("formatCallerContext", () => {
     expect(out).toContain("no default — you must select tools explicitly");
   });
 
+  it("lists up to 12 default tools by name and renders a longer default as its count", () => {
+    const names = (count: number) => Array.from({ length: count }, (_, i) => `tool_${i + 1}`);
+    const out = contextText(
+      {
+        user: { name: "Ada" },
+        org: { role: "member" },
+        connections: [
+          {
+            integration_package_id: "@acme/twelve",
+            name: "Twelve",
+            source: "own",
+            default_tools: names(12),
+          },
+          {
+            integration_package_id: "@acme/thirteen",
+            name: "Thirteen",
+            source: "shared",
+            default_tools: names(13),
+          },
+        ],
+      },
+      BASE_OPTS,
+    );
+    expect(out).toContain(`(own; default: ${names(12).join(", ")})`);
+    // Past the cap the names are one detail read away, not in every turn's prompt.
+    expect(out).toContain("(shared; default: 13 tools (names: tool_catalog))");
+    expect(out).not.toContain("tool_13");
+  });
+
   it("tells a draft-only agent apart by whether THIS caller may run its draft", () => {
     // `published: false` alone does not say "run it with version=draft": the
     // run route reserves the draft to whoever may WRITE the agent, so telling
