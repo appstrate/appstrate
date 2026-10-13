@@ -28,6 +28,9 @@ describe("refuseLoginPlaceholders", () => {
     ["a nested value", { filter: { any: [{ text: "x {{otp}} y" }] } }],
     ["an array item", { ids: ["a", "{{password}}"] }],
     ["a property name", { "{{password}}": 1 }],
+    // The proxy's grammar allows whitespace inside the braces; JSON text would escape it away.
+    ["a value with a tab inside the braces", { query: "{{\tpassword }}" }],
+    ["a value with a line break inside the braces", { query: "{{\npassword\n}}" }],
   ])("refuses a call naming a login input in %s, without reaching the runner", async (_, args) => {
     const { client, calls } = recordingClient();
     const result = await client.callTool({ name: "search", arguments: args });

@@ -429,6 +429,18 @@ describe("transparent egress listener — plain HTTP path", () => {
       "an authority-form target",
       "GET other.test.local:80 HTTP/1.1\r\nHost: api.test.local\r\n\r\n",
     ],
+    [
+      "a bare LF hiding a first Host line",
+      "GET / HTTP/1.1\r\nX-B: c\nHost: other.test.local\r\nHost: api.test.local\r\n\r\n",
+    ],
+    [
+      "a bare LF before a folded Host line",
+      "GET / HTTP/1.1\r\nX-B: c\nHost: other.test.local\r\nX-A: b\r\n Host: api.test.local\r\n\r\n",
+    ],
+    [
+      "a backslash in the absolute-form authority",
+      "GET http://other.test.local\\@api.test.local/ HTTP/1.1\r\nHost: api.test.local\r\n\r\n",
+    ],
   ])("destroys a request with %s, without dialing", async (_, head) => {
     const upstream = await startTcpEcho();
     const events: EgressListenerEvent[] = [];
@@ -444,7 +456,7 @@ describe("transparent egress listener — plain HTTP path", () => {
     expect(closed).toBe(true);
     expect(received.length).toBe(0);
     expect(events).toEqual([
-      { kind: "tunnel-refused", target: `<unknown>:${upstream.port}`, reason: "no-host-header" },
+      { kind: "tunnel-refused", target: `<unknown>:${upstream.port}`, reason: "ambiguous-host" },
     ]);
   });
 

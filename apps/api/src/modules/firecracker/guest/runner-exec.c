@@ -10,8 +10,10 @@
 // (`delivery.files`): before dropping, the wrapper hands it to <uid> and its
 // private group and strips every group and other bit, so the runner reads it
 // and neither the agent nor a sibling runner does. Only a regular file with
-// one link, owned by the calling uid, is given away: the caller cannot make
-// the wrapper touch a file it does not own, and a symlink is not followed.
+// one link, owned by the calling uid, is given away, and no component of its
+// path may be a symlink: the wrapper resolves the path as root, so a link
+// planted in a directory the agent can write would point it at another file
+// of the caller's.
 //
 // It drops to <uid> — one uid of the runner pool, allocated by the sidecar
 // per spawned integration runner — with that pool user's private group
@@ -41,6 +43,7 @@
 
 #include <fcntl.h>
 #include <grp.h>
+#include <linux/openat2.h>
 #include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,7 +76,12 @@ static int parse_pool_uid(const char *s, uid_t *out) {
 // owner bits only. Runs before the drop, as root, on a descriptor so the
 // file checked is the file changed.
 static int own_for_runner(const char *path, uid_t uid, gid_t gid) {
-  const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  // musl has no openat2() wrapper; the syscall needs kernel >= 5.6 (the guest runs 6.1).
+  const struct open_how how = {
+      .flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC,
+      .resolve = RESOLVE_NO_SYMLINKS,
+  };
+  const int fd = (int)syscall(SYS_openat2, AT_FDCWD, path, &how, sizeof how);
   if (fd < 0) return -1;
   struct stat st;
   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_uid != getuid() ||

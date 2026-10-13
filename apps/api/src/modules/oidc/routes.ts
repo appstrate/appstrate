@@ -2615,14 +2615,15 @@ export function createOidcRouter() {
       });
     }
 
-    // Redirect only to a post-logout URI an operator or an org admin registered on the client;
-    // "/" otherwise. A client that registered itself (DCR, CIMD) is never honoured: anyone can
-    // create one, so its URIs would make this public route an open redirect. Nor are a client's
-    // `redirect_uris`: an authorize callback is not a place to land a signed-out browser.
+    // Redirect only to a post-logout URI registered on an enabled client by whoever administers
+    // it; "/" otherwise. A client that registered itself (DCR, CIMD) is never honoured, and a
+    // `redirect_uris` entry is not a post-logout URI. Any org can still register a client and its
+    // URIs: without an `id_token_hint` this route cannot tell who asks.
     if (postLogoutUri && clientId) {
       const client = await getClientCached(clientId);
       if (
         client &&
+        !client.disabled &&
         client.postLogoutRedirectUris.includes(postLogoutUri) &&
         !(await isSelfServiceClient(clientId))
       ) {

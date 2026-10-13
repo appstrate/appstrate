@@ -27752,7 +27752,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invitation email does not match the authenticated session */
+            /** @description `email_mismatch` — the invitation is for another address than the session's. `not_a_platform_account` — the session's account belongs to a space's application (`end_user:<space>` realm) and cannot join an organization. */
             403: {
                 headers: {
                     [name: string]: unknown;

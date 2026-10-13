@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BASE_ERROR_CODES, betterAuth, getCurrentAdapter } from "better-auth";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getOAuthState, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -257,18 +257,29 @@ async function assertSignInAudience(
   const realm = await readRealm();
   if (realm === undefined) return;
   const query = (context.query ?? {}) as Record<string, unknown>;
+  // A social callback whose transaction resolves to no audience (its client disabled since, an
+  // authorize destination naming none) is refused like one of another audience: the resolver
+  // throws there, which on this browser redirect would answer a bare error body.
   const expected = await resolver({
     headers: context.headers ?? null,
     path: context.path,
     query,
+  }).catch((error: unknown) => {
+    if (context.path !== "/callback/:id") throw error;
+    return undefined;
   });
   if (realm === expected) return;
   logger.warn("auth: refused a sign-in for an account outside its audience", {
     expected,
     path: context.path,
   });
+  // A magic link carries its error page in the query; a social callback, in the OAuth state its
+  // sign-in stored.
   const raw = query.errorCallbackURL ?? query.callbackURL;
-  const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
+  const callback =
+    typeof raw === "string"
+      ? decodeURIComponent(raw)
+      : ((await getOAuthState().catch(() => null))?.errorURL ?? "/");
   throw refusalRedirect(context, callback, "signup_disabled");
 }
 

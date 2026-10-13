@@ -246,7 +246,7 @@ describe("realm isolation", () => {
   });
 
   it("the SSE cookie branch refuses a member whose session is not of the platform realm", async () => {
-    // A membership row an earlier release could attach to such an account.
+    // A member, so the session's realm is the only thing left to refuse it.
     const { userId, cookie } = await endUserRealmAccount("stream@example.com");
     await db.insert(organizationMembers).values({ orgId: ctx.orgId, userId, role: "admin" });
     const res = await app.request(

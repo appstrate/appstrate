@@ -1456,7 +1456,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   with the login secret in every request the runner sends to the auth's
   authorized URIs, a parallel tool call's included. The sidecar refuses a call
   whose arguments name a `{{key}}` of the connection's login inputs, at any
-  time in the run.
+  time in the run. On such a connection an argument that legitimately
+  contains that text (a mail-merge `{{email}}`) is refused too.
 
 - **Under `RUN_ADAPTER=firecracker`, a `delivery.files` credential belongs to
   its runner** (#1949). The sidecar wrote it on its own uid with the
@@ -1468,9 +1469,13 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 - **Hardening** (#1949).
   - **BREAKING (OIDC): `GET /api/oauth/logout` redirects only to a
-    `postLogoutRedirectUris` entry.** A `redirect_uris` entry is no longer
-    accepted as a fallback, and a client that registered itself (DCR, CIMD) is
-    never redirected to: register the post-logout URI on the client.
+    `postLogoutRedirectUris` entry of an enabled client.** A `redirect_uris`
+    entry is no longer accepted as a fallback, and a client that registered
+    itself (DCR, CIMD) is never redirected to. Before the deploy, list the
+    clients whose logout relied on the fallback
+    (`SELECT client_id, name FROM oauth_clients WHERE post_logout_redirect_uris IS NULL OR post_logout_redirect_uris = '{}'`,
+    column names as in `packages/db/src/schema/oidc.ts`) and register their
+    post-logout URI; until then their logout lands on `/`.
   - The magic-link confirmation page names no account: it knew the address
     only from the link's query string.
   - A remote MCP credential that is not an HTTP header value is refused

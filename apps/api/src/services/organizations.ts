@@ -54,7 +54,7 @@ import {
   unshareConnectionsOfOwnersWithoutAccess,
 } from "./space-members.ts";
 import { orphanPersonalSpaces } from "./spaces.ts";
-import { ensurePersonalSpace, provisionOrg } from "@appstrate/db/provision-org";
+import { ensurePersonalSpace, isPlatformAccount, provisionOrg } from "@appstrate/db/provision-org";
 import type { ConnectionShare, RevokedSpaceAssignment } from "./space-members.ts";
 import { assignableRolesForMember, canRemoveMember } from "@appstrate/shared-types";
 import { getMcpOrgResourceUri, getMcpSpaceResourceUri } from "../lib/audiences.ts";
@@ -376,8 +376,8 @@ export async function getOrgMemberWithProfile(orgId: string, userId: string) {
  * downgrade), and the space half is idempotent for its own reasons, so
  * re-provisioning an existing member is safe.
  *
- * Only an account of the `platform` realm becomes a member: an `end_user:<space>` account is an
- * outsider of some space's application, whatever address it holds (`403 not_a_platform_account`).
+ * Only an account of the `platform` realm becomes a member (`isPlatformAccount`):
+ * `403 not_a_platform_account` otherwise.
  */
 export async function provisionMember(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
@@ -385,12 +385,7 @@ export async function provisionMember(
   userId: string,
   role: OrgRole = "member",
 ): Promise<{ created: boolean }> {
-  const [account] = await tx
-    .select({ realm: user.realm })
-    .from(user)
-    .where(eq(user.id, userId))
-    .limit(1);
-  if (account && account.realm !== "platform") {
+  if (!(await isPlatformAccount(tx, userId))) {
     throw new ApiError({
       status: 403,
       code: "not_a_platform_account",

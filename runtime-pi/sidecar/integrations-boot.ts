@@ -1079,6 +1079,14 @@ async function registerLocalIntegration(
   return { allocatedNs, toolCount: host.routeCount() - sizeBefore };
 }
 
+/** Every string of a JSON value, property names included, as the tool receives them. */
+function stringsOf(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringsOf);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, item]) => [key, ...stringsOf(item)]);
+}
+
 /**
  * Refuse an agent's tool call whose arguments carry a `{{key}}` placeholder of the connection's
  * login inputs.
@@ -1098,9 +1106,9 @@ export function refuseLoginPlaceholders(
   return {
     ...client,
     async callTool(args, options) {
-      const named = unresolvedPlaceholders(JSON.stringify(args.arguments ?? {}), {}).find((key) =>
-        keys.has(key),
-      );
+      const named = stringsOf(args.arguments)
+        .flatMap((text) => unresolvedPlaceholders(text, {}))
+        .find((key) => keys.has(key));
       if (named !== undefined) {
         return {
           isError: true,

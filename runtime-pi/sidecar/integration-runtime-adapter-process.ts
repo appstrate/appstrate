@@ -363,6 +363,9 @@ export async function materializeFileMountsOnHost(
       if (parent && parent !== "/" && parent !== ".") {
         await mkdir(parent, { recursive: true });
       }
+      // A file an earlier spawn of this run left here now belongs to that runner's uid: replace
+      // it rather than write into it.
+      await rm(containerPath, { force: true });
       await writeFile(containerPath, bytes, { mode: finalMode });
       await chmod(containerPath, finalMode);
       writtenAt = containerPath;
@@ -376,6 +379,7 @@ export async function materializeFileMountsOnHost(
       );
       try {
         await mkdir(dirname(scratchPath), { recursive: true });
+        await rm(scratchPath, { force: true });
         await writeFile(scratchPath, bytes, { mode: finalMode });
         await chmod(scratchPath, finalMode);
         writtenAt = scratchPath;

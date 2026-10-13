@@ -427,7 +427,8 @@ host↔guest isolation.
    `delivery.files` credential the sidecar wrote owner-only for that runner:
    before dropping, the wrapper gives it to the runner's uid and private group
    with owner bits only, and refuses anything but a single-link regular file
-   the sidecar owns (no symlink is followed), so the runner reads its
+   the sidecar owns, reached through no symlink at any component of its path
+   (`openat2` with `RESOLVE_NO_SYMLINKS`), so the runner reads its
    credential and neither the agent nor a sibling runner does. Each pool user `runner<i>` has a
    private primary group (gid == uid) and a 0700 home `/home/runner<i>`; the
    wrapper sets `HOME` to it, applies `umask 007` and closes every inherited

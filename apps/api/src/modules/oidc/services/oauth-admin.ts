@@ -269,7 +269,18 @@ export function getClientCached(clientId: string): Promise<OAuthClientRecord | n
   return clientCache.get(clientId, () => getClient(clientId));
 }
 
-/** True for a client that registered itself (DCR, CIMD): nobody the platform trusts declared it. */
+/**
+ * Whether `clientId` registered itself (DCR / CIMD) — the `self_service` column
+ * `markClientSelfService` stamps.
+ *
+ * Such a client mints instance tokens carrying the connecting user's full
+ * authority, so the only safe audience is a single protected resource (a per-org
+ * MCP endpoint) whose own resource-server check and the outbound confinement in
+ * `protected-resources.ts` jointly cage it; the `/oauth2/token` guard enforces
+ * that at mint time. A missing row reads as not self-service, so
+ * operator-provisioned clients (the dashboard SPA / CLI) keep targeting the
+ * platform audience under the other gates.
+ */
 export async function isSelfServiceClient(clientId: string): Promise<boolean> {
   const [row] = await db
     .select({ selfService: oauthClient.selfService })

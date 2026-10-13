@@ -93,8 +93,9 @@ want
 $want"
 
 # --own refusals, each exit 2 with the file left as it was: a file the caller
-# does not own, a symlink, a directory, a second hard link, a missing file,
-# and --own with no command after it.
+# does not own, a symlink, a file reached through a symlinked directory, a
+# directory, a second hard link, a missing file, and --own with no command
+# after it.
 chown 0:0 "$second"
 foreign=/tmp/foreign
 echo x >"$foreign"
@@ -103,12 +104,16 @@ ln -s "$second" /tmp/link
 mkdir /tmp/dir
 echo y >/tmp/linked
 ln /tmp/linked /tmp/linked2
-for path in "$foreign" /tmp/link /tmp/dir /tmp/linked /tmp/missing; do
+mkdir /tmp/real
+echo z >/tmp/real/key
+ln -s /tmp/real /tmp/via
+for path in "$foreign" /tmp/link /tmp/via/key /tmp/dir /tmp/linked /tmp/missing; do
   "$bin" --own "$path" 1100 /bin/true 2>/dev/null && code=0 || code=$?
   [ "$code" -eq 2 ] || fail "--own '$path' exited $code, want 2"
 done
 [ "$(stat -c '%u' "$foreign")" = 1102 ] || fail "--own changed a file the caller does not own"
 [ "$(stat -c '%u' "$second")" = 0 ] || fail "--own followed a symlink"
+[ "$(stat -c '%u' /tmp/real/key)" = 0 ] || fail "--own followed a symlinked directory"
 "$bin" --own "$second" 1100 2>/dev/null && code=0 || code=$?
 [ "$code" -eq 2 ] || fail "--own without a command exited $code, want 2"
 [ "$(stat -c '%u' "$second")" = 0 ] || fail "--own changed a file before refusing its arguments"

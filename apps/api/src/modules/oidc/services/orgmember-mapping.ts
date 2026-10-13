@@ -58,7 +58,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { organizationMembers, user } from "@appstrate/db/schema";
+import { organizationMembers } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import type { OrgRole } from "../../../types/index.ts";
 import type { SpaceAssignment } from "@appstrate/core/permissions";
@@ -117,15 +117,6 @@ export class OrgSignupConfigurationError extends Error {
   }
 }
 
-async function isPlatformAccount(userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ realm: user.realm })
-    .from(user)
-    .where(eq(user.id, userId))
-    .limit(1);
-  return row?.realm === "platform";
-}
-
 /**
  * Resolve (or create) the org membership for an authenticated Better Auth
  * identity against a specific organization, subject to the provided signup
@@ -141,10 +132,8 @@ export async function resolveOrCreateOrgMembership(
   const existing = await findMembership(authUser.id, orgId);
   if (existing) return existing;
 
-  // Step 2: not a member — gate on signup policy, and on the account's realm: an
-  // `end_user:<space>` account holding the address is not the platform member an org-level
-  // client provisions (`provisionMember` refuses it too; here the refusal is the styled one).
-  if (!policy.allowSignup || !(await isPlatformAccount(authUser.id))) {
+  // Step 2: not a member — gate on signup policy.
+  if (!policy.allowSignup) {
     throw new OrgSignupClosedError(authUser.id, orgId, authUser.email);
   }
 
@@ -156,7 +145,16 @@ export async function resolveOrCreateOrgMembership(
     // SSO-provisioned member is not the one population without one. `created`
     // is its ON CONFLICT DO NOTHING `RETURNING` — the loser of the concurrent-
     // login race gets `false` and re-reads through step 1.
-    const { created } = await provisionMember(tx, orgId, authUser.id, policy.signupRole);
+    // The door admits platform accounts only: to an `end_user:<space>` account holding the
+    // address, this client's signup is closed.
+    const { created } = await provisionMember(tx, orgId, authUser.id, policy.signupRole).catch(
+      (error: unknown) => {
+        if (error instanceof ApiError && error.code === "not_a_platform_account") {
+          throw new OrgSignupClosedError(authUser.id, orgId, authUser.email);
+        }
+        throw error;
+      },
+    );
     if (!created) return null;
     const assignments = policy.signupSpaceAssignments ?? [];
     try {
