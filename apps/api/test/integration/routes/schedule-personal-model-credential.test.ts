@@ -15,7 +15,13 @@ import { getTestApp } from "../../helpers/app.ts";
 import { authHeaders } from "../../helpers/auth.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedOrgModelProviderKey, seedSchedule } from "../../helpers/seed.ts";
+import {
+  seedAgent,
+  seedOrgModelProviderKey,
+  seedSchedule,
+  seedSpace,
+  seedSpacePackage,
+} from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import {
   createFakeOrchestrator,
@@ -361,6 +367,21 @@ describe("schedule payer — organization credentials only", () => {
       const res = await send("PATCH", `/api/models/${bound.id}`, { credentialId: null });
 
       await expectScheduled(res, [schedule.id]);
+    });
+
+    it("unbinds a model the agent selects in another space than the schedule's", async () => {
+      // The first model of an organization becomes its default, which the schedule inherits.
+      await seedBoundModel("Default GPT");
+      const bound = await seedBoundModel("Team GPT");
+      const other = await seedSpace({ orgId: ctx.orgId, name: "Other space" });
+      await seedSpacePackage(other.id, AGENT_ID, { modelId: bound.id });
+      await seedAgentSchedule();
+
+      const res = await send("PATCH", `/api/models/${bound.id}`, { credentialId: null });
+
+      expect(res.status).toBe(200);
+      const [row] = await db.select().from(orgModels).where(eq(orgModels.id, bound.id));
+      expect(row!.credentialId).toBeNull();
     });
 
     it("unbinds a model only disabled schedules would run", async () => {
