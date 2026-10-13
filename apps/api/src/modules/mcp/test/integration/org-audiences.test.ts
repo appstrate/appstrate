@@ -14,7 +14,7 @@
  * prefix is not the module's to delete.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, inArray, like } from "drizzle-orm";
 import { oauthResource } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
@@ -185,7 +185,7 @@ describe("per-space MCP audience rows", () => {
     expect(await identifiers([orgUri, spaceUri])).toEqual([]);
   });
 
-  it("writes a live space's row on demand, once", async () => {
+  it("writes a live space's row on demand, and attempts no write once it exists", async () => {
     const ctx = await createTestContext({ orgSlug: "mcpspc3" });
     orgUris.push(getMcpOrgResourceUri(ctx.orgId));
     const space = await seedSpace({ orgId: ctx.orgId, name: "On demand" });
@@ -196,7 +196,13 @@ describe("per-space MCP audience rows", () => {
     const firstId = await rowId(spaceUri);
     expect(firstId).toBeDefined();
 
-    await ensureMcpResourceMintable(spaceUri);
+    const inserts = spyOn(db, "insert");
+    try {
+      await ensureMcpResourceMintable(spaceUri);
+      expect(inserts).not.toHaveBeenCalled();
+    } finally {
+      inserts.mockRestore();
+    }
     expect(await rowId(spaceUri)).toBe(firstId);
   });
 

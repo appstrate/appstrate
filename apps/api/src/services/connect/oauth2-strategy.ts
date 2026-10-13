@@ -407,6 +407,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       actor: ctx.actor,
       ...(result.connectionId ? { connectionId: result.connectionId } : {}),
       ...(ctx.delegated ? { delegated: true } : {}),
+      ...(ctx.onScopeWidened ? { onScopeWidened: ctx.onScopeWidened } : {}),
       clientRef: result.clientRef,
       variables: result.variables ?? null,
       ...(result.resource ? { oauthResource: result.resource } : {}),

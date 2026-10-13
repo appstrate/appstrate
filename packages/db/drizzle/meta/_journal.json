@@ -642,8 +642,15 @@
     {
       "idx": 91,
       "version": "7",
-      "when": 1791816182744,
-      "tag": "0091_connection_calls",
+      "when": 1791874791513,
+      "tag": "0091_connection_share_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1791883605327,
+      "tag": "0092_connection_calls",
       "breakpoints": true
     }
   ]

@@ -1,4 +1,4 @@
--- 0091 — the credential proxy's call journal (`packages/db/src/schema/connection-calls.ts`).
+-- 0092 — the credential proxy's call journal (`packages/db/src/schema/connection-calls.ts`).
 -- No foreign keys, like `audit_events`: the journal outlives what it names. The two composite
 -- indexes serve the reads' `id DESC` paging: a space's calls, and one connection's.
 CREATE TABLE "connection_calls" (

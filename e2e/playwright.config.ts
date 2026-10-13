@@ -41,9 +41,13 @@ export default defineConfig({
     // Both append, so lines are not overwritten, but stdout and stderr are not
     // in strict time order. `bash` for `pipefail` (`/bin/sh` is dash in CI),
     // so a startup failure reports the server's exit status, not `tee`'s.
-    // In CI only, the server (not the browsers) may dump core on a crash.
+    // In CI only, the server (not the browsers) may dump core on a crash, and it
+    // starts without the GitHub Actions runner's `GITHUB_*` / `RUNNER_*`
+    // variables, which would fill its unread-keys boot warning (`docs/ENV.md`
+    // § Unread keys). Unset in the shell: Playwright spreads `process.env`
+    // under `env:`, so that map adds keys and removes none.
     command:
-      "bash -o pipefail -c '[ -z \"$CI\" ] || ulimit -c unlimited; cd .. && mkdir -p data/e2e && : >data/e2e/server.log && bun apps/api/src/index.ts 2>&1 >>data/e2e/server.log | tee -a data/e2e/server.log >&2'",
+      "bash -o pipefail -c '[ -z \"$CI\" ] || { ulimit -c unlimited; unset ${!GITHUB_@} ${!RUNNER_@}; }; cd .. && mkdir -p data/e2e && : >data/e2e/server.log && bun apps/api/src/index.ts 2>&1 >>data/e2e/server.log | tee -a data/e2e/server.log >&2'",
     url: E2E_BASE_URL,
     // Reuse an already-listening server ONLY in CI.
     //

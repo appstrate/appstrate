@@ -249,6 +249,10 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   still going. (#1844, #1851)
 - **The wait poll sends the remaining seconds and the server clamps them**
   (`@appstrate/core/run-and-wait-client`). (#1851)
+- **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: a refusal's
+  code holds for every argument it lists. When `scope` and `name` are one
+  absent and the other unusable, the refusal lists the absent one alone as
+  `missing_argument` (it used to list both as `invalid_argument`). (#1925)
 
 ## [15.0.0] — 2026-10-08
 

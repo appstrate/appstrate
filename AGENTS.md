@@ -333,7 +333,9 @@ whole chain from `0000` under PGlite, so a malformed migration fails there
 loudly.
 
 A migration that changes the schema also regenerates **`packages/db/schema-catalog.txt`** — the
-fingerprint of what the chain builds (columns, indexes, constraints, enum labels; the query is
+fingerprint of what the chain builds (columns, indexes, constraints, enum labels, and the triggers
+migrations install: every non-internal trigger of `public`, outside the `ee_*` tables, whose
+function is not one of the `notify_*` functions the platform installs at boot; the query is
 `scripts/schema-catalog.sql`). Migrate an EMPTY Postgres 16 database with
 `bun packages/db/src/migrate.ts`, then `bun run verify:schema-catalog --write` against it, and commit
 the file; the `schema-catalog` job in `check.yml` fails until you do. It is not in `bun run check`
