@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { asc, eq, inArray } from "drizzle-orm";
+import { asRecord } from "@appstrate/core/safe-json";
 import {
   auditEvents,
   integrationConnections,
@@ -304,7 +305,9 @@ describe("removing the layer that names a schedule's connection set", () => {
       const [integration] = await db.select().from(packages).where(eq(packages.id, INTEGRATION));
       await db
         .update(packages)
-        .set({ draftManifest: { ...integration!.draftManifest, default_tools: ["search"] } })
+        .set({
+          draftManifest: { ...asRecord(integration!.draftManifest), default_tools: ["search"] },
+        })
         .where(eq(packages.id, INTEGRATION));
       await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)], DEFAULTED);
       const published = await armedSchedule({ packageId: DEFAULTED });
