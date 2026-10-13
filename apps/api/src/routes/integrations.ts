@@ -137,7 +137,6 @@ import { createConnectRunExecutor } from "../services/connect/connect-run-launch
 import { readReconnectTarget } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
-import { removeNamingLayer } from "../services/schedules-named-by-layer.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
@@ -1564,9 +1563,11 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous, disabledScheduleIds } = await removeNamingLayer(
-        { kind: "admin_pin", spaceId: scope.spaceId, integrationId: packageId, agentPackageId },
-        (tx) => deletePin(tx, scope, agentPackageId, packageId, null),
+      const { previous, disabledScheduleIds } = await deletePin(
+        scope,
+        agentPackageId,
+        packageId,
+        null,
       );
       await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
@@ -1578,7 +1579,6 @@ export function createIntegrationsRouter() {
           ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — a count of 0 when there was no pin.
       return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
@@ -1630,10 +1630,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const { previous, disabledScheduleIds } = await removeNamingLayer(
-        { kind: "org_default", spaceId: scope.spaceId, integrationId: packageId },
-        (tx) => deleteOrgDefault(tx, scope, packageId),
-      );
+      const { previous, disabledScheduleIds } = await deleteOrgDefault(scope, packageId);
       await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
@@ -1644,7 +1641,6 @@ export function createIntegrationsRouter() {
           ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — a count of 0 when no default was set.
       return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );

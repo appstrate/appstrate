@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Removing the layer that names an integration's connection set for a schedule's fire — a member
- * pin, an admin pin, an org default — disables the schedules it leaves unnamed
- * (`connection_set_unnamed`): those the fire bound through that layer and that no
- * `connection_overrides` key, pin or org default names the set for afterwards, however many
- * connections their actor holds. Each DELETE answers how many it disabled. A connection delete
- * that empties a member pin drops it, the same removal, recorded as `connection_deleted`.
+ * Removing a layer that names an integration's connection set — a member pin, an admin pin, an org
+ * default — disables the schedules it leaves unnamed (`connection_set_unnamed`): the enabled ones
+ * whose fired version uses the integration and that no `connection_overrides` key, pin or org
+ * default names the set for afterwards, however many connections their actor holds. Each DELETE
+ * answers how many it disabled. A connection delete that empties a member pin drops it, the same
+ * removal, recorded as `connection_deleted`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import {
   auditEvents,
+  integrationConnections,
+  integrationOauthClients,
   integrationOrgDefaults,
   integrationPins,
   schedules,
@@ -32,9 +34,10 @@ import {
   seedIntegrationConnection,
 } from "../../helpers/run-connection-fixtures.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { deactivatePackage } from "../../../src/services/space-packages.ts";
 import {
   disableSchedulesLeftUnnamed,
-  schedulesBoundThrough,
+  schedulesLayerMayName,
 } from "../../../src/services/schedules-named-by-layer.ts";
 
 const app = getTestApp();
@@ -122,6 +125,8 @@ describe("removing the layer that names a schedule's connection set", () => {
     });
   }
 
+  const ownPin = (ids: string[], agent = AGENT) => pin(ids, { userId: ctx.user.id, agent });
+
   async function orgDefault(connectionIds: string[], enforce = false): Promise<void> {
     await db.insert(integrationOrgDefaults).values({
       spaceId: ctx.defaultSpaceId,
@@ -173,11 +178,9 @@ describe("removing the layer that names a schedule's connection set", () => {
   }
 
   describe("a member pin — DELETE /api/me/integration-pins/{agent}/integrations/{integration}", () => {
-    const ownPin = (ids: string[], agent = AGENT) => pin(ids, { userId: ctx.user.id, agent });
-
     for (const held of [2, 1]) {
       // The verdict does not count the actor's connections: one would bind by fallback.
-      it(`disables the schedule the pin bound, its actor holding ${held} connection(s)`, async () => {
+      it(`disables the schedule the pin named the set for, its actor holding ${held} connection(s)`, async () => {
         const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
         if (held === 2) await seedIntegrationConnection(ctx, INTEGRATION);
         await ownPin([pinned]);
@@ -254,7 +257,7 @@ describe("removing the layer that names a schedule's connection set", () => {
       ["no integration", null],
       ["the integration inert", { tools: [] }],
     ] as const) {
-      // The draft declares it with a tool: only the schedule firing the draft was bound.
+      // The draft declares it with a tool: only the schedule firing the draft uses it.
       it(`judges the version each schedule fires — published declares ${fired}`, async () => {
         const QUIET = "@unnamed/quiet";
         await seedDivergedAgent({
@@ -275,6 +278,16 @@ describe("removing the layer that names a schedule's connection set", () => {
       });
     }
 
+    // Off in the space, the fire starts without the integration; back on, it would take the fallback.
+    it("disables the schedule while the space has the integration switched off", async () => {
+      await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)]);
+      const schedule = await armedSchedule();
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+
+      expect(await remove(memberPinPath())).toBe(1);
+      expect(await unnamed()).toEqual([schedule.id]);
+    });
+
     it("answers 0 and disables nothing when there is no pin", async () => {
       await seedIntegrationConnection(ctx, INTEGRATION);
       const schedule = await armedSchedule();
@@ -285,7 +298,7 @@ describe("removing the layer that names a schedule's connection set", () => {
   });
 
   describe("an admin pin — DELETE /api/integrations/{integration}/pins/{agent}", () => {
-    it("disables the schedules of every actor it bound, sparing an actor with a pin of their own", async () => {
+    it("disables the schedules of every actor it named the set for, sparing an actor with a pin of their own", async () => {
       const shared = await sharedConnection();
       await pin([shared]);
       const colleague = await memberContext(ctx, "member");
@@ -321,7 +334,7 @@ describe("removing the layer that names a schedule's connection set", () => {
 
   describe("an org default — DELETE /api/integrations/{integration}/default", () => {
     for (const enforce of [false, true]) {
-      it(`disables across agents what the ${enforce ? "enforced" : "soft"} default bound, sparing what another layer names`, async () => {
+      it(`disables across agents what the ${enforce ? "enforced" : "soft"} default named the set for, sparing what another layer names`, async () => {
         const PLAIN = "@unnamed/plain";
         const PINNED = "@unnamed/pinned";
         await seedAgent(OTHER_AGENT);
@@ -349,9 +362,7 @@ describe("removing the layer that names a schedule's connection set", () => {
     }
   });
 
-  describe("a member pin dropped by a connection delete — DELETE /api/me/connections/{id}", () => {
-    const ownPin = (ids: string[]) => pin(ids, { userId: ctx.user.id });
-
+  describe("a member pin dropped by a connection delete", () => {
     async function deleteConnection(id: string): Promise<void> {
       const res = await app.request(`/api/me/connections/${id}`, {
         method: "DELETE",
@@ -365,7 +376,7 @@ describe("removing the layer that names a schedule's connection set", () => {
       return rows.map((row) => row.connectionIds);
     }
 
-    it("disables the schedule bound through the pin the delete empties, sparing one naming another set", async () => {
+    it("disables the schedule of the pin DELETE /api/me/connections/{id} empties, sparing one naming another set", async () => {
       const gone = await seedIntegrationConnection(ctx, INTEGRATION);
       const kept = await seedIntegrationConnection(ctx, INTEGRATION);
       await ownPin([gone]);
@@ -401,7 +412,8 @@ describe("removing the layer that names a schedule's connection set", () => {
       expect(await auditedAs("integration.connection.deleted")).toEqual([]);
     });
 
-    it("spares the schedule a soft org default still names the set for", async () => {
+    // A patch read before the delete still lands: its compare-and-set is on `updated_at`.
+    it("holds a schedule another layer still names without writing it", async () => {
       const gone = await seedIntegrationConnection(ctx, INTEGRATION);
       await ownPin([gone]);
       await orgDefault([await sharedConnection()]);
@@ -410,46 +422,128 @@ describe("removing the layer that names a schedule's connection set", () => {
       await deleteConnection(gone);
 
       expect(await ownPins()).toEqual([]);
-      // Held by the delete, not written: a patch read before it still lands.
       const spared = await rowOf(schedule.id);
       expect(spared.enabled).toBe(true);
       expect(spared.updatedAt).toEqual(schedule.updatedAt);
     });
+
+    for (const minting of [1, 2]) {
+      // With two, the first forget shrinks the pin and the second drops it.
+      it(`disables it when an OAuth client delete drops a pin of ${minting} minted connection(s)`, async () => {
+        const minted: string[] = [];
+        while (minted.length < minting) {
+          minted.push(await seedIntegrationConnection(ctx, INTEGRATION));
+        }
+        const [client] = await db
+          .insert(integrationOauthClients)
+          .values({
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            integrationId: INTEGRATION,
+            authKey: "primary",
+            clientId: "byo-app",
+            clientSecretEncrypted: "x",
+          })
+          .returning({ id: integrationOauthClients.id });
+        await db
+          .update(integrationConnections)
+          .set({ clientRef: client!.id })
+          .where(inArray(integrationConnections.id, minted));
+        await ownPin(minted);
+        const schedule = await armedSchedule();
+
+        const res = await app.request(
+          `/api/integrations/${INTEGRATION}/oauth-clients/${client!.id}`,
+          {
+            method: "DELETE",
+            headers: authHeaders(ctx),
+          },
+        );
+
+        expect(res.status, await res.clone().text()).toBe(204);
+        expect(await ownPins()).toEqual([]);
+        expect(await rowOf(schedule.id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+        });
+        expect(await auditedAs("integration.oauth_client.deleted")).toEqual([schedule.id]);
+      });
+    }
   });
 
-  // The fires are read before the removal's transaction opens: it judges again, on the rows it locks.
-  describe("a schedule write landing between the read of the fires and the removal", () => {
-    it("spares a bound schedule the write names a set for, or pauses", async () => {
-      const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
-      await pin([pinned], { userId: ctx.user.id });
-      const [named, paused, left] = [
-        await armedSchedule(),
-        await armedSchedule(),
-        await armedSchedule(),
-      ];
-      const layer = {
+  // The fires are read before the removal's transaction opens; every layer fact is read inside it.
+  describe("writes landing between the read of the fires and the removal", () => {
+    const pinLayer = () =>
+      ({
         kind: "member_pin",
         spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION,
         agentPackageId: AGENT,
         userId: ctx.user.id,
-      } as const;
-      const bound = await schedulesBoundThrough(layer);
-      expect([...bound].sort()).toEqual([named.id, paused.id, left.id].sort());
+      }) as const;
+
+    /** The pin's removal, run with the ids its read returned earlier. */
+    function removePinWith(scheduleIds: string[]): Promise<string[]> {
+      return db.transaction(async (tx) => {
+        await tx.delete(integrationPins);
+        return disableSchedulesLeftUnnamed(tx, pinLayer(), scheduleIds, "connection_set_unnamed");
+      });
+    }
+
+    it("spares a schedule a write names a set for, or pauses", async () => {
+      const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([pinned]);
+      const [named, paused, left] = [
+        await armedSchedule(),
+        await armedSchedule(),
+        await armedSchedule(),
+      ];
+      const read = await schedulesLayerMayName(pinLayer());
+      expect([...read].sort()).toEqual([named.id, paused.id, left.id].sort());
 
       await db
         .update(schedules)
         .set({ connectionOverrides: { [INTEGRATION]: [pinned] } })
         .where(eq(schedules.id, named.id));
       await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, paused.id));
-      const disabled = await db.transaction(async (tx) => {
-        await tx.delete(integrationPins);
-        return disableSchedulesLeftUnnamed(tx, layer, bound, "connection_set_unnamed");
-      });
 
-      expect(disabled).toEqual([left.id]);
+      expect(await removePinWith(read)).toEqual([left.id]);
       expect(await unnamed()).toEqual([left.id]);
       expect(await rowOf(paused.id)).toMatchObject({ enabled: false, disabledReason: null });
+    });
+
+    it("disables a schedule paused at the read and enabled before the removal", async () => {
+      await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)]);
+      const schedule = await armedSchedule({ enabled: false, nextRunAt: null });
+      const read = await schedulesLayerMayName(pinLayer());
+
+      await db.update(schedules).set({ enabled: true }).where(eq(schedules.id, schedule.id));
+
+      expect(await removePinWith(read)).toEqual([schedule.id]);
+    });
+
+    // The default's removal reads while the pin stands, and the pin's removal while the default does.
+    it("disables a schedule the removal of its other layer spared in between", async () => {
+      const shared = await sharedConnection();
+      await ownPin([shared]);
+      await orgDefault([shared]);
+      const schedule = await armedSchedule();
+      const defaultLayer = {
+        kind: "org_default",
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+      } as const;
+      const read = await schedulesLayerMayName(defaultLayer);
+
+      expect(await remove(memberPinPath())).toBe(0);
+      expect((await rowOf(schedule.id)).enabled).toBe(true);
+      const disabled = await db.transaction(async (tx) => {
+        await tx.delete(integrationOrgDefaults);
+        return disableSchedulesLeftUnnamed(tx, defaultLayer, read, "connection_set_unnamed");
+      });
+
+      expect(disabled).toEqual([schedule.id]);
+      expect(await unnamed()).toEqual([schedule.id]);
     });
   });
 });

@@ -4,6 +4,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import {
   authKeyParam,
   clientIdParam,
+  droppedPinEffect,
   integrationClientsListSchema,
   oauthClientCreateBodySchema,
   oauthClientSchema,
@@ -134,6 +135,7 @@ export const orgIntegrationsPaths = {
         "Deletes one org-level client by id (a space client id is a 404 here), " +
         "with every connection it minted in any space of the org. Refused with 409 " +
         "`connection_pinned` while an admin pin or an org default (enforced or soft) names one of them. " +
+        `${droppedPinEffect} ` +
         PERMISSION_NOTE,
       parameters: [...packageParams, clientIdParam],
       responses: {

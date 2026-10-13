@@ -46,10 +46,9 @@ import {
   connectionReach,
   connectionViewOf,
   loadConnectionShares,
-  memberPinLayer,
   planConnectionForget,
 } from "./integration-connections.ts";
-import { schedulesLeftUnnamedWithout } from "./schedules-named-by-layer.ts";
+import { pinLayer, schedulesLeftUnnamedWithout } from "./schedules-named-by-layer.ts";
 import {
   connectionActions,
   meConnectionAuthorityFilter,
@@ -434,11 +433,11 @@ export async function getConnectionDeleteImpact(
       pinFilter: pinAuthorityFilter(principal),
     },
   );
-  // A pin the delete empties is dropped; its schedules are of its space, which `pinFilter` narrows.
+  // The schedules of a pin are of its space, which `pinFilter` narrows.
   const unnamedByPin = new Map<string, number>();
   for (const pin of plan.pins) {
     if (pin.nextConnectionIds.length > 0) continue;
-    const unnamed = await schedulesLeftUnnamedWithout(memberPinLayer(pin, actor.id));
+    const unnamed = await schedulesLeftUnnamedWithout(pinLayer(pin, actor.id));
     unnamedByPin.set(pin.id, unnamed.length);
   }
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];

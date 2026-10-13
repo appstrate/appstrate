@@ -131,12 +131,12 @@ describe("integration-org-defaults-service", () => {
     expect(resolverMap[INTEGRATION_ID]).toEqual({ connectionIds: [connId], enforce: true });
 
     // delete
-    const del = await db.transaction((tx) => deleteOrgDefault(tx, scope, INTEGRATION_ID));
+    const del = await deleteOrgDefault(scope, INTEGRATION_ID);
     expect(del.previous).toMatchObject({ connection_ids: [connId], enforce: true });
     expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
 
     // delete is idempotent — second delete reports nothing removed.
-    const del2 = await db.transaction((tx) => deleteOrgDefault(tx, scope, INTEGRATION_ID));
+    const del2 = await deleteOrgDefault(scope, INTEGRATION_ID);
     expect(del2.previous).toBeNull();
   });
 

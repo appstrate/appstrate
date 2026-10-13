@@ -41,7 +41,6 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { notFound } from "../lib/errors.ts";
-import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -71,6 +70,7 @@ import type {
 } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
+import { pinLayer, removeNamingLayer } from "./schedules-named-by-layer.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
@@ -331,21 +331,24 @@ async function upsertPin(args: {
 }
 
 /**
- * Delete one pin row in `tx` — the admin pin for `userId: null`, else that member's; `previous` is
- * the set it held, `null` when there was none.
+ * Delete one pin row — the admin pin for `userId: null`, else that member's — and disable the
+ * schedules that leaves unnamed ({@link removeNamingLayer}); `previous` is the set it held, `null`
+ * when there was none.
  */
 export async function deletePin(
-  tx: Tx,
   scope: SpaceScope,
   agentPackageId: string,
   integrationId: string,
   userId: string | null,
-): Promise<{ previous: string[] | null }> {
-  const [row] = await tx
-    .delete(integrationPins)
-    .where(pinKey(scope, agentPackageId, integrationId, userId))
-    .returning({ connectionIds: integrationPins.connectionIds });
-  return { previous: row?.connectionIds ?? null };
+): Promise<{ previous: string[] | null; disabledScheduleIds: string[] }> {
+  const pin = { spaceId: scope.spaceId, agentPackageId, integrationId };
+  return removeNamingLayer(pinLayer(pin, userId), async (tx) => {
+    const [row] = await tx
+      .delete(integrationPins)
+      .where(pinKey(scope, agentPackageId, integrationId, userId))
+      .returning({ connectionIds: integrationPins.connectionIds });
+    return { previous: row?.connectionIds ?? null };
+  });
 }
 
 /**

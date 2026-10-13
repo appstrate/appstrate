@@ -139,7 +139,11 @@ export const namingLayerRemovalSchema = {
 
 /** The schedules a pin or org default removal disables, closing each removal's description. */
 export const namingLayerRemovalEffect =
-  "In the same transaction, every enabled schedule whose fire bound this integration through it and that nothing names the set for afterwards — no `connection_overrides` key, no admin pin or pin of its actor on its agent, no org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds; re-enabling it requires naming its set. Idempotent: `schedules_disabled_count` is 0 when there was nothing to remove.";
+  "In the same transaction, every enabled schedule whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards — no `connection_overrides` key, admin pin, pin of its actor or org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds.";
+
+/** What a connection delete does to the schedules of a member pin it empties. */
+export const droppedPinEffect =
+  "A member pin the delete empties is removed, which disables its owner's enabled schedules whose fired version uses the integration and whose set nothing else names (`disabled_reason: connection_deleted`, jobs removed).";
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
 export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
@@ -989,13 +993,12 @@ export const integrationsPaths = {
         "default, the cascade re-resolves (org default, else system client) " +
         "with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default " +
         "(enforced or soft) names one of the connections it minted; a member pin does not block it. " +
-        "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed, " +
-        "which disables the owner's enabled schedules whose fire bound the integration through it and " +
-        "that nothing else names the set for) " +
+        "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) " +
         "and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration " +
         "is left empty is disabled); another member's pin keeps the id, and that member's next run fails " +
         "with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted " +
         "connection are disabled (`disabled_reason: connection_deleted`), their overrides kept. " +
+        `${droppedPinEffect} ` +
         "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

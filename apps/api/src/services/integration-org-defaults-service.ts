@@ -19,9 +19,9 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
-import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { validatePinTargets } from "./integration-pins-service.ts";
+import { removeNamingLayer } from "./schedules-named-by-layer.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
 type OrgDefaultSummary = IntegrationOrgDefault;
@@ -123,15 +123,20 @@ export async function upsertOrgDefault(
   return { previous: previous ? toSummary(previous) : null, orgDefault: toSummary(row!) };
 }
 
-/** Delete the org default in `tx`; `previous` is the one removed, `null` when none was set. */
+/**
+ * Delete the org default and disable the schedules that leaves unnamed ({@link removeNamingLayer});
+ * `previous` is the one removed, `null` when none was set.
+ */
 export async function deleteOrgDefault(
-  tx: Tx,
   scope: SpaceScope,
   integrationId: string,
-): Promise<{ previous: OrgDefaultSummary | null }> {
-  const [row] = await tx
-    .delete(integrationOrgDefaults)
-    .where(orgDefaultKey(scope, integrationId))
-    .returning();
-  return { previous: row ? toSummary(row) : null };
+): Promise<{ previous: OrgDefaultSummary | null; disabledScheduleIds: string[] }> {
+  const layer = { kind: "org_default", spaceId: scope.spaceId, integrationId } as const;
+  return removeNamingLayer(layer, async (tx) => {
+    const [row] = await tx
+      .delete(integrationOrgDefaults)
+      .where(orgDefaultKey(scope, integrationId))
+      .returning();
+    return { previous: row ? toSummary(row) : null };
+  });
 }
