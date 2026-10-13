@@ -4,6 +4,8 @@ The compose that runs `app.appstrate.com`. **No product code lives here**: `dock
 
 The billing module is `packages/module-ee`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
 
+Staging deploys this same file, from `main`, on every merge: `docs/deployment/STAGING.md`.
+
 ## Layout
 
 |                      |                                                             |

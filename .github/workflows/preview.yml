@@ -8,8 +8,13 @@ name: Preview Images
 # Opt-in per PR: add the `preview` label. A labeled PR re-publishes on every
 # push. `workflow_dispatch` builds any ref on demand. amd64 only (the staging
 # server is x86_64). See docs/deployment/PREVIEW_DEPLOY.md.
+#
+# A push to `main` publishes the same stack under `main` and, once all 8 images
+# are up, deploys that commit to staging. See docs/deployment/STAGING.md.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       ref:
@@ -20,8 +25,10 @@ on:
     types: [labeled, synchronize]
 
 concurrency:
-  # One in-flight build per PR / dispatch ref — a new push cancels the stale one.
-  group: preview-${{ github.event.pull_request.number || github.event.inputs.ref }}
+  # One in-flight build per PR / dispatch ref / branch — a new push cancels the
+  # stale one. On `main` that is what keeps staging on the newest commit: a
+  # merge landing mid-build supersedes the run it interrupts, deploy included.
+  group: preview-${{ github.event.pull_request.number || github.event.inputs.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
@@ -34,10 +41,11 @@ env:
 
 jobs:
   # Gate on the `preview` label (pull_request) and resolve the tag + the ref
-  # to check out. Skipping here keeps every unlabeled push a zero-cost no-op.
+  # to check out. Skipping here keeps every unlabeled PR push a zero-cost no-op.
   resolve:
     runs-on: ubuntu-latest
     if: >-
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'preview'))
@@ -61,6 +69,10 @@ jobs:
             # Build the PR's HEAD, not the synthetic merge commit.
             echo "checkout_ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
             echo "is_pr=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "checkout_ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "is_pr=false" >> "$GITHUB_OUTPUT"
           else
             # Slugify for a valid, readable Docker tag.
             SLUG="$(echo "$REF" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._-]#-#g' | cut -c1-100)"
@@ -111,6 +123,12 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.checkout_ref }}
 
+      # The commit actually built. `github.sha` is not it for a PR (the
+      # synthetic merge commit) nor for a dispatch (the default branch's HEAD).
+      - name: Resolve built commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -135,15 +153,100 @@ jobs:
           # platform compares the two `org.opencontainers.image.revision` labels
           # and warns on a pair built from different commits (#1200); unstamped
           # preview images read `unknown` on both sides and disable that check
-          # silently. Images declaring no such ARG ignore them.
+          # silently. APP_VERSION + GIT_SHA are the platform image's own stamp,
+          # what `/health` and the SPA footer report. Images declaring no such
+          # ARG ignore them.
           build-args: |
             BUILD_VERSION=${{ needs.resolve.outputs.tag }}
-            BUILD_REVISION=${{ github.sha }}
+            BUILD_REVISION=${{ steps.commit.outputs.sha }}
+            APP_VERSION=${{ needs.resolve.outputs.tag }}
+            GIT_SHA=${{ steps.commit.outputs.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Continuous deployment of `main` to staging. Runs only once every image of
+  # the matrix is pushed, and points staging at the immutable `main-<sha>` tag,
+  # never at `main`: a superseded run leaves `main` half-moved across the 8
+  # images, and a trio that disagrees fails runs (AGENTS.md, "version contract").
+  #
+  # The `staging` environment holds the Coolify coordinates and is restricted
+  # to the `main` branch, so a PR editing this file cannot read its token.
+  deploy-staging:
+    needs: [resolve, build-and-push]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    permissions: {}
+    env:
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      STAGING_URL: ${{ vars.STAGING_URL }}
+      VERSION: ${{ needs.resolve.outputs.tag }}-${{ github.sha }}
+    steps:
+      - name: Point staging at this build
+        run: |
+          set -euo pipefail
+          : "${COOLIFY_URL:?}" "${COOLIFY_APP_UUID:?}" "${COOLIFY_TOKEN:?}"
+          curl --fail-with-body --silent --show-error \
+            --request PATCH "$COOLIFY_URL/api/v1/applications/$COOLIFY_APP_UUID/envs" \
+            --header "Authorization: Bearer $COOLIFY_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data "$(jq -n --arg value "$VERSION" '{key: "APPSTRATE_VERSION", value: $value}')" \
+            --output /dev/null
+
+      # `appstrate-migrate` applies the pending drizzle migrations before the
+      # application starts, so a migration that fails fails the deployment.
+      - name: Deploy and wait
+        run: |
+          set -euo pipefail
+          DEPLOYMENT="$(curl --fail-with-body --silent --show-error \
+            "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID" \
+            --header "Authorization: Bearer $COOLIFY_TOKEN" |
+            jq -er '.deployments[0].deployment_uuid')"
+          echo "Coolify deployment $DEPLOYMENT"
+          for _ in $(seq 1 120); do
+            STATUS="$(curl --fail-with-body --silent --show-error \
+              "$COOLIFY_URL/api/v1/deployments/$DEPLOYMENT" \
+              --header "Authorization: Bearer $COOLIFY_TOKEN" | jq -er '.status')"
+            case "$STATUS" in
+              finished) exit 0 ;;
+              queued | in_progress) sleep 10 ;;
+              *)
+                echo "::error::Coolify deployment $DEPLOYMENT ended as '$STATUS'"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::Coolify deployment $DEPLOYMENT still '$STATUS' after 20 minutes"
+          exit 1
+
+      # A finished deployment is Coolify's verdict on the containers, not proof
+      # of which build answers: read the commit back off the running platform.
+      - name: Verify the running commit
+        env:
+          EXPECTED: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          : "${STAGING_URL:?}"
+          for _ in $(seq 1 30); do
+            # --fail: a 503 body carries the version too, while the platform is
+            # still starting or unhealthy.
+            RUNNING="$(curl --fail --silent --max-time 10 "$STAGING_URL/health" | jq -r '.version.commit // empty' || true)"
+            if [ -n "$RUNNING" ] && [ "${EXPECTED#"$RUNNING"}" != "$EXPECTED" ]; then
+              echo "Staging runs $RUNNING"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Staging reports commit '${RUNNING:-none}', expected ${EXPECTED}"
+          exit 1
 
   # Sticky PR comment with the tag + the one-liner to deploy on Coolify. Runs
   # only for PR events (a dispatch has no PR to comment on) and only after the
