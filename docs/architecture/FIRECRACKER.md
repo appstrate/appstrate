@@ -420,10 +420,15 @@ host↔guest isolation.
    drive** (no workload can ever read the launch spec) → `setpriv` spawns
    sidecar (1000; not hardened — it execs the setuid runner wrapper) then
    agent (1001, `--no-new-privs --bounding-set -all`). Integration runners
-   exec as `appstrate-runner-exec [--workspace] <uid> <command…>` (setuid
-   root, group-1000-only): the sidecar allocates each runner its own uid from
-   the pool 1100-1163 and hands it to the wrapper, which refuses any uid
-   outside the pool or without a pool user. Each pool user `runner<i>` has a
+   exec as `appstrate-runner-exec [--workspace] [--own <file>]… <uid> <command…>`
+   (setuid root, group-1000-only): the sidecar allocates each runner its own uid
+   from the pool 1100-1163 and hands it to the wrapper, which refuses any uid
+   outside the pool or without a pool user. Each `--own <file>` is a
+   `delivery.files` credential the sidecar wrote owner-only for that runner:
+   before dropping, the wrapper gives it to the runner's uid and private group
+   with owner bits only, and refuses anything but a single-link regular file
+   the sidecar owns (no symlink is followed), so the runner reads its
+   credential and neither the agent nor a sibling runner does. Each pool user `runner<i>` has a
    private primary group (gid == uid) and a 0700 home `/home/runner<i>`; the
    wrapper sets `HOME` to it, applies `umask 007` and closes every inherited
    fd above stdio (`close_range`), so no descriptor the sidecar leaked still

@@ -4,7 +4,14 @@
 // Firecracker guest. Installed setuid-root, mode 4750 root:1000, so ONLY
 // the sidecar (uid 1000) can exec it.
 //
-//   appstrate-runner-exec [--workspace] <uid> <command> [args...]
+//   appstrate-runner-exec [--workspace] [--own <file>]... <uid> <command> [args...]
+//
+// Each --own <file> is a credential file the sidecar wrote for this runner
+// (`delivery.files`): before dropping, the wrapper hands it to <uid> and its
+// private group and strips every group and other bit, so the runner reads it
+// and neither the agent nor a sibling runner does. Only a regular file with
+// one link, owned by the calling uid, is given away: the caller cannot make
+// the wrapper touch a file it does not own, and a symlink is not followed.
 //
 // It drops to <uid> — one uid of the runner pool, allocated by the sidecar
 // per spawned integration runner — with that pool user's private group
@@ -32,6 +39,7 @@
 
 #define _GNU_SOURCE
 
+#include <fcntl.h>
 #include <grp.h>
 #include <pwd.h>
 #include <stdio.h>
@@ -61,11 +69,36 @@ static int parse_pool_uid(const char *s, uid_t *out) {
   return 0;
 }
 
+// Give `path`, a file the caller owns, to the runner: uid, private group,
+// owner bits only. Runs before the drop, as root, on a descriptor so the
+// file checked is the file changed.
+static int own_for_runner(const char *path, uid_t uid, gid_t gid) {
+  const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0) return -1;
+  struct stat st;
+  if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_uid != getuid() ||
+      fchown(fd, uid, gid) != 0 || fchmod(fd, st.st_mode & 0700) != 0) {
+    close(fd);
+    return -1;
+  }
+  return close(fd);
+}
+
 int main(int argc, char **argv) {
   const int workspace = argc > 1 && strcmp(argv[1], "--workspace") == 0;
   char **args = argv + 1 + workspace;
-  if (argc - 1 - workspace < 2) {
-    fprintf(stderr, "usage: appstrate-runner-exec [--workspace] <uid> <command> [args...]\n");
+  int left = argc - 1 - workspace;
+  char **owned = args;
+  int owned_count = 0;
+  while (left >= 2 && strcmp(args[0], "--own") == 0) {
+    owned_count++;
+    args += 2;
+    left -= 2;
+  }
+  if (left < 2) {
+    fprintf(stderr,
+            "usage: appstrate-runner-exec [--workspace] [--own <file>]... <uid> <command> "
+            "[args...]\n");
     return 2;
   }
   uid_t uid;
@@ -79,6 +112,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "appstrate-runner-exec: uid %u has no pool user with a private group\n",
             (unsigned)uid);
     return 2;
+  }
+  for (int i = 0; i < owned_count; i++) {
+    if (own_for_runner(owned[2 * i + 1], uid, pw->pw_gid) != 0) {
+      fprintf(stderr, "appstrate-runner-exec: --own refused a file\n");
+      return 2;
+    }
   }
   // Supplementary groups first (needs privilege), then gid, then uid —
   // the reverse order would drop the privilege needed for the earlier

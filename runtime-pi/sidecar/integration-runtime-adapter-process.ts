@@ -16,7 +16,7 @@
  * (`APPSTRATE_RUNNER_UIDS`), which only the Firecracker guest supervisor
  * provides; see {@link requireRunnerIsolation}.
  *
- * Each runner execs as `<wrapper> [--workspace] <uid> <command> [args...]` on
+ * Each runner execs as `<wrapper> [--workspace] [--own <file>]... <uid> <command> [args...]` on
  * a pool uid of its own, which is how listener peers are attributed: the
  * kernel's socket table (`/proc/net/tcp`) names the uid owning the client end
  * of each connection a listener accepts ({@link socketOwnerUid}). The guest gives a
@@ -311,8 +311,11 @@ export function isHostPathSafeForMount(hostPath: string): boolean {
 /**
  * AFPS §7.6 (CC-5) — materialise `delivery.files` for the process
  * adapter. Subprocesses share the host filesystem, so we attempt to write
- * each entry at the manifest-declared absolute path with the requested
- * mode. When that fails (typically a dev machine without write permission
+ * each entry at the manifest-declared absolute path, with the owner bits of
+ * the requested mode and no other: the sidecar, the agent and the runners
+ * share this filesystem on different uids, so a group or other bit would open
+ * the credential to the agent. The runner reads its file because the exec
+ * wrapper gives it the file (`--own`, see the spawn below). When that fails (typically a dev machine without write permission
  * to `/run/`, `/etc/`, …), we fall back to a per-run scratch dir under the
  * sidecar's tmp space and surface the actual path via an env var
  * `APPSTRATE_FILE_MOUNT_<sanitized-path>` so the integration code can pick
@@ -349,7 +352,7 @@ export async function materializeFileMountsOnHost(
     }
     const bytes = Buffer.from(entry.content_b64, "base64");
     const modeOctal = parseInt(entry.mode, 8);
-    const finalMode = Number.isNaN(modeOctal) ? 0o400 : modeOctal;
+    const finalMode = Number.isNaN(modeOctal) ? 0o400 : (modeOctal & 0o700) | 0o400;
 
     let writtenAt: string | null = null;
     try {
@@ -567,6 +570,7 @@ export function createProcessIntegrationRuntimeAdapter({
       }
       // AFPS §7.6 (CC-5) — materialise `delivery.files` entries
       // before the subprocess starts so the entrypoint sees them at boot.
+      const ownedPaths: string[] = [];
       if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
         const holder = spec.connection?.id ?? null;
         const declaredPaths = Object.keys(spec.fileMounts).map(normalizeMountPath);
@@ -587,6 +591,7 @@ export function createProcessIntegrationRuntimeAdapter({
           spec.fileMounts,
         );
         createdPaths.push(...paths);
+        ownedPaths.push(...paths);
         Object.assign(procEnv, envOverrides);
       }
       // The setuid wrapper drops the runner onto its own uid instead of the
@@ -594,11 +599,13 @@ export function createProcessIntegrationRuntimeAdapter({
       // `attribution` maps the runner's sockets back to this integration. It
       // sets the runner's HOME to that uid's private home, and grants the
       // `workspace` group only on `--workspace`, so a runner reaches /workspace
-      // only when handed it.
+      // only when handed it. `--own` gives it the credential files written
+      // above, which the sidecar's uid wrote owner-only.
       const transport = new SubprocessTransport({
         command: wrapper,
         args: [
           ...(workspaceDir !== null ? ["--workspace"] : []),
+          ...ownedPaths.flatMap((path) => ["--own", path]),
           String(uid),
           plan.command,
           ...plan.args,

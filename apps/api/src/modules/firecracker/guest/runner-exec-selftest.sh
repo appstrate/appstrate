@@ -66,4 +66,51 @@ $out
 want
 $want"
 
+# --own: a file the caller owns becomes the runner's, owner bits only.
+owned=/tmp/owned-key
+echo secret >"$owned"
+chmod 644 "$owned"
+out=$("$bin" --own "$owned" 1100 sh -c 'cat "$1"; stat -c "%u %g %a" "$1"' sh "$owned") ||
+  fail "--own drop exited $?"
+want="secret
+1100 1100 600"
+[ "$out" = "$want" ] || fail "--own: got
+$out
+want
+$want"
+
+# --own with --workspace, and two files.
+second=/tmp/owned-cert
+echo cert >"$second"
+chown 0:0 "$owned"
+out=$("$bin" --workspace --own "$owned" --own "$second" 1100 sh -c 'stat -c "%u %a" "$1" "$2"' sh "$owned" "$second") ||
+  fail "--workspace --own drop exited $?"
+want="1100 600
+1100 600"
+[ "$out" = "$want" ] || fail "--workspace --own: got
+$out
+want
+$want"
+
+# --own refusals, each exit 2 with the file left as it was: a file the caller
+# does not own, a symlink, a directory, a second hard link, a missing file,
+# and --own with no command after it.
+chown 0:0 "$second"
+foreign=/tmp/foreign
+echo x >"$foreign"
+chown 1102 "$foreign"
+ln -s "$second" /tmp/link
+mkdir /tmp/dir
+echo y >/tmp/linked
+ln /tmp/linked /tmp/linked2
+for path in "$foreign" /tmp/link /tmp/dir /tmp/linked /tmp/missing; do
+  "$bin" --own "$path" 1100 /bin/true 2>/dev/null && code=0 || code=$?
+  [ "$code" -eq 2 ] || fail "--own '$path' exited $code, want 2"
+done
+[ "$(stat -c '%u' "$foreign")" = 1102 ] || fail "--own changed a file the caller does not own"
+[ "$(stat -c '%u' "$second")" = 0 ] || fail "--own followed a symlink"
+"$bin" --own "$second" 1100 2>/dev/null && code=0 || code=$?
+[ "$code" -eq 2 ] || fail "--own without a command exited $code, want 2"
+[ "$(stat -c '%u' "$second")" = 0 ] || fail "--own changed a file before refusing its arguments"
+
 echo "runner-exec self-test: ok"
