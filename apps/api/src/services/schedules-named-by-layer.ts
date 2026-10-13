@@ -9,7 +9,7 @@
  * any); every layer fact is read from rows, inside it.
  */
 
-import { and, asc, eq, exists, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationOrgDefaults,
@@ -65,18 +65,6 @@ function orgDefaultOf(layer: NamingLayer): SQL | undefined {
     eq(integrationOrgDefaults.spaceId, layer.spaceId),
     eq(integrationOrgDefaults.integrationId, layer.integrationId),
   );
-}
-
-function layerRow(layer: NamingLayer) {
-  return layer.kind === "org_default"
-    ? db
-        .select({ one: sql`1` })
-        .from(integrationOrgDefaults)
-        .where(orgDefaultOf(layer))
-    : db
-        .select({ one: sql`1` })
-        .from(integrationPins)
-        .where(pinOf(layer));
 }
 
 /** `connection_overrides` holds no key for `integrationId`: a key names its set, `[]` included. */
@@ -160,7 +148,7 @@ async function integrationsFired(schedule: ScheduleRow): Promise<string[]> {
 
 /**
  * The schedules of `layer`'s scope, enabled or not, whose fire resolves a set for its integration
- * ({@link integrationsFired}). None when the layer has no row: removing nothing reads no version.
+ * ({@link integrationsFired}). It asks no layer fact: the layer may hold no row.
  */
 export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[]> {
   const candidates = await db
@@ -171,7 +159,6 @@ export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[
         eq(schedules.spaceId, layer.spaceId),
         layer.kind === "org_default" ? undefined : eq(schedules.packageId, layer.agentPackageId),
         layer.kind === "member_pin" ? eq(schedules.userId, layer.userId) : undefined,
-        exists(layerRow(layer)),
       ),
     );
   const fired = new Map<string, string[]>();
