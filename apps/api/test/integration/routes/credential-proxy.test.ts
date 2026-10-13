@@ -1319,7 +1319,7 @@ describe("POST /api/credential-proxy/proxy — outside a run with credential-pro
     });
   }
 
-  it("an enforced org default: 403 run_required whatever is named, its members never listed", async () => {
+  it("an enforced org default: 403 call_run_required whatever is named, its members never listed", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
     await orgDefault(ctx, [shared], true);
@@ -1328,7 +1328,7 @@ describe("POST /api/credential-proxy/proxy — outside a run with credential-pro
     for (const id of named) {
       const res = await call(id ? { "X-Connection-Id": id } : {});
       const text = await res.clone().text();
-      await expectProblem(res, 403, { code: "run_required" });
+      await expectProblem(res, 403, { code: "call_run_required" });
       expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_request_denied");
       expect(text).toContain("also holds credential-proxy:call-run");
       expect(text).not.toContain(shared);
@@ -1808,7 +1808,7 @@ describe("GET /api/credential-proxy/connections", () => {
       allow_all_uris: false,
       needs_reconnection: needsReconnection,
       owned_by_actor: true,
-      run_required: false,
+      call_run_required: false,
     });
     const byId = (a: { connection_id: string }, b: { connection_id: string }) =>
       a.connection_id.localeCompare(b.connection_id);
@@ -1892,15 +1892,19 @@ describe("GET /api/credential-proxy/connections", () => {
     for (const secret of secrets) expect(text).not.toContain(secret);
   });
 
-  /** Each listed row as `[connection_id, owned_by_actor, run_required]`, sorted by id. */
+  /** Each listed row as `[connection_id, owned_by_actor, call_run_required]`, sorted by id. */
   async function listedFor(scopes: string[]): Promise<[string, boolean, boolean][]> {
     const res = await list(scopes);
     expect(res.status, await res.clone().text()).toBe(200);
     const body = (await res.json()) as {
-      data: { connection_id: string; owned_by_actor: boolean; run_required: boolean }[];
+      data: { connection_id: string; owned_by_actor: boolean; call_run_required: boolean }[];
     };
     return body.data
-      .map((c): [string, boolean, boolean] => [c.connection_id, c.owned_by_actor, c.run_required])
+      .map((c): [string, boolean, boolean] => [
+        c.connection_id,
+        c.owned_by_actor,
+        c.call_run_required,
+      ])
       .sort(([a], [b]) => a.localeCompare(b));
   }
   const sorted = (rows: [string, boolean, boolean][]) =>

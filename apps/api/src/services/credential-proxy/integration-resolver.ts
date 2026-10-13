@@ -221,7 +221,7 @@ interface ConnectionOutsideRun {
   allow_all_uris: boolean;
   /** A call binding it answers `409 needs_reconnection` until its owner reconnects it. */
   needs_reconnection: boolean;
-  run_required: boolean;
+  call_run_required: boolean;
 }
 
 /** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
@@ -258,7 +258,7 @@ export async function listConnectionsOutsideRun(
         authorized_uris: listedAuthorizedUris(authDef, connectionVariablesOf(row.variables)),
         allow_all_uris: authDef.allow_all_uris === true,
         needs_reconnection: row.needsReconnection,
-        run_required: reach === "own" && enforcedMembers !== null,
+        call_run_required: reach === "own" && enforcedMembers !== null,
       },
     ];
   });

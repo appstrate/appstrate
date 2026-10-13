@@ -387,11 +387,11 @@ function buildListConnectionsTool(ctx: ConnectionToolContext): AppstrateToolDefi
       "pass, the `authorized_uris` a target must match (unless `allow_all_uris`; an entry may " +
       "hold a `{$credential.<field>}` the proxy alone resolves, see api_call's `target`), its " +
       "`scopes_granted`, and what such a call would still refuse: `needs_reconnection`, and " +
-      "`run_required` (an enforced organization default governs the integration and you hold " +
+      "`call_run_required` (an enforced organization default governs the integration and you hold " +
       "no `credential-proxy:call-run`). A connection you do not own is used when you pass its " +
       "`connection_id` or an organization default designates it. With " +
       "`credential-proxy:call-own` alone, a connection another member shared and a " +
-      "`run_required` integration are reached through " +
+      "`call_run_required` integration are reached through " +
       (ctx.runs ? "a run (run_and_wait)." : "an agent run only."),
     annotations: {
       title: "List callable connections",
@@ -450,7 +450,7 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "status (a 401 there is the upstream refusing the connection), with `headers` and a text " +
       "`body`, cut at `max_response_bytes` (`truncated: true`); a non-text body is replaced by " +
       "its size. An entry with `error` `{ status, code, detail }` is the platform's refusal and " +
-      "does not stop the other requests: `run_required`, `credential_not_found`, " +
+      "does not stop the other requests: `call_run_required`, `credential_not_found`, " +
       "`must_choose_connection` (retry with one `errors[0].candidate_connections[].id` as " +
       "`connection_id`), `connection_not_in_org_default`, `needs_reconnection`, " +
       "`unauthorized_target`, `rate_limited`. A " +

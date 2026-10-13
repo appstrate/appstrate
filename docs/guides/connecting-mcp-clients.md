@@ -277,7 +277,7 @@ declare them; who holds `credential-proxy:call-own` is stated in
 - **What you reach.** With `credential-proxy:call-own` alone, your OWN
   connections usable in the space, never one another member shared: that one,
   and every connection of an integration under an enforced organization default
-  (`run_required` in the listing), is reached by an agent run (`run_and_wait`).
+  (`call_run_required` in the listing), is reached by an agent run (`run_and_wait`).
   With `credential-proxy:call-run` as well, the connections usable in the space,
   yours and those another member shared into it, under the space's
   organization defaults. A shared connection is used when you name it
@@ -306,7 +306,7 @@ declare them; who holds `credential-proxy:call-own` is stated in
   default) and marked `truncated`; a non-text body is replaced by its size. All
   bodies of one result share a 256 KiB budget. An entry with `error`
   (`{ status, code, detail }`) is the platform's refusal of that request
-  (`run_required`, `credential_not_found`, `must_choose_connection`,
+  (`call_run_required`, `credential_not_found`, `must_choose_connection`,
   `needs_reconnection`, `unauthorized_target`, `rate_limited`, …) and does not
   stop the others. The result is `isError` only when no request succeeded.
 - **Sessions.** Pass a previous result's `session_id` to keep the cookies the

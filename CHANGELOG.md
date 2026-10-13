@@ -292,7 +292,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   - with `credential-proxy:call-own` alone, the caller's own connections
     usable in the space and nothing else. No org default applies, a soft one
     included, and an integration an enforced org default governs answers
-    `403 run_required`, whatever is named. A named `X-Connection-Id` that is
+    `403 call_run_required`, whatever is named. A named `X-Connection-Id` that is
     not one of the caller's own (another member's connection, shared into
     the space or not, or an unknown id) answers one and the same
     `404 credential_not_found`. With nothing named: the caller's single own
@@ -1019,7 +1019,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   `owned_by_actor` (`false` for another member's connection shared into the
   space) and auth, `scopes_granted`, the auth's `authorized_uris`,
   `allow_all_uris`, and the two flags a call would still be refused on,
-  `needs_reconnection` and `run_required`. It decrypts nothing: an
+  `needs_reconnection` and `call_run_required`. It decrypts nothing: an
   `authorized_uris` entry templated on a credential field is given as the
   manifest declares it (`{$credential.<field>}`), and a caller targets it by
   writing `{{<field>}}` at that place in the target. Requires

@@ -204,7 +204,7 @@ const proxyParameters = [
       "**`credential-proxy:call-own` alone**: only the caller's own connections (user or " +
       "end-user) usable in the request's space are candidates — no org default applies, a soft " +
       "one included — in this order: (1) an integration governed by an ENFORCED org default " +
-      "answers `403 run_required` whatever is named; (2) a named connection is used when it is " +
+      "answers `403 call_run_required` whatever is named; (2) a named connection is used when it is " +
       "one of the caller's own, of the requested integration; any other id — another member's " +
       "connection, shared into the space or not, or an unknown id — is one and the same " +
       "`404 credential_not_found`; (3) nothing named: exactly one own connection is used, none " +
@@ -298,7 +298,7 @@ const proxyResponses = {
       "does not name its hosts: it is empty or has an entry that leaves the host to the " +
       "caller, or every entry matching the target reaches it through a wildcard past the " +
       "registrable domain written under it, judged with the Public Suffix List (the message " +
-      "then names the host to list) (`http_request_denied`); `run_required` — no `X-Run-Id`, " +
+      "then names the host to list) (`http_request_denied`); `call_run_required` — no `X-Run-Id`, " +
       "an enforced org default governs the integration in this space and the caller holds " +
       "`credential-proxy:call-own` without `credential-proxy:call-run` " +
       "(`http_request_denied`); `forbidden` — the principal lacks " +
@@ -451,7 +451,7 @@ const connectionOutsideRunSchema = {
     "authorized_uris",
     "allow_all_uris",
     "needs_reconnection",
-    "run_required",
+    "call_run_required",
   ],
   properties: {
     integration_package_id: {
@@ -498,12 +498,12 @@ const connectionOutsideRunSchema = {
       type: "boolean",
       description: "A call binding it answers `409 needs_reconnection` until it is reconnected.",
     },
-    run_required: {
+    call_run_required: {
       type: "boolean",
       description:
         "An enforced org default governs the integration in this space and the caller holds " +
         "no `credential-proxy:call-run`: their call without `X-Run-Id` answers " +
-        "`403 run_required`, this connection named or not.",
+        "`403 call_run_required`, this connection named or not.",
     },
   },
 } as const;
@@ -525,7 +525,7 @@ export const credentialProxyPaths = {
         "enforced org default, that default's members only. Grouped by integration, oldest " +
         "first within one. An entry the caller does not own is used when named with " +
         "`X-Connection-Id` or designated by an org default, and several own entries of one " +
-        "integration need `X-Connection-Id`; `run_required` and `needs_reconnection` tell which " +
+        "integration need `X-Connection-Id`; `call_run_required` and `needs_reconnection` tell which " +
         "entries a call would still refuse. No credential is decrypted to build it. Requires " +
         "`credential-proxy:call-own`.",
       parameters: [
