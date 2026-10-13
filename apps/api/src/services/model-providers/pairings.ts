@@ -46,7 +46,9 @@ interface CreatePairingArgs {
   userId: string;
   orgId: string;
   providerId: string;
-  /** Existing org credential to update; omitted when connecting a new account. */
+  /** Owner of the credential the pairing produces or reconnects: `null` = the organization. */
+  ownerUserId: string | null;
+  /** Existing credential to update; omitted when connecting a new account. */
   reconnectCredentialId?: string;
   /** Public platform URL embedded in the token so the helper knows where to POST back. */
   platformUrl: string;
@@ -69,6 +71,7 @@ interface ConsumedPairing {
   userId: string;
   orgId: string;
   providerId: string;
+  ownerUserId: string | null;
   reconnectCredentialId: string | null;
   expiresAt: Date;
   consumedAt: Date;
@@ -118,6 +121,7 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
       userId: args.userId,
       orgId: args.orgId,
       providerId: args.providerId,
+      ownerUserId: args.ownerUserId,
       reconnectCredentialId: args.reconnectCredentialId ?? null,
       expiresAt,
     });
@@ -156,6 +160,7 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
       userId: modelProviderPairings.userId,
       orgId: modelProviderPairings.orgId,
       providerId: modelProviderPairings.providerId,
+      ownerUserId: modelProviderPairings.ownerUserId,
       reconnectCredentialId: modelProviderPairings.reconnectCredentialId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
@@ -171,6 +176,7 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
     userId: row.userId,
     orgId: row.orgId,
     providerId: row.providerId,
+    ownerUserId: row.ownerUserId,
     reconnectCredentialId: row.reconnectCredentialId,
     expiresAt: row.expiresAt,
     consumedAt: row.consumedAt,

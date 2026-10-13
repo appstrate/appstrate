@@ -157,6 +157,17 @@ describe("personal model credentials — instance token", () => {
     expect(data.find((m) => m.label === "Shared GPT")?.billed_to).toBe("user");
   });
 
+  it("pairs a subscription under the session's rule: a member's token mints a personal one only", async () => {
+    const mint = (ownerType: "org" | "user") =>
+      app.request("/api/model-providers-oauth/pairing", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ providerId: "test-oauth", owner_type: ownerType }),
+      });
+    expect((await mint("org")).status).toBe(403);
+    expect((await mint("user")).status).toBe(200);
+  });
+
   it("launches a run on the member's own credential", async () => {
     const res = await app.request("/api/runs/inline", {
       method: "POST",

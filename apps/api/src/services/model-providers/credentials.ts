@@ -19,6 +19,7 @@
  */
 
 import type { Context } from "hono";
+import { z } from "zod";
 import { eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, user } from "@appstrate/db/schema";
@@ -46,6 +47,7 @@ import { clearResolvedModelCache } from "../resolved-model-cache.ts";
 import { getOrgSettings } from "../organizations.ts";
 import { lockOrgMember } from "../space-members.ts";
 import type { AppEnv } from "../../types/index.ts";
+import { assertPermission } from "../../middleware/require-permission.ts";
 import {
   isBindableCredential,
   providerAllowsPersonalCredentials,
@@ -83,6 +85,34 @@ export function requestModelCredentialCaller(c: Context<AppEnv>): ModelCredentia
     deletesOrg: permissions.has("model-provider-credentials:delete"),
     connects: permissions.has("model-provider-credentials:connect"),
   };
+}
+
+/** Create, rotate or reconnect: an org manager, or a member for its own (`connect`). */
+export const MANAGE_CREDENTIALS = [
+  "model-provider-credentials:write",
+  "model-provider-credentials:connect",
+];
+
+/**
+ * `owner_type` of the two creation doors (API key, subscription pairing): `org`
+ * (default) is an organization credential, `user` the caller's personal one.
+ */
+export const credentialOwnerTypeSchema = z.enum(["org", "user"]).default("org");
+
+/**
+ * The owner a creation door writes for `ownerType`, after its permission:
+ * `write` for the organization (`null`), `connect` for the caller.
+ */
+export function resolveCredentialOwner(
+  c: Context<AppEnv>,
+  ownerType: z.infer<typeof credentialOwnerTypeSchema>,
+): string | null {
+  if (ownerType === "org") {
+    assertPermission(c, "model-provider-credentials", "write");
+    return null;
+  }
+  assertPermission(c, "model-provider-credentials", "connect");
+  return c.get("user").id;
 }
 
 // ─── Blob shapes (encrypted at rest) ───────────────────────────────────────
@@ -313,10 +343,33 @@ export function personalCredentialCustomEndpoint(
   });
 }
 
-/** {@link personalModelCredentialsAllowed} as a refusal, for the personal-creation doors. */
+/** {@link personalModelCredentialsAllowed} as a refusal. */
 async function assertPersonalModelCredentialsAllowed(orgId: string): Promise<void> {
   if (await personalModelCredentialsAllowed(orgId)) return;
   throw personalModelCredentialsDisabled();
+}
+
+/**
+ * The guard of a personal credential's creation, API key or subscription: the
+ * organization allows them, and the credential picks no endpoint (its traffic
+ * would leave the org's own host list, which the org cannot audit).
+ */
+async function assertPersonalCredentialCreatable(
+  orgId: string,
+  cfg: ModelProviderDefinition,
+  baseUrlOverride: string | null | undefined,
+): Promise<void> {
+  await assertPersonalModelCredentialsAllowed(orgId);
+  if (!providerAllowsPersonalCredentials(cfg) || baseUrlOverride) {
+    throw personalCredentialCustomEndpoint(cfg.providerId);
+  }
+}
+
+/** Rows of exactly this owner (`null` = the organization's). */
+function ownedBy(ownerUserId: string | null) {
+  return ownerUserId === null
+    ? isNull(modelProviderCredentials.ownerUserId)
+    : eq(modelProviderCredentials.ownerUserId, ownerUserId);
 }
 
 interface CreateApiKeyCredentialInput {
@@ -326,8 +379,8 @@ interface CreateApiKeyCredentialInput {
   providerId: string;
   apiKey: string;
   baseUrlOverride?: string | null;
-  /** The member who owns a personal credential; `null` (default) = organization credential. */
-  ownerUserId?: string | null;
+  /** The member who owns a personal credential; `null` = organization credential. */
+  ownerUserId: string | null;
 }
 
 export async function createApiKeyCredential(input: CreateApiKeyCredentialInput): Promise<string> {
@@ -340,14 +393,9 @@ export async function createApiKeyCredential(input: CreateApiKeyCredentialInput)
       `Provider ${input.providerId} requires OAuth (authMode=${cfg.authMode}); use createOAuthCredential instead`,
     );
   }
-  const ownerUserId = input.ownerUserId ?? null;
+  const { ownerUserId } = input;
   if (ownerUserId !== null) {
-    await assertPersonalModelCredentialsAllowed(input.orgId);
-    // A personal key cannot pick an endpoint: its traffic would leave the org's
-    // own host list, and the org cannot audit a host it does not configure.
-    if (!providerAllowsPersonalCredentials(cfg) || input.baseUrlOverride) {
-      throw personalCredentialCustomEndpoint(cfg.providerId);
-    }
+    await assertPersonalCredentialCreatable(input.orgId, cfg, input.baseUrlOverride);
   }
   const baseUrlOverride = resolveBaseUrlOverride(cfg, input.baseUrlOverride);
   const blob: ApiKeyBlob = { kind: "api_key", apiKey: input.apiKey };
@@ -386,7 +434,10 @@ async function insertCredential(
 
 export interface CreateOAuthCredentialInput {
   orgId: string;
+  /** The member who minted the pairing. */
   userId: string;
+  /** The member who owns a personal credential; `null` = organization credential. */
+  ownerUserId: string | null;
   label: string;
   providerId: string;
   accessToken: string;
@@ -398,8 +449,6 @@ export interface CreateOAuthCredentialInput {
 }
 
 export async function createOAuthCredential(input: CreateOAuthCredentialInput): Promise<string> {
-  // The pairing redeem reaches this door without the mint route: the policy is enforced here too.
-  await assertPersonalModelCredentialsAllowed(input.orgId);
   const cfg = getModelProvider(input.providerId);
   if (!cfg) {
     throw new Error(`Unknown providerId: ${input.providerId}`);
@@ -408,6 +457,10 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
     throw new Error(
       `Provider ${input.providerId} is api-key only (authMode=${cfg.authMode}); use createApiKeyCredential instead`,
     );
+  }
+  // The pairing redeem reaches this door without the mint route: the guard is enforced here too.
+  if (input.ownerUserId !== null) {
+    await assertPersonalCredentialCreatable(input.orgId, cfg, null);
   }
   const expiresAt = input.expiresAt ?? null;
   const blob: OAuthBlob = {
@@ -428,15 +481,16 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
     // worker scan can filter at SQL level. Blob remains source of truth.
     expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
     createdBy: input.userId,
-    // A subscription is its holder's: never an organization credential.
-    ownerUserId: input.userId,
+    ownerUserId: input.ownerUserId,
   });
 }
 
 interface ReconnectOAuthCredentialInput {
   orgId: string;
-  /** The member redeeming the pairing: only the subscription's holder may reconnect it. */
+  /** The member who minted the pairing. */
   userId: string;
+  /** The pairing's owner, which the credential must have (`null` = the organization). */
+  ownerUserId: string | null;
   id: string;
   providerId: string;
   accessToken: string;
@@ -454,10 +508,10 @@ interface ReconnectOAuthCredentialInput {
  * design — reconnect is the user-facing repair path for that state too.
  *
  * Judged at write time, not at the pairing's mint (the pairing is already
- * consumed): personal credentials must be allowed (else the 403), and the row
- * must be the redeeming member's own subscription with the member still in the
- * organization, under the membership lock the exit takes (else `false`, the
- * route's 404).
+ * consumed): the row must have the pairing's owner, and the member who minted
+ * the pairing must still be in the organization, under the membership lock the
+ * exit takes (else `false`, the route's 404). A personal credential also needs
+ * the organization to allow them (else the 403).
  */
 export async function reconnectOAuthCredential(
   input: ReconnectOAuthCredentialInput,
@@ -467,11 +521,11 @@ export async function reconnectOAuthCredential(
     extra: [
       eq(modelProviderCredentials.id, input.id),
       eq(modelProviderCredentials.providerId, input.providerId),
-      eq(modelProviderCredentials.ownerUserId, input.userId),
+      ownedBy(input.ownerUserId),
     ],
   });
   // Read before the transaction: the settings read is not on `tx` (one connection on PGlite).
-  await assertPersonalModelCredentialsAllowed(input.orgId);
+  if (input.ownerUserId !== null) await assertPersonalModelCredentialsAllowed(input.orgId);
   const updated = await db.transaction(async (tx) => {
     if (!(await lockOrgMember(tx, input.orgId, input.userId))) return false;
     const [row] = await tx
@@ -657,8 +711,8 @@ interface CredentialFacts {
 
 /**
  * The reconnect rule, shared by the list's `reconnect` action and the pairing
- * route: the caller's own OAuth subscription of `providerId`, re-paired by a
- * `connects` holder while `personalAllowed` (the organization's policy).
+ * route: an OAuth credential of `providerId` the caller may edit, a personal one
+ * only while `personalAllowed` (the organization's policy).
  */
 export function mayReconnectCredential(
   caller: ModelCredentialCaller,
@@ -667,13 +721,11 @@ export function mayReconnectCredential(
   personalAllowed: boolean,
 ): boolean {
   return (
-    personalAllowed &&
-    caller.connects &&
     credential.source === "custom" &&
     credential.authMode === "oauth2" &&
     credential.providerId === providerId &&
-    credential.ownerUserId !== null &&
-    credential.ownerUserId === caller.userId
+    mayManageCredential(caller, credential.ownerUserId, "edit") &&
+    (credential.ownerUserId === null || personalAllowed)
   );
 }
 
@@ -740,11 +792,7 @@ export async function dedupeCredentialLabel(
     .where(
       scopedWhere(modelProviderCredentials, {
         orgId,
-        extra: [
-          ownerUserId === null
-            ? isNull(modelProviderCredentials.ownerUserId)
-            : eq(modelProviderCredentials.ownerUserId, ownerUserId),
-        ],
+        extra: [ownedBy(ownerUserId)],
       }),
     );
   return dedupeLabel(
@@ -1164,7 +1212,7 @@ export async function listOrgModelProviderCredentials(
           },
           personalAllowed,
         ),
-        bindable: isBindableCredential({ ownerUserId: r.ownerUserId, providerId: r.providerId }),
+        bindable: isBindableCredential(r),
         created_by: r.createdBy,
         createdAt: toISORequired(r.createdAt),
         updatedAt: toISORequired(r.updatedAt),

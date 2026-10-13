@@ -12,23 +12,22 @@ import {
 } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import {
-  assertPermission,
-  requireAnyPermission,
-  requirePermission,
-} from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
   mayProbeCredential,
   createApiKeyCredential,
+  credentialOwnerTypeSchema,
   dedupeCredentialLabel,
   deriveCredentialLabel,
   deleteModelProviderCredential,
   getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
+  MANAGE_CREDENTIALS,
   personalCredentialCustomEndpoint,
   requestModelCredentialCaller,
+  resolveCredentialOwner,
   updateModelProviderCredential,
   type ModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
@@ -60,11 +59,6 @@ const endpointUrlSchema = z.url({ protocol: /^https?$/ });
 
 /** Read the credential list, the pickers and the probes: an org reader or a member with its own key. */
 const VIEW_CREDENTIALS = ["model-provider-credentials:read", "model-provider-credentials:connect"];
-/** Create or rotate: an org manager, or a member for its own (`connect`). */
-const MANAGE_CREDENTIALS = [
-  "model-provider-credentials:write",
-  "model-provider-credentials:connect",
-];
 /** Remove: an org manager, or a member for its own (`connect`). */
 const REMOVE_CREDENTIALS = [
   "model-provider-credentials:delete",
@@ -93,7 +87,7 @@ export const createSchema = z
      * `org` (default) makes an organization credential, needing `write`;
      * `user` makes the caller's personal credential, needing `connect`.
      */
-    owner_type: z.enum(["org", "user"]).default("org"),
+    owner_type: credentialOwnerTypeSchema,
   })
   .strict();
 
@@ -350,12 +344,7 @@ export function createModelProviderCredentialsRouter() {
     const user = c.get("user");
     const data = await readJsonBody(c, createSchema);
     const { providerId, api_key: apiKey, base_url_override: baseUrlOverride } = data;
-    const personal = data.owner_type === "user";
-    if (personal) {
-      assertPermission(c, "model-provider-credentials", "connect");
-    } else {
-      assertPermission(c, "model-provider-credentials", "write");
-    }
+    const ownerUserId = resolveCredentialOwner(c, data.owner_type);
 
     const cfg = getModelProvider(providerId);
     if (!cfg) {
@@ -373,7 +362,7 @@ export function createModelProviderCredentialsRouter() {
     const label = await dedupeCredentialLabel(
       caller.orgId,
       data.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
-      personal ? user.id : null,
+      ownerUserId,
     );
 
     try {
@@ -384,7 +373,7 @@ export function createModelProviderCredentialsRouter() {
         providerId,
         apiKey,
         baseUrlOverride: baseUrlOverride ?? null,
-        ownerUserId: personal ? user.id : null,
+        ownerUserId,
       });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.created",
@@ -394,7 +383,7 @@ export function createModelProviderCredentialsRouter() {
           label,
           providerId,
           baseUrlOverride: baseUrlOverride ?? null,
-          ownerType: personal ? "user" : "org",
+          ownerType: data.owner_type,
         },
       });
       // Return the bare created resource — the public, non-secret

@@ -203,6 +203,7 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
   const credentialId = await createApiKeyCredential({
     orgId: ctx.orgId,
     userId: ctx.user.id,
+    ownerUserId: null,
     label: "Connection fixture credential",
     providerId: "openai",
     apiKey: "sk-test-not-a-real-key",

@@ -165,6 +165,7 @@ describe("personal model credentials — routes", () => {
       await createApiKeyCredential({
         orgId: admin.orgId,
         userId: admin.user.id,
+        ownerUserId: null,
         label: "Org key",
         providerId: FIXED_KEY_PROVIDER,
         apiKey: "sk-org",
@@ -194,6 +195,7 @@ describe("personal model credentials — routes", () => {
       await createApiKeyCredential({
         orgId: admin.orgId,
         userId: admin.user.id,
+        ownerUserId: null,
         label: "Org key",
         providerId: FIXED_KEY_PROVIDER,
         apiKey: "sk-org",
@@ -235,6 +237,7 @@ describe("personal model credentials — routes", () => {
       await createApiKeyCredential({
         orgId: admin.orgId,
         userId: admin.user.id,
+        ownerUserId: null,
         label: "Org key",
         providerId: FIXED_KEY_PROVIDER,
         apiKey: "sk-org",
@@ -275,6 +278,7 @@ describe("personal model credentials — routes", () => {
       const id = await createOAuthCredential({
         orgId: admin.orgId,
         userId: member.user.id,
+        ownerUserId: member.user.id,
         label: "Member subscription",
         providerId: OAUTH_PROVIDER,
         accessToken: "at-member",
@@ -297,6 +301,7 @@ describe("personal model credentials — routes", () => {
       await createOAuthCredential({
         orgId: admin.orgId,
         userId: member.user.id,
+        ownerUserId: member.user.id,
         label: "Member subscription",
         providerId: OAUTH_PROVIDER,
         accessToken: "at-member",
@@ -387,6 +392,7 @@ describe("personal model credentials — routes", () => {
       const id = await createApiKeyCredential({
         orgId: admin.orgId,
         userId: admin.user.id,
+        ownerUserId: null,
         label: "Org key",
         providerId: FIXED_KEY_PROVIDER,
         apiKey: "sk-org",
@@ -450,6 +456,7 @@ describe("personal model credentials — routes", () => {
       createApiKeyCredential({
         orgId: admin.orgId,
         userId: admin.user.id,
+        ownerUserId: null,
         label: "Org key",
         providerId: FIXED_KEY_PROVIDER,
         apiKey: "sk-org",
@@ -588,7 +595,7 @@ describe("personal model credentials — routes", () => {
       const mint = await app.request(PAIRINGS, {
         method: "POST",
         headers: jsonHeaders(member),
-        body: JSON.stringify({ providerId: OAUTH_PROVIDER }),
+        body: JSON.stringify({ providerId: OAUTH_PROVIDER, owner_type: "user" }),
       });
       expect(mint.status).toBe(200);
       const { id } = (await mint.json()) as { id: string };
@@ -614,7 +621,7 @@ describe("personal model credentials — routes", () => {
       const res = await app.request(PAIRINGS, {
         method: "POST",
         headers: jsonHeaders(member),
-        body: JSON.stringify({ providerId: OAUTH_PROVIDER }),
+        body: JSON.stringify({ providerId: OAUTH_PROVIDER, owner_type: "user" }),
       });
       expect(res.status).toBe(403);
       expect(((await res.json()) as { code: string }).code).toBe(
@@ -626,6 +633,7 @@ describe("personal model credentials — routes", () => {
       const subscriptionId = await createOAuthCredential({
         orgId: admin.orgId,
         userId: otherMember.user.id,
+        ownerUserId: otherMember.user.id,
         label: "Other subscription",
         providerId: OAUTH_PROVIDER,
         accessToken: "at-other",
@@ -635,13 +643,18 @@ describe("personal model credentials — routes", () => {
       const foreign = await app.request(PAIRINGS, {
         method: "POST",
         headers: jsonHeaders(member),
-        body: JSON.stringify({ providerId: OAUTH_PROVIDER, credentialId: subscriptionId }),
+        body: JSON.stringify({
+          providerId: OAUTH_PROVIDER,
+          owner_type: "user",
+          credentialId: subscriptionId,
+        }),
       });
       expect(foreign.status).toBe(404);
 
       const ownId = await createOAuthCredential({
         orgId: admin.orgId,
         userId: member.user.id,
+        ownerUserId: member.user.id,
         label: "Own subscription",
         providerId: OAUTH_PROVIDER,
         accessToken: "at-own",
@@ -650,7 +663,11 @@ describe("personal model credentials — routes", () => {
       const own = await app.request(PAIRINGS, {
         method: "POST",
         headers: jsonHeaders(member),
-        body: JSON.stringify({ providerId: OAUTH_PROVIDER, credentialId: ownId }),
+        body: JSON.stringify({
+          providerId: OAUTH_PROVIDER,
+          owner_type: "user",
+          credentialId: ownId,
+        }),
       });
       expect(own.status).toBe(200);
     });

@@ -611,7 +611,7 @@ function personalCredentialNotBindable(): ApiError {
     code: "personal_credential_not_bindable",
     title: "Invalid Request",
     detail:
-      "A model can only be bound to an organization API key: a subscription or a member's own credential is never shared. Without one, each member serves it with their own credential.",
+      "A model can only be bound to an organization credential: a member's own credential is never shared. Without one, each member serves it with their own credential.",
     param: "credentialId",
   });
 }
@@ -870,7 +870,7 @@ export async function seedOrgModelsForCredential(
   // A seed is an organization binding: a member's own credential is never bound.
   const credential = await loadCredentialBinding(orgId, credentialId);
   if (!credential) throw invalidRequest("credentialId is unknown", "credentialId");
-  if (credential.ownerUserId !== null) throw personalCredentialNotBindable();
+  if (!isBindableCredential(credential)) throw personalCredentialNotBindable();
 
   return db.transaction(async (tx) => {
     // Dedup: skip if any model already references this credential.

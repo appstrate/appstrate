@@ -112,6 +112,7 @@ export async function importOAuthModelProviderConnection(
     const reconnected = await reconnectOAuthCredential({
       orgId: input.orgId,
       userId: input.userId,
+      ownerUserId: input.ownerUserId,
       id: reconnectCredentialId,
       providerId: input.providerId,
       accessToken: input.accessToken,
@@ -136,8 +137,7 @@ export async function importOAuthModelProviderConnection(
   // every redeem. A reconnect deliberately skips this path and preserves the
   // targeted row's label.
   const base = input.label?.trim() || config.displayName || config.providerId;
-  // A new subscription is its holder's, so its label is deduped within their scope.
-  const label = await dedupeCredentialLabel(input.orgId, base, input.userId);
+  const label = await dedupeCredentialLabel(input.orgId, base, input.ownerUserId);
 
   const credentialId = await createOAuthCredential({
     ...credentialInput,

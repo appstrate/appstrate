@@ -10,8 +10,9 @@
  * payer and never spends a personal credential. A model with no usable
  * credential for its payer is refused at kickoff (`model_credential_required`).
  *
- * The sidecar OAuth door serves a personal credential only to runs of its
- * holder: the same pin that gates the run, plus the payer check.
+ * The sidecar OAuth door serves an organization credential to every run pinned
+ * to it, and a personal one only to runs its owner pays: the same pin that gates
+ * the run, plus the payer check.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -225,7 +226,7 @@ describe("run payer — personal model credentials", () => {
     expect(after!.payerUserId).toBe(member.user.id);
   });
 
-  it("serves a personal OAuth credential only to runs of its holder", async () => {
+  it("serves a personal OAuth credential only to runs its owner pays", async () => {
     const member = await memberContext(ctx, "member", "builder");
     const agentId = `@${ctx.org.slug}/payer-agent`;
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
@@ -262,7 +263,7 @@ describe("run payer — personal model credentials", () => {
     }
   });
 
-  it("refuses the door to a run that recorded no payer, even when its user holds the credential", async () => {
+  it("refuses a personal credential to a run that recorded no payer, even when its user owns the credential", async () => {
     const agentId = `@${ctx.org.slug}/nopayer-agent`;
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
     const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });
@@ -291,7 +292,46 @@ describe("run payer — personal model credentials", () => {
     }
   });
 
-  it("stops the sidecar's subscription door for a holder's pinned run once personal credentials are switched off", async () => {
+  it("serves an organization subscription to every run pinned to it, with no payer, whatever the personal policy", async () => {
+    const member = await memberContext(ctx, "member", "builder");
+    const agentId = `@${ctx.org.slug}/org-subscription-agent`;
+    await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
+    const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId, createdBy: ctx.user.id });
+    // A run on an organization credential records no payer, whoever launched it.
+    const tokenOf = async (userId: string | null) =>
+      signRunToken(
+        (
+          await seedRun({
+            packageId: agentId,
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            userId,
+            payerUserId: null,
+            modelSource: "org",
+            status: "running",
+            modelCredentialId: oauth.id,
+          })
+        ).id,
+      );
+    const read = (token: string) =>
+      app.request(`/internal/oauth-token/${oauth.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+    try {
+      // A schedule or an API key launches with no user at all.
+      const unattended = await tokenOf(null);
+      expect((await read(unattended)).status).toBe(200);
+      expect((await read(await tokenOf(member.user.id))).status).toBe(200);
+
+      await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+      expect((await read(unattended)).status).toBe(200);
+    } finally {
+      await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
+    }
+  });
+
+  it("stops the sidecar's door on a personal subscription for its owner's pinned run once personal credentials are switched off", async () => {
     const agentId = `@${ctx.org.slug}/door-agent`;
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
     const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId });

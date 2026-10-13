@@ -859,8 +859,8 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
  *   3. Holder: a personal credential (`owner_user_id` set) serves only the run
  *      whose recorded payer (`runs.payer_user_id`) is its owner, and nothing
- *      while the organization has personal credentials off. Subscriptions are
- *      personal by rule.
+ *      while the organization has personal credentials off. An organization
+ *      credential serves every run of the organization.
  *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
  * Remote-origin runs (where the pin is structurally absent) are already
