@@ -1156,6 +1156,20 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **A fire refused over the schedule's own connection choice disables the
+  schedule** (#1954). It recorded a failed run and stayed armed, so it failed
+  at every tick: only a write to the schedule clears those verdicts, the ones
+  the schedule write refuses (`must_choose_connection`,
+  `override_connection_unavailable`, `override_outranked`, and
+  `auth_serves_no_selected_tool` or `required_integration_unbound` decided by
+  its own `connection_overrides`). A fire whose refusal carries any of them
+  disables the schedule, removes its job and records one failed run
+  (`Schedule disabled: …`). `disabled_reason` is the new
+  `connection_choice_invalid` (migration `0094`, no operator step);
+  re-enabling goes through the schedule write rule. Every other refusal (not
+  connected, needs reconnection, an inactive integration, a pin naming an
+  unavailable connection) records a failed run and leaves the schedule armed,
+  as before.
 - **Removing the pin or org default that named a schedule's connection set
   disables the schedule** (#1933). It stayed armed: its next fire failed at
   every tick (`must_choose_connection`), bound the actor's one own connection
