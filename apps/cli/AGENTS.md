@@ -145,7 +145,8 @@ echo '{"connection_overrides": {"@acme/gmail": ["<connection-id>"]}}' \
 #   - for a run (X-Run-Id): `credential-proxy:call-run`, the connections that run
 #     bound. This is what a locally executed `appstrate run` does when its run is
 #     registered on the instance (--report, on by default with a profile or an
-#     API key). Launching runs (`agents:run`) does not include it.
+#     API key), and what a script does when it runs under a run (last example
+#     below). Launching runs (`agents:run`) does not include it.
 #   - outside a run: `credential-proxy:call-own`, and YOUR OWN connections only.
 #     A connection another member shared, or an integration under an enforced
 #     org default (403 run_required), is reachable through a run only.
@@ -169,6 +170,25 @@ appstrate api GET /api/credential-proxy/proxy \
   -H 'X-Integration-Id: @acme/gmail' \
   -H 'X-Target: https://gmail.googleapis.com/gmail/v1/users/me/profile' \
   -H "X-Session-Id: $(uuidgen)"
+
+# A script reaches a shared connection, or an integration under an enforced org
+# default, by running under a run. `appstrate run @scope/agent -- <command>`
+# registers a run of the agent and runs the command as its runner: no agent
+# executes, no model is called. It needs `agents:run` to register and
+# `credential-proxy:call-run` for each call. The run binds one connection per
+# integration that agent declares, so which agent to name is the human's call;
+# `--connection` and `--input` go before the `--`. The command names the run
+# itself: $APPSTRATE_RUN_ID is set in its environment only, hence the single
+# quotes. stdout and the exit code are the command's; the run ends success on
+# exit 0, failed otherwise, cancelled on a signal. A run cancelled or failed on
+# the instance refuses the calls naming it: the CLI says so once on stderr and
+# the command keeps running.
+appstrate run @acme/email-sorter -- sh -c '
+  appstrate api --fail-with-body GET /api/credential-proxy/proxy \
+    -H "X-Run-Id: $APPSTRATE_RUN_ID" \
+    -H "X-Integration-Id: @acme/gmail" \
+    -H "X-Target: https://gmail.googleapis.com/gmail/v1/users/me/profile" \
+    -H "X-Session-Id: $(uuidgen)"'
 ```
 
 **List runs for a space, filter by status:**
@@ -197,7 +217,7 @@ If you hit any of the following, stop and surface the issue to the human instead
 
 - `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed. With `APPSTRATE_API_KEY` set, the key itself was rejected instead: the human must supply a valid one.
 - `403 forbidden` — the pinned org doesn't have permission. Offer `appstrate org switch` or ask which org to use.
-- `403` from `/api/credential-proxy/*` naming `credential-proxy:call-own`, or `403 run_required` — a call made outside a run that the human's role, or an enforced org default on the integration, does not allow there. The same call goes through a run (`appstrate run` with reporting on, i.e. no `--report=false`) when the role holds `credential-proxy:call-run`; a `403` naming both permissions (`credential-proxy:call-run|credential-proxy:call-own`) means the role holds neither and cannot use the proxy at all. Do not look for another route to the credentials.
+- `403` from `/api/credential-proxy/*` naming `credential-proxy:call-own`, or `403 run_required` — a call made outside a run that the human's role, or an enforced org default on the integration, does not allow there. The same call goes through a run when the role holds `credential-proxy:call-run`: from a script, `appstrate run @scope/agent -- <command>` with `X-Run-Id: $APPSTRATE_RUN_ID` on the call; from a locally executed agent, `appstrate run` with reporting on (no `--report=false`). A `403` naming both permissions (`credential-proxy:call-run|credential-proxy:call-own`) means the role holds neither and cannot use the proxy at all. Do not look for another route to the credentials.
 - `400 Space context required` — the profile has no `spaceId` pinned. Run `appstrate space current` to check, then `appstrate space switch` (or surface the error — the cascade at login should have handled this).
 - `404 Space '<id>' not found in this organization` — stale space pin from a previous org. Run `appstrate space switch` under the current org.
 - `Profile "<name>" … pins the retired key "applicationId"` — the profile on disk predates the space rename. Every command is blocked until the human deletes that line from `config.toml` and re-pins with `appstrate space switch`. Surface this to the human; do not edit their config yourself.

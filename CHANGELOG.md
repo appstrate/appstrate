@@ -949,6 +949,34 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   member shared is reached by delegating to an agent run. Guide:
   `docs/guides/connecting-mcp-clients.md`.
 
+- **`appstrate run @scope/agent -- <command> [args…]`** (#1946). The CLI
+  registers a remote run of the agent and runs the command as its runner: no
+  agent executes, no model is called, and the agent's bundle is not fetched.
+  The command reads the run id from `APPSTRATE_RUN_ID` and names it on its
+  credential-proxy calls (`-H "X-Run-Id: $APPSTRATE_RUN_ID"`), which reach
+  the connections the run bound, a colleague's shared connection and an
+  integration under an enforced org default included. Registering takes
+  `agents:run` and each call `credential-proxy:call-run`, with no read access
+  to the agent: holding `credential-proxy:call-run` amounts to direct use of
+  whatever the runs its holder may launch bind. stdout and the exit code are
+  the command's (128 + n on a signal, 127 not found, 126 not executable). The
+  run ends `success` on exit 0, `failed` otherwise, `cancelled` when the CLI
+  receives a signal. `--profile` and `--api-key` reach the command as
+  `APPSTRATE_PROFILE` and `APPSTRATE_API_KEY`, the key then readable by the
+  command and its descendants. Cancelling the run
+  (`POST /api/runs/{id}/cancel`) cuts the command's access without stopping
+  it. The form accepts `--connection`, `--input`, `--input-file`, `--sink-ttl`
+  and `--api-key`, and refuses the flags that configure an agent's execution
+  or its rendering. Reference: `apps/cli/README.md`, "Running a command as the
+  run's runner".
+
+- **A remote run whose `runner_kind` is `command` finishes `success` with
+  zero tokens and no output** (#1946). The finalize route does not apply the
+  zero-token liveness check to it, and does not judge it by the agent's output
+  schema when it emits no output. An output it does emit is validated against
+  that schema. Every other run keeps both rules, a platform-executed run
+  launched with `X-Appstrate-Runner-Kind: command` included.
+
 - **Boot warning for environment keys this version does not read.** One `warn`
   line lists each set key whose namespace is one the platform reads and that no
   current setting consumes, so a renamed, retired or misspelled variable is

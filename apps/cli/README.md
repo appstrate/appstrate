@@ -781,6 +781,8 @@ Execute an agent. The shape of the target picks the execution mode:
 
 `--local` and `--remote` are mutually exclusive.
 
+A command after a literal `--` replaces the agent's execution: `appstrate run @scope/agent -- <command> [args…]` registers a run of the agent on the instance and runs the command as its runner (see Running a command as the run's runner).
+
 ```sh
 # Run the latest version of an agent active in the pinned space
 appstrate run @scope/triage
@@ -852,7 +854,7 @@ Besides the canonical RunEvents, `--json` writes four envelopes of the CLI's own
 | `appstrate.remote.triggered` | `--remote`: the instance created the run, before the first event               | `runId`, `instance`, `warnings` (only when there are some) |
 | `appstrate.report.started`   | `--report`: the instance registered the locally executed run, before it starts | `runId`, `instance`, `warnings` (only when there are some) |
 | `appstrate.remote.detached`  | `--remote`: a signal detached the CLI from a run that keeps going              | `runId`, `instance`                                        |
-| `appstrate.finalize`         | Every mode: the run reached a terminal status (a detached run has none)        | `result` (the run's `RunResult`)                           |
+| `appstrate.finalize`         | Local and remote: the run reached a terminal status (a detached run has none)  | `result` (the run's `RunResult`)                           |
 
 `warnings` holds the launch's items as the API returns them (`{ field, code, message, … }`), for the integrations the run starts without.
 
@@ -890,6 +892,57 @@ appstrate api GET /api/credential-proxy/connections | jq '.data[] | {integration
 ```
 
 A run executed on the instance (`--remote`, the default for a package id) involves none of this: its integrations are reached from inside its sandbox.
+
+**Running a command as the run's runner**
+
+```sh
+appstrate run @scope/agent[@spec] [options] -- <command> [args…]
+```
+
+With a command after a literal `--`, no agent executes and no model is called. The CLI registers a run of the agent on the instance (`POST /api/runs/remote`) and is its runner: it emits the run's first event, keeps its heartbeat, starts the command and finalizes the run with the command's outcome. The agent's bundle is never fetched. The target is a package id active in the space; a bundle path is refused. The command is what follows a `--` placed after the target, and options go before that `--`. A `--` ahead of the target only ends option parsing, so `appstrate run -- @scope/agent` runs the agent.
+
+The command reads the run id from `APPSTRATE_RUN_ID` and names it on its credential-proxy calls. Those calls take the proxy's run path (see Integration calls of a locally executed run) and reach the connections the run bound, including one another member shared into the space and one an enforced org default imposes, which a call outside a run never reaches. `appstrate api` reads no environment variable for the run; the command passes the header itself.
+
+```sh
+appstrate run @acme/email-sorter -- sh -c '
+  appstrate api --fail-with-body GET /api/credential-proxy/proxy \
+    -H "X-Run-Id: $APPSTRATE_RUN_ID" \
+    -H "X-Integration-Id: @acme/gmail" \
+    -H "X-Target: https://gmail.googleapis.com/gmail/v1/users/me/labels" \
+    -H "X-Session-Id: $(uuidgen)"
+' > labels.json
+```
+
+The single quotes keep `$APPSTRATE_RUN_ID` for the command. The variable is set in the command's environment, and the shell that launches `appstrate run` does not have it. The command is started without a shell, in the CLI's working directory, with its standard streams and its environment. A `--profile` or an `--api-key` given to `appstrate run` is added to that environment as `APPSTRATE_PROFILE` or `APPSTRATE_API_KEY`, so an `appstrate` the command runs reaches the instance and the identity the run is registered with. The key is then readable by the command and its descendants. With a key, the registration needs `APPSTRATE_SPACE_ID`, as a run executed locally does.
+
+- **Permissions.** Registering the run requires `agents:run`. Each proxy call made for it requires `credential-proxy:call-run`, which `agents:run` does not include. The run is registered by id, so a custom role or an API key holding those two is enough, with no read access to the agent.
+- **Connections.** The run binds one connection per integration the agent declares, by the rules of any run (see Connection readiness). `--connection <integration>=<connection-id>` names it when several of your connections are open to choose from, or when only connections shared by other members serve the agent. A call naming an integration the run bound no connection for answers `404 credential_not_found`. Every call that may have sent a credential is journaled with the run id (`connection_calls`).
+- **Input.** `--input` / `--input-file` are sent verbatim. The instance resolves them over the agent's defaults and validates the result against the agent's input schema, so an agent with required input fields needs them.
+- **Output.** stdout belongs to the command. The CLI writes to stderr only: the launch line, one `⚠` line per launch warning, and its own warnings and errors.
+
+The command's outcome is the run's, and its exit code is the CLI's:
+
+| Outcome                                    | Run status  | Exit code                             |
+| ------------------------------------------ | ----------- | ------------------------------------- |
+| The command exits 0                        | `success`   | 0                                     |
+| The command exits with another code        | `failed`    | that code                             |
+| A signal terminates the command            | `failed`    | 128 + signal number                   |
+| The command is not found                   | `failed`    | 127                                   |
+| The command is found but not executable    | `failed`    | 126                                   |
+| The CLI receives SIGINT, SIGTERM or SIGHUP | `cancelled` | 130, 143 or 129 (128 + signal number) |
+| The instance refuses the registration      | no run      | 1 (the command is not started)        |
+| The instance refuses the run's first event | `failed`    | 1 (the command is not started)        |
+
+On a signal the CLI finalizes the run `cancelled` at once and stops the command meanwhile: SIGTERM, then SIGKILL after 3 seconds. If the CLI process exits while the command is alive (a second Ctrl-C, a crash), it kills the command with SIGKILL. After a refused first event the `failed` finalize is best effort.
+
+Every finalize states zero tokens, and the CLI sends no output. The instance does not apply its zero-token check to a run whose runner is a command, and does not judge such a run by the agent's output schema when it emits no output. An output a command runner does emit is validated against that schema like any other run's.
+
+A run can be closed on the instance while the command lives: cancelled through `POST /api/runs/{id}/cancel`, failed by the stall watchdog, or past its `--sink-ttl`. The CLI learns it at its next heartbeat (about every 15 seconds), prints one line on stderr, keeps the command running and sends no finalize; it still exits with the command's code. A cancelled or failed run refuses the calls that name it at once, so cancelling the run cuts the command's access without stopping it.
+
+- **`--sink-ttl <seconds>`** is how long the instance accepts the runner's signed requests. It defaults to `REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS` (2 hours) and is capped by `REMOTE_RUN_SINK_MAX_TTL_SECONDS` (24 hours); a value above 86400 is a `400`. Past it the heartbeat is refused and stops. The stall watchdog then fails the run, `RUN_STALL_THRESHOLD_SECONDS` (60 seconds by default) after the last accepted heartbeat, and the proxy refuses the calls naming it from that point.
+- **A CLI killed with SIGKILL** runs no cleanup. The command stays alive and keeps its access until the stall watchdog fails the run, on the same threshold.
+
+Command mode accepts `--connection`, `--input`, `--input-file`, `--sink-ttl` and `--api-key`, plus the global `--profile`. It refuses every flag that configures an agent's execution or its rendering, naming each with its reason before anything is registered: `--local`, `--remote`, `--model`, `--model-api`, `--model-source`, `--llm-api-key`, `--integrations`, `--creds-file`, `--snapshot`, `--proxy`, `--no-inherit`, `--report`, `--report-fallback`, `--run-id`, `--output`, `--json`, `--verbose`, `--quiet` and `--[no-]cancel-on-exit`.
 
 ---
 
