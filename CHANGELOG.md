@@ -971,6 +971,12 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **An `Idempotency-Key` sent to the credential proxy reaches the upstream.**
+  On `/api/credential-proxy/proxy` the header is the upstream's
+  (Stripe's, for one): it is relayed with the caller's other headers,
+  whatever the verb, where a mutating call carrying one was refused
+  `400 idempotency_not_supported`. The platform de-duplicates nothing on it.
+
 - **A session is refused for a user with no user row.** The session hook throws
   instead of creating a session without a realm.
 - **The Pi resource loader guard throws when Pi no longer exposes
