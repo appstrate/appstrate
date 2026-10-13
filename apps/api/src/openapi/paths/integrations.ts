@@ -989,7 +989,9 @@ export const integrationsPaths = {
         "default, the cascade re-resolves (org default, else system client) " +
         "with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default " +
         "(enforced or soft) names one of the connections it minted; a member pin does not block it. " +
-        "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) " +
+        "Each deleted connection is dropped from its owner's member pins (a pin left empty is removed, " +
+        "which disables the owner's enabled schedules whose fire bound the integration through it and " +
+        "that nothing else names the set for) " +
         "and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration " +
         "is left empty is disabled); another member's pin keeps the id, and that member's next run fails " +
         "with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted " +

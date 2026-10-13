@@ -10,7 +10,7 @@
  * answer, and what still names the set afterwards is read from rows.
  */
 
-import { and, asc, eq, exists, inArray, isNull, notExists, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationOrgDefaults,
@@ -20,7 +20,7 @@ import {
 } from "@appstrate/db/schema";
 import type { ConnectionResolutionSource } from "@appstrate/core/integration";
 import { actorFromIds } from "../lib/actor.ts";
-import type { Tx } from "../lib/db-helpers.ts";
+import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
@@ -30,7 +30,7 @@ import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
 import { disableSchedules } from "./schedules-naming-connection.ts";
 
 /** A layer naming `integrationId`'s set in a space: its org default, or a pin on one agent. */
-type NamingLayer = { spaceId: string; integrationId: string } & (
+export type NamingLayer = { spaceId: string; integrationId: string } & (
   | { kind: "org_default" }
   | { kind: "admin_pin"; agentPackageId: string }
   | { kind: "member_pin"; agentPackageId: string; userId: string }
@@ -45,32 +45,84 @@ const LAYER_SOURCES: Record<NamingLayer["kind"], readonly ConnectionResolutionSo
 
 type ScheduleRow = typeof schedules.$inferSelect;
 
+/** `layer`'s own row among the pins; `undefined` for an org default. */
+function pinOf(layer: NamingLayer): SQL | undefined {
+  if (layer.kind === "org_default") return undefined;
+  return and(
+    eq(integrationPins.spaceId, layer.spaceId),
+    eq(integrationPins.packageId, layer.agentPackageId),
+    eq(integrationPins.integrationId, layer.integrationId),
+    layer.kind === "admin_pin"
+      ? isNull(integrationPins.userId)
+      : eq(integrationPins.userId, layer.userId),
+  );
+}
+
+/** `layer`'s own row among the org defaults; `undefined` for a pin. */
+function orgDefaultOf(layer: NamingLayer): SQL | undefined {
+  if (layer.kind !== "org_default") return undefined;
+  return and(
+    eq(integrationOrgDefaults.spaceId, layer.spaceId),
+    eq(integrationOrgDefaults.integrationId, layer.integrationId),
+  );
+}
+
 /** The layer's own row. */
 function layerRow(layer: NamingLayer) {
-  if (layer.kind === "org_default") {
-    return db
-      .select({ one: sql`1` })
-      .from(integrationOrgDefaults)
-      .where(
-        and(
-          eq(integrationOrgDefaults.spaceId, layer.spaceId),
-          eq(integrationOrgDefaults.integrationId, layer.integrationId),
+  return layer.kind === "org_default"
+    ? db
+        .select({ one: sql`1` })
+        .from(integrationOrgDefaults)
+        .where(orgDefaultOf(layer))
+    : db
+        .select({ one: sql`1` })
+        .from(integrationPins)
+        .where(pinOf(layer));
+}
+
+/** `connection_overrides` holds no key for `integrationId`: a key names its set, `[]` included. */
+function noOverrideKey(integrationId: string): SQL {
+  return sql`NOT coalesce(${schedules.connectionOverrides} ? ${integrationId}, false)`;
+}
+
+/**
+ * Nothing but `layer` names its integration's set for a schedule: it is enabled, with no key in
+ * `connection_overrides`, no admin pin or pin of its actor on its agent, and no org default.
+ * `standing` reads it while the layer's row exists, the one row then not counted.
+ */
+function leftUnnamed(executor: DbOrTx, layer: NamingLayer, standing: boolean): SQL | undefined {
+  const besides = (own: SQL | undefined) =>
+    standing && own ? sql`(${own}) IS NOT TRUE` : undefined;
+  return and(
+    eq(schedules.enabled, true),
+    noOverrideKey(layer.integrationId),
+    notExists(
+      executor
+        .select({ one: sql`1` })
+        .from(integrationPins)
+        .where(
+          and(
+            eq(integrationPins.spaceId, schedules.spaceId),
+            eq(integrationPins.packageId, schedules.packageId),
+            eq(integrationPins.integrationId, layer.integrationId),
+            or(isNull(integrationPins.userId), eq(integrationPins.userId, schedules.userId)),
+            besides(pinOf(layer)),
+          ),
         ),
-      );
-  }
-  return db
-    .select({ one: sql`1` })
-    .from(integrationPins)
-    .where(
-      and(
-        eq(integrationPins.spaceId, layer.spaceId),
-        eq(integrationPins.packageId, layer.agentPackageId),
-        eq(integrationPins.integrationId, layer.integrationId),
-        layer.kind === "admin_pin"
-          ? isNull(integrationPins.userId)
-          : eq(integrationPins.userId, layer.userId),
-      ),
-    );
+    ),
+    notExists(
+      executor
+        .select({ one: sql`1` })
+        .from(integrationOrgDefaults)
+        .where(
+          and(
+            eq(integrationOrgDefaults.spaceId, schedules.spaceId),
+            eq(integrationOrgDefaults.integrationId, layer.integrationId),
+            besides(orgDefaultOf(layer)),
+          ),
+        ),
+    ),
+  );
 }
 
 /** The definition `schedule` fires, or `null` when none resolves: that fire fails on its own. */
@@ -127,6 +179,7 @@ export async function schedulesBoundThrough(layer: NamingLayer): Promise<string[
         eq(schedules.spaceId, layer.spaceId),
         layer.kind === "org_default" ? undefined : eq(schedules.packageId, layer.agentPackageId),
         layer.kind === "member_pin" ? eq(schedules.userId, layer.userId) : undefined,
+        noOverrideKey(layer.integrationId),
         exists(layerRow(layer)),
       ),
     );
@@ -142,10 +195,23 @@ export async function schedulesBoundThrough(layer: NamingLayer): Promise<string[
 }
 
 /**
- * Disable, with `reason`, those of `scheduleIds` nothing names `layer`'s integration for once the
- * layer is gone from `tx`: still enabled, no key in `connection_overrides` (`[]` is a name), no
- * admin pin or pin of its actor on its agent, no org default. Locked in one id-ordered statement
- * (`schedules-naming-connection.ts`); returns them, whose jobs the caller removes once committed.
+ * The schedules removing `layer` would disable, read while it stands: those its removal leaves
+ * unnamed ({@link leftUnnamed}) among {@link schedulesBoundThrough}, all of the layer's space.
+ */
+export async function schedulesLeftUnnamedWithout(layer: NamingLayer): Promise<string[]> {
+  const bound = await schedulesBoundThrough(layer);
+  if (bound.length === 0) return [];
+  const rows = await db
+    .select({ id: schedules.id })
+    .from(schedules)
+    .where(and(inArray(schedules.id, bound), leftUnnamed(db, layer, true)));
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Disable, with `reason`, those of `scheduleIds` that `layer`, gone from `tx`, leaves unnamed
+ * ({@link leftUnnamed}). Locked in one id-ordered statement (`schedules-naming-connection.ts`);
+ * returns them, whose jobs the caller removes once committed.
  */
 export async function disableSchedulesLeftUnnamed(
   tx: Tx,
@@ -157,37 +223,7 @@ export async function disableSchedulesLeftUnnamed(
   const rows = await tx
     .select({ id: schedules.id })
     .from(schedules)
-    .where(
-      and(
-        inArray(schedules.id, [...scheduleIds]),
-        eq(schedules.enabled, true),
-        sql`NOT coalesce(${schedules.connectionOverrides} ? ${layer.integrationId}, false)`,
-        notExists(
-          tx
-            .select({ one: sql`1` })
-            .from(integrationPins)
-            .where(
-              and(
-                eq(integrationPins.spaceId, schedules.spaceId),
-                eq(integrationPins.packageId, schedules.packageId),
-                eq(integrationPins.integrationId, layer.integrationId),
-                or(isNull(integrationPins.userId), eq(integrationPins.userId, schedules.userId)),
-              ),
-            ),
-        ),
-        notExists(
-          tx
-            .select({ one: sql`1` })
-            .from(integrationOrgDefaults)
-            .where(
-              and(
-                eq(integrationOrgDefaults.spaceId, schedules.spaceId),
-                eq(integrationOrgDefaults.integrationId, layer.integrationId),
-              ),
-            ),
-        ),
-      ),
-    )
+    .where(and(inArray(schedules.id, [...scheduleIds]), leftUnnamed(tx, layer, false)))
     .orderBy(asc(schedules.id))
     .for("update");
   const ids = rows.map((row) => row.id);

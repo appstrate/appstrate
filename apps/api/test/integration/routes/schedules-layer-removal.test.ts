@@ -5,7 +5,8 @@
  * pin, an admin pin, an org default — disables the schedules it leaves unnamed
  * (`connection_set_unnamed`): those the fire bound through that layer and that no
  * `connection_overrides` key, pin or org default names the set for afterwards, however many
- * connections their actor holds. Each DELETE answers how many it disabled.
+ * connections their actor holds. Each DELETE answers how many it disabled. A connection delete
+ * that empties a member pin drops it, the same removal, recorded as `connection_deleted`.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -346,6 +347,74 @@ describe("removing the layer that names a schedule's connection set", () => {
         expect(await auditedAs("integration.org_default.deleted")).toEqual(disabled);
       });
     }
+  });
+
+  describe("a member pin dropped by a connection delete — DELETE /api/me/connections/{id}", () => {
+    const ownPin = (ids: string[]) => pin(ids, { userId: ctx.user.id });
+
+    async function deleteConnection(id: string): Promise<void> {
+      const res = await app.request(`/api/me/connections/${id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status, await res.clone().text()).toBe(204);
+    }
+
+    async function ownPins(): Promise<string[][]> {
+      const rows = await db.select().from(integrationPins);
+      return rows.map((row) => row.connectionIds);
+    }
+
+    it("disables the schedule bound through the pin the delete empties, sparing one naming another set", async () => {
+      const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+      const kept = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([gone]);
+      const bound = await armedSchedule();
+      const named = await armedSchedule({ connectionOverrides: { [INTEGRATION]: [kept] } });
+
+      await deleteConnection(gone);
+
+      expect(await ownPins()).toEqual([]);
+      expect(await rowOf(bound.id)).toMatchObject({
+        enabled: false,
+        disabledReason: "connection_deleted",
+        nextRunAt: null,
+        connectionOverrides: null,
+      });
+      expect(await rowOf(named.id)).toMatchObject({
+        enabled: true,
+        connectionOverrides: { [INTEGRATION]: [kept] },
+      });
+      expect(await auditedAs("integration.connection.deleted")).toEqual([bound.id]);
+    });
+
+    it("spares the schedule when the pin only shrinks", async () => {
+      const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+      const kept = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([gone, kept]);
+      const schedule = await armedSchedule();
+
+      await deleteConnection(gone);
+
+      expect(await ownPins()).toEqual([[kept]]);
+      expect((await rowOf(schedule.id)).enabled).toBe(true);
+      expect(await auditedAs("integration.connection.deleted")).toEqual([]);
+    });
+
+    it("spares the schedule a soft org default still names the set for", async () => {
+      const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([gone]);
+      await orgDefault([await sharedConnection()]);
+      const schedule = await armedSchedule();
+
+      await deleteConnection(gone);
+
+      expect(await ownPins()).toEqual([]);
+      // Held by the delete, not written: a patch read before it still lands.
+      const spared = await rowOf(schedule.id);
+      expect(spared.enabled).toBe(true);
+      expect(spared.updatedAt).toEqual(schedule.updatedAt);
+    });
   });
 
   // The fires are read before the removal's transaction opens: it judges again, on the rows it locks.

@@ -46,8 +46,10 @@ import {
   connectionReach,
   connectionViewOf,
   loadConnectionShares,
+  memberPinLayer,
   planConnectionForget,
 } from "./integration-connections.ts";
+import { schedulesLeftUnnamedWithout } from "./schedules-named-by-layer.ts";
 import {
   connectionActions,
   meConnectionAuthorityFilter,
@@ -367,6 +369,8 @@ interface OwnPinHoldingConnection {
   integration_package_id: string;
   /** Size of the stored set today; the delete leaves `connection_count - 1` (0 drops the pin). */
   connection_count: number;
+  /** The caller's schedules the dropped pin leaves unnamed: the delete disables them. */
+  schedules_disabled_count: number;
 }
 
 /** One of the caller's schedules whose override set for an integration names the connection. */
@@ -430,6 +434,13 @@ export async function getConnectionDeleteImpact(
       pinFilter: pinAuthorityFilter(principal),
     },
   );
+  // A pin the delete empties is dropped; its schedules are of its space, which `pinFilter` narrows.
+  const unnamedByPin = new Map<string, number>();
+  for (const pin of plan.pins) {
+    if (pin.nextConnectionIds.length > 0) continue;
+    const unnamed = await schedulesLeftUnnamedWithout(memberPinLayer(pin, actor.id));
+    unnamedByPin.set(pin.id, unnamed.length);
+  }
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];
   const agents =
     agentIds.length === 0
@@ -447,6 +458,7 @@ export async function getConnectionDeleteImpact(
       agent_display_name: displayName(pin.agentPackageId),
       integration_package_id: pin.integrationId,
       connection_count: pin.connectionIds.length,
+      schedules_disabled_count: unnamedByPin.get(pin.id) ?? 0,
     })),
     schedules: plan.schedules.flatMap((schedule) =>
       schedule.entries.map((entry) => ({

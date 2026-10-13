@@ -489,7 +489,9 @@ export const mePaths = {
         "Lists the caller's own member pins and schedules whose connection set names this connection — " +
         "the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can " +
         "say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a " +
-        "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
+        "pin left with none is removed (the agent falls back to the default resolution), which disables " +
+        "the caller's enabled schedules whose fire bound the integration through that pin and that " +
+        "nothing else names the set for (`schedules_disabled_count`); and a schedule " +
         "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
         "an unattended run never silently falls back to another account; its owner re-picks and " +
         "re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules " +
@@ -530,6 +532,7 @@ export const mePaths = {
                         "agent_display_name",
                         "integration_package_id",
                         "connection_count",
+                        "schedules_disabled_count",
                       ],
                       properties: {
                         agent_package_id: { type: "string" },
@@ -539,6 +542,12 @@ export const mePaths = {
                           type: "integer",
                           minimum: 1,
                           description: "Size of the pinned set before the delete.",
+                        },
+                        schedules_disabled_count: {
+                          type: "integer",
+                          minimum: 0,
+                          description:
+                            "How many of the caller's enabled schedules the delete disables (`connection_deleted`) by removing this pin: those whose fire binds the integration through it and that no `connection_overrides` key, admin pin or org default names the set for. 0 while `connection_count` is above 1: the pin only shrinks.",
                         },
                       },
                     },
@@ -642,7 +651,9 @@ export const mePaths = {
         "run. An admin removes it from the pin(s) or default first. A member pin does not block the " +
         "delete. The caller's own " +
         "member pins and schedule overrides drop the connection in the same transaction — a pin it " +
-        "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
+        "empties is removed (the cascade falls back), which disables the caller's enabled schedules " +
+        "whose fire bound the integration through that pin and that nothing else names the set for " +
+        "(`disabled_reason: connection_deleted`), and a schedule override it empties drops that " +
         "integration and disables the schedule (its job is removed) rather than let it fall back " +
         "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
         "Another member's pins keep the id, and their next run fails " +

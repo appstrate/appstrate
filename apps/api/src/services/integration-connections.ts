@@ -22,6 +22,7 @@
 
 import {
   and,
+  arrayContained,
   arrayContains,
   arrayOverlaps,
   asc,
@@ -166,6 +167,11 @@ import {
   scheduleOverridesName,
   schedulesNamingAny,
 } from "./schedules-naming-connection.ts";
+import {
+  disableSchedulesLeftUnnamed,
+  schedulesBoundThrough,
+  type NamingLayer,
+} from "./schedules-named-by-layer.ts";
 import {
   actorIdentityOf,
   candidateOf,
@@ -2357,6 +2363,14 @@ export async function deleteIntegrationOAuthClient(
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
     : eq(integrationConnections.orgId, owner.orgId);
+  const mintedBefore = await db
+    .select({ id: integrationConnections.id, userId: integrationConnections.userId })
+    .from(integrationConnections)
+    .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces));
+  const boundByPin = await boundThroughDroppablePins(
+    mintedBefore.map((c) => c.id),
+    mintedBefore.flatMap((c) => (c.userId ? [c.userId] : [])),
+  );
   return db.transaction(async (tx) => {
     // The client, then its rows — the order a connect and a promote take.
     const [client] = await tx
@@ -2404,8 +2418,8 @@ export async function deleteIntegrationOAuthClient(
             )
             .returning(deletedConnectionOwner);
     // Each forget below locks its connection's rows: the owner's member pins naming it, then every
-    // schedule naming it. Locked here first for all of them, in the plan's order, so two batches
-    // cannot each hold a row the other waits on.
+    // schedule naming it or bound through a pin it may drop. Locked here first for all of them, in
+    // the plan's order, so two batches cannot each hold a row the other waits on.
     const forgotten = deletedConns.map((c) => c.id);
     const owners = [...new Set(deletedConns.flatMap((c) => (c.userId ? [c.userId] : [])))];
     if (owners.length > 0) {
@@ -2429,13 +2443,13 @@ export async function deleteIntegrationOAuthClient(
       await tx
         .select({ id: schedules.id })
         .from(schedules)
-        .where(schedulesNamingAny(forgotten))
+        .where(or(schedulesNamingAny(forgotten), schedulesIn(boundByPin)))
         .orderBy(asc(schedules.id))
         .for("update");
     }
     const disabledScheduleIds: string[] = [];
     for (const row of deletedConns) {
-      disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
+      disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row, boundByPin)));
     }
     return {
       client: toPublicClient(projectClientWithSecret(deleted!)),
@@ -3562,6 +3576,11 @@ export async function deleteOwnConnection(
   principal: ConnectionPrincipal,
   connectionId: string,
 ): Promise<{ orgId: string; disabledScheduleIds: string[] } | null> {
+  const { actor } = principal;
+  const boundByPin = await boundThroughDroppablePins(
+    [connectionId],
+    actor.type === "user" ? [actor.id] : [],
+  );
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select({
@@ -3586,7 +3605,10 @@ export async function deleteOwnConnection(
     }
     await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
     await tx.delete(integrationConnections).where(eq(integrationConnections.id, row.id));
-    return { orgId: row.orgId, disabledScheduleIds: await forgetDeletedConnection(tx, row) };
+    return {
+      orgId: row.orgId,
+      disabledScheduleIds: await forgetDeletedConnection(tx, row, boundByPin),
+    };
   });
 }
 
@@ -3596,18 +3618,71 @@ const deletedConnectionOwner = {
   endUserId: integrationConnections.endUserId,
 };
 
+/** A member pin of `userId` as the layer its drop removes. */
+export function memberPinLayer(
+  pin: Pick<PinForget, "spaceId" | "agentPackageId" | "integrationId">,
+  userId: string,
+): NamingLayer {
+  return {
+    kind: "member_pin",
+    spaceId: pin.spaceId,
+    integrationId: pin.integrationId,
+    agentPackageId: pin.agentPackageId,
+    userId,
+  };
+}
+
+/**
+ * The schedules bound through each member pin a delete of `connectionIds` may drop, by pin id:
+ * the pins of `ownerIds` whose whole set is among them. {@link schedulesBoundThrough} reads
+ * outside any transaction, so this runs before the delete's opens.
+ */
+async function boundThroughDroppablePins(
+  connectionIds: string[],
+  ownerIds: string[],
+): Promise<Map<string, string[]>> {
+  const boundByPin = new Map<string, string[]>();
+  if (connectionIds.length === 0 || ownerIds.length === 0) return boundByPin;
+  const pins = await db
+    .select({ ...pinForgetColumns, userId: integrationPins.userId })
+    .from(integrationPins)
+    .where(
+      and(
+        inArray(integrationPins.userId, ownerIds),
+        arrayOverlaps(integrationPins.connectionIds, connectionIds),
+        arrayContained(integrationPins.connectionIds, connectionIds),
+      ),
+    );
+  for (const pin of pins) {
+    boundByPin.set(pin.id, await schedulesBoundThrough(memberPinLayer(pin, pin.userId!)));
+  }
+  return boundByPin;
+}
+
+/** The schedules `boundByPin` holds, as a lock filter; `undefined` for none. */
+function schedulesIn(boundByPin: ReadonlyMap<string, string[]>): SQL | undefined {
+  const ids = [...boundByPin.values()].flat();
+  return ids.length > 0 ? inArray(schedules.id, ids) : undefined;
+}
+
 /**
  * Drop a deleted connection from its OWNER's member pins and schedule overrides, and disable other
- * actors' schedules naming it ({@link planConnectionForget}). Returns the schedules it disabled,
+ * actors' schedules naming it ({@link planConnectionForget}) and those of `boundByPin` a pin it
+ * drops leaves unnamed ({@link boundThroughDroppablePins}). Returns the schedules it disabled,
  * whose jobs the caller removes once committed (importing the scheduler here would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
   row: { id: string; userId: string | null; endUserId: string | null },
+  boundByPin: ReadonlyMap<string, string[]>,
 ): Promise<string[]> {
   // `integration_connections` holds exactly one owner id.
   const owner = actorFromIds(row.userId, row.endUserId)!;
-  const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
+  const plan = await planConnectionForget(
+    tx,
+    { id: row.id, owner },
+    { lock: true, alsoLock: schedulesIn(boundByPin) },
+  );
   for (const pin of plan.pins) {
     // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
@@ -3632,12 +3707,30 @@ async function forgetDeletedConnection(
       .where(eq(schedules.id, schedule.id));
   }
   await disableSchedules(tx, plan.foreignScheduleIds, "connection_deleted");
-  return [...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])), ...plan.foreignScheduleIds];
+  // A dropped pin is a layer removed, judged once the overrides above are rewritten.
+  const unnamed: string[] = [];
+  for (const pin of plan.pins) {
+    if (pin.nextConnectionIds.length > 0) continue;
+    unnamed.push(
+      ...(await disableSchedulesLeftUnnamed(
+        tx,
+        memberPinLayer(pin, owner.id),
+        boundByPin.get(pin.id) ?? [],
+        "connection_deleted",
+      )),
+    );
+  }
+  return [
+    ...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])),
+    ...plan.foreignScheduleIds,
+    ...unnamed,
+  ];
 }
 
 /** One of the owner's member pins naming the connection. */
 interface PinForget {
   id: string;
+  spaceId: string;
   agentPackageId: string;
   integrationId: string;
   connectionIds: string[];
@@ -3666,30 +3759,35 @@ interface ConnectionForgetPlan {
   foreignScheduleIds: string[];
 }
 
+const pinForgetColumns = {
+  id: integrationPins.id,
+  spaceId: integrationPins.spaceId,
+  agentPackageId: integrationPins.packageId,
+  integrationId: integrationPins.integrationId,
+  connectionIds: integrationPins.connectionIds,
+};
+
 /**
  * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
  * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
  * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
- * a caller that applies the plan in the same transaction. `scheduleFilter` narrows both schedule
- * lists (a schedule may name a connection of another space), `pinFilter` the pins.
+ * a caller that applies the plan in the same transaction; `alsoLock` joins schedules to that
+ * statement, outside the plan. `scheduleFilter` narrows both schedule lists (a schedule may name a
+ * connection of another space), `pinFilter` the pins.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
   connection: { id: string; owner: Actor },
   {
     lock = false,
+    alsoLock,
     scheduleFilter,
     pinFilter,
-  }: { lock?: boolean; scheduleFilter?: SQL; pinFilter?: SQL } = {},
+  }: { lock?: boolean; alsoLock?: SQL; scheduleFilter?: SQL; pinFilter?: SQL } = {},
 ): Promise<ConnectionForgetPlan> {
   const { id, owner } = connection;
   const pinQuery = executor
-    .select({
-      id: integrationPins.id,
-      agentPackageId: integrationPins.packageId,
-      integrationId: integrationPins.integrationId,
-      connectionIds: integrationPins.connectionIds,
-    })
+    .select(pinForgetColumns)
     .from(integrationPins)
     .where(
       and(
@@ -3717,10 +3815,13 @@ export async function planConnectionForget(
       connectionOverrides: schedules.connectionOverrides,
     })
     .from(schedules)
-    .where(and(scheduleOverridesName(id), scheduleFilter))
+    .where(or(and(scheduleOverridesName(id), scheduleFilter), lock ? alsoLock : undefined))
     .orderBy(asc(schedules.id));
   const pinRows = await (lock ? pinQuery.for("update") : pinQuery);
-  const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  const lockedRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  const scheduleRows = lockedRows.filter((row) =>
+    Object.values(row.connectionOverrides ?? {}).some((ids) => ids.includes(id)),
+  );
   const ownRows = scheduleRows
     .filter((row) => scheduleActorIs(row, owner))
     .sort(

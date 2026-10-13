@@ -37,6 +37,7 @@ import {
   integrationConnections,
   integrationOauthClients,
   integrationPins,
+  packages,
   runs,
   schedules,
 } from "@appstrate/db/schema";
@@ -64,6 +65,12 @@ import {
 import { upsertOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { deleteSpace } from "../../../src/services/spaces.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
+import { seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
@@ -846,6 +853,67 @@ describe("integration-pins-service — DB access/ownership", () => {
         expect(await overridesOf(emptied)).toBeNull();
         expect(disabledScheduleIds).toEqual([emptied]);
       });
+
+      for (const minting of [1, 2]) {
+        // With two, the first forget shrinks the pin and the second drops it.
+        it(`an OAuth client delete dropping a pin of ${minting} minted connection(s) disables the schedule bound through it`, async () => {
+          const FIRED = "@pinsorg/fired-agent";
+          await db
+            .update(packages)
+            .set({
+              draftManifest: localIntegrationManifest({
+                name: INTEGRATION,
+                serverName: `${INTEGRATION}-server`,
+                version: "1.0.0",
+                auths: {
+                  google: {
+                    type: "api_key",
+                    authorizedUris: ["https://api.example.com/**"],
+                    credentialFields: ["api_key"],
+                    delivery: httpHeaderDelivery({ name: "Authorization", field: "api_key" }),
+                  },
+                },
+                tools_policy: { search: {} },
+              }),
+            })
+            .where(eq(packages.id, INTEGRATION));
+          await activatePackage(scope, INTEGRATION);
+          await seedSchedulableAgent({
+            id: FIRED,
+            ...scope,
+            userId: ctx.user.id,
+            manifest: {
+              name: FIRED,
+              version: "1.0.0",
+              type: "agent",
+              schema_version: "0.2",
+              display_name: "Fired agent",
+              dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+              integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
+            },
+          });
+          const minted = await seedSharedConnections(minting);
+          const clientId = await seedClientMinting(minted);
+          await pinAs(memberId, minted, FIRED);
+          const bound = await seedSchedule({
+            packageId: FIRED,
+            ...scope,
+            userId: memberId,
+            enabled: true,
+          });
+
+          const { disabledScheduleIds } = await deleteIntegrationOAuthClient(
+            scope,
+            INTEGRATION,
+            clientId,
+          );
+
+          expect(await memberPinSet(memberId, FIRED)).toBeNull();
+          expect(disabledScheduleIds).toEqual([bound.id]);
+          const [row] = await db.select().from(schedules).where(eq(schedules.id, bound.id));
+          expect(row).toMatchObject({ enabled: false, disabledReason: "connection_deleted" });
+        });
+      }
 
       it("touches no pin and no schedule when the delete is refused", async () => {
         const [a, b] = await seedSharedConnections(2);
