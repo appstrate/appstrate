@@ -10,12 +10,13 @@
  * token. This component, mounted once for all authenticated routes, polls
  * each pending pairing and fires the global side effects — the success toast
  * and credential/model-list invalidation once the redeem produces a credential,
- * the failure toast when it is refused — then drops it from the store, as it
- * does an expired or lost one. The TTL is the backstop for abandoned ones.
+ * the failure toast when it is refused, unless a modal shows that pairing and
+ * states the failure inline. An entry leaves the store when its poll ends, on
+ * a terminal status or lost.
  *
  * Polling is scoped to the active org: the status route 404s cross-tenant
- * reads, so a pairing minted in another org resumes only once the user
- * switches back to it (still within its TTL).
+ * reads, so a pairing minted in another org is polled again once the user
+ * switches back to it, for as long as the store holds it.
  */
 
 import { useEffect } from "react";
@@ -28,6 +29,7 @@ import {
   pairingStore,
   usePendingPairings,
   removePendingPairing,
+  isPairingShown,
   type PendingPairing,
 } from "../stores/pairing-store";
 
@@ -43,7 +45,7 @@ function PairingPoll({ pairing }: { pairing: PendingPairing }) {
       toast.success(t("credentials.oauth.callbackSuccess"));
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-    } else if (state === "failed") {
+    } else if (state === "failed" && !isPairingShown(pairing.id)) {
       toast.error(t("credentials.oauth.pairingFailed"));
     }
     removePendingPairing(pairing.id);
@@ -57,8 +59,8 @@ export function PendingPairingsWatcher() {
   const pairings = usePendingPairings();
   const currentOrgId = useCurrentOrgId();
 
-  // Drop time-expired pairings periodically so the poller list stays bounded
-  // even when a tab is backgrounded across several TTLs.
+  // Bounds the entries no poll reaches (another org's): the store drops them
+  // `UNPOLLED_RETENTION_MS` past their expiry.
   useEffect(() => {
     pairingStore.getState().prune();
     const handle = window.setInterval(() => pairingStore.getState().prune(), 30_000);

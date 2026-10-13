@@ -9,8 +9,8 @@
  * `failed` (the redeem was refused), or `expired`. A pairing the server refuses
  * to state is `lost`.
  *
- * The dashboard never cancels a pairing when its modal closes (that dropped
- * in-flight connections); abandoned tokens are reaped by their TTL (5 min).
+ * The dashboard never cancels a pairing: closing its modal leaves the helper
+ * free to redeem it, and an abandoned token is reaped by its TTL (5 min).
  */
 
 import { $api } from "../api/client";
