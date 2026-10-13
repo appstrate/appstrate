@@ -438,6 +438,36 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   (ActiveCampaign, Shopify, Firecrawl), else `Connexion N`; a
   `format: "password"` field is never used.
 
+- **Every system integration backed by an MCP server declares its
+  `default_tools`** (#1923). An agent that declares one of them and selects no
+  tool (the chat's default for an inline run) inherits that list, where it got
+  zero tools: publish and import refused it with `no_tools_selected`, and an
+  inline or draft run aborted at container boot. The 14 that declared none
+  move one patch version: browser-use 1.0.2, browserless 1.0.2, canva-mcp 1.0.3,
+  clickup-mcp 1.2.4, coolify-mcp 1.0.2, expo-mcp 1.0.1, github-git 1.0.4,
+  github-mcp 1.1.5, gitlab-mcp 1.0.1, gmail-mcp 2.3.7, mcpemails 1.0.2,
+  notion-mcp 1.0.3, ssh 1.0.3, twenty-mcp 1.0.2. Each default names its tools,
+  never `"*"`: every tool the integration exposes that is not hidden, limited,
+  where a tool declares `required_scopes`, to the tools the auth's
+  `default_scopes` cover. So gmail-mcp, canva-mcp and mcpemails default to
+  their read tools, and an agent that writes with them selects those tools;
+  github-mcp's default scopes cover its whole surface. The platform supplies
+  no fallback: an integration that declares no `default_tools` still requires
+  an explicit selection (`docs/architecture/INTEGRATIONS_RUNTIME.md`,
+  "Least-privilege selection"). The chat's context lists a default of up to 12
+  tools by name and gives a longer one as a count, and the chat narrows a
+  large default to the tools the task needs.
+
+- **BREAKING (API): saving or importing an integration refuses a
+  `default_tools` entry the integration does not expose** (#1923), with
+  `400 invalid_manifest` on `manifest.default_tools`, whenever the catalog is
+  known from the manifest alone: a source that is not `local`, with a
+  non-empty resolved catalog. The schema refuses it for a
+  `source.kind: "none"` integration only; for the others it is a write-path
+  rule (`findUnexposedDefaultTools`, `@appstrate/core/integration`), not a
+  schema rule: a stored manifest that names such a tool still loads, and its
+  next save is refused. The system-package build applies the same rule.
+
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
   - A refused tool call is a tool result with `isError: true` and JSON text
