@@ -7,7 +7,7 @@
  */
 
 import type { MiddlewareHandler } from "hono";
-import { classifyApiCallFailure, type ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
+import type { ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError } from "./errors.ts";
 
@@ -101,18 +101,6 @@ export type ProxyProblemCode = keyof typeof PROXY_PROBLEMS;
 
 /** A proxy's upstream that could not be resolved, reached, or did not answer in time. */
 export type UpstreamFailureCode = Extract<ProxyProblemCode, `upstream_${string}`>;
-
-/**
- * What a thrown transport error says of the upstream once a refusal is ruled out: it did not
- * answer in time, or it could not be reached. The one reading both proxies make of such an error.
- */
-export function transportFailureCode(
-  err: unknown,
-): Extract<UpstreamFailureCode, "upstream_timeout" | "upstream_unreachable"> {
-  return classifyApiCallFailure(err).code === "upstream_timeout"
-    ? "upstream_timeout"
-    : "upstream_unreachable";
-}
 
 /** `"<subject> could not be reached"` and the like: the detail of an upstream failure. */
 export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode): string {

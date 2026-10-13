@@ -17,7 +17,6 @@ import {
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
-import { PROXY_CONTROL_HEADERS } from "../../../../src/services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { toolsFor } from "./helpers.ts";
@@ -176,18 +175,6 @@ describe("connection tools — declaration", () => {
     expect(declared).toContain("invoke_operation");
   });
 
-  it("tells the caller what to write where an allowlist entry is a credential template", () => {
-    // The listing gives such an entry as the manifest declares it: the value never reaches the
-    // model, so the description has to name the placeholder that stands for it in `target`.
-    const { descriptor } = makeTools(DIRECT).byName.get("api_call")!;
-    const schema = descriptor.inputSchema as unknown as {
-      properties: { requests: { items: { properties: { target: { description: string } } } } };
-    };
-    const target = schema.properties.requests.items.properties.target.description;
-    expect(target).toContain("{$credential.<field>}");
-    expect(target).toContain("{{<field>}}");
-  });
-
   it("names run_and_wait only to a caller who is offered it", () => {
     const description = (permissions: string[], name: string) =>
       makeTools(permissions).byName.get(name)!.descriptor.description!;
@@ -305,7 +292,7 @@ describe("api_call — arguments", () => {
     }
   });
 
-  it("refuses a session id that is not a UUID v4, and out-of-range caps", async () => {
+  it("refuses a session id that is not a UUID v4, and an out-of-range cap", async () => {
     expect(await refused({ requests: [get()], session_id: "session-1" })).toMatchObject({
       code: "invalid_argument",
       arguments: ["session_id"],
@@ -313,10 +300,6 @@ describe("api_call — arguments", () => {
     expect(await refused({ requests: [get()], max_response_bytes: 262_145 })).toMatchObject({
       code: "invalid_argument",
       arguments: ["max_response_bytes"],
-    });
-    expect(await refused({ requests: [get()], concurrency: 9 })).toMatchObject({
-      code: "invalid_argument",
-      arguments: ["concurrency"],
     });
   });
 
@@ -328,7 +311,14 @@ describe("api_call — arguments", () => {
       "x-space-id",
       internalDispatchHeader()[0],
       // The proxy's controls, each a typed argument or never sent, and the run a call names.
-      ...PROXY_CONTROL_HEADERS,
+      "x-integration-id",
+      "x-target",
+      "x-session-id",
+      "x-connection-id",
+      "x-substitute-body",
+      "x-stream-request",
+      "x-stream-response",
+      "x-max-response-size",
       "x-run-id",
       // The dispatched request's own framing and client source.
       "host",
@@ -375,7 +365,6 @@ describe("api_call — dispatch", () => {
         }),
       ],
       max_response_bytes: 1000,
-      concurrency: 1,
     });
 
     expect(calls).toHaveLength(2);
@@ -421,7 +410,6 @@ describe("api_call — dispatch", () => {
         }),
         get({ method: "PATCH", body: "a=1&b={{token}}", substitute_body: true }),
       ],
-      concurrency: 1,
     });
     const [object, array, text] = calls as [Request, Request, Request];
 
@@ -453,33 +441,22 @@ describe("api_call — dispatch", () => {
     expect(continued.calls[0]!.headers.get("X-Session-Id")).toBe(sessionId);
   });
 
-  it("keeps at most `concurrency` requests in flight, 3 by default", async () => {
-    const peakOf = async (concurrency?: number) => {
-      let inFlight = 0;
-      let peak = 0;
-      await apiCall(
-        {
-          requests: Array.from({ length: 9 }, () => get()),
-          ...(concurrency ? { concurrency } : {}),
-        },
-        async () => {
-          inFlight += 1;
-          peak = Math.max(peak, inFlight);
-          await Bun.sleep(5);
-          inFlight -= 1;
-          return relayedJson({ ok: true });
-        },
-      );
-      return peak;
-    };
-    expect(await peakOf()).toBe(3);
-    expect(await peakOf(1)).toBe(1);
-    expect(await peakOf(8)).toBe(8);
+  it("keeps at most 3 requests in flight", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    await apiCall({ requests: Array.from({ length: 9 }, () => get()) }, async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await Bun.sleep(5);
+      inFlight -= 1;
+      return relayedJson({ ok: true });
+    });
+    expect(peak).toBe(3);
   });
 
   it("returns the entries in request order whatever order the answers arrive in", async () => {
     const { payload } = await apiCall(
-      { requests: [0, 1, 2, 3].map((n) => get({ target: `${TARGET}/${n}` })), concurrency: 4 },
+      { requests: [0, 1, 2, 3].map((n) => get({ target: `${TARGET}/${n}` })) },
       async (req) => {
         const n = Number(req.headers.get("X-Target")!.split("/").pop());
         await Bun.sleep((4 - n) * 4);
@@ -503,12 +480,12 @@ describe("api_call — dispatch", () => {
     });
     const call = made.byName
       .get("api_call")!
-      .handler({ requests: Array.from({ length: 10 }, () => get()), concurrency: 2 }, {
+      .handler({ requests: Array.from({ length: 10 }, () => get()) }, {
         signal: controller.signal,
       } as unknown as AppstrateRequestExtra);
     await expect(call).rejects.toThrow("client went away");
-    // The two already in flight, and none of the eight behind them.
-    expect(made.calls).toHaveLength(2);
+    // The three already in flight, and none of the seven behind them.
+    expect(made.calls).toHaveLength(3);
   });
 });
 
@@ -600,7 +577,7 @@ describe("api_call — result", () => {
 
   it("keeps the batch when one dispatch throws below the proxy", async () => {
     const { result, payload } = await apiCall(
-      { requests: [get(), get({ target: `${TARGET}/boom` })], concurrency: 1 },
+      { requests: [get(), get({ target: `${TARGET}/boom` })] },
       (req) => {
         if (req.headers.get("X-Target") !== TARGET) throw new Error("socket hang up");
         return relayedJson({ ok: true });

@@ -458,8 +458,7 @@ export function readIntegrationManifestForRun(
 
 /**
  * The integration manifest a credential-proxy call is authorized against: the version its run
- * froze (`frozen`), else (a call outside a run) the `latest` published one — the draft only if
- * the run froze it.
+ * froze (`frozen`), else the `latest` published one — the draft only if the run froze it.
  */
 export async function readIntegrationManifestForProxy(
   packageId: string,

@@ -48,16 +48,15 @@ const PROXY_PATH = "/api/credential-proxy/proxy";
 
 /**
  * Requests per call: what one tool call may hold before it answers. Every response is kept, up to
- * {@link MAX_RESULT_BYTES} each, until the result is assembled (12.8 MB at most), and at the
- * default concurrency a full batch is 17 rounds: inside an MCP client's 60 s request timeout when
- * the upstream answers within 3 s. The proxy's rate limit is the route's own and is not sized
- * here: each request is counted there, and one it refuses comes back as a `rate_limited` entry.
+ * {@link MAX_RESULT_BYTES} each, until the result is assembled (12.5 MiB at most), and at
+ * {@link CONCURRENCY} in flight a full batch is 17 rounds: inside an MCP client's 60 s request
+ * timeout when the upstream answers within 3 s. The proxy's rate limit is the route's own and is
+ * not sized here: each request is counted there, and one it refuses comes back as a
+ * `rate_limited` entry.
  */
 const MAX_REQUESTS = 50;
-/** Requests in flight by default: the sidecar's own `api_call` fan-out. */
-const DEFAULT_CONCURRENCY = 3;
-/** The most a caller may ask for: what one tool call holds open against a principal's upstreams. */
-const MAX_CONCURRENCY = 8;
+/** Requests in flight: the sidecar's own `api_call` fan-out. */
+const CONCURRENCY = 3;
 /** Default cap on one text body: the sidecar's inline budget for a tool output (~8 000 tokens). */
 const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024;
 /**
@@ -102,24 +101,77 @@ const RESPONSE_HEADERS = [
   "location",
   "link",
   "retry-after",
-  "www-authenticate",
 ] as const;
 
 const requestSchema = z.strictObject({
-  integration_package_id: z.string().min(1),
+  integration_package_id: z
+    .string()
+    .min(1)
+    .describe("Integration package id (`@scope/name`), from list_connections."),
   method: z.enum(METHODS),
-  target: z.string().min(1),
-  headers: z.record(z.string(), z.string()).optional(),
-  body: z.union([z.string(), z.array(z.unknown()), z.record(z.string(), z.unknown())]).optional(),
-  substitute_body: z.boolean().optional(),
-  connection_id: z.string().min(1).optional(),
+  target: z
+    .string()
+    .min(1)
+    .describe(
+      "Absolute URL matching one of the connection's `authorized_uris`. Where an entry writes " +
+        "`{$credential.<field>}`, write `{{<field>}}` at that place (`{{webhook_url}}`, " +
+        "`{{site_url}}/wp-json/…`): the proxy substitutes the connection's value, which you " +
+        "never see, ask for or type.",
+    ),
+  headers: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe(
+      "Extra request headers. The proxy injects the credential: Authorization, Cookie and its " +
+        "own control headers are refused.",
+    ),
+  body: z
+    .union([z.string(), z.array(z.unknown()), z.record(z.string(), z.unknown())])
+    .optional()
+    .describe(
+      "A string is sent as is (set its Content-Type yourself); an object or array is sent as " +
+        "JSON, with `Content-Type: application/json` unless you set one. Refused with GET and " +
+        "HEAD.",
+    ),
+  substitute_body: z
+    .boolean()
+    .optional()
+    .describe(
+      "Also substitute `{{field}}` placeholders in the body. Off by default, so a credential " +
+        "never lands in a payload by accident.",
+    ),
+  connection_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Which connection to use, when you hold several of the integration."),
 });
 
+/** The arguments of `api_call`: what the handler parses, and the schema the tool declares. */
 const apiCallSchema = z.strictObject({
-  requests: z.array(requestSchema).min(1).max(MAX_REQUESTS),
-  session_id: z.string().refine(isValidSessionId, "must be a UUID v4").optional(),
-  max_response_bytes: z.number().int().min(1).max(MAX_RESULT_BYTES).optional(),
-  concurrency: z.number().int().min(1).max(MAX_CONCURRENCY).optional(),
+  requests: z
+    .array(requestSchema)
+    .min(1)
+    .max(MAX_REQUESTS)
+    .describe(`1 to ${MAX_REQUESTS} requests.`),
+  session_id: z
+    .string()
+    .refine(isValidSessionId, "must be a UUID v4")
+    .optional()
+    .describe(
+      "The `session_id` of a previous result, to keep that call's upstream cookies. Omit to " +
+        "start a session.",
+    ),
+  max_response_bytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_RESULT_BYTES)
+    .optional()
+    .describe(
+      `Cap on each text body (default ${DEFAULT_MAX_RESPONSE_BYTES}). One result carries at ` +
+        `most ${MAX_RESULT_BYTES} bytes of bodies, all entries together.`,
+    ),
 });
 
 type ApiCallRequest = z.infer<typeof requestSchema>;
@@ -388,8 +440,8 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
         ? "; delegate to run_and_wait instead when the task needs judgement, several dependent " +
           "steps, a connection another member shared, or an agent's configured tools. "
         : ". ") +
-      "Requests run concurrently, not in order (`concurrency: 1` runs them in order), and each " +
-      "counts against the proxy's rate limit. Returns `{ session_id, results }`, one entry per " +
+      "Requests run concurrently, not in order, and each counts against the proxy's rate " +
+      "limit. Returns `{ session_id, results }`, one entry per " +
       "request, in order. An entry with `status` is the upstream's own answer, whatever the " +
       "status (a 401 there is the upstream refusing the connection), with `headers` and a text " +
       "`body`, cut at `max_response_bytes` (`truncated: true`); a non-text body is replaced by " +
@@ -405,83 +457,7 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       idempotentHint: false,
       openWorldHint: true,
     },
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["requests"],
-      properties: {
-        requests: {
-          type: "array",
-          minItems: 1,
-          maxItems: MAX_REQUESTS,
-          description: `1 to ${MAX_REQUESTS} requests.`,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["integration_package_id", "method", "target"],
-            properties: {
-              integration_package_id: {
-                type: "string",
-                description: "Integration package id (`@scope/name`), from list_connections.",
-              },
-              method: { type: "string", enum: [...METHODS] },
-              target: {
-                type: "string",
-                description:
-                  "Absolute URL matching one of the connection's `authorized_uris`. Where an " +
-                  "entry writes `{$credential.<field>}`, write `{{<field>}}` at that place " +
-                  "(`{{webhook_url}}`, `{{site_url}}/wp-json/…`): the proxy substitutes the " +
-                  "connection's value, which you never see, ask for or type.",
-              },
-              headers: {
-                type: "object",
-                description:
-                  "Extra request headers. The proxy injects the credential: Authorization, " +
-                  "Cookie and its own control headers are refused.",
-                additionalProperties: { type: "string" },
-              },
-              body: {
-                type: ["string", "object", "array"],
-                description:
-                  "A string is sent as is (set its Content-Type yourself); an object or array " +
-                  "is sent as JSON, with `Content-Type: application/json` unless you set one. " +
-                  "Refused with GET and HEAD.",
-              },
-              substitute_body: {
-                type: "boolean",
-                description:
-                  "Also substitute `{{field}}` placeholders in the body. Off by default, so a " +
-                  "credential never lands in a payload by accident.",
-              },
-              connection_id: {
-                type: "string",
-                description: "Which connection to use, when you hold several of the integration.",
-              },
-            },
-          },
-        },
-        session_id: {
-          type: "string",
-          description:
-            "The `session_id` of a previous result, to keep that call's upstream cookies. " +
-            "Omit to start a session.",
-        },
-        max_response_bytes: {
-          type: "integer",
-          minimum: 1,
-          maximum: MAX_RESULT_BYTES,
-          description:
-            `Cap on each text body (default ${DEFAULT_MAX_RESPONSE_BYTES}). One result carries ` +
-            `at most ${MAX_RESULT_BYTES} bytes of bodies, all entries together.`,
-        },
-        concurrency: {
-          type: "integer",
-          minimum: 1,
-          maximum: MAX_CONCURRENCY,
-          description: `Requests in flight at once (default ${DEFAULT_CONCURRENCY}).`,
-        },
-      },
-    },
+    inputSchema: z.toJSONSchema(apiCallSchema, { target: "draft-7" }) as Tool["inputSchema"],
   };
 
   const handler = async (
@@ -520,24 +496,20 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
     }
 
     const signal: AbortSignal | undefined = extra.signal;
-    const outcomes = await mapWithConcurrency(
-      calls,
-      parsed.data.concurrency ?? DEFAULT_CONCURRENCY,
-      (call) => {
-        // An abort sends nothing more and fails the call.
-        signal?.throwIfAborted();
-        // One request failing below the proxy's own error handling must not lose the others.
-        return dispatchCall(ctx, call, signal).catch((err: unknown): Outcome => {
-          if (signal?.aborted) throw err;
-          logger.error("mcp: api_call dispatch failed", {
-            error: err instanceof Error ? err.name : typeof err,
-          });
-          return {
-            error: { status: 500, code: "internal_error", detail: "The proxy did not answer." },
-          };
+    const outcomes = await mapWithConcurrency(calls, CONCURRENCY, (call) => {
+      // An abort sends nothing more and fails the call.
+      signal?.throwIfAborted();
+      // One request failing below the proxy's own error handling must not lose the others.
+      return dispatchCall(ctx, call, signal).catch((err: unknown): Outcome => {
+        if (signal?.aborted) throw err;
+        logger.error("mcp: api_call dispatch failed", {
+          error: err instanceof Error ? err.name : typeof err,
         });
-      },
-    );
+        return {
+          error: { status: 500, code: "internal_error", detail: "The proxy did not answer." },
+        };
+      });
+    });
     const { results, failed, budgetSpent } = projectOutcomes(outcomes);
     ctx.observe({
       tool: "api_call",
@@ -553,7 +525,7 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
           ? {
               note:
                 `The result's ${MAX_RESULT_BYTES}-byte body budget ran out: later bodies are ` +
-                "cut. Send those requests again in a smaller batch.",
+                "cut. Every request was sent: repeat only the reads, in a smaller batch.",
             }
           : {}),
       },

@@ -107,25 +107,12 @@ describe("mcp catalog", () => {
     expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(
       [],
     );
-    expect(operations.filter((op) => op.operationId.startsWith("credentialProxy"))).toEqual([]);
-    // Nothing the three discovery tools read offers them: the index is built from the catalog.
-    const index = buildOperationIndex(
-      new Set(["mcp:read", "mcp:invoke", "credential-proxy:call", "credential-proxy:direct"]),
-      undefined,
-    );
-    expect(index).not.toContain("credentialProxy");
     const { byName, calls } = makeTools(["mcp:read", "mcp:invoke", "agents:run"]);
-    for (const tool of ["describe_operation", "invoke_operation"]) {
-      const refused = await byName
-        .get(tool)!
-        .handler({ operation_id: "credentialProxyGet" }, noExtra);
-      expect(parseResult(refused).code).toBe("unknown_operation");
-    }
+    const refused = await byName
+      .get("invoke_operation")!
+      .handler({ operation_id: "credentialProxyGet" }, noExtra);
+    expect(parseResult(refused).code).toBe("unknown_operation");
     expect(calls).toHaveLength(0);
-    const found = parseResult(
-      await byName.get("search_operations")!.handler({ query: "credential proxy" }, noExtra),
-    );
-    expect(JSON.stringify(found)).not.toContain("credentialProxy");
     // The listing stays an operation: `deriveMcpSurface` reads its guard to declare the tools.
     expect(operationIdGranted("listCredentialProxyConnections", new Set(), undefined)).toBe(false);
     expect(

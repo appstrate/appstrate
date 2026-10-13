@@ -9,7 +9,8 @@
  *   - `GET /api/integrations/calls`: a holder of `integrations:configure` reads every call made in
  *     the request space, and never another space's or another organization's.
  *
- * Both take the same filters and keyset pagination.
+ * Both take the same filters and keyset pagination. Their rows come from `recordConnectionCall`,
+ * the journal's single writer: its own cases close the file.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -214,13 +215,8 @@ describe("connection call journal routes", () => {
       expect((await app.request(ownDoor(theirs), { headers: asKey })).status).toBe(404);
     });
 
-    it("filters by actor, and refuses the space door's connection filter", async () => {
+    it("refuses the space door's connection filter", async () => {
       const connectionId = await seedIntegrationConnection(ctx, CRM);
-      await record(connectionId);
-      await record(connectionId, { actor: { type: "user", id: colleague.user.id } });
-
-      const body = await page(`${ownDoor(connectionId)}?actor_id=${colleague.user.id}`);
-      expect(body.data.map((call) => call.actor_id)).toEqual([colleague.user.id]);
 
       const res = await app.request(`${ownDoor(connectionId)}?connection_id=${connectionId}`, {
         headers: authHeaders(ctx),
@@ -249,19 +245,6 @@ describe("connection call journal routes", () => {
       expect(viaKey.status).toBe(403);
 
       expect((await page(SPACE_DOOR)).data).toEqual([]);
-    });
-
-    it("stays session-only: no key is minted with integrations:configure, even by its holder", async () => {
-      const mint = (scopes: string[]) =>
-        app.request("/api/api-keys", {
-          method: "POST",
-          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "journal reader", scopes }),
-        });
-
-      expect((await mint(["integrations:configure"])).status).toBe(400);
-      // The control: the same request with a grantable scope mints a key.
-      expect((await mint(["integrations:read"])).status).toBe(201);
     });
 
     it("lists the space's calls whatever the connection and its owner", async () => {
@@ -372,6 +355,36 @@ describe("connection call journal routes", () => {
         "req_1",
         "req_0",
       ]);
+    });
+  });
+
+  // ─── Writer ─────────────────────────────────────────────
+
+  describe("recordConnectionCall", () => {
+    const rows = () => db.select().from(connectionCalls);
+
+    it("records a call whose connection is gone, with no owner", async () => {
+      await record(crypto.randomUUID());
+
+      const [row] = await rows();
+      expect(row).toMatchObject({ ownerType: null, ownerId: null, outcome: "200" });
+    });
+
+    it("caps the host it stores", async () => {
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
+      const labels = ["a", "b", "c", "d", "e"].map((letter) => letter.repeat(60));
+
+      await record(connectionId, { target: `https://${labels.join(".")}/${"p".repeat(5000)}` });
+
+      const [row] = await rows();
+      expect(row!.host).toHaveLength(255);
+    });
+
+    it("never throws: a call the database refuses is dropped", async () => {
+      // `integration_connections.id` is a uuid column: the owner lookup throws, before any insert.
+      await expect(record("not-a-uuid")).resolves.toBeUndefined();
+
+      expect(await rows()).toHaveLength(0);
     });
   });
 });

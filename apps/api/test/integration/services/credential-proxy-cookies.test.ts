@@ -123,6 +123,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     target: string,
     fetchImpl: typeof fetch,
     connectionId?: string,
+    store: CookieJarStore = jar,
   ) =>
     proxyCall({
       orgId: ctx.orgId,
@@ -134,7 +135,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       target,
       headers: {},
       body: "order_id=0",
-      cookieJar: jar,
+      cookieJar: store,
       jarSessionId: SESSION_ID,
       cookieJarTtlSeconds: 600,
       fetch: fetchImpl,
@@ -466,37 +467,17 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       shutdown: () => Promise.resolve(),
     });
 
-    const callOn = (
-      store: CookieJarStore,
-      packageId: string,
-      target: string,
-      fetchImpl: typeof fetch,
-    ) =>
-      proxyCall({
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        actor: { type: "user", id: ctx.user.id },
-        integrationId: packageId,
-        method: "POST",
-        target,
-        headers: {},
-        body: "order_id=0",
-        cookieJar: store,
-        jarSessionId: SESSION_ID,
-        cookieJarTtlSeconds: 600,
-        fetch: fetchImpl,
-      });
-
     it("is the proxy's own error naming the connection once the upstream answered", async () => {
       const packageId = "@cpcookieorg/shop";
       const connectionId = await cookieCredential(packageId);
       const upstream = scriptedUpstream([["PHPSESSID=new; Path=/"]]);
 
-      const err = await callOn(
-        unwritable(),
+      const err = await call(
         packageId,
         "https://1.1.1.1/cart",
         upstream.fetchImpl,
+        undefined,
+        unwritable(),
       ).catch((thrown: unknown) => thrown);
 
       expect(upstream.seen).toHaveLength(1);
@@ -513,11 +494,12 @@ describe("proxyCall — session cookie jar (#1613)", () => {
         redirect("https://8.8.8.8/elsewhere", "PHPSESSID=new; Path=/"),
       );
 
-      const err = await callOn(
-        unwritable(),
+      const err = await call(
         packageId,
         "https://1.1.1.1/cart/add",
         upstream.fetchImpl,
+        undefined,
+        unwritable(),
       ).catch((thrown: unknown) => thrown);
 
       expect(err).toBeInstanceOf(ProxyCallError);
@@ -529,11 +511,12 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       await cookieCredential(packageId);
       const upstream = scriptedUpstream([]);
 
-      const result = await callOn(
-        unwritable(),
+      const result = await call(
         packageId,
         "https://1.1.1.1/cart",
         upstream.fetchImpl,
+        undefined,
+        unwritable(),
       );
 
       expect(result.status).toBe(200);

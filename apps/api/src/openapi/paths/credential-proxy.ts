@@ -272,7 +272,7 @@ const proxyResponses = {
       "and an enforced org default governs the integration in this space: its connections are " +
       "reached through a run only (`http_request_denied`); `forbidden` — the principal lacks " +
       "the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, " +
-      "`credential-proxy:direct` without, the detail naming it and the other path), session " +
+      "`credential-proxy:direct` without, the detail naming it), session " +
       "bound to a different principal, cookie session used, or `X-Run-Id` names another " +
       "actor's run or a run the platform executes.",
     headers: PROXY_STATUS_HEADER,

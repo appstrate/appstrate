@@ -269,11 +269,9 @@ of the catalog, so `invoke_operation` does not reach it: these two tools are the
 MCP path, and each request re-enters the route with your credential, so its
 permission check, rate limit and call journal apply as over REST. They are
 declared to a caller authenticated by a bearer (an API key or an OAuth token)
-who holds both permissions. `credential-proxy:direct` is held by the space
-`admin` preset alone, so below it a custom role must grant it; a `builder`
-holds `credential-proxy:call`, the permission of a call made for a run, which
-does not declare these tools; and a personal space grants `direct` to nobody,
-its owner included.
+who holds both permissions. `credential-proxy:call`, the permission of a call
+made for a run, does not declare them; who holds `credential-proxy:direct` is
+stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
 
 - **What you reach.** Your OWN connections usable in the space, never one
   another member shared: that one, and every connection of an integration under
@@ -291,10 +289,10 @@ its owner included.
   `substitute_body` and `connection_id` (which of your connections, when you
   hold several of the integration). The platform injects the credential: a
   header of your own platform request (`Authorization`, `Cookie`, …) or one of
-  the proxy's control headers is refused in `headers`, and the whole call is refused before anything is sent
-  when an argument is malformed. Requests run concurrently, three at a time by
-  default (`concurrency`, up to 8; `1` runs them in order), and each counts
-  against the proxy's rate limit.
+  the proxy's control headers is refused in `headers`, and the whole call is
+  refused before anything is sent when an argument is malformed. Requests run
+  concurrently, three at a time and not in order, and each counts against the
+  proxy's rate limit.
 - **A result.** `{ session_id, results }`, one entry per request, in order. An
   entry with `status` is the upstream's own answer, whatever the status, with a
   few response headers and a text `body` cut at `max_response_bytes` (32 KiB by
@@ -308,7 +306,8 @@ its owner included.
   upstream set; omit it to start a session.
 
 The exact argument and result schemas are the tools' own; the access rule is in
-`docs/architecture/INTEGRATIONS_RUNTIME.md`, "Platform credential proxy".
+`docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+credential proxy (`/api/credential-proxy/*`)".
 
 The whole surface follows your permissions the same way: the tool list, the
 operation index in the server instructions, `search_operations` (matches you

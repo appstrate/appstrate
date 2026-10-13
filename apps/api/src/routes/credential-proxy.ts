@@ -72,7 +72,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
-import { readProxyCaller } from "../lib/proxy-caller.ts";
+import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
@@ -131,14 +131,21 @@ export function createCredentialProxyRouter() {
       // (device-flow `oauth2-instance`) or dashboard (`oauth2-dashboard`).
       // Cookie sessions are refused — they would let a drive-by CSRF
       // trigger arbitrary upstream calls on behalf of a logged-in user.
-      const { principalId, authMethod, orgId, userId, apiKeyId, runId } = readProxyCaller(
-        c,
-        "Credential proxy",
-      );
+      const authMethod = c.get("authMethod");
+      assertBearerOnly(authMethod, "Credential proxy", {
+        firstPartyLoopback: c.get("firstPartyLoopback"),
+      });
+      const orgId = c.get("orgId");
       const spaceId = c.get("spaceId");
+      const apiKeyId = c.get("apiKeyId") || null;
+      const userId = c.get("user").id;
+      // Namespaced principal id — keeps JWT-user and API-key buckets
+      // disjoint even when the underlying UUIDs happen to match.
+      const principalId = apiKeyId ? `apikey:${apiKeyId}` : `user:${userId}`;
       const actor = getActor(c);
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
+      const runId = c.req.header("X-Run-Id") || null;
       await authorizeProxyCall({
         permissions: callerPermissions(c),
         orgId,

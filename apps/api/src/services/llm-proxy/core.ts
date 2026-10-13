@@ -24,7 +24,6 @@ import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import {
   proxyProblem,
   relayedProxyStatus,
-  transportFailureCode,
   upstreamFailureDetail,
   type UpstreamFailureCode,
 } from "../../lib/proxy-status.ts";
@@ -330,7 +329,11 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       throw blockedUpstream(presetId);
     }
     const code =
-      err instanceof SsrfBlockedError ? "upstream_unresolvable" : transportFailureCode(err);
+      err instanceof SsrfBlockedError
+        ? "upstream_unresolvable"
+        : (err as { name?: unknown } | null)?.name === "TimeoutError"
+          ? "upstream_timeout"
+          : "upstream_unreachable";
     // A silent provider is a `warn`; one we cannot reach may be our own egress.
     logger[code === "upstream_timeout" ? "warn" : "error"]("llm-proxy: upstream fetch failed", {
       presetId,

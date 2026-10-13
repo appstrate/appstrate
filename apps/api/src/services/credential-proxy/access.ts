@@ -31,7 +31,7 @@ interface ProxyAccessInput {
   /** The run the call names with `X-Run-Id`; `null` outside a run. */
   runId: string | null;
   /** Receives the permission a refusal names, for the door's denial audit. */
-  onDenied?: (required: string) => void;
+  onDenied: (required: string) => void;
 }
 
 /** Throws unless `input` may call the credential proxy on the path its `runId` selects. */
@@ -39,7 +39,7 @@ export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void>
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
   if (runId === null) {
     if (permissions.has(PROXY_DIRECT_PERMISSION)) return;
-    onDenied?.(PROXY_DIRECT_PERMISSION);
+    onDenied(PROXY_DIRECT_PERMISSION);
     throw forbidden(
       `Insufficient permissions: ${PROXY_DIRECT_PERMISSION} required to call the credential proxy ` +
         `outside a run. A call made for a run names it with X-Run-Id and requires ` +
@@ -47,7 +47,7 @@ export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void>
     );
   }
   if (!permissions.has(PROXY_RUN_PERMISSION)) {
-    onDenied?.(PROXY_RUN_PERMISSION);
+    onDenied(PROXY_RUN_PERMISSION);
     throw forbidden(
       `Insufficient permissions: ${PROXY_RUN_PERMISSION} required to call the credential proxy ` +
         `for a run (X-Run-Id)`,

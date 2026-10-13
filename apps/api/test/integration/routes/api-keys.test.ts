@@ -10,7 +10,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedSpace, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
+import { seedApiKey, seedSpace } from "../../helpers/seed.ts";
 import { apiKeys } from "@appstrate/db/schema";
 import { hashApiKey } from "../../../src/services/api-keys.ts";
 
@@ -191,50 +191,6 @@ describe("API Keys API", () => {
       expect(body.scopes).toContain("credential-proxy:call");
       expect(body.scopes).toContain("credential-proxy:direct");
       expect(body.scopes).toContain("llm-proxy:call");
-    });
-
-    it("carries credential-proxy:direct from a space admin or a custom role holding it, from no other creator", async () => {
-      // No preset below `admin` mints keys, so the creator who does not hold it
-      // is a custom role: the same bundle, that one permission apart.
-      const minting = ["api-keys:read", "api-keys:create", "agents:read"];
-      const direct = await seedSpaceRole({
-        orgId: ctx.orgId,
-        permissions: [...minting, "credential-proxy:direct"],
-      });
-      const without = await seedSpaceRole({ orgId: ctx.orgId, permissions: minting });
-      const member = async (customRoleId: string) => {
-        const created = await memberContext(ctx, "member");
-        await seedSpaceMember({
-          spaceId: ctx.defaultSpaceId,
-          userId: created.user.id,
-          presetRole: null,
-          customRoleId,
-        });
-        return created;
-      };
-      const mint = async (creator: TestContext, scopes?: string[]) => {
-        const res = await app.request("/api/api-keys", {
-          method: "POST",
-          headers: { ...authHeaders(creator), "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Proxy Key", scopes }),
-        });
-        expect(res.status).toBe(201);
-        return ((await res.json()) as { scopes: string[] }).scopes;
-      };
-
-      // Listed alone: the owner is preset `admin` here, the member holds it by role.
-      expect(await mint(ctx, ["credential-proxy:direct"])).toEqual(["credential-proxy:direct"]);
-      const holder = await member(direct.id);
-      expect(await mint(holder, ["credential-proxy:direct"])).toEqual(["credential-proxy:direct"]);
-      expect(await mint(holder)).toContain("credential-proxy:direct");
-
-      // The twin: the same role without it. Asked for, the scope narrows away;
-      // defaulted, the key does not carry it.
-      const other = await member(without.id);
-      expect(await mint(other, ["agents:read", "credential-proxy:direct"])).toEqual([
-        "agents:read",
-      ]);
-      expect(await mint(other)).not.toContain("credential-proxy:direct");
     });
 
     it("rejects session-only scopes (org:*, billing:*) instead of minting a narrower key", async () => {

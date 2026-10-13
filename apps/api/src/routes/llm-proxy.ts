@@ -63,7 +63,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { bodyLimit } from "../middleware/body-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
-import { readProxyCaller } from "../lib/proxy-caller.ts";
+import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { proxyStatusMarker } from "../lib/proxy-status.ts";
 import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 import { isServedByLlmProxy, requireAttributableRun } from "../services/state/runs.ts";
@@ -163,9 +163,13 @@ async function handleProxy(
   apiShape: ProxiedApiShape,
   limits: LlmProxyLimits,
 ): Promise<Response> {
-  const caller = readProxyCaller(c, "LLM proxy");
-  const { orgId, runId } = caller;
-  const principal = buildLlmProxyPrincipal(caller);
+  const authMethod = c.get("authMethod");
+  assertBearerOnly(authMethod, "LLM proxy", { firstPartyLoopback: c.get("firstPartyLoopback") });
+
+  const apiKeyId = c.get("apiKeyId");
+  const orgId = c.get("orgId");
+  const userId = c.get("user").id;
+  const principal = buildLlmProxyPrincipal({ apiKeyId, orgId, userId });
 
   // Chat attribution rides the VALIDATED loopback bearer's claims, surfaced by
   // the auth pipeline as opaque `authExtra` (never a caller-supplied header —
@@ -175,6 +179,8 @@ async function handleProxy(
   const chatSessionId =
     authExtra && typeof authExtra.chatSessionId === "string" ? authExtra.chatSessionId : null;
 
+  const runIdHeader = c.req.header("X-Run-Id");
+  const runId = runIdHeader && runIdHeader.length > 0 ? runIdHeader : null;
   // CRIT-07 guard — `X-Run-Id` is caller-supplied and feeds
   // `llm_usage.run_id` → `computeRunSpend` → `runs.cost`. Validate it against
   // the principal BEFORE the upstream call so a caller with `llm-proxy:call`

@@ -6,7 +6,6 @@ import { errorHandler } from "../../src/middleware/error-handler.ts";
 import {
   proxyProblem,
   proxyStatusMarker,
-  transportFailureCode,
   upstreamFailureDetail,
   type ProxyProblemCode,
 } from "../../src/lib/proxy-status.ts";
@@ -52,21 +51,5 @@ describe("upstreamFailureDetail", () => {
     expect(upstreamFailureDetail("api.example.com", "upstream_timeout")).toBe(
       "api.example.com did not answer in time",
     );
-  });
-});
-
-describe("transportFailureCode", () => {
-  it("reads a timeout as the upstream not answering in time", () => {
-    expect(transportFailureCode(new DOMException("timed out", "TimeoutError"))).toBe(
-      "upstream_timeout",
-    );
-  });
-
-  it("reads any other thrown value as the upstream being unreachable", () => {
-    expect(transportFailureCode(new TypeError("fetch failed"))).toBe("upstream_unreachable");
-    expect(
-      transportFailureCode(Object.assign(new Error("refused"), { code: "ECONNREFUSED" })),
-    ).toBe("upstream_unreachable");
-    expect(transportFailureCode("boom")).toBe("upstream_unreachable");
   });
 });

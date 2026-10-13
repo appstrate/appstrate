@@ -98,26 +98,11 @@ export interface LaunchAnnouncement {
   instance: string;
   /** The platform run, or null for a local run nothing reports to. */
   run: { runId: string; warnings: readonly LaunchItem[] } | null;
-  /**
-   * `{ns}__api_call` tools of a locally executed run that call the instance's credential proxy
-   * (`--integrations remote`). With no `run` to name, their calls are made outside a run.
-   */
-  proxyTools?: number | undefined;
   writeStdout: (chunk: string) => void;
   writeStderr: (chunk: string) => void;
 }
 
-/** What a credential-proxy call made outside a run requires and reaches, and what changes it. */
-const outsideRunLines = (instance: string): string[] => [
-  `⚠ no run registered on ${instance}: integration calls reach its credential proxy outside a run`,
-  "  they need the credential-proxy:direct permission and reach your own connections only (list: appstrate api GET /api/credential-proxy/connections)",
-  "  with --report they go through the registered run instead (credential-proxy:call, the connections the run binds)",
-];
-
-/**
- * `→ running …` and a `⚠` line per warning, its candidates under it, on stderr; with no run and
- * `proxyTools`, what their calls require outside a run. Under `--json` the envelope on stdout.
- */
+/** `→ running …` and a `⚠` line per warning, its candidates under it, on stderr; under `--json` the envelope on stdout. */
 export function announceLaunch(a: LaunchAnnouncement): void {
   if (a.json) {
     if (!a.run) return;
@@ -129,9 +114,6 @@ export function announceLaunch(a: LaunchAnnouncement): void {
   }
   const reportNote = a.run ? ` (reporting to ${a.instance} as ${a.run.runId})` : "";
   a.writeStderr(`→ running ${a.bundleLabel}${reportNote}\n`);
-  if (!a.run && (a.proxyTools ?? 0) > 0) {
-    for (const line of outsideRunLines(a.instance)) a.writeStderr(`${line}\n`);
-  }
   for (const item of a.run?.warnings ?? []) {
     a.writeStderr(`⚠ ${launchItemLine(item)}\n`);
     for (const line of candidateLines(item)) a.writeStderr(`${line}\n`);

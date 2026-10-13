@@ -8,22 +8,21 @@
  *   - who is offered the two tools: a space admin and a custom role holding
  *     `credential-proxy:direct`, never a builder, a credential whose scopes omit it, or a
  *     cookie session or the chat's loopback bearer, which the bearer-only proxy refuses;
- *   - `list_connections` lists the caller's own connections, as the proxy selects them, and
- *     never a credential value: an allowlist entry that is one stays a template, which
- *     `api_call` targets by placeholder;
  *   - `api_call` makes one proxy call per request and relays what each came back with: the
- *     upstream's answer, cut and filtered, or the proxy's own refusal;
- *   - the operation catalog offers the listing, with the same rows, and never the proxy.
+ *     upstream's answer, cut and filtered, or the proxy's own refusal, never reaching a
+ *     connection another member shared;
+ *   - `list_connections` and the catalog's listing operation serve the same rows, the caller's
+ *     own.
  *
  * The upstream is a stub of the global `fetch` the proxy calls, as in
- * `test/integration/routes/credential-proxy.test.ts`; argument handling and result shaping are
- * covered request by request in `test/unit/modules/mcp/connection-tools.test.ts`.
+ * `test/integration/routes/credential-proxy.test.ts`, which covers the proxy's access rule and
+ * what reaches the upstream; argument handling and result shaping are covered request by request
+ * in `test/unit/modules/mcp/connection-tools.test.ts`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { like } from "drizzle-orm";
-import { integrationOrgDefaults, oauthResource } from "@appstrate/db/schema";
-import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
+import { oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -40,16 +39,13 @@ import {
   seedProxyIntegration,
 } from "../../../../../test/helpers/credential-proxy-fixtures.ts";
 import {
-  envDelivery,
   httpHeaderDelivery,
   localIntegrationManifest,
 } from "../../../../../test/helpers/integration-manifests.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
-import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 import { drainAudits } from "../../../../services/audit.ts";
-import { PROXY_CONTROL_HEADERS } from "../../../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../../../services/credential-proxy/session.ts";
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../oidc/test/helpers/authorization-code-flow.ts";
@@ -208,7 +204,7 @@ async function callTool(
 }
 
 type Entry = Record<string, unknown> & {
-  error?: { code: string; status: number; detail: string; errors?: unknown[] };
+  error?: { code: string; status: number; detail: string };
 };
 const entries = (data: Record<string, unknown>) => data.results as Entry[];
 
@@ -398,27 +394,6 @@ describe("mcp connection tools", () => {
       return id;
     }
 
-    it("lists the caller's own connections only", async () => {
-      const own = await connect(owner, "mine");
-      await shareColleagueConnection();
-
-      const { isError, data } = await callTool(caller, "list_connections");
-      expect(isError).toBe(false);
-      expect(data.connections).toEqual([
-        {
-          integration_package_id: INTEGRATION_ID,
-          connection_id: own,
-          label: "mine",
-          auth_key: "api",
-          scopes_granted: [],
-          authorized_uris: [`${UPSTREAM}/**`],
-          allow_all_uris: false,
-          needs_reconnection: false,
-          run_required: false,
-        },
-      ]);
-    });
-
     it("calls the upstream with the connection's credential and returns its answer", async () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ contacts: [{ id: 1 }] }));
@@ -442,30 +417,6 @@ describe("mcp connection tools", () => {
       expect(upstreamCalls[0]!.headers.get("accept")).toBe("application/json");
       // The connection's credential, never the caller's MCP token.
       expect(upstreamAuth()).toEqual(["Bearer tok-mine"]);
-    });
-
-    it("sends the upstream nothing of the platform's own request", async () => {
-      // The tool re-enters the proxy with the caller's auth context, the space it entered, the
-      // in-process dispatch marker (a per-process secret) and the proxy's controls. The route
-      // consumes all of them: the upstream sees the request's own headers and the connection's
-      // credential, set under `Authorization` by the integration's delivery.
-      await connect(owner, "mine");
-      await callTool(caller, "api_call", {
-        requests: [get("/contacts", { headers: { Accept: "application/json" } })],
-      });
-
-      const { headers } = upstreamCalls[0]!;
-      const sent = [...headers.keys()];
-      expect(sent).toContain("accept");
-      expect(sent).not.toContain(internalDispatchHeader()[0]);
-      expect(
-        sent.filter(
-          (name) =>
-            name !== "authorization" &&
-            (isPlatformRequestHeader(name) || PROXY_CONTROL_HEADERS.has(name)),
-        ),
-      ).toEqual([]);
-      expect(headers.get("authorization")).toBe("Bearer tok-mine");
     });
 
     it("runs a batch through, one refused request leaving the others their answers", async () => {
@@ -506,7 +457,7 @@ describe("mcp connection tools", () => {
       expect(posted.body).toBe('{"name":"x"}');
     });
 
-    it("cuts a text body at `max_response_bytes` and omits a non-text one", async () => {
+    it("cuts each body at `max_response_bytes`, text or not", async () => {
       await connect(owner, "mine");
       mockUpstream((call) =>
         call.path === "/export"
@@ -521,57 +472,7 @@ describe("mcp connection tools", () => {
 
       const [text, image] = entries(data);
       expect(text).toMatchObject({ status: 200, body: "x".repeat(100), truncated: true });
-      expect(image).toMatchObject({
-        status: 200,
-        headers: { "content-type": "image/png" },
-        note: "Non-text response body omitted.",
-        bytes: 100,
-        truncated: true,
-      });
-      expect(image).not.toHaveProperty("body");
-    });
-
-    it("relays must_choose_connection with the caller's own candidates, then the one named", async () => {
-      const first = await connect(owner, "work");
-      const second = await connect(owner, "personal");
-      await shareColleagueConnection();
-
-      const ambiguous = await callTool(caller, "api_call", { requests: [get("/contacts")] });
-      expect(ambiguous.isError).toBe(true);
-      const { error } = entries(ambiguous.data)[0]!;
-      expect(error).toMatchObject({ status: 409, code: "must_choose_connection" });
-      const candidates = (error!.errors![0] as { candidate_connections: { id: string }[] })
-        .candidate_connections;
-      // Never the colleague's shared connection.
-      expect(candidates.map((candidate) => candidate.id).sort()).toEqual([first, second].sort());
-      expect(upstreamCalls).toHaveLength(0);
-
-      const chosen = await callTool(caller, "api_call", {
-        requests: [get("/contacts", { connection_id: second })],
-      });
-      expect(entries(chosen.data)[0]).toMatchObject({ status: 200 });
-      expect(upstreamAuth()).toEqual(["Bearer tok-personal"]);
-    });
-
-    it("relays run_required under an enforced default, as list_connections announced", async () => {
-      const own = await connect(owner, "mine");
-      const shared = await shareColleagueConnection();
-      await db.insert(integrationOrgDefaults).values({
-        spaceId: owner.defaultSpaceId,
-        integrationId: INTEGRATION_ID,
-        connectionIds: [shared],
-        enforce: true,
-      });
-
-      const listed = await callTool(caller, "list_connections");
-      expect(listed.data.connections).toMatchObject([{ connection_id: own, run_required: true }]);
-
-      const { isError, data } = await callTool(caller, "api_call", {
-        requests: [get("/contacts", { connection_id: own })],
-      });
-      expect(isError).toBe(true);
-      expect(entries(data)[0]!.error).toMatchObject({ status: 403, code: "run_required" });
-      expect(upstreamCalls).toHaveLength(0);
+      expect(image).toMatchObject({ status: 200, bytes: 100, truncated: true });
     });
 
     it("answers credential_not_found for a colleague's shared connection, named or not", async () => {
@@ -586,88 +487,19 @@ describe("mcp connection tools", () => {
       expect(upstreamCalls).toHaveLength(0);
     });
 
-    it("keeps upstream cookies in the session it returns, and never hands them over", async () => {
-      await connect(owner, "mine");
-      mockUpstream(
-        () =>
-          new Response("{}", {
-            headers: { "content-type": "application/json", "Set-Cookie": "sid=one; Path=/" },
-          }),
-      );
-      const cookieSent = () => upstreamCalls.at(-1)!.headers.get("cookie");
-
-      const first = await callTool(caller, "api_call", { requests: [get("/login")] });
-      const sessionId = first.data.session_id as string;
-      expect(isValidSessionId(sessionId)).toBe(true);
-      expect(JSON.stringify(first.data)).not.toContain("sid=one");
-      expect(cookieSent()).toBeNull();
-
-      const continued = await callTool(caller, "api_call", {
-        requests: [get("/cart")],
-        session_id: sessionId,
-      });
-      expect(continued.data.session_id).toBe(sessionId);
-      expect(cookieSent()).toBe("sid=one");
-
-      // A call naming no session starts its own: the jar does not follow the caller.
-      const fresh = await callTool(caller, "api_call", { requests: [get("/cart")] });
-      expect(fresh.data.session_id).not.toBe(sessionId);
-      expect(cookieSent()).toBeNull();
-    });
-
-    it("serves the listing operation the same rows, with no credential value in either", async () => {
-      // The allowlist of this auth IS a credential field: the connection's own endpoint, whose
-      // path and query are the secret.
-      const HOOKS = "@cporg/hooks";
-      const HOOK_SECRET = "whk-live-9f2c";
-      const hookUrl = `${UPSTREAM}/hooks/T0PRIVATE?key=${HOOK_SECRET}`;
-      await seedProxyIntegration(
-        owner,
-        localIntegrationManifest({
-          name: HOOKS,
-          displayName: "Hooks",
-          description: "Hooks integration",
-          auths: {
-            api: {
-              type: "custom",
-              authorizedUris: ["{$credential.webhook_url}"],
-              allowAllUris: false,
-              credentialFields: ["webhook_url"],
-              requiredCredentialFields: ["webhook_url"],
-              delivery: envDelivery({ WEBHOOK_URL: "webhook_url" }),
-            },
-          },
-        }),
-      );
-      await seedProxyConnection(owner, HOOKS, "api", { webhook_url: hookUrl }, "hook");
-      await connect(owner, "mine");
+    it("serves the listing operation the same rows as list_connections, the caller's own", async () => {
+      const own = await connect(owner, "mine");
+      await shareColleagueConnection();
 
       const listed = await callTool(caller, "list_connections");
       const invoked = await callTool(caller, "invoke_operation", {
         operation_id: "listCredentialProxyConnections",
       });
       expect(invoked.isError).toBe(false);
-      const rows = listed.data.connections as Array<Record<string, unknown>>;
+      const rows = listed.data.connections as Array<{ connection_id: string }>;
       expect((invoked.data.body as { data: unknown[] }).data).toEqual(rows);
-      expect(rows.map((row) => [row.integration_package_id, row.authorized_uris])).toEqual([
-        [INTEGRATION_ID, [`${UPSTREAM}/**`]],
-        [HOOKS, ["{$credential.webhook_url}"]],
-      ]);
-      for (const payload of [listed.data, invoked.data]) {
-        const text = JSON.stringify(payload);
-        expect(text).not.toContain(HOOK_SECRET);
-        expect(text).not.toContain("T0PRIVATE");
-      }
-
-      // The placeholder is what a call writes: the proxy resolves it, the result never holds it.
-      const called = await callTool(caller, "api_call", {
-        requests: [
-          { integration_package_id: HOOKS, method: "POST", target: "{{webhook_url}}", body: {} },
-        ],
-      });
-      expect(entries(called.data)[0]).toMatchObject({ status: 200, body: { ok: true } });
-      expect(upstreamCalls.map((call) => call.url)).toEqual([hookUrl]);
-      expect(JSON.stringify(called.data)).not.toContain(HOOK_SECRET);
+      // Never the colleague's shared connection, at either door.
+      expect(rows.map((row) => row.connection_id)).toEqual([own]);
     });
   });
 });

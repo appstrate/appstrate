@@ -667,10 +667,7 @@ interface RemoteAppstrateIntegrationResolverOptions {
   endUserId?: string;
   /** Session id scoping the platform-side cookie jar. Defaults to a fresh UUID. */
   sessionId?: string;
-  /**
-   * Extra headers attached to every credential-proxy call. `X-Run-Id` names the caller's own
-   * in-flight remote run: the call is made for it and reaches the connections it bound.
-   */
+  /** Extra headers attached to every credential-proxy call (e.g. `X-Run-Id`). */
   extraHeaders?: Record<string, string>;
   /** Override the low-level HTTP client. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
@@ -685,10 +682,6 @@ interface RemoteAppstrateIntegrationResolverOptions {
  * The credential-proxy route is provider/integration-agnostic — it gates on
  * the resolved connection's `authorized_uris` and injects the configured
  * header, identically across every `{ns}__api_call` surface.
- *
- * With `X-Run-Id` in `extraHeaders` a call resolves a connection the run
- * bound; without, one of the caller's own. A refusal comes back as the
- * platform's problem document, serialised like any upstream response.
  */
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
   private readonly instance: string;

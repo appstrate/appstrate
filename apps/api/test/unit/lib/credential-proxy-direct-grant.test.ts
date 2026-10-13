@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The credential proxy has two permissions. `credential-proxy:call`,
- * the call for a run, is held by `admin` and `builder`. `credential-proxy:direct`,
- * the call outside a run, is held by `admin` alone: below it a custom space role
- * grants it, and an API key carries it only from a creator who holds it.
+ * `credential-proxy:direct`, the call outside a run, is held by `admin` alone among the presets:
+ * below it a custom space role grants it, and an API key carries it only from a creator who
+ * holds it.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -18,28 +17,13 @@ import {
 } from "../../../src/lib/permissions.ts";
 import { resolveSpaceRole, spacePermissions } from "../../../src/lib/space-role.ts";
 
-const CALL = "credential-proxy:call";
 const DIRECT = "credential-proxy:direct";
-
-const presetsHolding = (permission: typeof CALL | typeof DIRECT) =>
-  SPACE_ROLE_PRESETS.filter((preset) => presetPermissions(preset).has(permission));
-
-describe("credential-proxy:call", () => {
-  it("is held by `admin` and `builder`, and is API-key grantable", () => {
-    expect(presetsHolding(CALL)).toEqual(["admin", "builder"]);
-    expect(API_KEY_ALLOWED_SCOPES.has(CALL)).toBe(true);
-    expect(validateScopes([CALL], presetPermissions("builder"))).toEqual([CALL]);
-    expect(validateScopes([CALL], presetPermissions("operator"))).toEqual([]);
-  });
-
-  it("does not carry the call outside a run", () => {
-    expect(validateScopes([CALL, DIRECT], presetPermissions("builder"))).toEqual([CALL]);
-  });
-});
 
 describe("credential-proxy:direct", () => {
   it("is held by `admin` and by no other preset", () => {
-    expect(presetsHolding(DIRECT)).toEqual(["admin"]);
+    expect(SPACE_ROLE_PRESETS.filter((preset) => presetPermissions(preset).has(DIRECT))).toEqual([
+      "admin",
+    ]);
   });
 
   it("is the one core permission `builder` lacks outside the governance families", () => {

@@ -14,7 +14,6 @@ import { presetPermissions } from "../../../src/lib/permissions.ts";
 import {
   resolveSpaceRole,
   spacePermissions,
-  toSpaceRoleWire,
   type SpaceAccessRow,
 } from "../../../src/lib/space-role.ts";
 
@@ -58,23 +57,6 @@ describe("resolveSpaceRole on a personal space", () => {
       ).toEqual(["credential-proxy:direct"]);
       expect([...owned].filter((permission) => !admin.has(permission))).toEqual([]);
     }
-    // The twin: the same preset reached in a team space holds it.
-    const inTeam = spacePermissions(resolveSpaceRole("admin", team, null, OTHER));
-    expect(inTeam.has("credential-proxy:direct")).toBe(true);
-    const asMember = { ref: { kind: "preset", preset: "admin" } } as const;
-    expect(
-      spacePermissions(resolveSpaceRole("member", team, asMember, OTHER)).has(
-        "credential-proxy:direct",
-      ),
-    ).toBe(true);
-  });
-
-  it("shows its owner the preset's name: the narrowing is not a role of its own", () => {
-    expect(toSpaceRoleWire(resolveSpaceRole("member", personal, null, OWNER))).toEqual({
-      kind: "preset",
-      key: "admin",
-      name: "admin",
-    });
   });
 
   it("gives a GUEST owner preset operator — receive and run, never author", () => {

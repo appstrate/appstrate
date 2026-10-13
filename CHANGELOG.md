@@ -199,29 +199,20 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 - **Review who calls the credential proxy outside a run; there is nothing to
   run** (#1894). From the deploy on, a call to `/api/credential-proxy/proxy`
-  without `X-Run-Id` requires the new permission `credential-proxy:direct`,
-  which `admin` alone holds among the space presets, and reaches the caller's
-  own connections only (see Changed). `credential-proxy:call` keeps its
-  holders and now covers the calls made for a run only, so:
-  - a `builder`, a custom role and an existing API key that hold
-    `credential-proxy:call` keep calling the proxy for a run and are refused
-    `403` outside one. A custom role gets `credential-proxy:direct` by being
-    edited; a key by being minted anew by a creator who holds it, since a
-    key's stored scopes are its ceiling, a space admin's key included;
-  - a connection another member shared, and every connection of an
-    integration under an enforced org default, is reached through a run only:
-    a script that called one directly must become an agent run, or use a
-    connection its caller owns;
-  - a personal space grants `credential-proxy:direct` to nobody, its owner
-    included.
+  without `X-Run-Id` requires the new permission `credential-proxy:direct`
+  and reaches the caller's own connections only; who holds the permission
+  and what such a call reaches are in Changed. `credential-proxy:call` keeps
+  its holders and now covers the calls made for a run only. For each caller
+  that names no run:
+  - a custom role gets `credential-proxy:direct` by being edited;
+  - an API key gets it by being minted anew by a creator who holds it, since
+    a key's stored scopes are its ceiling, a space admin's key included;
+  - a script that called a connection another member shared, or a connection
+    of an integration under an enforced org default, becomes an agent run or
+    uses a connection its caller owns.
 
-  Migration `0091` only creates `connection_calls`, the proxy's call journal,
-  and rewrites nothing. Nothing prunes that table: its retention is the
-  operator's. `400 connection_not_in_org_default` and the audit action
-  `integration.connection.proxied` no longer exist, so update a client, an
-  alert or a report that matches either. `PI_IMAGE` and `SIDECAR_IMAGE` ship
-  from this release with the platform, as for every release: the sidecar
-  reads the request-header rule the proxies share.
+  Migration `0091` only creates `connection_calls`, the proxy's call journal
+  (see Added), and rewrites nothing.
 
 ### Changed
 
@@ -232,8 +223,9 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   the connections shared into it. It now requires `credential-proxy:direct`,
   a new space-level permission: `admin` holds it alone among the presets
   (`builder` does not), a custom role can list it, an API key carries it from
-  a creator who holds it, and a personal space grants it to nobody. The call
-  reaches the caller's own connections usable in the space and nothing else:
+  a creator who holds it, and a personal space grants it to nobody, its owner
+  included. The call reaches the caller's own connections usable in the space
+  and nothing else:
   - no org default applies, a soft one included, and an integration an
     enforced org default governs answers `403 run_required`, whatever is
     named;
@@ -245,21 +237,32 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     several, listing those and no one else's.
 
   `400 connection_not_in_org_default` no longer exists. The `403` of a caller
-  without the permission names `credential-proxy:direct` and the run path. A
-  call made for a run (`X-Run-Id`) still requires `credential-proxy:call` and
-  still reaches the connections the run bound, a colleague's shared one
-  included; launching runs (`agents:run`) does not open it, so an `operator`
-  or a `runner` registers a remote run and has its proxy calls refused. The
-  rule: `docs/architecture/INTEGRATIONS_RUNTIME.md`, "Platform credential
-  proxy".
+  that holds `credential-proxy:call` without the new permission names
+  `credential-proxy:direct` and the run path. A call made for a run
+  (`X-Run-Id`) still requires `credential-proxy:call` and still reaches the
+  connections the run bound, a colleague's shared one included. The rule:
+  `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+  credential proxy (`/api/credential-proxy/*`)".
 
 - **BREAKING (API): the credential proxy refuses an `X-Run-Id` naming a run
   the platform executes** (#1894): `403`. Such a run reaches its connections
   from inside its sandbox, through its sidecar. `X-Run-Id` names the caller's
   own in-flight run that the caller executes itself, a remote run.
 
+- **BREAKING (MCP): the credential proxy is reached through `api_call`, not
+  `invoke_operation`** (#1894). The five `credentialProxy*` operations are
+  not in the operation catalog (`search_operations`, `describe_operation`,
+  `invoke_operation`); `list_connections` and `api_call` are the MCP path
+  (see Added).
+
+- **The credential proxy answers `500 session_store_unavailable` when the
+  upstream answered but its cookies could not be saved** (#1894), with
+  `Proxy-Status` error `proxy_internal_error`, and withholds the response.
+  The call took effect upstream, so a retry repeats it; the call journal
+  records that code.
+
 - **BREAKING (API): the credential proxy sends upstream no header describing
-  the platform's own inbound request** (#1894). One rule,
+  the platform's own inbound request.** One rule,
   `isPlatformRequestHeader` (`@appstrate/connect/platform-request-headers`),
   read by the credential proxy and by the LLM proxies' forwarding policy,
   names them: the caller's platform credential (`Authorization`, `Cookie`),
@@ -273,33 +276,6 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   caller's credential for its upstream. A caller's own `Cookie` header does
   not reach the upstream; the cookies an upstream sets are kept and replayed
   from the server-side jar of the `X-Session-Id` session.
-
-- **BREAKING (MCP): the credential proxy is reached through `api_call`, not
-  `invoke_operation`** (#1894). The five `credentialProxy*` operations are
-  not in the operation catalog (`search_operations`, `describe_operation`,
-  `invoke_operation`); `list_connections` and `api_call` are the MCP path
-  (see Added).
-
-- **BREAKING: the audit action `integration.connection.proxied` no longer
-  exists** (#1894). It recorded the first use per session of a connection the
-  caller did not own. The call journal records every call instead (see
-  Added).
-
-- **The credential proxy answers `500 session_store_unavailable` when the
-  upstream answered but its cookies could not be saved** (#1894), with
-  `Proxy-Status` error `proxy_internal_error`, and withholds the response.
-  The call took effect upstream, so a retry repeats it; the call journal
-  records that code.
-
-- **`appstrate run` says when its integration calls are made outside a run**
-  (#1894). A run executed locally with no run registered on the instance
-  (`--report=false`, or a registration that failed under
-  `--report-fallback console`) prints once, before it starts, that its
-  integration calls require
-  `credential-proxy:direct` and reach the caller's own connections only, and
-  that with `--report` they go through the run (`credential-proxy:call`).
-  Nothing is printed under `--json`. A refused call reaches the agent as the
-  tool's error; nothing is retried.
 
 - **BREAKING (API): an undeclared override key has its own code, on both
   maps.** A key naming an id the agent does not declare answers
@@ -899,14 +875,13 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   - `GET /api/integrations/calls`: a holder of `integrations:configure` reads
     every call made in the space.
 
-  Limits: it covers the platform proxy only (calls outside a run and the
-  calls of remote runs), so an `api_call` made by a run the platform executes
-  is in that run's logs, not here. The host is stored as the caller wrote it,
-  before substitution: a `{{field}}` placeholder is kept as written, and no
-  path, query string or userinfo is stored. A row is written best-effort, off
-  the response path. A streamed response is journaled when it is handed over. The owner's
-  read answers `404` once the connection is deleted; the space's read still
-  lists its calls. No retention job exists.
+  It covers the platform proxy only, keeps the target's host and not its
+  path, and nothing prunes it; its limits in full:
+  `docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+  credential proxy (`/api/credential-proxy/*`)". BREAKING: the audit action
+  `integration.connection.proxied`, which recorded the first use per session
+  of a connection the caller did not own, no longer exists; an alert or a
+  report that matches it reads the journal instead.
 
 - **MCP: `list_connections` and `api_call`** (#1894), declared to a bearer
   caller holding `mcp:invoke` and `credential-proxy:direct`.

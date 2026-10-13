@@ -50,11 +50,7 @@ import type { Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import {
-  transportFailureCode,
-  upstreamFailureDetail,
-  type ProxyProblemCode,
-} from "../../lib/proxy-status.ts";
+import { upstreamFailureDetail, type ProxyProblemCode } from "../../lib/proxy-status.ts";
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
@@ -522,8 +518,9 @@ export function bodyReadError(
   redactedHost: string,
   connectionId: string,
 ): ProxyCallError {
-  const code = transportFailureCode(err);
-  return new ProxyCallError(code, upstreamFailureDetail(redactedHost, code), connectionId);
+  const { code } = classifyApiCallFailure(err);
+  const upstream = code === "upstream_timeout" ? code : "upstream_unreachable";
+  return new ProxyCallError(upstream, upstreamFailureDetail(redactedHost, upstream), connectionId);
 }
 
 /** `fetchApiCall`'s refusals and transport faults, as the proxy's typed errors. */

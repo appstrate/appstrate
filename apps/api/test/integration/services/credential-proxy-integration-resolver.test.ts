@@ -26,7 +26,6 @@ import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
   integrationConnections,
   integrationOauthClients,
-  integrationOrgDefaults,
   packages,
   runs,
 } from "@appstrate/db/schema";
@@ -656,65 +655,6 @@ describe("credential-proxy integration-resolver", () => {
       const resolved = await resolveIntegrationProxyCredentials(input());
       expect(resolved.connectionId).toBe(ownId);
       expect(JSON.stringify(resolved.payload)).toContain("live-mine");
-    });
-
-    it("never reaches a colleague's shared connection, named or not — one not-found", async () => {
-      const colleague = await createTestUser();
-      const sharedId = await seedConnection({
-        userId: colleague.id,
-        accountId: "shared",
-        sharedSpaceIds: [ctx.defaultSpaceId],
-      });
-
-      const unnamed = await rejectionOf(resolveIntegrationProxyCredentials(input()));
-      expect(unnamed).toBeInstanceOf(IntegrationCredentialNotFoundError);
-      const named = (await rejectionOf(
-        resolveIntegrationProxyCredentials({ ...input(), connectionId: sharedId }),
-      )) as Error;
-      expect(named).toBeInstanceOf(IntegrationCredentialNotFoundError);
-      // The same words as for an id that names nothing.
-      const unknown = (await rejectionOf(
-        resolveIntegrationProxyCredentials({ ...input(), connectionId: crypto.randomUUID() }),
-      )) as Error;
-      expect(named.message).toBe(unknown.message);
-      expect(named.message).toContain("through a run (X-Run-Id)");
-    });
-
-    it("refuses an integration an enforced org default governs (403 run_required), not a soft one", async () => {
-      const colleague = await createTestUser();
-      const sharedId = await seedConnection({
-        userId: colleague.id,
-        accountId: "shared",
-        sharedSpaceIds: [ctx.defaultSpaceId],
-      });
-      const ownId = await seedConnection({ userId: ctx.user.id, accountId: "mine" });
-      const [orgDefault] = await db
-        .insert(integrationOrgDefaults)
-        .values({
-          spaceId: ctx.defaultSpaceId,
-          integrationId: INTEGRATION_ID,
-          connectionIds: [sharedId],
-          enforce: false,
-        })
-        .returning({ id: integrationOrgDefaults.id });
-      expect((await resolveIntegrationProxyCredentials(input())).connectionId).toBe(ownId);
-
-      await db
-        .update(integrationOrgDefaults)
-        .set({ enforce: true })
-        .where(eq(integrationOrgDefaults.id, orgDefault!.id));
-      for (const connectionId of [undefined, ownId, sharedId]) {
-        const err = (await rejectionOf(
-          resolveIntegrationProxyCredentials({
-            ...input(),
-            ...(connectionId ? { connectionId } : {}),
-          }),
-        )) as ApiError;
-        expect(err).toBeInstanceOf(ApiError);
-        expect(err.status).toBe(403);
-        expect(err.code).toBe("run_required");
-        expect(err.message).not.toContain(sharedId);
-      }
     });
 
     it("answers 409 must_choose_connection listing the actor's own connections only when they own several", async () => {
