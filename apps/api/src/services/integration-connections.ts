@@ -178,7 +178,7 @@ import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.t
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
-import { getIntegration, getOrgWideIntegrationManifest } from "./integration-service.ts";
+import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
 
 // ─────────────────────────────────────────────
@@ -227,17 +227,18 @@ function lookupAuth(
   return auth;
 }
 
+/** The manifest connecting reads ({@link readIntegrationManifestForConnect}), or a 404. */
 async function loadManifestOrThrow(
   scope: SpaceScope | OrgScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
-  const manifest = isSpaceOwner(scope)
-    ? (await getIntegration(scope, packageId))?.manifest
-    : await getOrgWideIntegrationManifest(scope.orgId, packageId);
-  if (!manifest) {
-    throw notFound(`Integration '${packageId}' not found in this organization`);
-  }
-  return manifest;
+  const read = await readIntegrationManifestForConnect(scope, packageId);
+  if (read.ok) return read.manifest;
+  throw notFound(
+    read.reason === "no_usable_version"
+      ? `Integration '${packageId}' has no usable published version to connect through: publish one`
+      : `Integration '${packageId}' not found in this organization`,
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -4065,10 +4066,9 @@ export async function getIntegrationAuthStatuses(
 }
 
 /**
- * Surfaces the manifest's `auth` declaration verbatim — used by the
- * OAuth initiate handler to read endpoints + resource + scopes without
- * a second DB round-trip. Returns the full manifest too so callers that
- * need the wider catalog don't re-fetch.
+ * The `auth` declaration every connect flow acts on (kickoff, hosted page, callback, strategies),
+ * with its manifest: the published one, never the draft of a published integration
+ * ({@link readIntegrationManifestForConnect}).
  */
 export async function readIntegrationAuth(
   scope: SpaceScope,

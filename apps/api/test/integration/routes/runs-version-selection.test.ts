@@ -36,10 +36,10 @@ import {
   seedPackageShare,
   seedPackageVersion,
   seedPublishedVersion,
-  seedEndUser,
   seedRun,
   seedSpace,
   seedSpaceMember,
+  seedSchedule,
 } from "../../helpers/seed.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
@@ -479,38 +479,27 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
    * the schedule row and may not write the agent — which is the whole point.
    */
   describe("editing a schedule whose stored selector is `draft`", () => {
-    /** The author of both: writes the agent in HOME, writes schedules in TEAM. */
-    async function authorHeaders(): Promise<Record<string, string>> {
+    /**
+     * A schedule holding the selector its author stored, running as the schedule writer who
+     * patches it: they write schedules in TEAM and nothing in HOME. A schedule running as anyone
+     * else is written by org owners/admins (an end user's, by an API key too), which would refuse
+     * the writer before the selector is judged.
+     */
+    async function storedSchedule(versionOverride: string) {
       const user = await createTestUser();
       await addOrgMember(ctx.orgId, user.id, "member");
-      await seedSpaceMember({ spaceId: homeId, userId: user.id, presetRole: "builder" });
       await seedSpaceMember({ spaceId: teamId, userId: user.id, presetRole: "builder" });
-      return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": teamId };
-    }
-
-    /** Writes schedules in TEAM, writes nothing in HOME. */
-    const scheduleWriterHeaders = () => memberIn(teamId, "builder");
-
-    async function createSchedule(
-      headers: Record<string, string>,
-      versionOverride?: string,
-    ): Promise<string> {
-      // Run as an end user: a schedule running as another MEMBER is written by org owners/admins
-      // only, which would refuse the schedule writer before the selector is judged.
-      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: teamId });
-      const res = await app.request(`/api/agents/${DRAFT_AGENT}/schedules`, {
-        method: "POST",
-        headers: { ...headers, "X-Space-Id": teamId, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "nightly",
-          cron_expression: "0 3 * * *",
-          timezone: "UTC",
-          actor: { endUserId: endUser.id },
-          ...(versionOverride ? { version_override: versionOverride } : {}),
-        }),
+      const row = await seedSchedule({
+        packageId: DRAFT_AGENT,
+        orgId: ctx.orgId,
+        spaceId: teamId,
+        userId: user.id,
+        name: "nightly",
+        cronExpression: "0 3 * * *",
+        timezone: "UTC",
+        versionOverride,
       });
-      expect(res.status, await res.clone().text()).toBe(201);
-      return ((await res.json()) as { id: string }).id;
+      return { id: row.id, writer: { Cookie: user.cookie, "X-Org-Id": ctx.orgId } };
     }
 
     const patch = (headers: Record<string, string>, id: string, body: Record<string, unknown>) =>
@@ -524,16 +513,16 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       // `input` is the field that re-opens the manifest decision, so this patch
       // DOES resolve the stored `draft` — and must still not be refused for it,
       // because the request never named it.
-      const id = await createSchedule(await authorHeaders(), "draft");
-      const res = await patch(await scheduleWriterHeaders(), id, { input: { note: "hi" } });
+      const { id, writer } = await storedSchedule("draft");
+      const res = await patch(writer, id, { input: { note: "hi" } });
       expect(res.status, await res.clone().text()).toBe(200);
     });
 
     it("accepts a patch that echoes the stored selector back unchanged", async () => {
       // The form's own shape: it posts `version_override` on every save. Same
       // value in, same value out — nothing was decided, so nothing is judged.
-      const id = await createSchedule(await authorHeaders(), "draft");
-      const res = await patch(await scheduleWriterHeaders(), id, {
+      const { id, writer } = await storedSchedule("draft");
+      const res = await patch(writer, id, {
         cron_expression: "0 4 * * *",
         version_override: "draft",
       });
@@ -544,8 +533,8 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
       // The control that keeps the two above from being a hole: naming the
       // draft on a schedule that did not hold it IS the act, and it answers to
       // the agent's author.
-      const id = await createSchedule(await authorHeaders(), "published");
-      const res = await patch(await scheduleWriterHeaders(), id, { version_override: "draft" });
+      const { id, writer } = await storedSchedule("published");
+      const res = await patch(writer, id, { version_override: "draft" });
       expect(res.status, await res.clone().text()).toBe(403);
       expect((await res.json()) as { code?: string }).toMatchObject({
         code: "draft_not_writable",
@@ -554,8 +543,8 @@ describe("POST /api/agents/:scope/:name/run — who may run the draft", () => {
 
     it("accepts a patch that CLEARS the selector off a draft schedule", async () => {
       // Dropping back to the published default takes nothing away from anyone.
-      const id = await createSchedule(await authorHeaders(), "draft");
-      const res = await patch(await scheduleWriterHeaders(), id, { version_override: null });
+      const { id, writer } = await storedSchedule("draft");
+      const res = await patch(writer, id, { version_override: null });
       expect(res.status, await res.clone().text()).toBe(200);
     });
   });

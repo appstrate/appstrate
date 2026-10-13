@@ -1321,6 +1321,31 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Security
 
+- **Connecting reads the integration's published version, not its draft**
+  (#1947). Every connect flow (OAuth kickoff and callback, the hosted form,
+  the fields and login flows) took the `auth` declaration from the draft, so
+  an edit nobody had published changed where an authorization code, a PKCE
+  verifier and the OAuth client secret were sent. The connect flows, the
+  auths `GET /api/integrations/{id}` lists as connectable and the
+  registration of OAuth clients now read the `latest` published version, as
+  the credential proxy does; the draft serves only while the integration has
+  no published version. An auth the draft adds is listed and connectable
+  once a version declaring it is published.
+
+- **BREAKING (API): a schedule running as an end user takes the authority to
+  borrow one** (#1947). `schedules:write` alone let a member (the `builder`
+  preset, a custom role) name any end user of the space as `actor`, and each
+  fire then ran with that end user's own connections. Naming an end user
+  other than the caller, and any `PATCH` or `DELETE` of a schedule whose
+  stored actor is an end user, now answers `403 forbidden` (`param: actor` on
+  the naming) unless the caller is an API key, which already borrows an end
+  user with `Appstrate-User`, or holds `api-keys:create` in the space and
+  could mint one. The `builder` preset holds no `api-keys:*`. The rule for
+  another member is unchanged (org owner or admin only). Existing schedules
+  keep firing; a builder who created one for an end user no longer edits or
+  deletes it. The dashboard's actor picker lists end users to holders of
+  `api-keys:create` only.
+
 - **BREAKING: an `api_call` encodes each `{{field}}` for the place it takes**
   (#1915), on the three paths (platform credential proxy, sidecar, CLI), through
   one request preparation shared with `connect.login`. A credential value was
