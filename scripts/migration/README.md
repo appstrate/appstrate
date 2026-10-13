@@ -1297,7 +1297,7 @@ permission string the platform does not know grants nothing, so `0046` rewrites 
 `credential-proxy:call-own` is appended and every other element is kept, so an existing API key or
 custom role keeps both paths.
 Revoked and expired keys are rewritten like the others. `credential-proxy:call-own` is stored
-nowhere before this release, so the rows holding it afterwards are the rows rewritten. The OIDC
+nowhere before this release, so until the release serves a request the rows holding it are the rows rewritten. The OIDC
 scope columns (`oauth_clients`, the tokens, the consents) are left alone: the OIDC vocabulary does
 not list the permission. Audit payloads are history and stay as written.
 
@@ -1329,9 +1329,13 @@ finds nothing to rewrite.
 It does not reach a client that mints keys: one naming `credential-proxy:call` in `scopes` gets a
 400 from this release and names `credential-proxy:call-run` and `credential-proxy:call-own`.
 
-Rollback, before the previous release serves again: the exact inverse on both columns —
-`UPDATE api_keys SET scopes = array_remove(array_replace(scopes, 'credential-proxy:call-run', 'credential-proxy:call'), 'credential-proxy:call-own') WHERE 'credential-proxy:call-run' = ANY(scopes)`,
-and the same on `space_roles.permissions` — or the window's `pg_dump`.
+Rollback: the window's `pg_dump`. Only before the release serves a request, the inverse statements
+are exact as well:
+`UPDATE api_keys SET scopes = array_remove(array_replace(scopes, 'credential-proxy:call-run', 'credential-proxy:call'), 'credential-proxy:call-own') WHERE 'credential-proxy:call-run' = ANY(scopes)`
+and
+`UPDATE space_roles SET permissions = array_remove(array_replace(permissions, 'credential-proxy:call-run', 'credential-proxy:call'), 'credential-proxy:call-own') WHERE 'credential-proxy:call-run' = ANY(permissions)`.
+Once the release serves, a key it mints with `credential-proxy:call-run` alone would come out of
+them holding `credential-proxy:call`, the whole proxy for the previous release.
 
 ## Log
 

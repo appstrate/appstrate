@@ -221,13 +221,10 @@ interface ConnectionOutsideRun {
   allow_all_uris: boolean;
   /** A call binding it answers `409 needs_reconnection` until its owner reconnects it. */
   needs_reconnection: boolean;
-  /** An enforced org default governs the integration: a call answers `403 run_required`. */
   run_required: boolean;
 }
 
 /**
- * What `actor` can call outside a run in the space, by `reach`, of the integrations a call would
- * not answer 404 for — active here, with a published version that declares the connection's auth.
  * It decrypts nothing: the answer reaches a model's context through the MCP module.
  */
 export async function listConnectionsOutsideRun(

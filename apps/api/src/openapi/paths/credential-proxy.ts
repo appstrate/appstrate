@@ -39,8 +39,9 @@ const proxySharedDescription =
   "without agent pins: the rows a run in the space binds for that caller. " +
   "`GET /api/credential-proxy/connections` lists what a call would accept. Holding one " +
   "permission never opens the other path.\n\n" +
-  "Optional `Appstrate-User` header scopes the call to an end-user's connection " +
-  "(API-key auth only).\n\n" +
+  "Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: " +
+  "outside a run the call reaches the end-user's own connections, and with both permissions " +
+  "those a member shared into the space.\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +
   "against the integration's credential schema, each value encoded for the place it " +
   "takes: percent-encoded as one URL component (a placeholder that starts the URL is a " +
@@ -134,7 +135,9 @@ const proxyParameters = [
     name: "Appstrate-User",
     in: "header",
     required: false,
-    description: "Impersonation header — scopes the call to this end-user's connection.",
+    description:
+      "Impersonation header — the end-user is the caller: outside a run the call reaches " +
+      "their own connections, and with both permissions those a member shared into the space.",
     schema: { type: "string", pattern: "^eu_" },
   },
   {
@@ -216,10 +219,11 @@ const proxyParameters = [
       "shared one is a candidate, is a `409 must_choose_connection` listing the candidates — a " +
       "shared connection is used only when named or designated by an org default; no " +
       "candidate at all is a `404 credential_not_found`. A " +
-      "default set of one is used, several are a `409 must_choose_connection` over the set, " +
+      "default set of one is used, several are a `409 must_choose_connection` over the set " +
+      "(an enforced default then takes one of its members, a soft one any candidate), " +
       "and a member the caller cannot reach is a `409 pinned_connection_unavailable`.\n\n" +
-      "Either way a connection whose credentials need reconnecting is a " +
-      "`409 needs_reconnection`, and a non-uuid value a `400`.",
+      "Either way a connection that would be used and needs reconnecting, a default's member " +
+      "included, is a `409 needs_reconnection`, and a non-uuid value a `400`.",
     schema: { type: "string", format: "uuid" },
   },
 ] as const;

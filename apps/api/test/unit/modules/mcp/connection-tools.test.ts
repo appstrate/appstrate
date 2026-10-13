@@ -490,11 +490,15 @@ describe("api_call — result", () => {
 
   it("tells an upstream refusal from the proxy's own, and runs the rest of the batch", async () => {
     const candidates = [{ id: "c1", label: "work" }];
+    const runRequiredDetail =
+      `Integration '${INTEGRATION}' is governed by an enforced org default in this space: it is ` +
+      `reached by a caller who also holds credential-proxy:call-run, or through an agent run ` +
+      `the platform executes.`;
     const answers: Record<string, () => Response> = {
       ok: () => relayedJson({ ok: true }),
       // The upstream refusing the connection's credential: relayed, not the platform's 401.
       upstream401: () => relayedJson({ error: "invalid_token" }, 401),
-      run_required: () => problem(403, "run_required", "Reached through a run (X-Run-Id)."),
+      run_required: () => problem(403, "run_required", runRequiredDetail),
       must_choose: () =>
         problem(409, "must_choose_connection", "Name one with the X-Connection-Id header.", {
           errors: [{ field: "integrations.x", candidate_connections: candidates }],
@@ -518,7 +522,7 @@ describe("api_call — result", () => {
       error: {
         status: 403,
         code: "run_required",
-        detail: "Reached through a run (X-Run-Id).",
+        detail: runRequiredDetail,
         request_id: "req_1",
       },
     });

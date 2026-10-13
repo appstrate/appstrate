@@ -9,8 +9,8 @@
  *     and executed by the caller ({@link requireCallerRun}). It reaches what the run bound, a
  *     colleague's shared connection included, which is why launching runs (`agents:run`) is not
  *     enough: registering a remote run would otherwise hand out raw access to that connection.
- *   - outside a run: `credential-proxy:call-own`, on the actor's own connections. Holding
- *     `credential-proxy:call-run` too: on every connection usable in the space, own or shared.
+ *   - outside a run: `credential-proxy:call-own`: own connections, and with `call-run` shared ones
+ *     (`selectAccessibleConnection`).
  */
 
 import type { Actor } from "../../lib/actor.ts";
@@ -40,7 +40,7 @@ interface ProxyAccessInput {
   onDenied: (required: string) => void;
 }
 
-/** Throws unless `input` may call the credential proxy on the path its `runId` selects. */
+/** Throws unless `input` may take its `runId`'s path; the reach outside a run, `null` for a run. */
 export async function authorizeProxyCall(input: ProxyAccessInput): Promise<ProxyReach | null> {
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
   if (runId === null) {

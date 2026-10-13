@@ -1214,7 +1214,7 @@ describe("POST /api/credential-proxy/proxy — one permission per path", () => {
   });
 });
 
-describe("POST /api/credential-proxy/proxy — outside a run, the caller's own connections only", () => {
+describe("POST /api/credential-proxy/proxy — outside a run with credential-proxy:call-own alone, the caller's own connections only", () => {
   let ctx: TestContext;
   let colleague: TestContext;
   let apiKey: string;
@@ -1392,6 +1392,34 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
     expect(await listed({ "Appstrate-User": endUser.id })).toEqual([]);
     expect(upstreamAuth).toEqual([]);
   });
+
+  it("an end-user under a key holding both permissions reaches a member's shared connection, never the creator's unshared one", async () => {
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const both = await mintProxyKey(ctx, [
+      "credential-proxy:call-own",
+      "credential-proxy:call-run",
+    ]);
+    const asEndUser = { Authorization: `Bearer ${both}`, "Appstrate-User": endUser.id };
+    const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
+    const creators = await seedGmailConnection(ctx, "creator-own");
+
+    expect((await call({ ...asEndUser, "X-Connection-Id": shared })).status).toBe(200);
+    await expectProblem(await call({ ...asEndUser, "X-Connection-Id": creators }), 404, {
+      code: "credential_not_found",
+    });
+    expect(upstreamAuth).toEqual(["Bearer tok-theirs-shared"]);
+
+    await drainAudits(5_000);
+    const rows = await db.select().from(connectionCalls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      connectionId: shared,
+      actorType: "end_user",
+      actorId: endUser.id,
+      ownerType: "user",
+      ownerId: colleague.user.id,
+    });
+  });
 });
 
 describe("POST /api/credential-proxy/proxy — outside a run, both proxy permissions reach the connections usable in the space", () => {
@@ -1429,13 +1457,22 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
   });
   afterEach(() => restoreFetch());
 
-  /** The colleague's connections, two shared into the space and one not, and `owned` of the caller's. */
-  async function seedConnections(owned: 0 | 1 | 2 = 1): Promise<Record<Connection, string>> {
+  /**
+   * The colleague's connections, `shared` (two unless stated) into the space and one not, and
+   * `owned` of the caller's.
+   */
+  async function seedConnections(
+    owned: 0 | 1 | 2 = 1,
+    shared: 1 | 2 = 2,
+  ): Promise<Record<Connection, string>> {
     return {
       own: owned > 0 ? await seedGmailConnection(ctx, LABELS.own) : crypto.randomUUID(),
       own2: owned > 1 ? await seedGmailConnection(ctx, LABELS.own2) : crypto.randomUUID(),
       shared: await seedGmailConnection(colleague, LABELS.shared, { shared: true }),
-      shared2: await seedGmailConnection(colleague, LABELS.shared2, { shared: true }),
+      shared2:
+        shared > 1
+          ? await seedGmailConnection(colleague, LABELS.shared2, { shared: true })
+          : crypto.randomUUID(),
       private: await seedGmailConnection(colleague, LABELS.private),
     };
   }
@@ -1463,6 +1500,8 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
     situation: string;
     /** The caller's own connections; one unless stated. */
     owned?: 0 | 2;
+    /** A single connection is shared into the space, where the fallback could bind it. */
+    oneShared?: true;
     orgDefault?: { members: Connection[]; enforce: boolean };
     named?: Connection;
     answers: Partial<Record<Caller, Answer>>;
@@ -1483,11 +1522,10 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
       answers: { both: { uses: "shared" } },
     },
     {
-      situation: "no own connection, none named",
+      situation: "no own connection, a single shared one, none named",
       owned: 0,
-      answers: {
-        both: { status: 409, code: "must_choose_connection", candidates: ["shared", "shared2"] },
-      },
+      oneShared: true,
+      answers: { both: { status: 409, code: "must_choose_connection", candidates: ["shared"] } },
     },
     {
       situation: "several own connections, none named",
@@ -1546,7 +1584,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
       const outcome =
         "uses" in answer ? `200 with ${answer.uses}` : `${answer.status} ${answer.code}`;
       it(`${caller} — ${row.situation}: ${outcome}`, async () => {
-        const ids = await seedConnections(row.owned);
+        const ids = await seedConnections(row.owned, row.oneShared ? 1 : 2);
         if (row.orgDefault) {
           await orgDefault(
             ctx,

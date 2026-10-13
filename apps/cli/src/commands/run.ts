@@ -275,9 +275,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
   // ─── 3b. Build the integration api_call resolver ──────────────────
-  // A registered run's credential-proxy calls carry its X-Run-Id: made for the
-  // run, they reach the connections it bound. With no run registered they are
-  // made outside a run, on what the caller reaches there.
   // Serverless `apiCall` integrations (the unified integration
   // surface) get credential-injected HTTP calls; the resolver yields one
   // `{ns}__api_call` tool per integration.

@@ -11,19 +11,18 @@
  * stored permission string the platform does not know grants nothing. Two columns store permission
  * strings: `api_keys.scopes` and `space_roles.permissions`. In each row holding
  * `credential-proxy:call`, that element becomes `credential-proxy:call-run` where it stands
- * (`array_replace`: the order and every other element kept). Revoked and expired keys are
+ * and `credential-proxy:call-own` is appended, the rest kept. Revoked and expired keys are
  * rewritten like the others. The OIDC scope columns are left alone: the OIDC vocabulary does not list the
  * permission, so no client, token or consent stores it. Audit payloads are history and stay as
  * written.
  *
  * Run it in the deploy window, after the migrate service and BEFORE the release serves a request,
- * `pg_dump` first; on the running previous release, the dry run only (`README.md`, script `0046`).
+ * `pg_dump` first; on the running previous release, the dry run only.
  *
  * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry
  * run by default (rolled back), `--apply` commits. It prints counts and row ids, never a key hash.
  * Idempotent: the rows rewritten are the rows holding the old name, which the write removes, so a
- * second run finds none. Rollback: the exact inverse on both columns,
- * `array_remove(array_replace(scopes, RUN, OLD), OWN)`, or the window's `pg_dump`.
+ * second run finds none. Rollback: `scripts/migration/README.md`, script `0046`.
  */
 
 import { parseArgs } from "node:util";

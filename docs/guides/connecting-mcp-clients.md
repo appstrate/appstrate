@@ -50,8 +50,8 @@ you the matching command).
 Grant the key the permissions the work needs on top of those two: what the
 server declares follows the key's scopes (see "The tool surface"). Calling a
 third-party API through one of your connections takes `credential-proxy:call-own`,
-which a key carries only from a creator who holds it (a space `admin` or
-`builder`, or a custom role that lists it).
+which a key carries only from a creator who holds it (a space `admin`, or a
+custom role that lists it).
 
 This is the recommended onboarding until you have HTTPS + the OAuth flow set up.
 

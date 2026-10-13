@@ -437,18 +437,16 @@ interface ConnectionSelectionContext {
   spaceId: string;
   actor: Actor;
   run?: RunBoundSelection;
-  /** Which rows a call outside a run reads; absent is `own`. */
   reach?: ProxyReach;
 }
 
 /**
  * The credential proxy's connection of `packageId`. Under a run, a member of its bound set, a
  * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
- * actor's OWN usable rows (the `own` reach) and nothing else: no org default
+ * rows in reach (default `own`): `usable` walks the cascade, pins aside; under `own` no org default
  * applies, and an integration an ENFORCED one governs answers `run_required`. `null` when nothing
- * answers; an id that is not the actor's own reads the same whether it names a colleague's row,
- * shared or not, or no row at all. Either way the pick passes the resolver's health checks.
- * The `usable` reach walks the resolver's cascade without pins over the rows usable in the space.
+ * answers; an id out of reach reads the same whether it names a colleague's row
+ * or no row at all. Either way the pick passes the resolver's health checks.
  */
 export async function selectAccessibleConnection(
   packageId: string,
