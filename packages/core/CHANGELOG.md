@@ -20,6 +20,11 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
+  (`./integration`): the `http://` `authorized_uris` entries of the auths
+  that inject a credential over HTTP, as write-path issues. `isTrustedHost`
+  exempts a host the operator designated as internal.
+
 - **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
   gating a call to `/api/credential-proxy/proxy` outside a run, on the
   caller's own connections. `CorePermission` and `SpaceLevelPermission` gain

@@ -52,6 +52,7 @@ import {
   getClient,
   getClientCached,
   getClientOwningOrg,
+  isSelfServiceClient,
   listClientsForOrgAndApps,
   rotateClientSecret,
   updateClient,
@@ -1803,13 +1804,11 @@ export function createOidcRouter() {
     token: string,
     callbackURL: string | null,
     errorCallbackURL: string | null,
-    email: string | null,
   ): string {
     const params = new URLSearchParams();
     params.set("token", token);
     if (callbackURL) params.set("callbackURL", callbackURL);
     if (errorCallbackURL) params.set("errorCallbackURL", errorCallbackURL);
-    if (email) params.set("email", email);
     return `?${params.toString()}`;
   }
 
@@ -1827,19 +1826,12 @@ export function createOidcRouter() {
     }
     const callbackURL = url.searchParams.get("callbackURL");
     const errorCallbackURL = url.searchParams.get("errorCallbackURL");
-    const email = url.searchParams.get("email");
     const branding = await resolveConfirmBranding(callbackURL);
     const csrfToken = issueCsrfToken(c);
     const body = renderMagicLinkConfirmPage({
-      action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(
-        token,
-        callbackURL,
-        errorCallbackURL,
-        email,
-      )}`,
+      action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(token, callbackURL, errorCallbackURL)}`,
       csrfToken,
       branding,
-      email: email ?? undefined,
     });
     return c.html(body.value);
   });
@@ -1860,19 +1852,12 @@ export function createOidcRouter() {
     if (!verifyCsrfToken(c, readFormString(form, "_csrf"))) {
       const callbackURL = url.searchParams.get("callbackURL");
       const errorCallbackURL = url.searchParams.get("errorCallbackURL");
-      const email = url.searchParams.get("email");
       const branding = await resolveConfirmBranding(callbackURL);
       const csrfToken = issueCsrfToken(c);
       const retry = renderMagicLinkConfirmPage({
-        action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(
-          token,
-          callbackURL,
-          errorCallbackURL,
-          email,
-        )}`,
+        action: `/api/oauth/magic-link/confirm${buildConfirmActionQuery(token, callbackURL, errorCallbackURL)}`,
         csrfToken,
         branding,
-        email: email ?? undefined,
       });
       return c.html(retry.value, 403);
     }
@@ -2630,33 +2615,26 @@ export function createOidcRouter() {
       });
     }
 
-    // Validate redirect URI against the client's registered post-logout URIs
-    // to prevent open redirect attacks (OWASP). Fall back to "/" if no URI,
-    // no client, or the URI is not registered.
+    // Redirect only to a post-logout URI an operator or an org admin registered on the client;
+    // "/" otherwise. A client that registered itself (DCR, CIMD) is never honoured: anyone can
+    // create one, so its URIs would make this public route an open redirect. Nor are a client's
+    // `redirect_uris`: an authorize callback is not a place to land a signed-out browser.
     if (postLogoutUri && clientId) {
       const client = await getClientCached(clientId);
-      if (client) {
-        const postLogoutUris = client.postLogoutRedirectUris ?? [];
-        if (postLogoutUris.includes(postLogoutUri)) {
-          return c.redirect(postLogoutUri, 302);
-        }
-        // Fallback: also accept URIs registered as OAuth redirect URIs.
-        // Some deployments re-use the same URI for both authorize callbacks
-        // and post-logout redirects.
-        const redirectUris = client.redirectUris ?? [];
-        if (redirectUris.includes(postLogoutUri)) {
-          return c.redirect(postLogoutUri, 302);
-        }
-        logger.warn("oidc: post_logout_redirect_uri not registered on client", {
-          module: "oidc",
-          clientId,
-          postLogoutUri,
-        });
+      if (
+        client &&
+        client.postLogoutRedirectUris.includes(postLogoutUri) &&
+        !(await isSelfServiceClient(clientId))
+      ) {
+        return c.redirect(postLogoutUri, 302);
       }
+      logger.warn("oidc: post_logout_redirect_uri not honoured for this client", {
+        module: "oidc",
+        clientId,
+      });
     } else if (postLogoutUri) {
       logger.warn("oidc: post_logout_redirect_uri without client_id — cannot validate, ignoring", {
         module: "oidc",
-        postLogoutUri,
       });
     }
 

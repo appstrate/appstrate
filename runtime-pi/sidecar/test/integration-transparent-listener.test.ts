@@ -407,6 +407,63 @@ describe("transparent egress listener — plain HTTP path", () => {
     expect(seenHosts.some((h) => h.includes(":"))).toBe(false);
   });
 
+  // The floor vets one name; the upstream must not get to route on another.
+  it.each([
+    [
+      "a repeated Host header",
+      "GET / HTTP/1.1\r\nHost: api.test.local\r\nHost: other.test.local\r\n\r\n",
+    ],
+    [
+      "a folded second Host line",
+      "GET / HTTP/1.1\r\nHost: api.test.local\r\n Host: other.test.local\r\n\r\n",
+    ],
+    [
+      "an absolute-form target for another host",
+      "GET http://other.test.local/x HTTP/1.1\r\nHost: api.test.local\r\n\r\n",
+    ],
+    [
+      "an absolute-form target hiding the host behind userinfo",
+      "GET http://api.test.local@other.test.local/ HTTP/1.1\r\nHost: api.test.local\r\n\r\n",
+    ],
+    [
+      "an authority-form target",
+      "GET other.test.local:80 HTTP/1.1\r\nHost: api.test.local\r\n\r\n",
+    ],
+  ])("destroys a request with %s, without dialing", async (_, head) => {
+    const upstream = await startTcpEcho();
+    const events: EgressListenerEvent[] = [];
+    const listener = await makeListener({
+      upstreamPort: upstream.port,
+      onEvent: (e) => events.push(e),
+    });
+    const { closed, received } = await driveClient(
+      listener.address().port,
+      [Buffer.from(head, "latin1")],
+      1,
+    );
+    expect(closed).toBe(true);
+    expect(received.length).toBe(0);
+    expect(events).toEqual([
+      { kind: "tunnel-refused", target: `<unknown>:${upstream.port}`, reason: "no-host-header" },
+    ]);
+  });
+
+  it("routes an absolute-form target naming the same host as Host", async () => {
+    const upstream = await startTcpEcho();
+    const events: EgressListenerEvent[] = [];
+    const listener = await makeListener({
+      upstreamPort: upstream.port,
+      onEvent: (e) => events.push(e),
+    });
+    const request = Buffer.from(
+      "GET http://API.test.local:80/v1/ping HTTP/1.1\r\nHost: api.test.local\r\n\r\n",
+      "latin1",
+    );
+    const { received } = await driveClient(listener.address().port, [request], request.length);
+    expect(received.equals(request)).toBe(true);
+    expect(events).toEqual([{ kind: "tunnel-opened", target: `api.test.local:${upstream.port}` }]);
+  });
+
   it("destroys a request without a Host header", async () => {
     const events: EgressListenerEvent[] = [];
     const listener = await makeListener({ onEvent: (e) => events.push(e) });

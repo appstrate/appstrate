@@ -269,6 +269,16 @@ export function getClientCached(clientId: string): Promise<OAuthClientRecord | n
   return clientCache.get(clientId, () => getClient(clientId));
 }
 
+/** True for a client that registered itself (DCR, CIMD): nobody the platform trusts declared it. */
+export async function isSelfServiceClient(clientId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ selfService: oauthClient.selfService })
+    .from(oauthClient)
+    .where(eq(oauthClient.clientId, clientId))
+    .limit(1);
+  return row?.selfService === true;
+}
+
 /** @internal Test helper — drop every entry. */
 export function _resetClientCache(): void {
   clientCache.clear();

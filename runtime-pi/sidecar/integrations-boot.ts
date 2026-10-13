@@ -34,6 +34,7 @@ import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
+import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
 import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
@@ -526,6 +527,9 @@ export async function connectRemoteHttpIntegration(
               );
             }
           };
+          // Before `Headers.set`, whose own TypeError quotes the value: the boot report the agent
+          // reads would carry the credential.
+          assertHttpFieldValue(injection.header.name, injection.header.value);
           headers.set(injection.header.name, injection.header.value);
         }
         const sensitiveHeaderName =

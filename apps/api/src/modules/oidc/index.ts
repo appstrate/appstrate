@@ -110,7 +110,7 @@ const oidcModule: AppstrateModule = {
     // confirmation interstitial instead of the one-shot verify URL.
     setMagicLinkIssuedHook(async (info) => {
       await bindIssuedMagicLink(info);
-      return toMagicLinkConfirmUrl(info.url, info.email);
+      return toMagicLinkConfirmUrl(info.url);
     });
     // A password change or reset also revokes this module's tokens and device codes.
     setCredentialChangeHook(revokeOidcAccessAfterCredentialChange);

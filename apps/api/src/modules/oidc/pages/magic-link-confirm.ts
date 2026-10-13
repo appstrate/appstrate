@@ -32,12 +32,10 @@ import type { ResolvedSpaceBranding } from "../services/branding.ts";
 import { magicLinkConfirmPageUrl } from "@appstrate/db/auth";
 
 /** The URL of this interstitial for a Better Auth verify URL — the one the email carries. */
-export function toMagicLinkConfirmUrl(verifyUrl: string, email: string): string {
-  const url = magicLinkConfirmPageUrl(verifyUrl, "/api/oauth/magic-link/confirm");
-  if (!url) return verifyUrl;
-  // Shown on the interstitial; the URL only ever reaches that address's inbox.
-  url.searchParams.set("email", email);
-  return url.toString();
+export function toMagicLinkConfirmUrl(verifyUrl: string): string {
+  return (
+    magicLinkConfirmPageUrl(verifyUrl, "/api/oauth/magic-link/confirm")?.toString() ?? verifyUrl
+  );
 }
 
 interface MagicLinkConfirmPageProps {
@@ -45,22 +43,19 @@ interface MagicLinkConfirmPageProps {
   action: string;
   csrfToken: string;
   branding: ResolvedSpaceBranding;
-  /** User-facing email the link was sent to, if parseable from context. Optional display aid. */
-  email?: string;
 }
 
+/**
+ * Names no account: the page knows the link's address only from its query string, which whoever
+ * sends the link writes. Showing it would let a link to one account be dressed as another's.
+ */
 export function renderMagicLinkConfirmPage(props: MagicLinkConfirmPageProps): RawHtml {
   const title = `Confirmer la connexion — ${props.branding.name}`;
   const bodyHtml = html`
     <h1>Confirmer la connexion</h1>
     <p>
-      ${
-        props.email
-          ? html`Vous êtes sur le point de vous connecter en tant que
-              <strong>${props.email}</strong>.`
-          : html`Vous êtes sur le point de vous connecter à
-              <strong>${props.branding.name}</strong>.`
-      }
+      Vous êtes sur le point de vous connecter à
+      <strong>${props.branding.name}</strong>.
     </p>
     <p class="muted">
       Cliquez sur le bouton ci-dessous pour finaliser votre connexion. Cette étape protège votre
