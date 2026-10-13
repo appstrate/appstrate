@@ -21,11 +21,11 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 ### Added
 
 - **`findUnexposedDefaultTools`** (`@appstrate/core/integration`): the
-  write-path rule listing a manifest's `default_tools` entries that its declared
-  tool catalog (`resolveIntegrationToolCatalog`) does not hold. It judges every
-  source but `local`, and a source other than `none` only when it declares a
-  catalog; `integrationManifestSchema` keeps applying it to `none` alone.
-  (#1923)
+  write-path rule listing a manifest's `default_tools` entries that the
+  integration does not expose (`resolveIntegrationToolCatalog`). It judges a
+  `none` source always, a `local` one never, and any other only when it
+  declares a `tools_policy`; `integrationManifestSchema` keeps applying it to
+  `none` alone. (#1923)
 - **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
   gating a call to `/api/credential-proxy/proxy` outside a run, on the
   caller's own connections. `CorePermission` and `SpaceLevelPermission` gain

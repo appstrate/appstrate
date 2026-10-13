@@ -641,9 +641,9 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   //     the catalog is known:
   //       · `source.kind: "none"` (api-only — this manifest is the whole
   //         catalog): here, so no such manifest parses;
-  //       · any other non-local source that declares a catalog: the write
-  //         paths only (`findUnexposedDefaultTools`), so a stored manifest
-  //         stays readable;
+  //       · any other non-local source that declares a `tools_policy`: the
+  //         write paths only (`findUnexposedDefaultTools`), so a stored
+  //         manifest stays readable;
   //       · `local`: the catalog is the referenced mcp-server's, resolved at
   //         the agent freeze points.
   const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
@@ -1109,23 +1109,24 @@ export function readDefaultTools(
 }
 
 /**
- * The `default_tools` entries absent from the catalog the manifest declares
- * ({@link resolveIntegrationToolCatalog}): a default is a selection an agent
- * could make explicitly. Nothing is judged for a `local` source, whose catalog
- * is the referenced mcp-server's, nor for an empty catalog on a source other
- * than `none`: a remote integration declaring no tool discovers them at connect
- * time.
+ * The `default_tools` entries the integration does not expose: a default is a
+ * selection an agent could make explicitly. A `none` source is always judged,
+ * its manifest being its whole catalog. A `local` source is never judged, its
+ * catalog being the referenced mcp-server's. Any other source is judged only
+ * when it declares a `tools_policy`: without one its tools are discovered at
+ * connect time. Entries are judged against {@link resolveIntegrationToolCatalog},
+ * which holds the `api_call` tools `_meta` exposes and none of `hidden_tools`.
  */
 function unexposedDefaultTools(
   manifest: IntegrationManifest,
-): Pick<AuthManifestIssue, "path" | "message">[] {
+): { path: IssuePath; message: string }[] {
   const defaults = readDefaultTools(manifest);
   const kind = manifest.source?.kind;
   if (defaults === undefined || isToolsWildcard(defaults) || kind === "local") return [];
+  if (kind !== "none" && getDeclaredToolNames(manifest).length === 0) return [];
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
   );
-  if (catalog.size === 0 && kind !== "none") return [];
   return defaults
     .filter((name) => !catalog.has(name))
     .map((name) => ({
@@ -1135,15 +1136,13 @@ function unexposedDefaultTools(
 }
 
 /**
- * The `default_tools` entries of a manifest that its declared tool catalog does
- * not hold. A WRITE-path policy: {@link integrationManifestSchema} applies it to
- * a `none` source only, so a stored manifest of any other source stays readable.
- * A manifest the structural schema refuses yields nothing: its shape is that
- * schema's to report.
+ * {@link unexposedDefaultTools} as a WRITE-path policy: {@link integrationManifestSchema}
+ * applies that rule to a `none` source only, so a stored manifest of any other
+ * source stays readable. A manifest the structural schema refuses yields nothing.
  */
 export function findUnexposedDefaultTools(
   manifest: unknown,
-): Pick<AuthManifestIssue, "path" | "message">[] {
+): { path: IssuePath; message: string }[] {
   return afpsIntegrationManifestSchema.safeParse(manifest).success
     ? unexposedDefaultTools(manifest as IntegrationManifest)
     : [];

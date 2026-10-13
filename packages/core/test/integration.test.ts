@@ -2462,7 +2462,7 @@ describe("findUnexposedDefaultTools — write-path default_tools membership", ()
     path: ["default_tools"],
     message: `default_tools contains "${name}" which is not a tool this integration exposes`,
   });
-  /** A remote integration declaring its catalog (`search`, `send`) through `tools_policy`. */
+  /** A remote integration declaring `search` and `send` in `tools_policy`. */
   const remote = (overrides: Record<string, unknown> = {}) =>
     baseManifest({ tools_policy: { search: {}, send: {} }, ...overrides });
   /** The schema accepts the manifest and the policy finds nothing in it. */
@@ -2471,7 +2471,7 @@ describe("findUnexposedDefaultTools — write-path default_tools membership", ()
     expect(findUnexposedDefaultTools(manifest)).toEqual([]);
   }
 
-  it("names an entry the declared catalog does not hold, which the schema still reads", () => {
+  it("names an entry the integration does not expose, which the schema still reads", () => {
     const manifest = remote({ default_tools: ["search", "serach"] });
     expect(findUnexposedDefaultTools(manifest)).toEqual([unexposed("serach")]);
     expect(errorPaths(manifest)).toEqual([]);
@@ -2485,13 +2485,29 @@ describe("findUnexposedDefaultTools — write-path default_tools membership", ()
     ).toEqual([unexposed("send")]);
   });
 
+  it("refuses every entry of a tools_policy that hidden_tools empties", () => {
+    expect(
+      findUnexposedDefaultTools(
+        remote({ default_tools: ["search"], hidden_tools: ["search", "send"] }),
+      ),
+    ).toEqual([unexposed("search")]);
+  });
+
   it("finds nothing when every entry is exposed", () => {
     expectNothing(remote({ default_tools: ["search", "send"] }));
     expectNothing(remote({ default_tools: [] }));
   });
 
-  it("finds nothing for a remote source that declares no catalog", () => {
+  it("finds nothing for a remote source that declares no tools_policy", () => {
     expectNothing(baseManifest({ default_tools: ["some_remote_tool"] }));
+  });
+
+  it("finds nothing for a remote source whose only declared tool is api_call", () => {
+    const manifest = apiManifest({ source: REMOTE, default_tools: ["notion-search"] });
+    expectNothing(manifest);
+    expect(findUnexposedDefaultTools({ ...manifest, tools_policy: { search: {} } })).toEqual([
+      unexposed("notion-search"),
+    ]);
   });
 
   it("finds nothing for a local source, whose catalog is the mcp-server's", () => {
@@ -2508,10 +2524,11 @@ describe("findUnexposedDefaultTools — write-path default_tools membership", ()
   });
 
   it("accepts api_call as a default only where _meta exposes it", () => {
-    const tools_policy = { search: {} };
-    const default_tools = ["search", API_CALL_TOOL_NAME];
-    expectNothing(apiManifest({ source: REMOTE, tools_policy, default_tools }));
-    expect(findUnexposedDefaultTools(remote({ default_tools }))).toEqual([
+    const defaultTools = ["search", API_CALL_TOOL_NAME];
+    expectNothing(
+      apiManifest({ source: REMOTE, tools_policy: { search: {} }, default_tools: defaultTools }),
+    );
+    expect(findUnexposedDefaultTools(remote({ default_tools: defaultTools }))).toEqual([
       unexposed(API_CALL_TOOL_NAME),
     ]);
   });
@@ -2529,12 +2546,17 @@ describe("findUnexposedDefaultTools — write-path default_tools membership", ()
     expectNothing(apiManifest({ default_tools: ["api_call"] }));
   });
 
-  it("leaves a manifest the structural schema refuses to that schema", () => {
+  it("leaves a non-string entry to the schema", () => {
+    const manifest = remote({ default_tools: [42] });
+    expect(findUnexposedDefaultTools(manifest)).toEqual([]);
+    expect(errorPaths(manifest)).toContain("default_tools");
+  });
+
+  it("finds nothing in a manifest the structural schema refuses", () => {
     expect(findUnexposedDefaultTools(null)).toEqual([]);
     expect(
       findUnexposedDefaultTools(remote({ default_tools: ["nope"], auths: { oauth: null } })),
     ).toEqual([]);
-    expect(findUnexposedDefaultTools(remote({ default_tools: [42] }))).toEqual([]);
   });
 });
 

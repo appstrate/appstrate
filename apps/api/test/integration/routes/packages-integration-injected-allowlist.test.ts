@@ -83,27 +83,6 @@ describe("writing an injecting auth's allowlist", () => {
     await expectRefused(await create(m), "manifest.auths.api.delivery.http.value");
   });
 
-  it("create refuses a default_tools entry outside the declared catalog; a stored one still reads", async () => {
-    const remote = (default_tools: string[]) => ({
-      ...remoteIntegrationManifest({
-        name: ID,
-        auths: { api: { type: "api_key" } },
-        tools_policy: { search: {} },
-      }),
-      default_tools,
-    });
-    await expectRefused(await create(remote(["serach"])), "manifest.default_tools");
-    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
-    expect((await create(remote(["search"]))).status).toBe(201);
-
-    const stored = remote(["serach"]);
-    await db.update(packages).set({ draftManifest: stored }).where(eq(packages.id, ID));
-    const res = await app.request(`/api/integrations/${ID}`, { headers: authHeaders(ctx) });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { manifest: { default_tools: string[] } };
-    expect(body.manifest.default_tools).toEqual(["serach"]);
-  });
-
   it("create accepts allow_all_uris on an auth the proxy injects nothing for", async () => {
     expect((await create(manifest({ type: "custom", allowAll: true }))).status).toBe(201);
   });
@@ -129,5 +108,32 @@ describe("writing an injecting auth's allowlist", () => {
     expect(row?.draftManifest).toMatchObject({
       auths: { api: { authorized_uris: ["https://api.example.com/**"] } },
     });
+  });
+});
+
+describe("a default_tools entry the integration does not expose", () => {
+  const remote = (defaultTools: string[]) => ({
+    ...remoteIntegrationManifest({
+      name: ID,
+      auths: { api: { type: "api_key" } },
+      tools_policy: { search: {} },
+    }),
+    default_tools: defaultTools,
+  });
+
+  it("is refused at create, writing nothing; an exposed one is accepted", async () => {
+    await expectRefused(await create(remote(["serach"])), "manifest.default_tools");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+    expect((await create(remote(["search"]))).status).toBe(201);
+  });
+
+  it("still reads from a stored manifest", async () => {
+    expect((await create(remote(["search"]))).status).toBe(201);
+    const stored = remote(["serach"]);
+    await db.update(packages).set({ draftManifest: stored }).where(eq(packages.id, ID));
+    const res = await app.request(`/api/integrations/${ID}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { manifest: { default_tools: string[] } };
+    expect(body.manifest.default_tools).toEqual(["serach"]);
   });
 });
