@@ -138,7 +138,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
         >
           <OAuthPairingBody
             providerId={entry.providerId}
-            ownerType="org"
+            target={{ ownerType: "org" }}
             onConnected={(newId) => {
               setDialogOpen(false);
               void handleConnected(newId);

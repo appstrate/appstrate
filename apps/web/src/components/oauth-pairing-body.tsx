@@ -40,17 +40,12 @@ import {
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
-import { pairingRequestBody, type CredentialOwnerType } from "../lib/oauth-pairing";
+import { pairingRequestBody, type PairingTarget } from "../lib/oauth-pairing";
 
 interface OAuthPairingBodyProps {
   providerId: string;
-  /**
-   * Who owns the subscription: the organization, or the caller. For a reconnect,
-   * the owner of `credentialId`.
-   */
-  ownerType: CredentialOwnerType;
-  /** Existing credential targeted by a reconnect; omitted for a new connection. */
-  credentialId?: string;
+  /** A new subscription and its owner, or the existing credential to reconnect. */
+  target: PairingTarget;
   /**
    * Fires once the helper has consumed the pairing token and the platform
    * has persisted the credential. Caller is responsible for closing the
@@ -67,8 +62,7 @@ interface OAuthPairingBodyProps {
 
 export function OAuthPairingBody({
   providerId,
-  ownerType,
-  credentialId,
+  target,
   onConnected,
   onBusyChange,
 }: OAuthPairingBodyProps) {
@@ -139,7 +133,7 @@ export function OAuthPairingBody({
     registeredRef.current = false;
     try {
       const res = await createPairing.mutateAsync({
-        body: pairingRequestBody({ providerId, ownerType, credentialId }),
+        body: pairingRequestBody({ providerId, ...target }),
       });
       setPairing({ id: res.id, command: res.command });
       // Register so `<PendingPairingsWatcher>` can poll this to completion

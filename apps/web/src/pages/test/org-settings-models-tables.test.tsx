@@ -118,7 +118,7 @@ describe("the credentials table, as Bob sees it", () => {
     expect(row(ORG_KEY.id)).toContain(`>${settingsFr["source.org"]}<`);
   });
 
-  it("names the holder for a personal credential", () => {
+  it("names the owner for a personal credential", () => {
     expect(row(BOB_SUBSCRIPTION.id)).toContain(">Bob<");
     expect(row(ALICE_SUBSCRIPTION.id)).toContain(">Alice<");
   });
@@ -145,7 +145,7 @@ describe("the credentials table, where a subscription needs reconnecting", () =>
   ]);
   const row = (id: string) => rowOf(html, `data-testid="credential-row-${id}"`);
 
-  it("offers the reconnect to the holder only", () => {
+  it("offers the reconnect on the row whose allowed actions list it, and on no other", () => {
     expect(row(BOB_SUBSCRIPTION.id)).toContain(settingsFr["credentials.oauth.reconnect"]);
     expect(row(ALICE_SUBSCRIPTION.id)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
   });
@@ -180,7 +180,7 @@ describe("the credentials table, where an organization subscription needs reconn
   });
 });
 
-describe("the credentials table, where a subscription the holder may re-pair is healthy", () => {
+describe("the credentials table, where a subscription that lists the reconnect is healthy", () => {
   const html = credentialsPage([
     { ...BOB_SUBSCRIPTION, allowed_actions: ["edit", "delete", "test", "reconnect"] },
   ]);

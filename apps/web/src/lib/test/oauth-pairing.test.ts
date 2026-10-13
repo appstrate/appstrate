@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pairing request is what decides who owns the subscription it produces.
- * The server defaults `owner_type` to `org`, so a body that leaves it out turns
- * a member's personal pairing into a 403, and a reconnect naming the wrong owner
- * into a 404: every payload is pinned here.
+ * The pairing request has two shapes, and the server refuses a mix of them:
+ * a creation states `owner_type` (left out, it defaults to `org`, which turns a
+ * member's personal pairing into a 403); a reconnect states `credentialId` alone
+ * (`owner_type` beside it is a 400).
  */
 
 import { describe, it, expect } from "bun:test";
@@ -25,16 +25,10 @@ describe("pairingRequestBody", () => {
     });
   });
 
-  it("reconnects an organization subscription in place", () => {
-    expect(
-      pairingRequestBody({ providerId: "claude-code", ownerType: "org", credentialId: "cred_org" }),
-    ).toEqual({ providerId: "claude-code", owner_type: "org", credentialId: "cred_org" });
-  });
-
-  it("reconnects the caller's own subscription in place", () => {
-    expect(
-      pairingRequestBody({ providerId: "codex", ownerType: "user", credentialId: "cred_mine" }),
-    ).toEqual({ providerId: "codex", owner_type: "user", credentialId: "cred_mine" });
+  it("reconnects a credential in place, naming it and no owner", () => {
+    const body = pairingRequestBody({ providerId: "claude-code", credentialId: "cred_1" });
+    expect(body).toEqual({ providerId: "claude-code", credentialId: "cred_1" });
+    expect("owner_type" in body).toBe(false);
   });
 
   it("sends no credentialId key for a new connection", () => {
@@ -42,24 +36,29 @@ describe("pairingRequestBody", () => {
       false,
     );
   });
+
+  it("accepts no mix of the two shapes", () => {
+    // @ts-expect-error a reconnect states no owner
+    pairingRequestBody({ providerId: "codex", ownerType: "user", credentialId: "cred_1" });
+    // @ts-expect-error a creation states its owner
+    pairingRequestBody({ providerId: "codex" });
+  });
 });
 
 describe("hasOrgSubscription", () => {
   const subscription = {
     authMode: "oauth2",
     providerId: "claude-code",
-    owner_type: "org",
+    bindable: true,
     needs_reconnection: false,
   } as const;
 
-  it("counts a healthy organization subscription of the provider", () => {
+  it("counts a healthy subscription the server lists as bindable", () => {
     expect(hasOrgSubscription([subscription], "claude-code")).toBe(true);
   });
 
-  it("ignores a member's personal subscription, which serves no organization model", () => {
-    expect(hasOrgSubscription([{ ...subscription, owner_type: "user" }], "claude-code")).toBe(
-      false,
-    );
+  it("ignores a subscription no organization model may bind, a member's own", () => {
+    expect(hasOrgSubscription([{ ...subscription, bindable: false }], "claude-code")).toBe(false);
   });
 
   it("ignores a subscription that needs reconnecting, another provider's, and an API key", () => {

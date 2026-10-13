@@ -349,8 +349,11 @@ function CredentialFormBody({
               <OAuthPairingBody
                 key={selectedOption.providerId}
                 providerId={selectedOption.providerId}
-                ownerType={credential?.owner_type ?? (personal ? "user" : "org")}
-                credentialId={credential?.id}
+                target={
+                  credential
+                    ? { credentialId: credential.id }
+                    : { ownerType: personal ? "user" : "org" }
+                }
                 onConnected={() => onClose()}
                 onBusyChange={oauthDismiss.onBusyChange}
               />

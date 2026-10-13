@@ -6,40 +6,42 @@ import type { ModelProviderCredentialInfo } from "../hooks/use-model-provider-cr
 type PairingRequestBody =
   paths["/api/model-providers-oauth/pairing"]["post"]["requestBody"]["content"]["application/json"];
 
-export type CredentialOwnerType = ModelProviderCredentialInfo["owner_type"];
+/**
+ * What a pairing produces: a new subscription owned as `ownerType` says, or the
+ * existing `credentialId` reconnected in place, whose owner the server knows.
+ */
+export type PairingTarget =
+  | { ownerType: ModelProviderCredentialInfo["owner_type"]; credentialId?: never }
+  | { credentialId: string; ownerType?: never };
 
 /**
- * Body of `POST /api/model-providers-oauth/pairing`. `owner_type` is always sent:
- * the server defaults it to `org`, which a member pairing their own subscription
- * may not create. With `credentialId` (a reconnect) it names that credential's owner.
+ * Body of `POST /api/model-providers-oauth/pairing`. A creation states
+ * `owner_type` (the server's default, `org`, is not one a member may create); a
+ * reconnect states `credentialId` alone, and the server refuses both together.
  */
-export function pairingRequestBody(input: {
-  providerId: string;
-  ownerType: CredentialOwnerType;
-  credentialId?: string;
-}): PairingRequestBody {
-  return {
-    providerId: input.providerId,
-    owner_type: input.ownerType,
-    ...(input.credentialId ? { credentialId: input.credentialId } : {}),
-  };
+export function pairingRequestBody(
+  input: { providerId: string } & PairingTarget,
+): PairingRequestBody {
+  return input.credentialId !== undefined
+    ? { providerId: input.providerId, credentialId: input.credentialId }
+    : { providerId: input.providerId, owner_type: input.ownerType };
 }
 
-/** Whether the organization holds a usable subscription of `providerId`; a member's own is not one. */
+/**
+ * Whether a usable subscription of `providerId` can serve organization models:
+ * one the server lists as `bindable`, which a member's own is not.
+ */
 export function hasOrgSubscription(
   credentials:
     | readonly Pick<
         ModelProviderCredentialInfo,
-        "authMode" | "providerId" | "owner_type" | "needs_reconnection"
+        "authMode" | "providerId" | "bindable" | "needs_reconnection"
       >[]
     | undefined,
   providerId: string,
 ): boolean {
   return (credentials ?? []).some(
     (c) =>
-      c.authMode === "oauth2" &&
-      c.providerId === providerId &&
-      c.owner_type === "org" &&
-      !c.needs_reconnection,
+      c.authMode === "oauth2" && c.providerId === providerId && c.bindable && !c.needs_reconnection,
   );
 }
