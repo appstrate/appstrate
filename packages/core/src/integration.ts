@@ -76,7 +76,6 @@ const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
  */
 export const API_META_KEY = "dev.appstrate/api";
 
-/** Reverse-DNS namespace of Appstrate's own `_meta` extensions (`dev.appstrate/`). */
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
 
 /**
@@ -1032,10 +1031,6 @@ export function resolveIntegrationToolCatalog(
   return out;
 }
 
-/**
- * The names withheld from the agent surface whatever the catalog holds: `hidden_tools`, the
- * run-start `connect.tool` primitives, and the upload companion of a hidden `api_call`.
- */
 function hiddenToolNames(
   integration: IntegrationManifest,
   apiCallConfigs: readonly ApiCallConfig[],
@@ -1044,17 +1039,9 @@ function hiddenToolNames(
     ...(integration.hidden_tools ?? []),
     ...getConnectToolNames(integration),
   ]);
-  // `api_upload` cannot execute without its sibling `api_call`: every chunk is
-  // dispatched through that credential-proxy tool. Preserve the useful
-  // asymmetric opt-out (authors may hide upload while keeping generic calls),
-  // but never leave an orphan upload in the catalog when its dependency is
-  // hidden.
+  // An upload dispatches every chunk through its sibling `api_call`, so hiding the call hides it.
   for (const config of apiCallConfigs) {
-    const callHidden = hidden.has(config.toolName);
-    const uploadHidden = config.uploadToolName !== undefined && hidden.has(config.uploadToolName);
-    if (config.uploadToolName && (callHidden || uploadHidden)) {
-      hidden.add(config.uploadToolName);
-    }
+    if (config.uploadToolName && hidden.has(config.toolName)) hidden.add(config.uploadToolName);
   }
   return hidden;
 }
@@ -1155,12 +1142,23 @@ export function readDefaultTools(
   return undefined;
 }
 
+/** Whether every key of every `_meta` object `node` carries, at any depth, is Appstrate's own. */
+function carriesOnlyAppstrateMeta(node: unknown): boolean {
+  if (node === null || typeof node !== "object") return true;
+  return Object.entries(node).every(
+    ([key, value]) =>
+      (key !== "_meta" ||
+        Object.keys(value ?? {}).every((k) => k.startsWith(APPSTRATE_META_NAMESPACE))) &&
+      carriesOnlyAppstrateMeta(value),
+  );
+}
+
 /**
- * The `default_tools` names the manifest proves unexposed: one {@link hiddenToolNames} withholds,
- * whatever the source, and one outside {@link resolveIntegrationToolCatalog} where that catalog is
- * the canonical one — a `none` source whose root `_meta` keys are all Appstrate's (another vendor's
- * extension may supply tools), a `local` source given its mcp-server's `tools[]`. A `remote`
- * catalog is the endpoint's, and `tools_policy` a policy table over it, not the catalog.
+ * The `default_tools` names the manifest proves unexposed, each once: one {@link hiddenToolNames}
+ * withholds, whatever the source, and one outside {@link resolveIntegrationToolCatalog} where that
+ * catalog is known — a `none` source carrying no `_meta` extension but Appstrate's (another
+ * vendor's may supply tools), a `local` source given its mcp-server's `tools[]`, and a `remote`
+ * source declaring a `tools_policy`, which bounds the default as it bounds an agent's selection.
  */
 function unexposedDefaultTools(
   manifest: IntegrationManifest,
@@ -1170,29 +1168,27 @@ function unexposedDefaultTools(
   if (defaults === undefined || isToolsWildcard(defaults)) return [];
   const kind = manifest.source?.kind;
   const serverTools = kind === "local" ? mcpServerTools : undefined;
-  const rootMeta = (manifest as { _meta?: Record<string, unknown> })._meta ?? {};
-  const catalogIsCanonical =
+  const catalogIsKnown =
     kind === "none"
-      ? Object.keys(rootMeta).every((key) => key.startsWith(APPSTRATE_META_NAMESPACE))
-      : serverTools !== undefined;
+      ? carriesOnlyAppstrateMeta(manifest)
+      : kind === "remote"
+        ? getDeclaredToolNames(manifest).length > 0
+        : serverTools !== undefined;
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest, mcpServerTools: serverTools }).map(
       (e) => e.name,
     ),
   );
   const hidden = hiddenToolNames(manifest, getApiCallConfigs(manifest));
-  return defaults
-    .filter((name) => hidden.has(name) || (catalogIsCanonical && !catalog.has(name)))
+  return [...new Set(defaults)]
+    .filter((name) => hidden.has(name) || (catalogIsKnown && !catalog.has(name)))
     .map((name) => ({
       path: ["default_tools"],
       message: `default_tools contains "${name}" which is not a tool this integration exposes`,
     }));
 }
 
-/**
- * {@link unexposedDefaultTools} as a WRITE-path policy: {@link integrationManifestSchema} applies
- * it to a `none` source only. A manifest the structural schema refuses yields nothing.
- */
+/** WRITE-path form of {@link unexposedDefaultTools}; none for a structurally invalid manifest. */
 export function findUnexposedDefaultTools(
   manifest: unknown,
   mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
@@ -1222,6 +1218,20 @@ export function resolveEffectiveToolSelection(
 ): readonly string[] | "*" | undefined {
   if (agentSelection !== undefined) return agentSelection;
   return readDefaultTools(manifest);
+}
+
+/**
+ * The tool selection an agent's OAuth scopes are inferred from: `"*"` when its effective
+ * selection ({@link resolveEffectiveToolSelection}) is the wildcard, written or inherited from
+ * `default_tools`, else the agent's own array, `[]` when it wrote none. Tool names inherited
+ * from `default_tools` contribute no scope.
+ */
+export function resolveScopeToolSelection(
+  agentSelection: readonly string[] | "*" | undefined,
+  manifest: IntegrationManifest,
+): readonly string[] | "*" {
+  const effective = resolveEffectiveToolSelection(agentSelection, manifest);
+  return isToolsWildcard(effective) ? TOOLS_WILDCARD : (agentSelection ?? []);
 }
 
 /**

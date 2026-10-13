@@ -39,6 +39,7 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   expandScopesGranted,
   missingScopesForConnection,
   partitionScopesByAuthCatalog,
@@ -1027,18 +1028,17 @@ export function requirementOf(
 ): IntegrationRequirement {
   // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);
-  const wildcard = isToolsWildcard(effectiveTools);
-  const hasSelectedTools = wildcard || (Array.isArray(effectiveTools) && effectiveTools.length > 0);
+  const hasSelectedTools =
+    isToolsWildcard(effectiveTools) || (Array.isArray(effectiveTools) && effectiveTools.length > 0);
   return {
     integrationId: entry.id,
     manifest,
     hasSelectedTools,
     hasMandatoryAuth: manifestHasRequiredAuth(manifest),
     required: entry.required === true,
-    // A `"*"` is the wildcard form for scopes whether written or inherited from `default_tools`.
-    // An array is read off the agent's OWN selection: inherited default tools contribute no
+    // Not the effective selection: tool names inherited from `default_tools` contribute no
     // scope, as they would fail `insufficient_scopes` on connections that work.
-    agentTools: wildcard ? "*" : (entry.tools ?? []),
+    agentTools: resolveScopeToolSelection(entry.tools, manifest),
     agentScopes: entry.scopes ?? [],
     ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),

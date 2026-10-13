@@ -30,6 +30,7 @@ import {
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
   readDefaultTools,
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
@@ -2528,13 +2529,25 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
   }
 
   describe("remote source", () => {
-    it("does not take tools_policy for the catalog", () => {
-      expectNothing(remote({ default_tools: ["search", "serach"] }));
+    it("refuses a name outside a declared tools_policy, which the schema still reads", () => {
+      expectRefusedOnWrite(remote({ default_tools: ["search", "serach"] }), ["serach"]);
+      expectNothing(remote({ default_tools: ["search", "send"] }));
     });
 
-    it("refuses a name listed in hidden_tools", () => {
-      const manifest = remote({ default_tools: ["search", "send"], hidden_tools: ["send"] });
-      expectRefusedOnWrite(manifest, ["send"]);
+    it("leaves a name unjudged when it declares no tools_policy", () => {
+      expectNothing(baseManifest({ default_tools: ["some_remote_tool"] }));
+      expectNothing(apiManifest({ source: REMOTE, default_tools: ["notion-search"] }));
+    });
+
+    it("refuses a name listed in hidden_tools, with and without a tools_policy", () => {
+      const hidden = { default_tools: ["search", "send"], hidden_tools: ["send"] };
+      expectRefusedOnWrite(remote(hidden), ["send"]);
+      expectRefusedOnWrite(baseManifest(hidden), ["send"]);
+    });
+
+    it("refuses every entry of a tools_policy that hidden_tools empties", () => {
+      const manifest = remote({ default_tools: ["search"], hidden_tools: ["search", "send"] });
+      expectRefusedOnWrite(manifest, ["search"]);
     });
 
     it("refuses a name a connect.tool references", () => {
@@ -2546,7 +2559,7 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
         delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
       };
       expectRefusedOnWrite(
-        remote({ auths: { session }, default_tools: ["search", "perform_login"] }),
+        baseManifest({ auths: { session }, default_tools: ["search", "perform_login"] }),
         ["perform_login"],
       );
     });
@@ -2561,8 +2574,15 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
       expectRefusedOnWrite({ ...manifest, hidden_tools: ["api_call"] }, ["api_upload"]);
     });
 
+    it("accepts api_call beside a tools_policy only where _meta exposes it", () => {
+      const policed = { tools_policy: { search: {} }, default_tools: ["search", "api_call"] };
+      expectNothing(apiManifest({ source: REMOTE, ...policed }));
+      expectRefusedOnWrite(baseManifest(policed), ["api_call"]);
+    });
+
     it("ignores mcpServerTools, which are a local source's catalog", () => {
-      expectNothing(remote({ default_tools: ["nope"] }), SERVER_TOOLS);
+      expectRefusedOnWrite(remote({ default_tools: ["extra"] }), ["extra"], [{ name: "extra" }]);
+      expectNothing(baseManifest({ default_tools: ["nope"] }), SERVER_TOOLS);
     });
   });
 
@@ -2584,6 +2604,16 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
 
     it("leaves a name unjudged when another vendor's root _meta key may supply it", () => {
       expectNothing(apiManifest({ _meta: FOREIGN_META, default_tools: ["api_call", "nope"] }));
+    });
+
+    it("reads another vendor's key in a _meta at any depth, not at the root alone", () => {
+      const withAuthMeta = (meta: Record<string, unknown>) => {
+        const manifest = apiManifest({ default_tools: ["api_call", "nope"] });
+        const auths = manifest.auths as { key: Record<string, unknown> };
+        return { ...manifest, auths: { key: { ...auths.key, _meta: meta } } };
+      };
+      expectNothing(withAuthMeta({ "com.example/tools": {} }));
+      expectRefusedBySchema(withAuthMeta({ "dev.appstrate/auth": { required: true } }), "nope");
     });
 
     it("still refuses a hidden name beside another vendor's root _meta key", () => {
@@ -2623,6 +2653,12 @@ describe("findUnexposedDefaultTools — write-path default_tools policy", () => 
       expectRefusedOnWrite(manifest, ["send"]);
       expectRefusedOnWrite(manifest, ["send"], SERVER_TOOLS);
     });
+  });
+
+  it("reports a name listed twice once", () => {
+    expectRefusedBySchema(apiManifest({ default_tools: ["nope", "api_call", "nope"] }), "nope");
+    const manifest = local({ default_tools: ["send", "send"], hidden_tools: ["send"] });
+    expectRefusedOnWrite(manifest, ["send"]);
   });
 
   it('finds nothing for the wildcard "*", an empty array or an absent default', () => {
@@ -2686,6 +2722,34 @@ describe("resolveEffectiveToolSelection", () => {
   });
   it("an undefined selection with no declared default stays undefined", () => {
     expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
+  });
+});
+
+describe("resolveScopeToolSelection", () => {
+  const withDefault = (d: unknown) => ({ default_tools: d }) as unknown as IntegrationManifest;
+  const noDefault = {} as IntegrationManifest;
+
+  it("a written wildcard is the wildcard", () => {
+    expect(resolveScopeToolSelection("*", noDefault)).toBe("*");
+    expect(resolveScopeToolSelection("*", withDefault(["search"]))).toBe("*");
+  });
+  it("an inherited wildcard is the wildcard too", () => {
+    expect(resolveScopeToolSelection(undefined, withDefault("*"))).toBe("*");
+  });
+  it("an inherited array contributes no tool", () => {
+    expect(resolveScopeToolSelection(undefined, withDefault(["search"]))).toEqual([]);
+  });
+  it("a written array is kept, over a wildcard default as over any other", () => {
+    expect(resolveScopeToolSelection(["search"], withDefault("*"))).toEqual(["search"]);
+    expect(resolveScopeToolSelection(["search"], withDefault(["other"]))).toEqual(["search"]);
+    expect(resolveScopeToolSelection(["search"], noDefault)).toEqual(["search"]);
+  });
+  it("a written empty array stays empty, over a wildcard default too", () => {
+    expect(resolveScopeToolSelection([], withDefault("*"))).toEqual([]);
+    expect(resolveScopeToolSelection([], withDefault(["search"]))).toEqual([]);
+  });
+  it("no selection and no default is empty", () => {
+    expect(resolveScopeToolSelection(undefined, noDefault)).toEqual([]);
   });
 });
 
