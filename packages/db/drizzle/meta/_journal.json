@@ -666,6 +666,13 @@
       "when": 1791900141138,
       "tag": "0094_schedule_disabled_reason_connection_choice_invalid",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1791904336820,
+      "tag": "0095_pairing_owner_user_id",
+      "breakpoints": true
     }
   ]
 }

@@ -303,8 +303,9 @@ export const modelProviderCredentials = pgTable(
     // did refresh last fail" is ever needed, build the reader first — a column
     // with no reader is not telemetry, it is write amplification.
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
-    // NULL = organization credential. Set = personal credential of that user: usable only by
-    // them, on their own runs, and deleted with their account.
+    // NULL = organization credential: bindable to a model, serves every caller. Set = personal
+    // credential of that user: usable only by them, on their own runs, and deleted with their
+    // account. The rule is the same for an API key and for a subscription (OAuth).
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -328,6 +329,10 @@ export const modelProviderCredentials = pgTable(
  * One-shot pairing tokens that bridge the dashboard "Connect Claude Pro"
  * button with the `npx @appstrate/connect-helper <token>` loopback OAuth
  * helper running on the user's machine.
+ *
+ * The row carries the ownership chosen under RBAC at mint (`owner_user_id`):
+ * redeem authenticates with the token alone, has no principal, and copies it
+ * onto the credential as is.
  *
  * Lifecycle:
  *   1. Dashboard POST /api/model-providers-oauth/pairing → row INSERTed,
@@ -364,6 +369,13 @@ export const modelProviderPairings = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    /**
+     * Owner of the credential this pairing produces or reconnects, with the
+     * meaning of `model_provider_credentials.owner_user_id`: NULL = an
+     * organization credential, set = that member's personal one. `user_id`
+     * is the member who minted the pairing, whichever owner they chose.
+     */
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     /** Provider id from the OAuth model provider registry. */
     providerId: text("provider_id").notNull(),
     /**
@@ -453,8 +465,9 @@ export const orgModels = pgTable(
     /**
      * Strict FK to `model_provider_credentials.id`. ON DELETE RESTRICT —
      * deleting a credential while any model still references it is rejected
-     * at the DB level so the API can surface a clear error. NULL: each member
-     * brings their own personal credential for `providerId`.
+     * at the DB level so the API can surface a clear error. The bound credential
+     * is an organization one (`owner_user_id IS NULL`), API key or subscription.
+     * NULL: each member brings their own personal credential for `providerId`.
      */
     credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
       onDelete: "restrict",
