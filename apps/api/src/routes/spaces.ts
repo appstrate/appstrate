@@ -494,9 +494,11 @@ export function createSpacesRouter() {
       const current = c.get("space")!;
       // A stored default can become effective later. Opening also grants the
       // existing default to every implicit member, even when it is not edited.
+      // A personal space takes neither field: `updateSpace` answers 409.
       if (
-        (data.default_role !== undefined && data.default_role !== current.defaultRole) ||
-        (data.visibility === "open" && current.visibility !== "open")
+        current.ownerUserId === null &&
+        ((data.default_role !== undefined && data.default_role !== current.defaultRole) ||
+          (data.visibility === "open" && current.visibility !== "open"))
       ) {
         assertCanGrantSpaceRole(c.get("permissions"), {
           kind: "preset",

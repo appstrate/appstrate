@@ -536,9 +536,12 @@ describe("personal spaces — the write rules", () => {
     await expectProblem(await patch({ visibility: "open" }), 409, {
       code: "personal_space_immutable",
     });
-    await expectProblem(await patch({ default_role: "builder" }), 409, {
-      code: "personal_space_immutable",
-    });
+    // Presets holding a permission the owner does not hold here: still the field's 409.
+    for (const default_role of ["builder", "admin"]) {
+      await expectProblem(await patch({ default_role }), 409, {
+        code: "personal_space_immutable",
+      });
+    }
     // Unchanged: the FIELD is refused, not a change of value.
     await expectProblem(await patch({ visibility: "private" }), 409, {
       code: "personal_space_immutable",
