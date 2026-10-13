@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "sdk_version": "1.0.4",
-  "source_version": "1.1.0",
-  "serial": 1791439765,
+  "source_version": "1.2.0",
+  "serial": 1791852251,
   "records": [
     {
       "provider": "amazon-bedrock",
@@ -286,6 +286,43 @@
     {
       "provider": "cloudflare-ai-gateway",
       "api": "anthropic-messages",
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125,
+        "tiers": [
+          {
+            "inputTokensAbove": 100000,
+            "input": 0.5,
+            "output": 2.5,
+            "cacheRead": 0.05,
+            "cacheWrite": 0.625
+          }
+        ]
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "compat": {
+        "sendSessionAffinityHeaders": true,
+        "forceAdaptiveThinking": true,
+        "supportsTemperature": false
+      }
+    },
+    {
+      "provider": "cloudflare-ai-gateway",
+      "api": "anthropic-messages",
       "id": "claude-sonnet-5-5",
       "name": "Claude Sonnet 5.5",
       "reasoning": true,
@@ -350,6 +387,144 @@
       "compat": {
         "supportsStrictMode": true,
         "supportsOpenAIGrammarTools": true
+      }
+    },
+    {
+      "provider": "github-copilot",
+      "api": "anthropic-messages",
+      "id": "claude-haiku-5.5",
+      "name": "Claude Haiku 5.5",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125,
+        "tiers": [
+          {
+            "inputTokensAbove": 100000,
+            "input": 0.5,
+            "output": 2.5,
+            "cacheRead": 0.05,
+            "cacheWrite": 0.625
+          }
+        ]
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "compat": {
+        "supportsMidConvoSystemMessages": true,
+        "forceAdaptiveThinking": true,
+        "supportsTemperature": false
+      }
+    },
+    {
+      "provider": "google-vertex",
+      "api": "google-vertex",
+      "id": "gemini-3.1-flash-lite-image",
+      "name": "Nano Banana 2 Lite",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.25,
+        "output": 30,
+        "cacheRead": 0.025,
+        "cacheWrite": 0
+      },
+      "contextWindow": 65536,
+      "maxTokens": 4096,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": null,
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      }
+    },
+    {
+      "provider": "huggingface",
+      "api": "openai-completions",
+      "id": "MiniMaxAI/MiniMax-M1-80k",
+      "name": "MiniMax M1 80K",
+      "reasoning": true,
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0.55,
+        "output": 2.2,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 80000,
+      "compat": {
+        "supportsStrictMode": true,
+        "supportsDeveloperRole": false
+      }
+    },
+    {
+      "provider": "huggingface",
+      "api": "openai-completions",
+      "id": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+      "name": "Qwen3 VL 30B A3B Instruct",
+      "reasoning": false,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.2,
+        "output": 0.7,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "contextWindow": 131072,
+      "maxTokens": 32768,
+      "compat": {
+        "supportsStrictMode": true,
+        "supportsDeveloperRole": false
+      }
+    },
+    {
+      "provider": "meta",
+      "api": "openai-responses",
+      "id": "muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
       }
     },
     {
@@ -498,7 +673,7 @@
         "cacheRead": 0.07,
         "cacheWrite": 0
       },
-      "contextWindow": 524288,
+      "contextWindow": 1048576,
       "maxTokens": 262144,
       "thinkingLevelMap": {
         "off": "none",
@@ -634,6 +809,40 @@
       }
     },
     {
+      "provider": "opencode",
+      "api": "openai-completions",
+      "id": "step-5-preview-free",
+      "name": "Step 5 Preview Free",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 65536,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsStrictMode": true,
+        "maxTokensField": "max_tokens"
+      }
+    },
+    {
       "provider": "opencode-go",
       "api": "anthropic-messages",
       "id": "claude-haiku-5-5",
@@ -695,6 +904,40 @@
         "high": "high",
         "xhigh": "xhigh",
         "max": "max"
+      },
+      "compat": {
+        "supportsStore": false,
+        "supportsDeveloperRole": false,
+        "supportsStrictMode": true,
+        "maxTokensField": "max_tokens"
+      }
+    },
+    {
+      "provider": "opencode-go",
+      "api": "openai-completions",
+      "id": "step-5-preview-free",
+      "name": "Step 5 Preview Free",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 65536,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
       },
       "compat": {
         "supportsStore": false,
@@ -825,6 +1068,64 @@
     {
       "provider": "openrouter",
       "api": "openai-completions",
+      "id": "inclusionai/ling-3.0-flash-sante",
+      "name": "inclusionAI: Ling 3.0 Flash Sante",
+      "reasoning": true,
+      "input": [
+        "text"
+      ],
+      "cost": {
+        "input": 0.042,
+        "output": 0.1232,
+        "cacheRead": 0.0084,
+        "cacheWrite": 0
+      },
+      "contextWindow": 262144,
+      "maxTokens": 32768,
+      "compat": {
+        "supportsDeveloperRole": false,
+        "thinkingFormat": "openrouter",
+        "supportsStrictMode": true,
+        "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "id": "meta/muse-wonder",
+      "name": "Meta: Muse Wonder",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 4,
+        "output": 20,
+        "cacheRead": 0.2,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 943718,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "compat": {
+        "supportsDeveloperRole": false,
+        "thinkingFormat": "openrouter",
+        "supportsStrictMode": true,
+        "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "openrouter",
+      "api": "openai-completions",
       "id": "mistralai/mistral-large-4-0",
       "name": "Mistral: Mistral Large 4",
       "reasoning": true,
@@ -838,7 +1139,7 @@
         "cacheRead": 0.07,
         "cacheWrite": 0
       },
-      "contextWindow": 524288,
+      "contextWindow": 1048576,
       "maxTokens": 262144,
       "thinkingLevelMap": {
         "off": "none",
@@ -854,6 +1155,161 @@
         "thinkingFormat": "openrouter",
         "supportsStrictMode": true,
         "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "id": "openai/gpt-6.1-sol-pro:batch",
+      "name": "OpenAI: GPT-6.1 Sol Pro (batch)",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 1,
+        "output": 5,
+        "cacheRead": 0.05,
+        "cacheWrite": 1.25,
+        "tiers": [
+          {
+            "inputTokensAbove": 272000,
+            "input": 2,
+            "output": 7.5,
+            "cacheRead": 0.1,
+            "cacheWrite": 2.5
+          }
+        ]
+      },
+      "contextWindow": 1050000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "compat": {
+        "thinkingFormat": "openrouter",
+        "supportsStrictMode": true,
+        "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "id": "openai/gpt-6.1-sol:batch",
+      "name": "OpenAI: GPT-6.1 Sol (batch)",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 1,
+        "output": 5,
+        "cacheRead": 0.05,
+        "cacheWrite": 1.25,
+        "tiers": [
+          {
+            "inputTokensAbove": 272000,
+            "input": 2,
+            "output": 7.5,
+            "cacheRead": 0.1,
+            "cacheWrite": 2.5
+          }
+        ]
+      },
+      "contextWindow": 1050000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      },
+      "compat": {
+        "thinkingFormat": "openrouter",
+        "supportsStrictMode": true,
+        "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "id": "stepfun/step-5-preview",
+      "name": "StepFun: Step 5 Preview",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 1,
+        "output": 2.7,
+        "cacheRead": 0.05,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 64000,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
+      },
+      "compat": {
+        "supportsDeveloperRole": false,
+        "thinkingFormat": "openrouter",
+        "supportsStrictMode": true,
+        "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "radius",
+      "api": "pi-messages",
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125,
+        "tiers": [
+          {
+            "inputTokensAbove": 100000,
+            "input": 0.5,
+            "output": 2.5,
+            "cacheRead": 0.05,
+            "cacheWrite": 0.625
+          }
+        ]
+      },
+      "contextWindow": 1000000,
+      "maxTokens": 128000,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
       }
     },
     {
@@ -891,6 +1347,50 @@
         "allowEmptySignature": true,
         "forceAdaptiveThinking": true,
         "supportsTemperature": false
+      }
+    },
+    {
+      "provider": "vercel-ai-gateway",
+      "api": "anthropic-messages",
+      "id": "callstack/apex",
+      "name": "Apex",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.5,
+        "output": 3,
+        "cacheRead": 0.2,
+        "cacheWrite": 0
+      },
+      "contextWindow": 262144,
+      "maxTokens": 131072,
+      "compat": {
+        "allowEmptySignature": true
+      }
+    },
+    {
+      "provider": "vercel-ai-gateway",
+      "api": "anthropic-messages",
+      "id": "meta/muse-wonder-1.0",
+      "name": "Muse Wonder",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 4,
+        "output": 20,
+        "cacheRead": 0.2,
+        "cacheWrite": 0
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 1048576,
+      "compat": {
+        "allowEmptySignature": true
       }
     },
     {
