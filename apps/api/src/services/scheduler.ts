@@ -6,7 +6,13 @@ import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
+import {
+  schedules,
+  endUsers,
+  runs,
+  notifications,
+  type ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
@@ -27,6 +33,7 @@ import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { toLaunchOverrides } from "./integration-connection-resolver.ts";
+import { isScheduleOwned } from "./schedule-connections.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion, versionRefOf } from "./agent-version-resolver.ts";
@@ -188,18 +195,44 @@ export async function assertScheduleActorValid(
   }
 }
 
-async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
-  await db
+/**
+ * The row's `updated_at` is still the stamp a read saw. At the stamp's millisecond precision: a
+ * `now()` default stores microseconds.
+ */
+function unchangedSince(updatedAt: string): SQL {
+  return sql`date_trunc('milliseconds', ${schedules.updatedAt}) = ${updatedAt}::timestamptz`;
+}
+
+/**
+ * A fire disabling its own schedule, as a compare-and-set on the row it read: its verdict judged
+ * that row, so one written since (repaired, pruned by a connection delete, paused) stays as that
+ * write left it, for the next tick to judge. Returns whether it disabled; only then is the job
+ * removed.
+ */
+async function disableScheduleAtFire(
+  row: Pick<typeof schedules.$inferSelect, "id" | "updatedAt">,
+  reason: ScheduleDisabledReason,
+): Promise<boolean> {
+  const disabled = await db
     .update(schedules)
     .set({
       enabled: false,
-      disabledReason: "actor_invalid",
+      disabledReason: reason,
       nextRunAt: null,
       updatedAt: new Date(),
     })
-    // A schedule paused while this fire ran is not relabelled.
-    .where(and(eq(schedules.id, scheduleId), eq(schedules.enabled, true)));
-  await removeScheduleJobs([scheduleId]);
+    .where(
+      and(
+        eq(schedules.id, row.id),
+        // A schedule paused while this fire ran is not relabelled, whatever its stamp.
+        eq(schedules.enabled, true),
+        unchangedSince(row.updatedAt.toISOString()),
+      ),
+    )
+    .returning({ id: schedules.id });
+  if (disabled.length === 0) return false;
+  await removeScheduleJobs([row.id]);
+  return true;
 }
 
 /**
@@ -271,10 +304,11 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     const fired = await triggerScheduledRun(scheduleId, claim);
     if (!fired) return;
 
-    // The trigger may have disabled the schedule (invalid actor), and a write may land after its
-    // read, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on the cron it
-    // was computed from, else the concurrent writer's value stands. Bookkeeping only: `updatedAt`
-    // is the write token of `updateSchedule`, so bumping it would 409 an overlapping PATCH.
+    // The trigger may have disabled the schedule (`disableScheduleAtFire`), and a write may land
+    // after its read, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on
+    // the cron it was computed from, else the concurrent writer's value stands. Bookkeeping only:
+    // `updatedAt` is the write token of `updateSchedule`, so bumping it would 409 an overlapping
+    // PATCH.
     const nextRun = computeNextRun(fired.cronExpression, fired.timezone);
     await db
       .update(schedules)
@@ -357,9 +391,11 @@ export async function shutdownScheduleWorker(): Promise<void> {
 
 /**
  * Fire one scheduled run from the schedule row, read now; any `ApiError` becomes a visible failed
- * run (`failSchedule()`). Returns the cron the fire read, or `null` when the row is gone or
- * disabled (its job is removed) or `claim` refuses the occurrence. A failed read throws before
- * `claim`, leaving the occurrence unconsumed for the job's failure to report.
+ * run (`failSchedule()`), and a refusal the schedule write would answer too — an invalid actor, a
+ * connection verdict it refuses — also disables the row this fire read (`disableScheduleAtFire`).
+ * Returns the cron the fire read, or `null` when the row is gone or disabled (its job is removed)
+ * or `claim` refuses the occurrence. A failed read throws before `claim`, leaving the occurrence
+ * unconsumed for the job's failure to report.
  */
 export async function triggerScheduledRun(
   scheduleId: string,
@@ -427,8 +463,11 @@ export async function triggerScheduledRun(
         actorType: actor.type,
         actorId: actor.id,
       });
-      await disableScheduleForInvalidActor(scheduleId);
-      await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
+      const refusal = invalidScheduleActorReason(actor);
+      const disabled = await disableScheduleAtFire(row, "actor_invalid");
+      await failSchedule(
+        disabled ? `Schedule disabled: ${refusal}` : `Scheduled run refused: ${refusal}`,
+      );
       return row;
     }
 
@@ -541,13 +580,21 @@ export async function triggerScheduledRun(
       });
     } catch (err) {
       if (err instanceof ApiError) {
+        // The write rule, repeated: a refusal carrying a verdict the schedule write refuses
+        // disables the schedule, and the failed run names those verdicts. Any other: armed.
+        const owned = err.fieldErrors?.filter(isScheduleOwned) ?? [];
+        const disabled =
+          owned.length > 0 && (await disableScheduleAtFire(row, "connection_choice_invalid"));
         logger.warn("Agent readiness check failed, skipping schedule", {
           scheduleId,
           packageId,
           code: err.code,
           detail: err.message,
+          disabled,
         });
-        await failSchedule(err.message);
+        await failSchedule(
+          disabled ? `Schedule disabled: ${owned.map((e) => e.message).join(" ")}` : err.message,
+        );
         return row;
       }
       logger.error("Unexpected error during schedule preflight", {
@@ -1031,11 +1078,7 @@ export async function updateSchedule(
       scopedWhere(schedules, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [
-          eq(schedules.id, expected.id),
-          // At the wire stamp's millisecond precision: a `now()` default stores microseconds.
-          sql`date_trunc('milliseconds', ${schedules.updatedAt}) = ${expected.updatedAt}::timestamptz`,
-        ],
+        extra: [eq(schedules.id, expected.id), unchangedSince(expected.updatedAt)],
       }),
     )
     .returning();

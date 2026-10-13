@@ -14,7 +14,15 @@ import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 process.on("unhandledRejection", () => {});
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, organizationMembers, runs, schedules } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOrgDefaults,
+  integrationPins,
+  organizationMembers,
+  runs,
+  schedules,
+} from "@appstrate/db/schema";
+import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { Queue, type ConnectionOptions } from "bullmq";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -25,7 +33,21 @@ import {
   memberContext,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace, seedSpacePackage, seedEndUser } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedPackageVersion,
+  seedSpace,
+  seedSpacePackage,
+  seedEndUser,
+  seedSchedule,
+} from "../../helpers/seed.ts";
+import { seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
+import {
+  seedConnectionTestIntegration,
+  seedIntegrationConnection,
+} from "../../helpers/run-connection-fixtures.ts";
+import { twoAuthApiIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import { flushRedis, closeRedis } from "../../helpers/redis.ts";
@@ -45,6 +67,81 @@ import { unshareConnection } from "../../../src/services/connection-shares.ts";
 import { leaveOrganization, updateMemberRole } from "../../../src/services/organizations.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
+
+/**
+ * An agent, published and active in the context's space, that REQUIRES each of `integrations`:
+ * with nothing to bind, a fire's preflight answers an error for it, not a warning.
+ */
+async function seedAgentRequiring(
+  ctx: TestContext,
+  id: string,
+  integrations: readonly string[],
+): Promise<void> {
+  for (const integration of integrations) {
+    await seedConnectionTestIntegration(ctx, integration);
+  }
+  await seedSchedulableAgent({
+    id,
+    orgId: ctx.orgId,
+    spaceId: ctx.defaultSpaceId,
+    userId: ctx.user.id,
+    manifest: {
+      name: id,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Fire Choice Agent",
+      dependencies: { integrations: Object.fromEntries(integrations.map((i) => [i, "^1.0.0"])) },
+      integrations_configuration: Object.fromEntries(
+        integrations.map((i) => [i, { tools: ["search"], required: true }]),
+      ),
+    },
+  });
+}
+
+interface FireOutcome {
+  disables: boolean;
+  /** The refusal the failed run names: the fire stopped on this verdict, not an earlier gate. */
+  error: RegExp;
+  /** A refusal of the same fire the failed run must not name. */
+  not?: RegExp;
+}
+
+/** Fires `schedule` once: one failed run naming `error`, and the row disabled or untouched. */
+async function expectFire(
+  schedule: typeof schedules.$inferSelect,
+  { disables, error, not }: FireOutcome,
+): Promise<void> {
+  await triggerScheduledRun(schedule.id);
+
+  const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+  expect(fired).toHaveLength(1);
+  expect(fired[0]!.status).toBe("failed");
+  const message = fired[0]!.error ?? "";
+  expect(message).toMatch(error);
+  if (not) expect(message).not.toMatch(not);
+  const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+  if (disables) {
+    expect(message).toStartWith("Schedule disabled: ");
+    expect(row).toMatchObject({
+      enabled: false,
+      disabledReason: "connection_choice_invalid",
+      nextRunAt: null,
+      connectionOverrides: schedule.connectionOverrides,
+    });
+  } else {
+    expect(message).not.toStartWith("Schedule disabled");
+    expect(row).toEqual(schedule);
+  }
+}
+
+/** A stamp-bumping write that keeps the schedule enabled, as any governed write of it does. */
+async function renameBumpingStamp(scheduleId: string): Promise<void> {
+  await db
+    .update(schedules)
+    .set({ name: "renamed", updatedAt: sql`${schedules.updatedAt} + interval '1 second'` })
+    .where(eq(schedules.id, scheduleId));
+}
 
 // Real BullMQ repeatable-job semantics — skipped in tier0 (in-memory queue).
 describeRequiresRedis("scheduler service", () => {
@@ -802,6 +899,37 @@ describeRequiresRedis("scheduler service", () => {
       expect(row).toEqual({ enabled: false, disabledReason: null });
     });
 
+    it("a fire racing a write that keeps the schedule enabled does not disable it", async () => {
+      const member = await createTestUser({ email: "racing-write@test.com" });
+      await addOrgMember(orgId, member.id, "member");
+      const schedule = await createSchedule(
+        { orgId, spaceId: defaultSpaceId },
+        packageId,
+        { type: "user", id: member.id },
+        { cronExpression: "0 * * * *" },
+      );
+      await db
+        .delete(organizationMembers)
+        .where(
+          and(eq(organizationMembers.orgId, orgId), eq(organizationMembers.userId, member.id)),
+        );
+
+      // The write lands after the fire read the row: the fire judged another row.
+      await triggerScheduledRun(schedule.id, async () => {
+        await renameBumpingStamp(schedule.id);
+        return true;
+      });
+
+      const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+      expect(fired).toHaveLength(1);
+      expect(fired[0]!.error ?? "").toStartWith("Scheduled run refused: ");
+      const [row] = await db
+        .select({ enabled: schedules.enabled, disabledReason: schedules.disabledReason })
+        .from(schedules)
+        .where(eq(schedules.id, schedule.id));
+      expect(row).toEqual({ enabled: true, disabledReason: null });
+    });
+
     it("a schedule whose end-user actor does not exist in the space fires into a FAILED run and is disabled", async () => {
       // The end user exists — but in a DIFFERENT space of the same org,
       // so the fire-time revalidation (end user must exist in the SCHEDULE's
@@ -904,6 +1032,45 @@ describeRequiresRedis("scheduler service", () => {
 
       expect(await triggerScheduledRun(schedule.id)).toBeNull();
       expect(await jobOf(schedule.id)).toBeUndefined();
+    });
+
+    /** Armed through the service, not the route: the write rule would refuse this open choice. */
+    async function armWithOpenChoice() {
+      const ctx = await createTestContext({ orgSlug: "jobsorg" });
+      await seedAgentRequiring(ctx, "@jobsorg/agent", ["@jobsorg/svc"]);
+      await seedIntegrationConnection(ctx, "@jobsorg/svc");
+      await seedIntegrationConnection(ctx, "@jobsorg/svc");
+      const schedule = await createSchedule(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        "@jobsorg/agent",
+        { type: "user", id: ctx.user.id },
+        { cronExpression: "0 * * * *" },
+      );
+      expect(await jobOf(schedule.id)).toBeDefined();
+      return schedule;
+    }
+
+    it("removes the job of a schedule its fire disables over its connection choice", async () => {
+      const schedule = await armWithOpenChoice();
+
+      await triggerScheduledRun(schedule.id);
+
+      const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(row).toMatchObject({ enabled: false, disabledReason: "connection_choice_invalid" });
+      expect(await jobOf(schedule.id)).toBeUndefined();
+    });
+
+    it("keeps the job of a schedule written while its fire ran", async () => {
+      const schedule = await armWithOpenChoice();
+
+      await triggerScheduledRun(schedule.id, async () => {
+        await renameBumpingStamp(schedule.id);
+        return true;
+      });
+
+      const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+      expect(row).toMatchObject({ enabled: true, disabledReason: null, name: "renamed" });
+      expect(await jobOf(schedule.id)).toBeDefined();
     });
 
     it("fires as the row's CURRENT actor, not the one it was armed with", async () => {
@@ -1473,4 +1640,321 @@ describe("schedule disabled_reason", () => {
       "package_schedules_enabled_has_no_disabled_reason",
     );
   });
+});
+
+// Plain `describe`: every case stops at the preflight, so no queue semantics and no orchestrator.
+// The write rule, repeated at the fire: a refusal carrying a verdict the schedule write refuses
+// disables the schedule; any other is a failed run on a schedule left armed. Rows are seeded
+// directly, since the write rule would refuse most of them.
+describe("triggerScheduledRun — the schedule's own connection choice", () => {
+  const AGENT = "@fireorg/agent";
+  const SVC = "@fireorg/svc";
+  const OTHER = "@fireorg/other";
+  let ctx: TestContext;
+  /** OTHER's one connection: it binds by the fallback unless a case removes it. */
+  let other: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "fireorg" });
+    await seedAgentRequiring(ctx, AGENT, [SVC, OTHER]);
+    other = await seedIntegrationConnection(ctx, OTHER);
+  });
+
+  const connect = (integration: string) => seedIntegrationConnection(ctx, integration);
+
+  type Layer = "admin pin" | "member pin" | "enforced org default";
+
+  /** Names `connectionIds` as SVC's set in one layer other than the schedule's own. */
+  async function nameSet(layer: Layer, connectionIds: string[]): Promise<void> {
+    if (layer === "enforced org default") {
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: ctx.defaultSpaceId,
+        integrationId: SVC,
+        connectionIds,
+        enforce: true,
+      });
+    } else {
+      await db.insert(integrationPins).values({
+        spaceId: ctx.defaultSpaceId,
+        packageId: AGENT,
+        integrationId: SVC,
+        userId: layer === "admin pin" ? null : ctx.user.id,
+        connectionIds,
+      });
+    }
+  }
+
+  function seedArmed(connectionOverrides: Record<string, string[]> | null) {
+    return seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      nextRunAt: new Date("2030-01-01T00:00:00Z"),
+      connectionOverrides,
+    });
+  }
+
+  interface FireCase extends FireOutcome {
+    verdict: string;
+    /** Seeds what the fire resolves against; returns the schedule's `connection_overrides`. */
+    arrange: () => Promise<Record<string, string[]> | null>;
+  }
+
+  const outranked = (by: "admin pin" | "enforced org default"): FireCase => ({
+    verdict: `overrides outside an ${by} placed above them (override_outranked)`,
+    arrange: async () => {
+      const [governed, picked] = [await connect(SVC), await connect(SVC)];
+      await nameSet(by, [governed]);
+      return { [SVC]: [picked] };
+    },
+    disables: true,
+    error: new RegExp(`fall outside an ${by}`),
+  });
+
+  // The pin is what to fix, whoever set it: the schedule names nothing here.
+  const pinUnavailable = (by: "admin pin" | "member pin"): FireCase => ({
+    verdict: `a ${by} naming a connection that is gone (pinned_connection_unavailable)`,
+    arrange: async () => {
+      await nameSet(by, [crypto.randomUUID()]);
+      return null;
+    },
+    disables: false,
+    error: /[Pp]inned connection '[^']+' for \S+ is not accessible/,
+  });
+
+  const notConnected = /has no connection accessible to this actor/;
+
+  const cases: FireCase[] = [
+    {
+      verdict: "two own connections and no set named (must_choose_connection)",
+      arrange: async () => {
+        await connect(SVC);
+        await connect(SVC);
+        return null;
+      },
+      disables: true,
+      error: /needs a connection choice/,
+    },
+    {
+      verdict: "overrides naming a connection that is gone (override_connection_unavailable)",
+      arrange: async () => {
+        await connect(SVC);
+        return { [SVC]: [crypto.randomUUID()] };
+      },
+      disables: true,
+      error: /Schedule-override connection '[^']+' for \S+ is not accessible/,
+    },
+    outranked("admin pin"),
+    outranked("enforced org default"),
+    {
+      verdict: "its own empty set on a required integration (required_integration_unbound)",
+      arrange: async () => ({ [SVC]: [] }),
+      disables: true,
+      error: /Schedule-override connection set for \S+ is empty/,
+    },
+    // Same code, another layer's set: `source` decides.
+    {
+      verdict: "an admin pin's empty set on a required integration (required_integration_unbound)",
+      arrange: async () => {
+        await nameSet("admin pin", []);
+        return null;
+      },
+      disables: false,
+      error: /Pinned connection set for \S+ is empty/,
+    },
+    pinUnavailable("admin pin"),
+    pinUnavailable("member pin"),
+    {
+      verdict: "a required integration its actor never connected (not_connected)",
+      arrange: async () => null,
+      disables: false,
+      error: notConnected,
+    },
+    {
+      verdict: "a required integration switched off in the space (integration_not_active)",
+      arrange: async () => {
+        await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SVC);
+        return null;
+      },
+      disables: false,
+      error: /Integration '\S+' is not active in this space/,
+    },
+    // Any, not all and not the first: either integration may carry the schedule's verdict, and
+    // the failed run names that one, never the refusal that disables nothing.
+    {
+      verdict: "an unreachable pick beside another integration not connected",
+      arrange: async () => ({ [OTHER]: [crypto.randomUUID()] }),
+      disables: true,
+      error: /^Schedule disabled: Schedule-override connection '[^']+' for @fireorg\/other is not/,
+      not: notConnected,
+    },
+    {
+      verdict: "an integration not connected beside an unreachable pick",
+      arrange: async () => {
+        await db.delete(integrationConnections).where(eq(integrationConnections.id, other));
+        return { [SVC]: [crypto.randomUUID()] };
+      },
+      disables: true,
+      error: /^Schedule disabled: Schedule-override connection '[^']+' for @fireorg\/svc is not/,
+      not: notConnected,
+    },
+    {
+      verdict: "two verdicts of its own, both named",
+      arrange: async () => {
+        await connect(SVC);
+        await connect(SVC);
+        return { [OTHER]: [crypto.randomUUID()] };
+      },
+      disables: true,
+      error: /^(?=.*needs a connection choice)(?=.*for @fireorg\/other is not accessible)/,
+    },
+  ];
+
+  for (const { verdict, arrange, ...outcome } of cases) {
+    it(`${outcome.disables ? "disables" : "leaves armed"} a schedule whose fire meets ${verdict}`, async () => {
+      await expectFire(await seedArmed(await arrange()), outcome);
+    });
+  }
+
+  it("does not relabel a schedule a person paused while the fire ran", async () => {
+    await connect(SVC);
+    await connect(SVC);
+    const schedule = await seedArmed(null);
+
+    // The pause lands after the fire read the row enabled.
+    await triggerScheduledRun(schedule.id, async () => {
+      await db
+        .update(schedules)
+        .set({ enabled: false, nextRunAt: null })
+        .where(eq(schedules.id, schedule.id));
+      return true;
+    });
+
+    const [row] = await db
+      .select({ enabled: schedules.enabled, disabledReason: schedules.disabledReason })
+      .from(schedules)
+      .where(eq(schedules.id, schedule.id));
+    expect(row).toEqual({ enabled: false, disabledReason: null });
+    const [fired] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    expect(fired!.error ?? "").not.toStartWith("Schedule disabled");
+  });
+
+  // Scenario of a connection delete pruning the set, or a PATCH repairing it, mid-fire: the
+  // verdict judged the row the fire read, so the row that write stored is the next tick's.
+  it("does not disable a schedule written while the fire ran: a plain failed run", async () => {
+    await connect(SVC);
+    await connect(SVC);
+    const schedule = await seedArmed(null);
+
+    await triggerScheduledRun(schedule.id, async () => {
+      await renameBumpingStamp(schedule.id);
+      return true;
+    });
+
+    const fired = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
+    expect(fired).toHaveLength(1);
+    expect(fired[0]!.error ?? "").toMatch(/needs a connection choice/);
+    expect(fired[0]!.error ?? "").not.toStartWith("Schedule disabled");
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+    expect(row).toMatchObject({
+      enabled: true,
+      disabledReason: null,
+      name: "renamed",
+      nextRunAt: schedule.nextRunAt,
+    });
+  });
+});
+
+// The other code `source` discriminates, on its own fixture: an `api_call` integration whose two
+// auths both expose the tool, and an agent selecting the `primary` one only.
+describe("triggerScheduledRun — a set on an auth serving no selected tool", () => {
+  const AGENT = "@fireorg/api-agent";
+  const API = "@fireorg/api";
+  let ctx: TestContext;
+  /** The actor's connection on the `backup` auth, which serves none of the selected tools. */
+  let backup: string;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "fireorg" });
+    const manifest = twoAuthApiIntegrationManifest(API);
+    await seedPackage({
+      id: API,
+      orgId: ctx.orgId,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await seedPackageVersion({
+      packageId: API,
+      version: "1.0.0",
+      manifest: manifest as unknown as Record<string, unknown>,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, API);
+    await seedSchedulableAgent({
+      id: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: {
+        name: AGENT,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Fire Auth Agent",
+        dependencies: { integrations: { [API]: "^1.0.0" } },
+        integrations_configuration: { [API]: { tools: ["api_call__primary"] } },
+      },
+    });
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: API,
+        authKey: "backup",
+        accountId: "spare",
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
+        scopesGranted: [],
+        label: "spare",
+      })
+      .returning({ id: integrationConnections.id });
+    backup = row!.id;
+  });
+
+  const cases = [
+    { boundBy: "the schedule's own override", disables: true },
+    { boundBy: "an admin pin", disables: false },
+  ] as const;
+
+  for (const { boundBy, disables } of cases) {
+    it(`${disables ? "disables" : "leaves armed"} a schedule whose fire binds it by ${boundBy}`, async () => {
+      if (!disables) {
+        await db.insert(integrationPins).values({
+          spaceId: ctx.defaultSpaceId,
+          packageId: AGENT,
+          integrationId: API,
+          userId: null,
+          connectionIds: [backup],
+        });
+      }
+      const schedule = await seedSchedule({
+        packageId: AGENT,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        connectionOverrides: disables ? { [API]: [backup] } : null,
+      });
+
+      await expectFire(schedule, {
+        disables,
+        error: /uses auth 'backup', which exposes none of the agent's selected tools/,
+      });
+    });
+  }
 });

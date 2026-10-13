@@ -97,6 +97,7 @@ export const scheduleDisabledReasonValues = [
   "connection_deleted",
   "connection_unshared",
   "connection_set_unnamed",
+  "connection_choice_invalid",
 ] as const;
 export const scheduleDisabledReasonEnum = pgEnum(
   "schedule_disabled_reason",
