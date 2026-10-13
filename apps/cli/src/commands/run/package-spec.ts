@@ -83,6 +83,11 @@ export function parseRunTarget(raw: string): ParsedRunTarget {
   return { kind: "path", path: trimmed };
 }
 
+/** `@scope/name[@spec]`, the id target as the user wrote it — what a run is announced under. */
+export function runTargetLabel(packageId: string, spec: string | undefined): string {
+  return `${packageId}${spec ? `@${spec}` : ""}`;
+}
+
 /**
  * How `POST /api/runs/remote` names the version `spec` selects. `draft` is the
  * `stage`; a `spec` is sent only when the server has one to resolve (a semver,

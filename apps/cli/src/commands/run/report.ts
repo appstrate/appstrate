@@ -252,16 +252,20 @@ export function hostSnapshot(): { os: string; cliVersion: string } {
 /**
  * Start the run's liveness keep-alive: a signed POST to `<sink>/heartbeat`,
  * the column the platform's stall watchdog reads. Same helper as the
- * runtime-pi container.
+ * runtime-pi container. `onClosed` is told once when the instance answers that
+ * the run's sink is closed; `intervalMs` overrides the helper's cadence (tests).
  */
 export function startReportHeartbeat(
   session: ReportSession,
   onError: (err: unknown) => void,
+  opts: { onClosed?: () => void; intervalMs?: number | undefined } = {},
 ): SinkHeartbeatHandle {
   return startSinkHeartbeat({
     url: `${session.sinkUrl.replace(/\/$/, "")}/heartbeat`,
     runSecret: session.runSecret,
     onError,
+    ...(opts.onClosed ? { onClosed: opts.onClosed } : {}),
+    ...(opts.intervalMs !== undefined ? { intervalMs: opts.intervalMs } : {}),
   });
 }
 

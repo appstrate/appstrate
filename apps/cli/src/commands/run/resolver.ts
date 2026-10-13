@@ -90,7 +90,7 @@ export const ERR_LOCAL_REQUIRES_CREDS = {
   hint: "Pass a JSON file with { version: 1, integrations: {…} }",
 } as const;
 export const ERR_REMOTE_REQUIRES_AUTH = {
-  message: "--integrations=remote requires a logged-in profile or an API key",
+  message: "Reaching the Appstrate instance requires a logged-in profile or an API key",
   hint: "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_SPACE_ID (headless)",
 } as const;
 

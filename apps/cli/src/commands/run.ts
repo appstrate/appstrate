@@ -87,7 +87,7 @@ import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
 import { PackageSpecError } from "../lib/package-spec.ts";
-import { parseRunTarget, registryVersion } from "./run/package-spec.ts";
+import { parseRunTarget, registryVersion, runTargetLabel } from "./run/package-spec.ts";
 import { fetchBundleForRun } from "./run/bundle-fetch.ts";
 import {
   fetchRunConfigPayload,
@@ -698,7 +698,7 @@ async function runCommandRemote(
   const idempotencyKey =
     opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-  const bundleLabel = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
+  const bundleLabel = runTargetLabel(target.packageId, target.spec);
 
   // What a signal means for the run we're about to trigger. Resolved
   // before the trigger so the decision is fixed for the whole tail — a
@@ -791,6 +791,7 @@ async function runCommandUnderRun(
       input: await resolveInput(opts),
       ttlSeconds: opts.sinkTtl,
       connectionOverrides: opts.connectionOverrides,
+      env: commandEnv(opts),
     },
     { signal: shutdownSignal, onShutdown },
   );
@@ -799,6 +800,21 @@ async function runCommandUnderRun(
   // same backstop as the two other paths.
   if (shutdownSignal.aborted) process.exit(shutdownExitCode());
   if (exitCode !== 0) process.exitCode = exitCode;
+}
+
+/**
+ * What the command's environment adds so that an `appstrate` it runs reaches
+ * the instance, and the identity, its run is registered with. A profile or a
+ * key named by a FLAG exists for this process only: the command's own
+ * `appstrate api` would otherwise resolve the default profile, and name the
+ * run to an instance or a principal that does not know it. Named by the
+ * environment already, either is inherited as it is.
+ */
+function commandEnv(opts: RunCommandOptions): Record<string, string> {
+  return {
+    ...(opts.profile ? { APPSTRATE_PROFILE: opts.profile } : {}),
+    ...(opts.apiKey ? { APPSTRATE_API_KEY: opts.apiKey } : {}),
+  };
 }
 
 /**
@@ -974,8 +990,9 @@ async function buildHeadlessRemoteInputs(
 type SpacedRemoteResolverInputs = RemoteResolverInputs & { spaceId: string };
 
 /**
- * A local run reads the space's run-config, registers its run record and calls the
- * credential proxy, all of which name the space. An API key leaves it unset unless
+ * A run this CLI is the runner of — an agent executed locally, or a command — registers
+ * its run record and calls the credential proxy, and the former also reads the space's
+ * run-config: all of which name the space. An API key leaves it unset unless
  * `APPSTRATE_SPACE_ID` spells it out; a remote run needs no id (the key pins it).
  */
 function requireSpaceForLocalRun(
@@ -984,7 +1001,7 @@ function requireSpaceForLocalRun(
   if (!inputs || !("bearerToken" in inputs)) return inputs;
   if (!inputs.spaceId) {
     throw new ResolverConfigError(
-      "No space id for a local run",
+      "No space id for the run",
       "Set APPSTRATE_SPACE_ID to the space the API key is pinned to",
     );
   }
@@ -1267,7 +1284,7 @@ async function resolveBundleSource(
     packageId: target.packageId,
     spec: target.spec,
   });
-  const label = `${target.packageId}${target.spec ? `@${target.spec}` : ""}`;
+  const label = runTargetLabel(target.packageId, target.spec);
   if (!opts.json) {
     process.stderr.write(`→ fetched bundle ${label}\n`);
   }

@@ -24,7 +24,7 @@ import { emptyRunResult, type TerminalRunResult } from "@appstrate/afps-runtime/
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { announceLaunch } from "./launch-warnings.ts";
-import { registryVersion } from "./package-spec.ts";
+import { registryVersion, runTargetLabel } from "./package-spec.ts";
 import {
   finalizeWithin,
   hostSnapshot,
@@ -37,17 +37,25 @@ import {
 /**
  * `X-Appstrate-Runner-Kind` of a runner that executes a command. A wire
  * literal the platform reads (`COMMAND_RUNNER_KIND`, `apps/api`): a remote run
- * of this kind may finish `success` with zero tokens, where any other run is
- * failed as "LLM never reached".
+ * of this kind may finish `success` with zero tokens and no output, where any
+ * other run is failed as "LLM never reached" or for the output it owes.
  */
 const COMMAND_RUNNER_KIND = "command";
 
 /**
- * How long a shutdown waits for the signalled command before SIGKILL. With the
- * finalize budget (`SAFETY_NET_FINALIZE_TIMEOUT_MS`) it stays under the
- * shutdown coordinator's 10 s ceiling.
+ * How long a shutdown waits for the signalled command before SIGKILL. The
+ * finalize goes out meanwhile, within `SAFETY_NET_FINALIZE_TIMEOUT_MS`: the
+ * longer of the two stays under the shutdown coordinator's 10 s ceiling.
  */
 const STOP_GRACE_MS = 3_000;
+
+/**
+ * How long a command that died of a signal waits for the CLI's own shutdown
+ * before its run is read as `failed`. A terminal's Ctrl-C signals the whole
+ * foreground process group, so the command can be seen dead before this
+ * process's handler has run; that handler is a matter of milliseconds.
+ */
+const SIGNAL_DEATH_SETTLE_MS = 100;
 
 /**
  * Exit codes of a command that could not be started, as a shell reports them:
@@ -56,6 +64,9 @@ const STOP_GRACE_MS = 3_000;
  */
 const EXIT_COMMAND_NOT_EXECUTABLE = 126;
 const EXIT_COMMAND_NOT_FOUND = 127;
+
+/** A command calls no model: its usage is truthfully zero, whatever its outcome. */
+const ZERO_USAGE = { input_tokens: 0, output_tokens: 0 };
 
 interface CommandRunOptions {
   /** The command and its arguments, as written after `--`. Never empty. */
@@ -72,6 +83,12 @@ interface CommandRunOptions {
   ttlSeconds?: number | undefined;
   /** `--connection` picks, sent as the registration's `connection_overrides`. */
   connectionOverrides?: ConnectionOverrides | undefined;
+  /**
+   * Added to the command's environment, over the CLI's own and under
+   * `APPSTRATE_RUN_ID`: what lets an `appstrate` the command runs reach the
+   * instance and identity the run is registered with.
+   */
+  env?: Record<string, string>;
 
   // ─── Dependency injection (testing) ──────────────────────────────────
   /** Defaults to `process.stderr`. */
@@ -80,6 +97,8 @@ interface CommandRunOptions {
   cwd?: string;
   /** Overrides {@link STOP_GRACE_MS}. */
   stopGraceMs?: number;
+  /** Overrides the heartbeat helper's interval. */
+  heartbeatIntervalMs?: number;
 }
 
 /** The process's shutdown coordinator, as far as a command run uses it. */
@@ -102,8 +121,9 @@ type Child = ReturnType<typeof Bun.spawn>;
  * command's outcome. Resolves with the exit code the CLI reports: the
  * command's own, 128 + n when signal n terminated it, and when it could not
  * be started 126 (found, not executable) or 127 (not found, or any other spawn
- * failure). Rejects when the instance refuses the registration — the command
- * is then never spawned.
+ * failure); 1 when the run's first event is refused, the command then never
+ * started. Rejects when the instance refuses the registration — the command
+ * is then never spawned either.
  */
 export async function runCommandAsRunner(
   opts: CommandRunOptions,
@@ -137,7 +157,7 @@ export async function runCommandAsRunner(
   announceLaunch({
     type: "appstrate.report.started",
     json: false,
-    bundleLabel: `${opts.packageId}${opts.spec ? `@${opts.spec}` : ""}`,
+    bundleLabel: `a command under ${runTargetLabel(opts.packageId, opts.spec)}`,
     instance: opts.context.instance,
     run: session,
     writeStdout: () => {},
@@ -146,6 +166,10 @@ export async function runCommandAsRunner(
 
   let heartbeat: SinkHeartbeatHandle | null = null;
   let child: Child | null = null;
+  // Set when the instance answers that the run's sink is closed (cancelled
+  // through the API, failed by the watchdog, or past its TTL): nothing more
+  // can be reported for it.
+  let closedOnInstance = false;
   let outcome: CommandOutcome = {
     exitCode: 1,
     failure: "Runner exited before the command completed (CLI error).",
@@ -160,20 +184,26 @@ export async function runCommandAsRunner(
     (closing ??= (async (): Promise<void> => {
       heartbeat?.stop();
       const cancelled = shutdown.signal.aborted;
-      // Still alive only on a shutdown, or on an error after the spawn.
-      if (child) await stopChild(child, opts.stopGraceMs ?? STOP_GRACE_MS);
-      const result: TerminalRunResult = {
-        ...emptyRunResult(),
-        ...terminalFields(cancelled, outcome),
-        durationMs: Math.round(performance.now() - registeredAt),
-      };
-      await finalizeWithin(
-        session.httpSink,
-        session.httpSink.finalize(result),
-        SAFETY_NET_FINALIZE_TIMEOUT_MS,
-      ).catch(warn("finalize"));
+      const stopped = child ? stopChild(child, opts.stopGraceMs ?? STOP_GRACE_MS) : null;
+      // On a shutdown the run is `cancelled` whatever the command does next,
+      // so it is closed at once — and the command's access with it — while the
+      // command is being stopped. Otherwise the command's exit is the status.
+      if (!cancelled) await stopped;
+      if (!closedOnInstance) {
+        const result: TerminalRunResult = {
+          ...emptyRunResult(),
+          ...terminalFields(cancelled, outcome),
+          durationMs: Math.round(performance.now() - registeredAt),
+        };
+        await finalizeWithin(
+          session.httpSink,
+          session.httpSink.finalize(result),
+          SAFETY_NET_FINALIZE_TIMEOUT_MS,
+        ).catch(warn("finalize"));
+      }
       // The run is over: no report request may outlive it.
       session.httpSink.abort(new Error("run ended"));
+      await stopped;
     })());
 
   const unregister = shutdown.onShutdown(close);
@@ -181,23 +211,43 @@ export async function runCommandAsRunner(
     // The run's first event: the platform flips it `pending` → `running` on
     // it, and stops counting its boot deadline. Sent before the command
     // starts so a command that outlives that deadline in silence is not failed.
-    await emitRuntimeReady(session.httpSink, session.runId, {
+    const refusal = await emitRuntimeReady(session.httpSink, session.runId, {
       bundleLoaded: false,
       extensions: 0,
       bootDurationMs: performance.now(),
-    }).catch(warn("runtime ready event"));
+    }).then(
+      () => null,
+      (err: unknown) => ({ cause: getErrorMessage(err) }),
+    );
 
-    // A shutdown that arrived meanwhile has already closed the run: nothing
-    // more is started.
-    if (!shutdown.signal.aborted) {
-      heartbeat = startReportHeartbeat(session, warn("heartbeat"));
+    if (shutdown.signal.aborted) {
+      // A shutdown that arrived meanwhile has already closed the run: nothing
+      // more is started.
+    } else if (refusal) {
+      // What refuses the first event (a signature the instance cannot verify,
+      // a clock out of tolerance) refuses every later signed call, and the
+      // platform fails the run at its boot deadline: the command would run
+      // under a run that is already lost.
+      const failure = `The run's first event could not be delivered: ${refusal.cause}`;
+      writeStderr(`error: ${failure}\nerror: The command was not started.\n`);
+      outcome = { exitCode: 1, failure };
+    } else {
+      heartbeat = startReportHeartbeat(session, warn("heartbeat"), {
+        intervalMs: opts.heartbeatIntervalMs,
+        onClosed: () => {
+          closedOnInstance = true;
+          writeStderr(
+            `warn: run ${session.runId} is closed on the instance: calls naming it are refused. The command keeps running.\n`,
+          );
+        },
+      });
       try {
         child = Bun.spawn([...opts.command], {
           ...(opts.cwd ? { cwd: opts.cwd } : {}),
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",
-          env: { ...process.env, APPSTRATE_RUN_ID: session.runId },
+          env: { ...process.env, ...opts.env, APPSTRATE_RUN_ID: session.runId },
         });
       } catch (err) {
         const failure = `Command could not be started: ${getErrorMessage(err)}`;
@@ -208,7 +258,11 @@ export async function runCommandAsRunner(
           failure,
         };
       }
-      if (child) outcome = await commandOutcome(child);
+      if (child) {
+        const disarm = killOnProcessExit(child);
+        void child.exited.then(disarm);
+        outcome = await commandOutcome(child, shutdown.signal);
+      }
     }
   } finally {
     // Unregistered only once closed: a signal arriving during the close makes
@@ -219,16 +273,29 @@ export async function runCommandAsRunner(
   return outcome.exitCode;
 }
 
+/**
+ * SIGKILL `child` if this process exits while it is alive — a second Ctrl-C
+ * that cuts the shutdown short, a crash — so that no exit of the CLI leaves the
+ * command running under a run nobody holds. The `exit` event is the one hook
+ * that runs whatever the cause, and it is synchronous. Returns the disarm, to
+ * call once the child has exited.
+ */
+function killOnProcessExit(child: Child): () => void {
+  const kill = (): void => child.kill("SIGKILL");
+  process.on("exit", kill);
+  return () => {
+    process.off("exit", kill);
+  };
+}
+
 /** Wait for `child` and read how it ended. */
-async function commandOutcome(child: Child): Promise<CommandOutcome> {
+async function commandOutcome(child: Child, shutdown: AbortSignal): Promise<CommandOutcome> {
   await child.exited;
   const { exitCode, signalCode } = child;
   if (signalCode !== null) {
-    // A terminal's Ctrl-C signals the whole foreground process group, so the
-    // command can be seen dead before this process's own handler has run. One
-    // turn of the event loop lets that handler flip the shutdown signal, and
-    // the run reads `cancelled` rather than `failed`.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // The signal may be one this process received too: its own shutdown then
+    // makes the run `cancelled`, not `failed` (see `SIGNAL_DEATH_SETTLE_MS`).
+    await abortedWithin(shutdown, SIGNAL_DEATH_SETTLE_MS);
     return {
       exitCode: 128 + (osConstants.signals[signalCode] ?? 0),
       failure: `Command terminated by ${signalCode}`,
@@ -236,6 +303,20 @@ async function commandOutcome(child: Child): Promise<CommandOutcome> {
   }
   if (exitCode === 0) return { exitCode: 0, failure: null };
   return { exitCode: exitCode ?? 1, failure: `Command exited with code ${exitCode}` };
+}
+
+/** Resolves when `signal` aborts or `ms` have passed, whichever comes first. */
+function abortedWithin(signal: AbortSignal, ms: number): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const settle = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", settle);
+      resolve();
+    };
+    const timer = setTimeout(settle, ms);
+    signal.addEventListener("abort", settle, { once: true });
+  });
 }
 
 /** The outcome half of the finalize body. */
@@ -247,11 +328,13 @@ function terminalFields(
     return {
       status: "cancelled",
       error: { message: "Command cancelled (CLI received a signal)." },
+      usage: ZERO_USAGE,
     };
   }
-  if (outcome.failure !== null) return { status: "failed", error: { message: outcome.failure } };
-  // A success must state its usage, and a command's is truthfully zero.
-  return { status: "success", usage: { input_tokens: 0, output_tokens: 0 } };
+  if (outcome.failure !== null) {
+    return { status: "failed", error: { message: outcome.failure }, usage: ZERO_USAGE };
+  }
+  return { status: "success", usage: ZERO_USAGE };
 }
 
 /** Ask `child` to terminate and SIGKILL it once `graceMs` has passed. Resolves when it is gone. */

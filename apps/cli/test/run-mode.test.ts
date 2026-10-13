@@ -4,7 +4,7 @@
  * Unit tests for `resolveExecutionMode` and `validateOptsForMode` —
  * the two pure functions that govern the dual-default behaviour of
  * `appstrate run` (id → remote, path → local) and its command mode
- * (`-- <command>`), plus `commandAfterSeparator`, which reads the command
+ * (`-- <command>`), plus `commandFromArgv`, which reads the command
  * off the raw arguments.
  *
  * Pure logic, no I/O: these tests are intentionally cheap so the full
@@ -12,8 +12,10 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { Command } from "commander";
 import {
-  commandAfterSeparator,
+  commandFromArgv,
+  ExcessArgumentsError,
   resolveExecutionMode,
   validateOptsForMode,
   ExecutionModeError,
@@ -185,27 +187,99 @@ describe("validateOptsForMode — remote mode", () => {
   });
 });
 
-describe("commandAfterSeparator", () => {
-  it("returns undefined when the arguments hold no `--`", () => {
-    expect(commandAfterSeparator(["run", "@a/b", "--input", "{}"])).toBeUndefined();
+describe("commandFromArgv", () => {
+  // argv tail, the operands commander parses out of it (`<bundle>` first), the command.
+  it.each([
+    ["no `--`", ["run", "@a/b", "--input", "{}"], ["@a/b"], undefined],
+    [
+      "a command, its own options included",
+      ["run", "@a/b", "--", "python", "sync.py", "--flag"],
+      ["@a/b", "python", "sync.py", "--flag"],
+      ["python", "sync.py", "--flag"],
+    ],
+    [
+      "the first `--` only: a later one belongs to the command",
+      ["run", "@a/b", "--connection", "@a/x=1", "--", "npm", "--", "t"],
+      ["@a/b", "npm", "--", "t"],
+      ["npm", "--", "t"],
+    ],
+    ["a trailing `--`: an empty command", ["run", "@a/b", "--"], ["@a/b"], []],
+    // Ahead of the bundle, `--` only ends option parsing.
+    ["`--` before the bundle: a plain run", ["run", "--", "@a/b"], ["@a/b"], undefined],
+    ["`--` before a non-id bundle: a plain run", ["run", "--", "true"], ["true"], undefined],
+    ["`--` before the subcommand", ["--", "run", "@a/b"], ["@a/b"], undefined],
+  ] as const)("%s", (_label, argv, operands, command) => {
+    expect(commandFromArgv(argv, operands)).toEqual(command as string[] | undefined);
   });
 
-  it("returns everything after the first `--`, options of the command included", () => {
-    expect(commandAfterSeparator(["run", "@a/b", "--", "python", "sync.py", "--flag"])).toEqual([
-      "python",
-      "sync.py",
-      "--flag",
-    ]);
+  it.each([
+    ["operands without a `--`", ["run", "@a/b", "x", "y"], ["@a/b", "x", "y"], "3: @a/b, x, y."],
+    [
+      "an operand between the bundle and the `--`",
+      ["run", "@a/b", "stray", "--", "true"],
+      ["@a/b", "stray", "true"],
+      "2: @a/b, stray.",
+    ],
+    [
+      "operands after a `--` that precedes the bundle",
+      ["run", "--", "@a/b", "x"],
+      ["@a/b", "x"],
+      "2: @a/b, x.",
+    ],
+  ] as const)("refuses %s", (_label, argv, operands, counted) => {
+    expect(() => commandFromArgv(argv, operands)).toThrow(
+      `error: too many arguments for 'run'. Expected 1 argument but got ${counted}`,
+    );
+    expect(() => commandFromArgv(argv, operands)).toThrow(ExcessArgumentsError);
   });
 
-  it("splits on the first `--` only: a later one belongs to the command", () => {
-    expect(
-      commandAfterSeparator(["run", "@a/b", "--connection", "@a/x=1", "--", "npm", "--", "t"]),
-    ).toEqual(["npm", "--", "t"]);
+  /**
+   * `run` as it is declared in `src/cli.ts`, minus the variadic argument: what
+   * commander itself answers to excess operands, and to how it splits argv.
+   */
+  function commander(variadic: boolean) {
+    const program = new Command();
+    program.exitOverride().configureOutput({ writeErr: () => {} });
+    const run = program.command("run").argument("<bundle>").option("--input <json>");
+    if (variadic) run.argument("[command...]");
+    let operands: string[] = [];
+    run.action((bundle: string, ...rest: unknown[]) => {
+      operands = [bundle, ...(variadic ? (rest[0] as string[]) : [])];
+    });
+    return {
+      parse: (argv: string[]): string[] => {
+        program.parse(["node", "appstrate", ...argv]);
+        return operands;
+      },
+    };
+  }
+
+  it("words the refusal exactly as commander does for a command without a variadic argument", () => {
+    const argv = ["run", "@a/b", "x", "y"];
+    let commanders = "";
+    try {
+      commander(false).parse(argv);
+    } catch (err) {
+      commanders = (err as Error).message;
+    }
+    expect(commanders).toStartWith("error: too many arguments for 'run'.");
+    expect(() => commandFromArgv(argv, commander(true).parse(argv))).toThrow(commanders);
   });
 
-  it("returns an empty command for a trailing `--`", () => {
-    expect(commandAfterSeparator(["run", "@a/b", "--"])).toEqual([]);
+  it("reads the operands the real parser hands the action", () => {
+    const parser = commander(true);
+    for (const [argv, command] of [
+      [
+        ["run", "@a/b", "--input", "{}", "--", "sh", "-c", "x", "--input"],
+        ["sh", "-c", "x", "--input"],
+      ],
+      [["run", "--", "@a/b"], undefined],
+      [["run", "@a/b"], undefined],
+    ] as const) {
+      expect(commandFromArgv(argv, parser.parse([...argv]))).toEqual(
+        command as string[] | undefined,
+      );
+    }
   });
 });
 

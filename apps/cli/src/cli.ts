@@ -65,7 +65,7 @@ import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { exitRunWithError, runCommand } from "./commands/run.ts";
-import { commandAfterSeparator } from "./commands/run/mode.ts";
+import { commandFromArgv, ExcessArgumentsError } from "./commands/run/mode.ts";
 import { parseConnectionFlags } from "./commands/run/connection-flag.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
 import {
@@ -1152,16 +1152,17 @@ program
     "-q, --quiet",
     "Suppress per-tool output lines (name, args, result). Errors and final summary still print.",
   )
-  .action(async (bundle: string, operands: string[], opts, self: Command) => {
-    // Operands past <bundle> are a command only behind a `--`. Without one they
-    // stay the excess arguments commander refuses on its own when no variadic
-    // argument is declared — same message, same exit.
-    const command = commandAfterSeparator(process.argv.slice(2));
-    if (operands.length !== (command?.length ?? 0)) {
-      const received = 1 + operands.length - (command?.length ?? 0);
-      self.error(`error: too many arguments for 'run'. Expected 1 argument but got ${received}.`, {
-        code: "commander.excessArguments",
-      });
+  .action(async (bundle: string, rest: string[], opts, self: Command) => {
+    // Operands past <bundle> are a command only behind a `--` that follows the
+    // bundle. Any other is the excess argument commander refuses on its own
+    // for a command without a variadic argument: raised here through the same
+    // `error()`, with the same code and exit.
+    let command: string[] | undefined;
+    try {
+      command = commandFromArgv(process.argv.slice(2), [bundle, ...rest]);
+    } catch (err) {
+      if (!(err instanceof ExcessArgumentsError)) throw err;
+      self.error(err.message, { code: "commander.excessArguments" });
     }
     const globalOpts = program.opts<{ profile?: string }>();
     try {

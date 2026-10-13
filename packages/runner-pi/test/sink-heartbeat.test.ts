@@ -8,7 +8,8 @@
  *   - fire a signed POST against the heartbeat URL on a jittered
  *     interval, with HMAC auth matching the event ingestion surface
  *   - stop cleanly on demand
- *   - stop on HTTP 410 (sink closed) without escalating to an error
+ *   - stop on HTTP 410 (sink closed) without escalating to an error,
+ *     telling the caller that asked through `onClosed`
  *   - surface other HTTP + network errors through `onError` without
  *     crashing the run
  */
@@ -111,6 +112,31 @@ describe("startSinkHeartbeat", () => {
     expect(calls.length).toBe(1);
     // 410 is a graceful stop, not an error — no onError invocation.
     expect(errors.length).toBe(0);
+  });
+
+  it("tells the caller once that the sink is closed, and only on a 410", async () => {
+    const { fetchImpl, respondWith } = collectingFetch();
+    let closed = 0;
+    const handle = startSinkHeartbeat({
+      url: "https://api/runs/r_3/events/heartbeat",
+      runSecret: "a".repeat(43),
+      intervalMs: 30,
+      jitter: 0,
+      fetch: fetchImpl,
+      onError: () => {},
+      onClosed: () => closed++,
+    });
+
+    // Healthy ticks, then a failure that is not a closed sink: nothing to tell.
+    await wait(50);
+    respondWith(500);
+    await wait(50);
+    expect(closed).toBe(0);
+
+    respondWith(410);
+    await wait(120);
+    handle.stop();
+    expect(closed).toBe(1);
   });
 
   it("surfaces non-410 errors through onError without crashing the loop", async () => {

@@ -84,14 +84,47 @@ export class ExecutionModeError extends Error {
 }
 
 /**
- * The command of `appstrate run … -- <command> [args…]`: everything after the
- * first literal `--` of the raw arguments, or undefined when there is none.
- * Read off `argv` because commander drops that separator before the `run`
- * action sees its operands, leaving `run @a/b x` and `run @a/b -- x` alike.
+ * More operands than `appstrate run` takes. Worded as commander 15 words the
+ * error it raises on its own for a command that declares no variadic argument
+ * (`_excessArguments`), which `run` no longer gets since it declares one.
  */
-export function commandAfterSeparator(argv: readonly string[]): string[] | undefined {
-  const at = argv.indexOf("--");
-  return at === -1 ? undefined : argv.slice(at + 1);
+export class ExcessArgumentsError extends Error {
+  override readonly name = "ExcessArgumentsError";
+  constructor(received: readonly string[]) {
+    super(
+      `error: too many arguments for 'run'. Expected 1 argument but got ${received.length}: ${received.join(", ")}.`,
+    );
+  }
+}
+
+/**
+ * The command of `appstrate run <bundle> -- <command> [args…]`, or undefined
+ * for an invocation that has none.
+ *
+ * `argv` is the raw argument tail and `operands` what commander parsed out of
+ * it, `<bundle>` first. Both are needed: commander drops the `--` before the
+ * `run` action sees its operands, leaving `run @a/b x` and `run @a/b -- x`
+ * alike.
+ *
+ * The command is what follows the first `--`, and only when `<bundle>`
+ * precedes that `--`. Ahead of the bundle a `--` merely ends option parsing:
+ * `run -- @a/b` is a plain run of `@a/b`. Operands that are neither the
+ * bundle nor the command raise {@link ExcessArgumentsError}.
+ */
+export function commandFromArgv(
+  argv: readonly string[],
+  operands: readonly string[],
+): string[] | undefined {
+  const separator = argv.indexOf("--");
+  const after = separator === -1 ? [] : argv.slice(separator + 1);
+  // How many operands commander read ahead of the separator.
+  const ahead = operands.length - after.length;
+  if (separator === -1 || ahead < 1) {
+    if (operands.length > 1) throw new ExcessArgumentsError(operands);
+    return undefined;
+  }
+  if (ahead > 1) throw new ExcessArgumentsError(operands.slice(0, ahead));
+  return after;
 }
 
 /**

@@ -45,13 +45,17 @@ interface Platform {
 
 const EVENTS = `/api/runs/${RUN_ID}/events`;
 const FINALIZE = `${EVENTS}/finalize`;
+const HEARTBEAT = `${EVENTS}/heartbeat`;
 
 /**
- * The instance, as far as a command run talks to it. `register` answers
- * `POST /api/runs/remote`; every other route answers 200 and is recorded.
+ * The instance, as far as a command run talks to it. Every request is
+ * recorded. `answer` scripts a path; unscripted, `POST /api/runs/remote`
+ * registers the run (with `warnings`) and any other route answers 200.
  * `/probe` is the command's own endpoint: a child calls it to say it runs.
  */
-function startPlatform(register?: () => Response, warnings: unknown[] = []): Platform {
+function startPlatform(
+  opts: { warnings?: unknown[]; answer?: Record<string, () => Response> } = {},
+): Platform {
   const hits: Hit[] = [];
   const waiters: { path: string; resolve: (hit: Hit) => void }[] = [];
   const server = Bun.serve({
@@ -70,8 +74,9 @@ function startPlatform(register?: () => Response, warnings: unknown[] = []): Pla
         if (waiter.path === hit.path) waiter.resolve(hit);
         else waiters.push(waiter);
       }
+      const scripted = opts.answer?.[url.pathname];
+      if (scripted) return scripted();
       if (url.pathname !== "/api/runs/remote") return new Response("ok");
-      if (register) return register();
       return Response.json(
         {
           id: RUN_ID,
@@ -79,7 +84,7 @@ function startPlatform(register?: () => Response, warnings: unknown[] = []): Pla
           finalize_url: `${url.origin}${FINALIZE}`,
           secret: "ZWZmZWN0aXZlbHkgYW55dGhpbmc=",
           expiresAt: "2099-01-01T00:00:00Z",
-          warnings,
+          warnings: opts.warnings ?? [],
         },
         { status: 201 },
       );
@@ -233,16 +238,18 @@ describe("runCommandAsRunner", () => {
 
   it("announces the run and the integrations it starts without, on stderr", async () => {
     platform.stop();
-    platform = startPlatform(undefined, [
-      {
-        field: "integrations.@acme/gmail",
-        code: "integration_unbound",
-        message: "Integration '@acme/gmail' is bound to no connection",
-      },
-    ]);
+    platform = startPlatform({
+      warnings: [
+        {
+          field: "integrations.@acme/gmail",
+          code: "integration_unbound",
+          message: "Integration '@acme/gmail' is bound to no connection",
+        },
+      ],
+    });
     await run(NOOP, { spec: "draft" });
     expect(stderr).toBe(
-      `→ running @acme/sync@draft (reporting to ${platform.origin} as ${RUN_ID})\n` +
+      `→ running a command under @acme/sync@draft (reporting to ${platform.origin} as ${RUN_ID})\n` +
         "⚠ @acme/gmail: Integration '@acme/gmail' is bound to no connection (integration_unbound)\n",
     );
   });
@@ -266,35 +273,136 @@ describe("runCommandAsRunner", () => {
     const result = finalizeBody(platform);
     expect(result.status).toBe("failed");
     expect(result.error).toEqual({ message: "Command exited with code 3" });
-    expect("usage" in result).toBe(false);
+    // Zero whatever the outcome: a command calls no model.
+    expect(result.usage).toEqual({ input_tokens: 0, output_tokens: 0 });
   });
 
-  it("returns 128 + n and names the signal when one terminates the command", async () => {
-    expect(await run(bun('process.kill(process.pid, "SIGKILL")'))).toBe(137);
+  it("returns 128 + n and reads failed when a signal terminates the command and no shutdown follows", async () => {
+    expect(await run(bun('process.kill(process.pid, "SIGINT")'))).toBe(130);
 
     const result = finalizeBody(platform);
     expect(result.status).toBe("failed");
-    expect(result.error).toEqual({ message: "Command terminated by SIGKILL" });
+    expect(result.error).toEqual({ message: "Command terminated by SIGINT" });
+    expect(exitCodes).toEqual([]);
+  });
+
+  // A terminal's Ctrl-C signals the command and the CLI at once, and the
+  // command's death can be seen before the CLI's own shutdown starts.
+  it("reads cancelled when the shutdown lands shortly after the command died of the signal", async () => {
+    const running = run(
+      bun(`${probe(platform.origin)} await Bun.sleep(50); process.kill(process.pid, "SIGINT");`),
+    );
+    const pid = await childPid();
+    while (isAlive(pid)) await Bun.sleep(1);
+
+    await shutdown.trigger("SIGINT", 130);
+
+    expect(await running).toBe(130);
+    expect(finalizeBody(platform).status).toBe("cancelled");
+    expect(platform.on(FINALIZE)).toHaveLength(1);
+  });
+
+  it("gives the command the environment it is handed, the run id last", async () => {
+    const report =
+      `await fetch("${platform.origin}/probe?profile=" + process.env.APPSTRATE_PROFILE` +
+      ` + "&key=" + process.env.APPSTRATE_API_KEY + "&run=" + process.env.APPSTRATE_RUN_ID);`;
+    await run(bun(report), {
+      env: {
+        APPSTRATE_PROFILE: "staging",
+        APPSTRATE_API_KEY: "apst_flag",
+        APPSTRATE_RUN_ID: "run_not_this_one",
+      },
+    });
+
+    const { query } = platform.on("/probe")[0]!;
+    expect(query.get("profile")).toBe("staging");
+    expect(query.get("key")).toBe("apst_flag");
+    expect(query.get("run")).toBe(RUN_ID);
+  });
+
+  it("keeps the run alive with signed heartbeats while the command runs", async () => {
+    await run(bun(`${probe(platform.origin)} await Bun.sleep(200);`), { heartbeatIntervalMs: 20 });
+
+    const beats = platform.on(HEARTBEAT);
+    expect(beats.length).toBeGreaterThanOrEqual(1);
+    expect(beats[0]!.method).toBe("POST");
+    expect(beats[0]!.headers.get("webhook-signature")).toStartWith("v1,");
+    expect(beats[0]!.headers.get("webhook-id")).toBeTruthy();
+    // The heartbeat stops with the command: none follows the finalize.
+    expect(platform.hits.at(-1)!.path).toBe(FINALIZE);
+  });
+
+  // The run was cancelled through the API, failed by the watchdog, or outlived
+  // its sink TTL: the command is told once, runs on, and nothing is finalized.
+  it("says once that the run is closed on the instance, lets the command finish, sends no finalize", async () => {
+    platform.stop();
+    platform = startPlatform({
+      answer: { [HEARTBEAT]: () => new Response("gone", { status: 410 }) },
+    });
+
+    const code = await run(
+      bun(`${probe(platform.origin)} await Bun.sleep(250); process.exit(5);`),
+      { heartbeatIntervalMs: 20 },
+    );
+
+    expect(code).toBe(5);
+    expect(stderr.match(/is closed on the instance/g)).toHaveLength(1);
+    expect(stderr).toContain(
+      `warn: run ${RUN_ID} is closed on the instance: calls naming it are refused. The command keeps running.\n`,
+    );
+    expect(platform.on(HEARTBEAT)).toHaveLength(1);
+    expect(platform.on(FINALIZE)).toHaveLength(0);
+    expect(stderr).not.toContain("finalize failed");
+  });
+
+  // What refuses the first event refuses every later signed call: the command
+  // would run under a run the platform fails at its boot deadline.
+  it("does not start the command when the run's first event is refused", async () => {
+    platform.stop();
+    platform = startPlatform({
+      answer: {
+        [EVENTS]: () =>
+          Response.json(
+            { code: "timestamp_out_of_tolerance", detail: "Timestamp out of tolerance" },
+            { status: 401 },
+          ),
+      },
+    });
+
+    expect(await run(bun(probe(platform.origin)))).toBe(1);
+
+    expect(platform.on("/probe")).toHaveLength(0);
+    expect(platform.on(HEARTBEAT)).toHaveLength(0);
+    expect(stderr).toContain("error: The run's first event could not be delivered: ");
+    expect(stderr).toContain("401");
+    expect(stderr).toContain("error: The command was not started.\n");
+    const result = finalizeBody(platform);
+    expect(result.status).toBe("failed");
+    expect((result.error as { message: string }).message).toStartWith(
+      "The run's first event could not be delivered: ",
+    );
   });
 
   it("never spawns the command when the instance refuses the registration", async () => {
     platform.stop();
-    platform = startPlatform(
-      () =>
-        new Response(
-          JSON.stringify({
-            code: "missing_integration_connection",
-            errors: [
-              {
-                field: "integrations.@acme/gmail",
-                code: "required_integration_unbound",
-                message: "Integration '@acme/gmail' is required and bound to no connection",
-              },
-            ],
-          }),
-          { status: 409, headers: { "Content-Type": "application/problem+json" } },
-        ),
-    );
+    platform = startPlatform({
+      answer: {
+        "/api/runs/remote": () =>
+          new Response(
+            JSON.stringify({
+              code: "missing_integration_connection",
+              errors: [
+                {
+                  field: "integrations.@acme/gmail",
+                  code: "required_integration_unbound",
+                  message: "Integration '@acme/gmail' is required and bound to no connection",
+                },
+              ],
+            }),
+            { status: 409, headers: { "Content-Type": "application/problem+json" } },
+          ),
+      },
+    });
 
     const err = await run(bun(probe(platform.origin))).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ReportStartError);
@@ -349,45 +457,30 @@ describe("runCommandAsRunner", () => {
     const result = finalizeBody(platform);
     expect(result.status).toBe("cancelled");
     expect(result.error).toEqual({ message: "Command cancelled (CLI received a signal)." });
+    expect(result.usage).toEqual({ input_tokens: 0, output_tokens: 0 });
     expect(platform.on(FINALIZE)).toHaveLength(1);
     // The coordinator exits once the run is closed, with the signal's code.
     expect(exitCodes).toEqual([143]);
     expect(await running).toBe(143);
   });
 
-  it("on shutdown: kills a command that ignores the request once the grace has passed", async () => {
+  // The run — and with it the command's access — closes at once: the finalize
+  // does not wait for a command that takes its time, or ignores the request.
+  it("on shutdown: closes the run before a command that ignores the request is killed", async () => {
     const running = run(
       bun(`process.on("SIGTERM", () => {}); ${probe(platform.origin)} await Bun.sleep(60_000);`),
-      { stopGraceMs: 100 },
+      { stopGraceMs: 400 },
     );
     const pid = await childPid();
 
-    await shutdown.trigger("SIGINT", 130);
+    const stopped = shutdown.trigger("SIGINT", 130);
+    await platform.next(FINALIZE);
+    expect(isAlive(pid)).toBe(true);
+    expect(finalizeBody(platform).status).toBe("cancelled");
 
+    await stopped;
     expect(isAlive(pid)).toBe(false);
-    expect(finalizeBody(platform).status).toBe("cancelled");
     expect(await running).toBe(137);
-  });
-
-  // A terminal's Ctrl-C signals the command and the CLI at once. When the
-  // command's death is seen first, the shutdown arrives a turn of the event
-  // loop later — and the run is still `cancelled`, not `failed`.
-  it("reads cancelled when the shutdown lands one turn after the command died of the signal", async () => {
-    const running = run(
-      bun(`${probe(platform.origin)} await Bun.sleep(50); process.kill(process.pid, "SIGINT");`),
-    );
-    const pid = await childPid();
-    // Runs at every turn of the loop, ahead of anything queued after it: the
-    // first turn that finds the command reaped is the one its exit is seen in.
-    const triggerOnceReaped = (): void => {
-      if (isAlive(pid)) setImmediate(triggerOnceReaped);
-      else void shutdown.trigger("SIGINT", 130);
-    };
-    setImmediate(triggerOnceReaped);
-
-    expect(await running).toBe(130);
-    expect(finalizeBody(platform).status).toBe("cancelled");
-    expect(platform.on(FINALIZE)).toHaveLength(1);
   });
 
   it("starts nothing when the shutdown arrives before the command would", async () => {
@@ -472,7 +565,9 @@ describe("appstrate run … -- <command> (src/cli.ts)", () => {
     // Options written after `--` reach the command untouched.
     expect(out.stdout).toBe(`${RUN_ID} --flag -x\n`);
     expect(out.exitCode).toBe(4);
-    expect(out.stderr).toContain(`→ running @acme/sync@draft (reporting to ${platform.origin}`);
+    expect(out.stderr).toContain(
+      `→ running a command under @acme/sync@draft (reporting to ${platform.origin}`,
+    );
     const body = JSON.parse(platform.on("/api/runs/remote")[0]!.body) as Record<string, unknown>;
     expect(body.source).toEqual({ kind: "registry", packageId: "@acme/sync", stage: "draft" });
     expect(body.input).toEqual({ since: "2026-01-01" });
@@ -482,7 +577,9 @@ describe("appstrate run … -- <command> (src/cli.ts)", () => {
 
   it("keeps stdout empty when the instance refuses the registration", async () => {
     platform.stop();
-    platform = startPlatform(() => new Response("forbidden", { status: 403 }));
+    platform = startPlatform({
+      answer: { "/api/runs/remote": () => new Response("forbidden", { status: 403 }) },
+    });
 
     const out = await cli(headless(), "@acme/sync", "--", ...bun('console.log("ran")'));
 
@@ -512,16 +609,47 @@ describe("appstrate run … -- <command> (src/cli.ts)", () => {
   it("still refuses extra operands that no `--` introduces", async () => {
     const out = await cli(headless(), "@acme/sync", "python", "sync.py");
     expect(out.stderr).toContain(
-      "error: too many arguments for 'run'. Expected 1 argument but got 3.",
+      "error: too many arguments for 'run'. Expected 1 argument but got 3: @acme/sync, python, sync.py.",
     );
     expect(out.exitCode).toBe(1);
     expect(platform.hits).toHaveLength(0);
+  });
 
-    const mixed = await cli(headless(), "@acme/sync", "stray", "--", "true");
-    expect(mixed.stderr).toContain(
-      "error: too many arguments for 'run'. Expected 1 argument but got 2.",
+  // Ahead of the bundle, `--` only ends option parsing: this is a plain run of
+  // the agent on the instance, not a command.
+  it("runs the agent itself when the `--` precedes the bundle", async () => {
+    platform.stop();
+    platform = startPlatform({
+      answer: { "/api/agents/@acme/sync/run": () => new Response("{}", { status: 403 }) },
+    });
+
+    await cli(headless(), "--", "@acme/sync");
+
+    expect(platform.hits.map((hit) => hit.path)).toEqual(["/api/agents/@acme/sync/run"]);
+  });
+
+  // `--profile` and `--api-key` exist for the CLI's process only; a command
+  // that calls `appstrate` itself must resolve the same instance and identity.
+  it("hands the command the profile and the API key its flags named", async () => {
+    const { APPSTRATE_API_KEY: _key, ...withoutKey } = headless();
+    const out = await cli(
+      withoutKey,
+      "--profile",
+      "staging",
+      "--api-key",
+      "apst_flag",
+      "@acme/sync",
+      "--",
+      "sh",
+      "-c",
+      'echo "$APPSTRATE_PROFILE $APPSTRATE_API_KEY"',
     );
-    expect(platform.hits).toHaveLength(0);
+
+    expect(out.stdout).toBe("staging apst_flag\n");
+    expect(out.exitCode).toBe(0);
+    expect(platform.on("/api/runs/remote")[0]!.headers.get("authorization")).toBe(
+      "Bearer apst_flag",
+    );
   });
 
   it("leaves an invocation without a command on its usual error stream", async () => {
@@ -553,5 +681,45 @@ describe("appstrate run … -- <command> (src/cli.ts)", () => {
     expect(await exited).toBe(130);
     expect(isAlive(pid)).toBe(false);
     expect(finalizeBody(platform).status).toBe("cancelled");
+  });
+
+  // A second Ctrl-C cuts the shutdown short. The run is closed already, and no
+  // exit of the CLI leaves its command running.
+  it("a second interrupt exits at once and takes a command that ignores signals with it", async () => {
+    const proc = Bun.spawn(
+      [
+        process.execPath,
+        "src/cli.ts",
+        "run",
+        "@acme/sync",
+        "--",
+        ...bun(
+          `process.on("SIGINT", () => {}); process.on("SIGTERM", () => {}); ` +
+            `${probe(platform.origin)} await Bun.sleep(60_000);`,
+        ),
+      ],
+      {
+        cwd: CLI_ROOT,
+        env: cliEnv(headless()),
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      },
+    );
+    const pid = Number((await platform.next("/probe")).query.get("pid"));
+    try {
+      proc.kill("SIGINT");
+      await platform.next(FINALIZE);
+      expect(finalizeBody(platform).status).toBe("cancelled");
+      // Asked to stop, the command is still there: its grace has just started.
+      expect(isAlive(pid)).toBe(true);
+
+      proc.kill("SIGINT");
+      expect(await proc.exited).toBe(130);
+      for (let waited = 0; isAlive(pid) && waited < 2_000; waited += 10) await Bun.sleep(10);
+      expect(isAlive(pid)).toBe(false);
+    } finally {
+      if (isAlive(pid)) process.kill(pid, "SIGKILL");
+    }
   });
 });

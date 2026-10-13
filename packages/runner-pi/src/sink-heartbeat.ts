@@ -62,6 +62,13 @@ export interface StartSinkHeartbeatOptions {
    * output without runner-pi taking a logger dependency.
    */
   readonly onError?: (err: unknown) => void;
+  /**
+   * Invoked once, when the server answers 410: the sink is closed — the run
+   * was cancelled through the API, failed by the watchdog, or outlived its
+   * sink TTL — and the loop stops. For a runner whose work outlives the run
+   * and has to say so. Must never throw.
+   */
+  readonly onClosed?: () => void;
 }
 
 function defaultErrorSink(err: unknown): void {
@@ -176,9 +183,10 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
         // failure worth surfacing.
         onError(new Error(`heartbeat failed: ${res.status} ${res.statusText}`));
       }
-      if (res.status === 410) {
+      if (res.status === 410 && !stopped) {
         // Server has closed the sink — no point in pinging further.
         stopped = true;
+        opts.onClosed?.();
       }
     } catch (err) {
       // A rejection caused by our own `stop()` is not a fault to report: the
