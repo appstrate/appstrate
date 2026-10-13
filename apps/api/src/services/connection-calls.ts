@@ -39,7 +39,7 @@ export interface ConnectionCallView {
   host: string;
   outcome: string;
   duration_ms: number;
-  request_id: string | null;
+  request_id: string;
 }
 
 export interface ConnectionCallFilters {

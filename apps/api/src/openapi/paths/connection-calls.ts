@@ -77,7 +77,7 @@ const connectionCallSchema = {
         "proxy answered itself (`unauthorized_target`, `upstream_timeout`, …).",
     },
     duration_ms: { type: "integer", minimum: 0 },
-    request_id: { type: ["string", "null"], description: "The call's `Request-Id`." },
+    request_id: { type: "string", description: "The call's `Request-Id`." },
   },
 } as const;
 

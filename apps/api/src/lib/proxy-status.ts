@@ -70,11 +70,7 @@ const PROXY_PROBLEMS = {
     proxyError: "proxy_configuration_error",
   },
   // After the upstream answered: a 500, not a 503 that would read as "nothing happened, retry".
-  session_store_unavailable: {
-    status: 500,
-    title: "Session Store Unavailable",
-    proxyError: "proxy_internal_error",
-  },
+  session_store_unavailable: { status: 500, title: "Session Store Unavailable" },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
   invalid_request: { status: 400, title: "Invalid Request" },
   upstream_unresolvable: {

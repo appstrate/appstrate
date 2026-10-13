@@ -14,13 +14,14 @@
  */
 
 import type { Actor } from "../../lib/actor.ts";
+import type { Permission } from "../../lib/permissions.ts";
 import { forbidden } from "../../lib/errors.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
 /** What a call made for a run requires. */
-export const PROXY_RUN_PERMISSION = "credential-proxy:call-run";
+export const PROXY_RUN_PERMISSION = "credential-proxy:call-run" satisfies Permission;
 /** What a call naming no run requires. */
-export const PROXY_OWN_PERMISSION = "credential-proxy:call-own";
+export const PROXY_OWN_PERMISSION = "credential-proxy:call-own" satisfies Permission;
 
 interface ProxyAccessInput {
   /** The caller's effective permissions in the space. */

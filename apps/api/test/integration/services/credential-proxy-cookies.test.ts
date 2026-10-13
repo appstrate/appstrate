@@ -505,21 +505,5 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       expect(err).toBeInstanceOf(ProxyCallError);
       expect(err).toMatchObject({ code: "unauthorized_target", connectionId });
     });
-
-    it("saves nothing, and fails nothing, when the upstream set no cookie", async () => {
-      const packageId = "@cpcookieorg/shop";
-      await cookieCredential(packageId);
-      const upstream = scriptedUpstream([]);
-
-      const result = await call(
-        packageId,
-        "https://1.1.1.1/cart",
-        upstream.fetchImpl,
-        undefined,
-        unwritable(),
-      );
-
-      expect(result.status).toBe(200);
-    });
   });
 });

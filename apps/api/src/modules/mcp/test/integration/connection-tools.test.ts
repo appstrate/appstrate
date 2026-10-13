@@ -6,8 +6,9 @@
  * authorization-code flow, `aud` = the organization's MCP resource):
  *
  *   - who is offered the two tools: a space admin and a custom role holding
- *     `credential-proxy:call-own`, never a builder, a credential whose scopes omit it, or a
- *     cookie session or the chat's loopback bearer, which the bearer-only proxy refuses;
+ *     `credential-proxy:call-own`, never a builder, the owner of a personal space, a credential
+ *     whose scopes omit it, or a cookie session or the chat's loopback bearer, which the
+ *     bearer-only proxy refuses;
  *   - `api_call` makes one proxy call per request and relays what each came back with: the
  *     upstream's answer, cut and filtered, or the proxy's own refusal, never reaching a
  *     connection another member shared;
@@ -288,6 +289,23 @@ describe("mcp connection tools", () => {
       expect(names).toContain("api_call");
     });
 
+    it("declares neither to the owner of a personal space, whose `admin` there omits it", async () => {
+      const personal = await seedSpace({
+        orgId: owner.orgId,
+        name: "Perso",
+        ownerUserId: owner.user.id,
+        visibility: "private",
+      });
+      const names = await toolNames({
+        path: spacePath(owner, personal.id),
+        headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+      });
+      expect(names).not.toContain("list_connections");
+      expect(names).not.toContain("api_call");
+      // The control: the rest of `admin` holds there.
+      expect(names).toContain("run_and_wait");
+    });
+
     it("declares neither to a credential whose scopes omit `credential-proxy:call-own`", async () => {
       // Same creator, a space admin: only the key's own ceiling differs.
       const without = await toolNames(
@@ -390,8 +408,8 @@ describe("mcp connection tools", () => {
     });
 
     /** A connection of the colleague's, shared into the space. */
-    async function shareColleagueConnection(account = "theirs"): Promise<string> {
-      const id = await connect(colleague, account);
+    async function shareColleagueConnection(): Promise<string> {
+      const id = await connect(colleague, "theirs");
       await seedShares(id, [owner.defaultSpaceId]);
       return id;
     }

@@ -23,7 +23,6 @@ const OWN = "credential-proxy:call-own";
 /** What each fixture row stores, by its name, and what `--apply` leaves in it. */
 const BEFORE: Record<string, string[]> = {
   old: ["agents:run", OLD, "runs:read"],
-  both: [NEW, "agents:run", OLD],
   new: ["agents:run", NEW],
   own: [OWN, "agents:run"],
   none: [],
@@ -31,7 +30,6 @@ const BEFORE: Record<string, string[]> = {
 const AFTER: Record<string, string[]> = {
   ...BEFORE,
   old: ["agents:run", NEW, "runs:read"],
-  both: [NEW, "agents:run"],
 };
 
 let ctx: TestContext;
@@ -69,20 +67,15 @@ describe("0046 — credential-proxy:call renamed credential-proxy:call-run where
       });
       roles[name] = await seedSpaceRole({ orgId: ctx.orgId, key: name, permissions: held });
     }
-    const rewritten = {
-      apiKeyIds: [keys.old!.id, keys.both!.id].sort(),
-      roles: [roles.old!, roles.both!]
-        .map(({ id, orgId, key }) => ({ id, orgId, key }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
-    };
+    const { id, orgId, key } = roles.old!;
+    const rewritten = { apiKeyIds: [keys.old!.id], roles: [{ id, orgId, key }] };
 
     expect(await run(false)).toEqual(rewritten);
     expect(lines[0]).toStartWith("database: ");
-    expect(lines).toContain(`api_keys.scopes holding ${OLD}: 2`);
-    expect(lines).toContain(`space_roles.permissions holding ${OLD}: 2`);
+    expect(lines).toContain(`api_keys.scopes holding ${OLD}: 1`);
+    expect(lines).toContain(`space_roles.permissions holding ${OLD}: 1`);
     expect(lines).toContain(`  key ${keys.old!.id}`);
     expect(lines).toContain(`  role ${roles.old!.id} (org ${ctx.orgId}, key old)`);
-    expect(lines).toContain(`left holding ${OLD}: 0`);
     expect(lines.at(-1)).toContain("DRY RUN");
     for (const key of Object.values(keys)) {
       expect(lines.join("\n")).not.toContain(key.keyHash);

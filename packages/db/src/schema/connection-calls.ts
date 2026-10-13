@@ -39,7 +39,7 @@ export const connectionCalls = pgTable(
     host: text("host").notNull(),
     outcome: text("outcome").notNull(),
     durationMs: integer("duration_ms").notNull(),
-    requestId: text("request_id"),
+    requestId: text("request_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

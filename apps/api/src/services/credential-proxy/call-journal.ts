@@ -36,7 +36,7 @@ interface ConnectionCall {
   /** The upstream's HTTP status as a string, or the proxy's own problem code. */
   outcome: string;
   durationMs: number;
-  requestId: string | null;
+  requestId: string;
 }
 
 /** Never throws: a database fault is logged and the row is lost. */

@@ -7,8 +7,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { Actor } from "@appstrate/connect";
 import {
   getCatalog,
@@ -22,14 +20,11 @@ import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts
 import { AFPS_SCHEMA_VERSION, validateManifest } from "@appstrate/core/validation";
 import { orgPermissions, presetPermissions } from "../../../../src/lib/permissions.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { toolsFor } from "./helpers.ts";
+import { noExtra, parseResult, toolsFor } from "./helpers.ts";
 
 // The tools read the mounted route table (what each operation's guard requires)
 // to decide what this caller is shown.
 await registerTestPlatformApp();
-
-// The handlers ignore `extra`; supply a typed placeholder.
-const noExtra = {} as unknown as AppstrateRequestExtra;
 
 /**
  * Everything the full tool surface takes: the transport gate, invoke, launch
@@ -38,12 +33,6 @@ const noExtra = {} as unknown as AppstrateRequestExtra;
  * asserts on the tool it means to, not on whether it is declared.
  */
 const FULL_SURFACE = ["mcp:read", "mcp:invoke", "agents:run", "runs:read", "files:read"];
-
-function parseResult(result: CallToolResult): Record<string, unknown> {
-  const first = result.content[0];
-  if (!first || first.type !== "text") throw new Error("expected text content");
-  return JSON.parse(first.text) as Record<string, unknown>;
-}
 
 function makeTools(
   permissions: string[],

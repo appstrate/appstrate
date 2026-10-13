@@ -499,9 +499,8 @@ export async function selectAccessibleConnection(
   }
   if (error) throw resolutionConflict(error);
 
-  const picked = resolved[packageId]?.[0];
-  const row = picked && rows.find((r) => r.id === picked.connectionId);
-  return row ? toResolvedRow(row) : null;
+  const picked = resolved[packageId]![0]!;
+  return toResolvedRow(rows.find((r) => r.id === picked.connectionId)!);
 }
 
 /**

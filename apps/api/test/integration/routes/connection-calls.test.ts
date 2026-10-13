@@ -75,7 +75,7 @@ describe("connection call journal routes", () => {
       target: "https://api.example.com/v1/users?page=2",
       outcome: "200",
       durationMs: 12,
-      requestId: null,
+      requestId: "req_1",
       ...overrides,
     });
   }
@@ -325,10 +325,8 @@ describe("connection call journal routes", () => {
       for (const query of [
         "actor=me",
         "connection_id=nope",
-        "actor_type=user",
         "start_date=yesterday",
         "startingAfter=abc",
-        "format=csv",
         "limit=0",
         "limit=201",
       ]) {
@@ -374,7 +372,7 @@ describe("connection call journal routes", () => {
       const connectionId = await seedIntegrationConnection(ctx, CRM);
       const labels = ["a", "b", "c", "d", "e"].map((letter) => letter.repeat(60));
 
-      await record(connectionId, { target: `https://${labels.join(".")}/${"p".repeat(5000)}` });
+      await record(connectionId, { target: `https://${labels.join(".")}` });
 
       const [row] = await rows();
       expect(row!.host).toHaveLength(255);

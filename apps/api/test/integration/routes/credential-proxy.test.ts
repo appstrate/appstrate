@@ -98,6 +98,11 @@ function restoreFetch(): void {
   if (realFetch) globalThis.fetch = realFetch;
 }
 
+// The route journals off the response path: no late insert reaches the next case's row counts.
+afterEach(async () => {
+  await drainAudits(5_000);
+});
+
 const INTEGRATION_ID = "@cporg/gmail";
 
 function gmailManifest(name = INTEGRATION_ID): IntegrationManifest {
@@ -116,26 +121,6 @@ function gmailManifest(name = INTEGRATION_ID): IntegrationManifest {
         }),
       },
     },
-  });
-}
-
-/** The Gmail integration, published and switched on in the context's default space. */
-async function seedGmailIntegration(ctx: TestContext): Promise<void> {
-  await seedPackage({
-    id: INTEGRATION_ID,
-    orgId: ctx.orgId,
-    type: "integration",
-    source: "local",
-    // Homed in the space: a `space_packages` row only speaks for a space the
-    // package is PLACED in.
-    homeSpaceId: ctx.defaultSpaceId,
-    draftManifest: gmailManifest(),
-  });
-  await seedPublishedVersion(INTEGRATION_ID, "1.0.0");
-  // Activate the integration in the default space.
-  await db.insert(spacePackages).values({
-    spaceId: ctx.defaultSpaceId,
-    packageId: INTEGRATION_ID,
   });
 }
 
@@ -176,19 +161,34 @@ async function seedGmailConnection(
   return row!.id;
 }
 
-async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
-  await seedGmailIntegration(ctx);
-  // A live connection owned by the API key's owner (the resolved actor).
-  await db.insert(integrationConnections).values({
-    integrationId: INTEGRATION_ID,
-    authKey: "api",
-    accountId: "acct-1",
-    label: "acct-1",
-    orgId: ctx.orgId,
+/** The Gmail integration and a live connection of the key's owner (the resolved actor); its id. */
+async function seedIntegrationWithConnection(ctx: TestContext): Promise<string> {
+  await seedProxyIntegration(ctx, gmailManifest());
+  return seedProxyConnection(ctx, INTEGRATION_ID, "api", { api_key: "ya29.live-token" });
+}
+
+/** An integration with one `primary` api_key auth whose credential holds `fields`. */
+const templated = (name: string, authorizedUris: string[], fields: string[]) =>
+  localIntegrationManifest({
+    name,
+    auths: {
+      primary: {
+        type: "api_key",
+        authorizedUris,
+        credentialFields: fields,
+        requiredCredentialFields: fields,
+        delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+      },
+    },
+  });
+
+/** The Gmail integration's org default in the context's default space. */
+async function orgDefault(ctx: TestContext, connectionIds: string[], enforce: boolean) {
+  await db.insert(integrationOrgDefaults).values({
     spaceId: ctx.defaultSpaceId,
-    userId: ctx.user.id,
-    credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
-    scopesGranted: [],
+    integrationId: INTEGRATION_ID,
+    connectionIds,
+    enforce,
   });
 }
 
@@ -863,7 +863,7 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
     await flushRedis();
     ctx = await proxyCallerContext();
     apiKey = await mintProxyKey(ctx);
-    await seedGmailIntegration(ctx);
+    await seedProxyIntegration(ctx, gmailManifest());
     await seedPackage({ id: AGENT_ID, orgId: ctx.orgId, type: "agent", source: "local" });
     const colleague = { ...ctx, user: await createTestUser() };
     colleagueId = colleague.user.id;
@@ -926,6 +926,27 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
 
     const rows = await journaled();
     expect(rows.map((row) => [row.connectionId, row.outcome])).toEqual([[own1, "200"]]);
+  });
+
+  it("journals a target templated on a credential field as the template, never the value", async () => {
+    const HOOK = "@cporg/hook";
+    await seedProxyIntegration(
+      ctx,
+      templated(HOOK, ["{$credential.webhook_url}"], ["api_key", "webhook_url"]),
+    );
+    // The secret URL sits on a literal address: the proxy resolves the host before dispatch.
+    const hook = await seedProxyConnection(ctx, HOOK, "primary", {
+      api_key: "HOOK-APIKEY-SECRET",
+      webhook_url: "https://1.1.1.1/services/T0SECRET?key=KEYSECRET",
+    });
+    const res = await call({ "X-Integration-Id": HOOK, "X-Target": "{{webhook_url}}" });
+    expect(res.status).toBe(200);
+
+    const rows = await journaled();
+    expect(rows.map((row) => [row.connectionId, row.host, row.outcome])).toEqual([
+      [hook, "{{webhook_url}}", "200"],
+    ]);
+    expect(rows[0]!.host).not.toContain("1.1.1.1");
   });
 
   it("journals every call of a run with its run id, the actor apart from a shared connection's owner", async () => {
@@ -1108,12 +1129,7 @@ describe("POST /api/credential-proxy/proxy — one permission per path", () => {
     await truncateAll();
     await flushRedis();
     ctx = await proxyCallerContext();
-    await seedIntegrationWithConnection(ctx);
-    const [connection] = await db
-      .select({ id: integrationConnections.id })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
-    connectionId = connection!.id;
+    connectionId = await seedIntegrationWithConnection(ctx);
     await seedPackage({ id: AGENT_ID, orgId: ctx.orgId, type: "agent", source: "local" });
     upstreamCalls = 0;
     mockUpstream(async () => {
@@ -1207,7 +1223,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
     ctx = await proxyCallerContext();
     colleague = await memberContext(ctx, "member");
     apiKey = await mintProxyKey(ctx, ["credential-proxy:call-own"]);
-    await seedGmailIntegration(ctx);
+    await seedProxyIntegration(ctx, gmailManifest());
     upstreamAuth = [];
     mockUpstream(async (_input, init) => {
       upstreamAuth.push(new Headers(init?.headers).get("authorization") ?? "");
@@ -1228,15 +1244,6 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
         "X-Session-Id": uuidV4(),
         ...extra,
       },
-    });
-  }
-
-  async function orgDefault(connectionIds: string[], enforce: boolean) {
-    await db.insert(integrationOrgDefaults).values({
-      spaceId: ctx.defaultSpaceId,
-      integrationId: INTEGRATION_ID,
-      connectionIds,
-      enforce,
     });
   }
 
@@ -1312,7 +1319,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
   it("an enforced org default: 403 run_required whatever is named, its members never listed", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
-    await orgDefault([shared], true);
+    await orgDefault(ctx, [shared], true);
 
     const named = [undefined, own, shared, crypto.randomUUID()];
     for (const id of named) {
@@ -1386,7 +1393,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, the caller's own c
   it("a soft org default is ignored: the own connection is bound, never the default's", async () => {
     await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
-    await orgDefault([shared], false);
+    await orgDefault(ctx, [shared], false);
     expect((await call()).status).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer tok-own-1"]);
   });
@@ -1401,7 +1408,7 @@ describe("GET /api/credential-proxy/connections", () => {
     await flushRedis();
     ctx = await proxyCallerContext();
     colleague = await memberContext(ctx, "member");
-    await seedGmailIntegration(ctx);
+    await seedProxyIntegration(ctx, gmailManifest());
     mockUpstream(async () => new Response("should not be called", { status: 599 }));
   });
   afterEach(() => restoreFetch());
@@ -1479,21 +1486,6 @@ describe("GET /api/credential-proxy/connections", () => {
   });
 
   it("never returns a credential value: an entry templated on a credential field stays a template", async () => {
-    /** An integration with one `primary` api_key auth whose credential holds `fields`. */
-    const templated = (name: string, authorizedUris: string[], fields: string[]) =>
-      localIntegrationManifest({
-        name,
-        auths: {
-          primary: {
-            type: "api_key",
-            authorizedUris,
-            credentialFields: fields,
-            requiredCredentialFields: fields,
-            delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
-          },
-        },
-      });
-
     // The shape of the shipped webhooks integration: the entry IS the secret URL.
     const HOOK = "@cporg/hook";
     const hookCredential = {
@@ -1566,12 +1558,7 @@ describe("GET /api/credential-proxy/connections", () => {
   it("flags run_required under an enforced org default", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
-    await db.insert(integrationOrgDefaults).values({
-      spaceId: ctx.defaultSpaceId,
-      integrationId: INTEGRATION_ID,
-      connectionIds: [shared],
-      enforce: true,
-    });
+    await orgDefault(ctx, [shared], true);
 
     const body = (await (await list()).json()) as {
       data: { connection_id: string; run_required: boolean }[];
@@ -1883,8 +1870,8 @@ describe("POST /api/credential-proxy/proxy — a credential no header can carry"
     expect(upstreamCalls).toBe(0);
   });
 
-  it("answers a body broken off after the headers as upstream_unreachable, not a 500", async () => {
-    await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
+  it("answers a body broken off after the headers as upstream_unreachable, not a 500, journaled once as such", async () => {
+    const connectionId = await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
     mockUpstream(async () => {
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -1899,20 +1886,6 @@ describe("POST /api/credential-proxy/proxy — a credential no header can carry"
     const body = (await res.json()) as { code: string; detail: string };
     expect(body.code).toBe("upstream_unreachable");
     expect(body.detail).toBe("1.1.1.1 could not be reached");
-  });
-
-  it("journals a buffered body broken off after a 200 once, as what the caller was answered", async () => {
-    const connectionId = await seedProxyConnection(ctx, KEY_INTEGRATION, "api", { api_key: "ok" });
-    mockUpstream(async () => {
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new TextEncoder().encode("hel"));
-          controller.error(new Error("socket closed"));
-        },
-      });
-      return new Response(body, { status: 200 });
-    });
-    expect((await call()).status).toBe(502);
     await drainAudits(5_000);
     const rows = await db.select().from(connectionCalls);
     expect(rows.map((row) => [row.connectionId, row.outcome])).toEqual([

@@ -22,6 +22,7 @@ import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../services/credential-proxy/session.ts";
+import { CREDENTIAL_PROXY_PATH } from "./catalog.ts";
 import {
   asRecord,
   dispatchHeaders,
@@ -44,7 +45,6 @@ interface ConnectionToolContext {
 }
 
 const CONNECTIONS_PATH = "/api/credential-proxy/connections";
-const PROXY_PATH = "/api/credential-proxy/proxy";
 
 /**
  * Requests per call: what one tool call may hold before it answers. Every response is kept, up to
@@ -70,8 +70,8 @@ const MAX_HEADER_VALUE_CHARS = 2048;
 /** Issues one argument refusal names. */
 const MAX_REPORTED_ISSUES = 10;
 
-const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
-const BODILESS_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+/** The verbs the proxy route declares. */
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 /**
  * The framing of the dispatched request, which this layer derives from the body it builds: what a
@@ -130,8 +130,7 @@ const requestSchema = z.strictObject({
     .optional()
     .describe(
       "A string is sent as is (set its Content-Type yourself); an object or array is sent as " +
-        "JSON, with `Content-Type: application/json` unless you set one. Refused with GET and " +
-        "HEAD.",
+        "JSON, with `Content-Type: application/json` unless you set one. Refused with GET.",
     ),
   substitute_body: z
     .boolean()
@@ -258,7 +257,7 @@ function prepareCall(
 
   let body: Uint8Array<ArrayBuffer> | undefined;
   if (request.body !== undefined) {
-    if (BODILESS_METHODS.has(request.method)) {
+    if (request.method === "GET") {
       return invalid(at("body"), `${request.method} carries no body.`);
     }
     if (typeof request.body === "string") {
@@ -306,7 +305,7 @@ async function dispatchCall(
   signal: AbortSignal | undefined,
 ): Promise<Outcome> {
   const response = await ctx.dispatch(
-    new Request(new URL(PROXY_PATH, ctx.origin).toString(), {
+    new Request(new URL(CREDENTIAL_PROXY_PATH, ctx.origin).toString(), {
       method: call.method,
       headers: call.headers,
       body: call.body,

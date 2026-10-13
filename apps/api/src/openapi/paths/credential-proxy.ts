@@ -7,8 +7,7 @@ import { problemContent } from "../responses.ts";
  * Credential proxy endpoint: a remote runner's calls for its run (`X-Run-Id`), and
  * calls on the caller's own connections outside any run.
  *
- * Wire-compatible with the runtime-pi sidecar `/proxy` contract. Accepts
- * bearer auth: API keys (headless / GitHub Action) or OIDC-issued JWTs
+ * Accepts bearer auth: API keys (headless / GitHub Action) or OIDC-issued JWTs
  * (interactive CLI device-flow, dashboard second-party apps). Cookie
  * sessions are rejected.
  *
@@ -487,7 +486,7 @@ export const credentialProxyPaths = {
       ],
       responses: {
         "200": {
-          description: "The caller's directly callable connections",
+          description: "The caller's connections callable outside a run",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {

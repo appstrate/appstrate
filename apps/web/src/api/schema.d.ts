@@ -11129,7 +11129,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's directly callable connections */
+            /** @description The caller's connections callable outside a run */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -12974,7 +12974,7 @@ export interface operations {
                             outcome: string;
                             duration_ms: number;
                             /** @description The call's `Request-Id`. */
-                            request_id: string | null;
+                            request_id: string;
                         }[];
                         hasMore: boolean;
                     };
@@ -16123,7 +16123,7 @@ export interface operations {
                             outcome: string;
                             duration_ms: number;
                             /** @description The call's `Request-Id`. */
-                            request_id: string | null;
+                            request_id: string;
                         }[];
                         hasMore: boolean;
                     };

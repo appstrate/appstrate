@@ -74,6 +74,9 @@ function extractHeaderParams(node: OperationNode): string[] {
   return names;
 }
 
+/** The credential proxy's route: kept out of the catalog, dispatched to by `api_call` alone. */
+export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
+
 /**
  * Kept out of the catalog: the MCP transport and its RFC 9728 well-known (no
  * recursive self-invocation), the spec document and its viewer, which
@@ -86,7 +89,7 @@ function isExcludedPath(pathTemplate: string): boolean {
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
     pathTemplate === "/api/docs" ||
-    pathTemplate === "/api/credential-proxy/proxy"
+    pathTemplate === CREDENTIAL_PROXY_PATH
   );
 }
 

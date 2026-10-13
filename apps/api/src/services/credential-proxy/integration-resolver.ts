@@ -16,7 +16,7 @@
  * `X-Run-Id` run's bound set, else one of the actor's own connections.
  * {@link listOwnProxyConnections} lists the latter with the same rows and rule.
  *
- * Both this external-runner path and the in-container sidecar path
+ * Both this path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
  * `buildProxyCredentialsPayload` helper in `@appstrate/connect`, so the
  * payload shape and injection contract cannot drift between them.

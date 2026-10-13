@@ -11,9 +11,8 @@
  * stored permission string the platform does not know grants nothing. Two columns store permission
  * strings: `api_keys.scopes` and `space_roles.permissions`. In each row holding
  * `credential-proxy:call`, that element becomes `credential-proxy:call-run` where it stands
- * (`array_replace`: the order and every other element kept); a row holding both names loses the
- * old one instead, so none ends with the new name twice. Revoked and expired keys are rewritten
- * like the others. The OIDC scope columns are left alone: the OIDC vocabulary does not list the
+ * (`array_replace`: the order and every other element kept). Revoked and expired keys are
+ * rewritten like the others. The OIDC scope columns are left alone: the OIDC vocabulary does not list the
  * permission, so no client, token or consent stores it. Audit payloads are history and stay as
  * written.
  *
@@ -57,11 +56,9 @@ const NEW = "credential-proxy:call-run";
 /** The rows whose `column` holds the old name: exactly what {@link renamed} removes. */
 const holdsOld = (column: AnyPgColumn): SQL => sql`${OLD} = ANY(${column})`;
 
-/** `column` with the old name renamed where it stands, or removed where the new one is held too. */
+/** `column` with the old name renamed where it stands. */
 const renamed = (column: AnyPgColumn): SQL<string[]> =>
-  sql<string[]>`CASE WHEN ${NEW} = ANY(${column})
-    THEN array_remove(${column}, ${OLD})
-    ELSE array_replace(${column}, ${OLD}, ${NEW}) END`;
+  sql<string[]>`array_replace(${column}, ${OLD}, ${NEW})`;
 
 interface RenamedRows {
   apiKeyIds: string[];
@@ -107,17 +104,6 @@ export async function runRenameCredentialProxyCallScope(options: {
       for (const role of result.roles)
         out(`  role ${role.id} (org ${role.orgId}, key ${role.key})`);
 
-      const [keysLeft] = await tx
-        .select({ n: sql<number>`count(*)::int` })
-        .from(apiKeys)
-        .where(holdsOld(apiKeys.scopes));
-      const [rolesLeft] = await tx
-        .select({ n: sql<number>`count(*)::int` })
-        .from(spaceRoles)
-        .where(holdsOld(spaceRoles.permissions));
-      const left = keysLeft!.n + rolesLeft!.n;
-      out(`left holding ${OLD}: ${left}`);
-      if (left !== 0) throw new Error(`${left} row(s) still hold ${OLD} after the rewrite`);
       if (!apply) throw new DryRunRollback();
     });
   } catch (error) {

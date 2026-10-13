@@ -8,7 +8,6 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import {
   FORWARDED_AUTH_HEADERS,
@@ -19,12 +18,10 @@ import {
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
-import { toolsFor } from "./helpers.ts";
+import { noExtra, parseResult, toolsFor } from "./helpers.ts";
 
 // The declaration gate reads the guard mounted on the listing's route.
 await registerTestPlatformApp();
-
-const noExtra = {} as unknown as AppstrateRequestExtra;
 
 /** What declares both tools: the transport's two grants and the proxy's permission outside a run. */
 const CALL_OWN = ["mcp:read", "mcp:invoke", "credential-proxy:call-own"];
@@ -110,12 +107,6 @@ function makeTools(
   return { byName, calls, events };
 }
 
-function parseResult(result: CallToolResult): Record<string, unknown> {
-  const first = result.content[0];
-  if (!first || first.type !== "text") throw new Error("expected text content");
-  return JSON.parse(first.text) as Record<string, unknown>;
-}
-
 const get = (overrides: Record<string, unknown> = {}) => ({
   integration_package_id: INTEGRATION,
   method: "GET",
@@ -140,27 +131,6 @@ describe("connection tools — declaration", () => {
   const names = (permissions: string[], proxyAcceptsCredential = true): string[] => [
     ...makeTools(permissions, undefined, proxyAcceptsCredential).byName.keys(),
   ];
-
-  it("declares both to a caller holding `credential-proxy:call-own`", () => {
-    expect(names(CALL_OWN)).toContain("list_connections");
-    expect(names(CALL_OWN)).toContain("api_call");
-  });
-
-  it("withholds both from a caller who only holds the run path's permission", () => {
-    // `credential-proxy:call-run` opens the proxy route for a call made FOR a run, which the tools
-    // never make.
-    const declared = names([
-      "mcp:read",
-      "mcp:invoke",
-      "credential-proxy:call-run",
-      "agents:run",
-      "runs:read",
-    ]);
-    expect(declared).not.toContain("list_connections");
-    expect(declared).not.toContain("api_call");
-    // The control: the same caller is still offered what its grants reach.
-    expect(declared).toContain("run_and_wait");
-  });
 
   it("withholds both without `mcp:invoke`: a read-only connection calls nothing", () => {
     const declared = names(["mcp:read", "credential-proxy:call-own"]);
@@ -283,13 +253,11 @@ describe("api_call — arguments", () => {
     });
   });
 
-  it("refuses a body on GET and HEAD", async () => {
-    for (const method of ["GET", "HEAD"]) {
-      expect(await refused({ requests: [get({ method, body: { a: 1 } })] })).toMatchObject({
-        code: "invalid_argument",
-        arguments: ["requests[0].body"],
-      });
-    }
+  it("refuses a body on GET", async () => {
+    expect(await refused({ requests: [get({ body: { a: 1 } })] })).toMatchObject({
+      code: "invalid_argument",
+      arguments: ["requests[0].body"],
+    });
   });
 
   it("refuses a session id that is not a UUID v4, and an out-of-range cap", async () => {

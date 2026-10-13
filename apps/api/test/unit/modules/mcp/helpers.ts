@@ -5,6 +5,8 @@
  * surface derived from the caller, read by both the tools and the instructions.
  */
 
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { buildServerInstructions } from "../../../../src/modules/mcp/router.ts";
 import {
   buildMcpTools,
@@ -32,4 +34,14 @@ export function instructionsFor(permissions: Iterable<string>, contextInjected =
     deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true),
     contextInjected,
   );
+}
+
+/** The handlers that ignore `extra` take this typed placeholder. */
+export const noExtra = {} as unknown as AppstrateRequestExtra;
+
+/** The JSON a tool returned as its first text block. */
+export function parseResult(result: CallToolResult): Record<string, unknown> {
+  const first = result.content[0];
+  if (!first || first.type !== "text") throw new Error("expected text content");
+  return JSON.parse(first.text) as Record<string, unknown>;
 }

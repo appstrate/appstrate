@@ -18,7 +18,7 @@ CREATE TABLE "connection_calls" (
 	"host" text NOT NULL,
 	"outcome" text NOT NULL,
 	"duration_ms" integer NOT NULL,
-	"request_id" text,
+	"request_id" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint

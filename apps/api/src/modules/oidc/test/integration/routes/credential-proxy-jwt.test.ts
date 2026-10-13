@@ -247,7 +247,6 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
   const AGENT_ID = "@jwtorg/agent";
   const realFetch: typeof fetch = globalThis.fetch;
   let owner: TestContext;
-  let colleague: TestContext;
   let shared: string;
   let upstreamAuth: string[];
   let tokens: Map<string, string>;
@@ -279,7 +278,7 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     );
     await seedPackage({ id: AGENT_ID, orgId: owner.orgId, type: "agent", source: "local" });
     // The team's connection: a colleague's, shared into the space.
-    colleague = await memberContext(owner, "member", "builder");
+    const colleague = await memberContext(owner, "member", "builder");
     shared = await seedProxyConnection(
       colleague,
       INTEGRATION_ID,
