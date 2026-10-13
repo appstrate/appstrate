@@ -117,6 +117,7 @@ import {
   usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
   type ReconnectTarget,
+  type WidenedConnection,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
 import type {
@@ -591,11 +592,13 @@ function assertScopesInAuthCatalog(
   ]);
 }
 
+type ConnectAudit = Parameters<typeof recordAuditAs>[2];
+
 /**
  * Complete a connect door's write and build its audit events. A creation records the granted
  * scopes. A reconnect renews the credential in place and records them when it changed them, since
- * they reach every agent the connection serves; one that moved a space-scoped row onto an org-tier
- * client records the widening.
+ * they reach every agent the connection serves; one whose write moved the row to org scope
+ * records that widening.
  */
 async function completeConnect(
   strategy: IntegrationConnectStrategy,
@@ -603,14 +606,18 @@ async function completeConnect(
   input: ConnectCompleteInput,
 ) {
   const target = ctx.target;
-  const conn = await strategy.complete(ctx, input);
+  const widenings: WidenedConnection[] = [];
+  const conn = await strategy.complete(
+    { ...ctx, onScopeWidened: (widened) => widenings.push(widened) },
+    input,
+  );
   const after = { packageId: ctx.integrationId, authKey: ctx.authKey, accountId: conn.account_id };
   const scopes =
     target &&
     auditDiff({
       scopesGranted: [[...target.scopesGranted].sort(), [...conn.scopes_granted].sort()],
     });
-  const audits: Parameters<typeof recordAuditAs>[2][] = [
+  const audits: ConnectAudit[] = [
     target
       ? {
           action: "integration.connection.reconnected",
@@ -625,16 +632,18 @@ async function completeConnect(
           after: { ...after, scopesGranted: [...conn.scopes_granted].sort() },
         },
   ];
-  if (target && target.spaceId !== null && conn.spaceId === null) {
-    audits.push({
-      action: "integration.connection.scope_widened",
-      resourceType: "integration_connection",
-      resourceId: conn.id,
-      before: { spaceId: target.spaceId, label: target.label },
-      after: { originSpaceId: target.spaceId, label: conn.label },
-    });
-  }
+  audits.push(...widenings.map(scopeWidenedAudit));
   return { conn, audits };
+}
+
+function scopeWidenedAudit(widened: WidenedConnection): ConnectAudit {
+  return {
+    action: "integration.connection.scope_widened",
+    resourceType: "integration_connection",
+    resourceId: widened.id,
+    before: { spaceId: widened.previousSpaceId, label: widened.previousLabel },
+    after: { originSpaceId: widened.previousSpaceId, label: widened.label },
+  };
 }
 
 /**
@@ -1010,11 +1019,7 @@ export function createIntegrationsRouter() {
       });
       for (const w of widened) {
         await recordAuditFromContext(c, {
-          action: "integration.connection.scope_widened",
-          resourceType: "integration_connection",
-          resourceId: w.id,
-          before: { spaceId: w.previousSpaceId, label: w.previousLabel },
-          after: { originSpaceId: w.previousSpaceId, label: w.label },
+          ...scopeWidenedAudit(w),
           spaceIdOverride: w.previousSpaceId,
         });
       }

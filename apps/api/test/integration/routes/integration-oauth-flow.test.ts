@@ -38,6 +38,7 @@ import {
 } from "../../helpers/strict-authorization-server.ts";
 import {
   auditEvents,
+  packages,
   spacePackages,
   integrationConnections,
   integrationOauthClients,
@@ -555,6 +556,69 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       spaceId: null,
       originSpaceId: ctx.defaultSpaceId,
     });
+  });
+
+  it("audits one scope_widened when a client promotion widens the row while its reconnect completes", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "space-secret",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "space-secret" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    const scoped = (await storedConnection())!;
+    expect(scoped.spaceId).toBe(ctx.defaultSpaceId);
+
+    // The callback fetches userinfo after it read its reconnect target and before it writes:
+    // the promotion lands in between.
+    let promotion: Response | undefined;
+    const userinfo = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch() {
+        promotion = await app.request(
+          `/api/integrations/${INTEGRATION}/oauth-clients/${scoped.clientRef}/promote`,
+          { method: "POST", headers: authHeaders(ctx) },
+        );
+        return Response.json({});
+      },
+    });
+    try {
+      const [pkg] = await db.select().from(packages).where(eq(packages.id, INTEGRATION));
+      const manifest = structuredClone(pkg!.draftManifest) as {
+        auths: Record<string, Record<string, unknown>>;
+      };
+      manifest.auths[AUTH_KEY]!.userinfo_endpoint = `http://127.0.0.1:${userinfo.port}/userinfo`;
+      await db
+        .update(packages)
+        .set({ draftManifest: manifest })
+        .where(eq(packages.id, INTEGRATION));
+
+      await consentAndCallback(await beginConnect(ctx, { connection_id: scoped.id }));
+    } finally {
+      await userinfo.stop(true);
+    }
+
+    expect(promotion?.status).toBe(200);
+    expect(await storedConnection()).toMatchObject({
+      id: scoped.id,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+    const audits = await db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, scoped.id));
+    expect(audits.map((audit) => audit.action).sort()).toEqual([
+      "integration.connection.created",
+      "integration.connection.reconnected",
+      "integration.connection.scope_widened",
+    ]);
   });
 
   it("connects with a manifest-declared public client (none)", async () => {

@@ -7,6 +7,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import type { Hono } from "hono";
+import type { AppstrateModule, AuthResolution } from "@appstrate/core/module";
+import type { AppEnv } from "../../../src/types/index.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -26,7 +29,6 @@ import { oauthStateStore } from "../../../src/services/connect/oauth-state-store
 import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
 import { runWidenConnectionsToOrgScope } from "../../../../../scripts/migration/0041-widen-connections-to-org-scope.ts";
 
-const app = getTestApp();
 const INTEGRATION = "@myorg/probe";
 const SYSTEM_ID = "probe-system";
 
@@ -55,6 +57,36 @@ const manifest = localIntegrationManifest({
 });
 
 let ctx: TestContext;
+
+/** An org-bound delegate pinning no space (a third-party token): it acts in the `X-Space-Id` space. */
+const unpinnedDelegate: AppstrateModule = {
+  manifest: { id: "unpinned-delegate", name: "Unpinned Delegate", version: "1.0.0" },
+  async init() {},
+  authStrategies() {
+    return [
+      {
+        id: "unpinned-delegate",
+        async authenticate({ headers }) {
+          const orgId = headers.get("x-test-delegate-org");
+          if (!orgId) return null;
+          return {
+            user: ctx.user,
+            orgId,
+            orgRole: "admin",
+            authMethod: "test-unpinned-delegate",
+            principalKind: "delegate",
+            permissions: ["integrations:connect"],
+          } satisfies AuthResolution;
+        },
+      },
+    ];
+  },
+};
+
+/** Its own app: a strategy is contributed by a module, and the default app loads none. */
+const delegateApp = getTestApp({ modules: [unpinnedDelegate] });
+// Built last: `getTestApp` registers the permission providers of the modules it is given.
+const app = getTestApp();
 
 beforeEach(async () => {
   await truncateAll();
@@ -118,8 +150,13 @@ async function ciphertextOf(id: string): Promise<string | undefined> {
   return row?.secret;
 }
 
-function post(path: string, headers: Record<string, string>, body: unknown) {
-  return app.request(`/api/integrations/${INTEGRATION}/auths/${path}`, {
+function post(
+  path: string,
+  headers: Record<string, string>,
+  body: unknown,
+  through: Hono<AppEnv> = app,
+) {
+  return through.request(`/api/integrations/${INTEGRATION}/auths/${path}`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -145,23 +182,74 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
       connection_id: connectionId,
     });
 
-  it("refuses an org-scoped row to an API key (403), not to the owner's session", async () => {
-    const orgRow = await seedRow("api", null);
+  // A reconnect targets a row of the door's own auth.
+  const doors = [
+    { path: "api/connect/fields", authKey: "api", body: { credentials: { api_key: "new" } } },
+    { path: "api/connect/session", authKey: "api", body: {} },
+    { path: "google/connect/oauth2", authKey: "google", body: {} },
+  ] as const;
+  const seedDoorRow = (door: (typeof doors)[number], spaceId: string | null) =>
+    seedRow(door.authKey, spaceId, door.authKey === "google" ? SYSTEM_ID : undefined);
 
-    const refused = await reconnect(orgRow.id, bearer);
-    expect(refused.status).toBe(403);
-    expect(await ciphertextOf(orgRow.id)).toBe(orgRow.credentialsEncrypted);
-    // A reconnect targets a row of the door's own auth: each door gets one.
-    const googleOrgRow = await seedRow("google", null);
-    for (const [door, row] of [
-      ["api/connect/session", orgRow],
-      ["google/connect/oauth2", googleOrgRow],
-    ] as const) {
-      expect((await post(door, bearer, { connection_id: row.id })).status).toBe(403);
+  /** The fields door writes the new secret; the other two mint a URL and write nothing yet. */
+  const renewedBy = async (
+    door: (typeof doors)[number],
+    row: { id: string; credentialsEncrypted: string },
+  ) =>
+    ((await ciphertextOf(row.id)) !== row.credentialsEncrypted) ===
+    (door.path === "api/connect/fields");
+
+  const delegates: Record<
+    string,
+    () => { headers: Record<string, string>; through: Hono<AppEnv> }
+  > = {
+    "an API key, pinned to its space": () => ({ headers: bearer, through: app }),
+    "a third-party token pinning no space": () => ({
+      headers: { "x-test-delegate-org": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId },
+      through: delegateApp,
+    }),
+  };
+
+  for (const [name, credential] of Object.entries(delegates)) {
+    it(`refuses ${name} an org-scoped row at every reconnect door (403), and renews its space's row`, async () => {
+      const { headers, through } = credential();
+      for (const door of doors) {
+        const orgRow = await seedDoorRow(door, null);
+        const refused = await post(
+          door.path,
+          headers,
+          { ...door.body, connection_id: orgRow.id },
+          through,
+        );
+        expect([door.path, refused.status]).toEqual([door.path, 403]);
+        expect(((await refused.json()) as { detail: string }).detail).toContain(
+          "A delegated credential cannot reconnect a connection serving the whole organization",
+        );
+        expect(await ciphertextOf(orgRow.id)).toBe(orgRow.credentialsEncrypted);
+
+        const spaceRow = await seedDoorRow(door, ctx.defaultSpaceId);
+        const renewed = await post(
+          door.path,
+          headers,
+          { ...door.body, connection_id: spaceRow.id },
+          through,
+        );
+        expect([door.path, renewed.status]).toEqual([door.path, 200]);
+        expect(await renewedBy(door, spaceRow)).toBe(true);
+      }
+    });
+  }
+
+  it("lets the owner's session reconnect an org-scoped row at every door", async () => {
+    for (const door of doors) {
+      const orgRow = await seedDoorRow(door, null);
+      const res = await post(door.path, authHeaders(ctx), {
+        ...door.body,
+        connection_id: orgRow.id,
+      });
+      expect([door.path, res.status]).toEqual([door.path, 200]);
+      expect(await renewedBy(door, orgRow)).toBe(true);
     }
-
-    expect((await reconnect(orgRow.id, authHeaders(ctx))).status).toBe(200);
-    expect(await ciphertextOf(orgRow.id)).not.toBe(orgRow.credentialsEncrypted);
   });
 
   it("lists, for an own org-scoped row, the share it may make: its own space only", async () => {
