@@ -15,12 +15,26 @@
  * completion regardless of which modal (if any) is currently open. The
  * store is also synced across tabs via the `storage` event so a pairing
  * minted (or completed) in one tab is reflected in the others.
+ *
+ * An entry leaves the store when its poll ends: the server is the one that
+ * states the outcome, and a pairing redeemed while the tab was hidden or
+ * closed is still read as `connected` after its TTL. The clock only bounds
+ * the entries no poll reaches (`UNPOLLED_RETENTION_MS`).
  */
 
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 
 export const STORAGE_KEY = "appstrate_pending_pairings";
+
+/**
+ * How long past its `expiresAt` an entry stays in the store. This is a bound
+ * for the entries no poll ends (minted in an org the user never returns to),
+ * not what completes a pairing: it is sized past the point where the server
+ * row can still exist (1 h of grace after the TTL + a 15 min sweep), so an
+ * entry is never dropped while its status route can still answer.
+ */
+export const UNPOLLED_RETENTION_MS = 2 * 60 * 60_000;
 
 export interface PendingPairing {
   /** Pairing row id (`pair_...`) — NOT the secret token. */
@@ -36,7 +50,7 @@ interface PairingState {
   pairings: PendingPairing[];
   add: (p: PendingPairing) => void;
   remove: (id: string) => void;
-  /** Drop pairings whose TTL has elapsed (keeps the poller list bounded). */
+  /** Drop pairings past `UNPOLLED_RETENTION_MS` (keeps the list bounded). */
   prune: () => void;
   /** Re-read the persisted list (used by the cross-tab `storage` sync). */
   hydrate: () => void;
@@ -51,6 +65,11 @@ function isPendingPairing(p: unknown): p is PendingPairing {
     typeof c.expiresAt === "string" &&
     typeof c.orgId === "string"
   );
+}
+
+/** Whether the store still holds `p` at `now` (epoch ms). */
+function isRetained(p: PendingPairing, now: number): boolean {
+  return new Date(p.expiresAt).getTime() + UNPOLLED_RETENTION_MS > now;
 }
 
 /**
@@ -68,7 +87,7 @@ function getStorage(): Storage | null {
   }
 }
 
-/** Read + validate + TTL-filter the persisted list. Exported for tests. */
+/** Read + validate the persisted list, minus unretained entries. Exported for tests. */
 export function readPersistedPairings(): PendingPairing[] {
   const storage = getStorage();
   if (!storage) return [];
@@ -78,9 +97,7 @@ export function readPersistedPairings(): PendingPairing[] {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     const now = Date.now();
-    return parsed.filter(
-      (p) => isPendingPairing(p) && new Date(p.expiresAt).getTime() > now,
-    ) as PendingPairing[];
+    return parsed.filter((p) => isPendingPairing(p) && isRetained(p, now)) as PendingPairing[];
   } catch {
     return [];
   }
@@ -116,7 +133,7 @@ export const pairingStore = createStore<PairingState>()((set) => ({
   prune: () =>
     set((s) => {
       const now = Date.now();
-      const next = s.pairings.filter((p) => new Date(p.expiresAt).getTime() > now);
+      const next = s.pairings.filter((p) => isRetained(p, now));
       if (next.length === s.pairings.length) return s;
       persist(next);
       return { pairings: next };

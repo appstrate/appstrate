@@ -46,6 +46,7 @@ const {
   removePendingPairing,
   readPersistedPairings,
   STORAGE_KEY,
+  UNPOLLED_RETENTION_MS,
 } = await import("../pairing-store");
 
 function reset() {
@@ -54,7 +55,9 @@ function reset() {
 }
 
 const future = () => new Date(Date.now() + 5 * 60_000).toISOString();
-const past = () => new Date(Date.now() - 1_000).toISOString();
+// TTL elapsed, server row still readable: the poll has yet to state the outcome.
+const pastTtl = () => new Date(Date.now() - UNPOLLED_RETENTION_MS + 60_000).toISOString();
+const pastRetention = () => new Date(Date.now() - UNPOLLED_RETENTION_MS - 1_000).toISOString();
 
 describe("pairingStore", () => {
   beforeEach(reset);
@@ -84,12 +87,32 @@ describe("pairingStore", () => {
     expect(pairingStore.getState().pairings).toHaveLength(0);
   });
 
-  it("prune drops TTL-expired pairings, keeps live ones", () => {
+  it("prune keeps a pairing past its TTL: only its poll ends it", () => {
     addPendingPairing({ id: "live", providerId: "codex", expiresAt: future(), orgId: "org_a" });
-    addPendingPairing({ id: "dead", providerId: "codex", expiresAt: past(), orgId: "org_a" });
+    addPendingPairing({
+      id: "past_ttl",
+      providerId: "codex",
+      expiresAt: pastTtl(),
+      orgId: "org_a",
+    });
     pairingStore.getState().prune();
     const ids = pairingStore.getState().pairings.map((p) => p.id);
-    expect(ids).toEqual(["live"]);
+    expect(ids).toEqual(["live", "past_ttl"]);
+    expect(readPersistedPairings().map((p) => p.id)).toEqual(["live", "past_ttl"]);
+  });
+
+  it("prune drops a pairing past the unpolled retention", () => {
+    addPendingPairing({ id: "live", providerId: "codex", expiresAt: future(), orgId: "org_a" });
+    addPendingPairing({
+      id: "unpolled",
+      providerId: "codex",
+      expiresAt: pastRetention(),
+      orgId: "org_a",
+    });
+    pairingStore.getState().prune();
+    expect(pairingStore.getState().pairings.map((p) => p.id)).toEqual(["live"]);
+    const persisted = JSON.parse(fakeStorage.getItem(STORAGE_KEY) as string) as { id: string }[];
+    expect(persisted.map((p) => p.id)).toEqual(["live"]);
   });
 
   it("persists to storage and reloads (survives a page reload)", () => {
@@ -127,16 +150,30 @@ describe("pairingStore", () => {
     expect(readPersistedPairings()).toEqual([]);
   });
 
-  it("drops malformed + TTL-expired entries on load, keeps valid live ones", () => {
+  it("keeps a pairing past its TTL on load, drops malformed and unretained entries", () => {
     fakeStorage.setItem(
       STORAGE_KEY,
       JSON.stringify([
         { id: "live", providerId: "codex", expiresAt: future(), orgId: "org_a" },
-        { id: "expired", providerId: "codex", expiresAt: past(), orgId: "org_a" },
+        { id: "past_ttl", providerId: "codex", expiresAt: pastTtl(), orgId: "org_a" },
+        { id: "unpolled", providerId: "codex", expiresAt: pastRetention(), orgId: "org_a" },
         { id: "malformed" }, // missing required fields
+        { id: "bad_date", providerId: "codex", expiresAt: "not a date", orgId: "org_a" },
       ]),
     );
-    expect(readPersistedPairings().map((p) => p.id)).toEqual(["live"]);
+    expect(readPersistedPairings().map((p) => p.id)).toEqual(["live", "past_ttl"]);
+  });
+
+  it("hydrate keeps a pairing past its TTL (reload, cross-tab sync)", () => {
+    fakeStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        { id: "past_ttl", providerId: "codex", expiresAt: pastTtl(), orgId: "org_a" },
+        { id: "unpolled", providerId: "codex", expiresAt: pastRetention(), orgId: "org_a" },
+      ]),
+    );
+    pairingStore.getState().hydrate();
+    expect(pairingStore.getState().pairings.map((p) => p.id)).toEqual(["past_ttl"]);
   });
 
   it("hydrate mirrors another tab's write (cross-tab sync)", () => {
