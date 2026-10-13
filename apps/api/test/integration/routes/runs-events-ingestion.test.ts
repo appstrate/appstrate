@@ -2443,6 +2443,49 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     expect(row?.result).toBeNull();
   });
 
+  // The exemption is for the ABSENCE of an output only: one the command run
+  // does send is held to the agent's schema like any other run's.
+  it("a remote command run that sends a schema-violating output is failed", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent", {
+      tokenUsage: null,
+      runOrigin: "remote",
+      runnerKind: "command",
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { wrong: 1 },
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toMatch(/^Output validation failed/);
+  });
+
+  it("a remote command run that sends a conforming output stays success, output persisted", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent", {
+      tokenUsage: null,
+      runOrigin: "remote",
+      runnerKind: "command",
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      output: { answer: "42" },
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    expect((row?.result as { output?: unknown } | null)?.output).toEqual({ answer: "42" });
+  });
+
   for (const [label, seed] of [
     ["a remote run of another kind", { runOrigin: "remote", runnerKind: "cli" }],
     [

@@ -388,7 +388,13 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // `agent_deleted` is a designed state (see `runAgentIdentity` in
     // `state/runs.ts`). Failing the run here would fabricate a verdict about
     // work that may have completed fine, so the runner's own status stands.
-  } else if (status === "success" && !isCommandRun(run) && effective.manifest.output?.schema) {
+  } else if (
+    status === "success" &&
+    effective.manifest.output?.schema &&
+    // A command run that emits no output is not judged by the agent's output
+    // contract; one that does emit an output is validated like any other run.
+    !(isCommandRun(run) && (result.output === null || result.output === undefined))
+  ) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
@@ -970,11 +976,13 @@ function runHadZeroTokens(usage: TokenUsage): boolean {
 /**
  * Is the run's runner a command? No agent executed then, so neither verdict on
  * an agent's execution judges the run: not the LLM-liveness check (zero tokens
- * is a command's normal outcome), not the agent's output contract (nothing
- * called `output`). Both halves are needed. `runner_kind` is a header the caller
- * sets at run creation: on a platform-executed run it labels the client that
- * triggered the run, while the runner is still the platform's own agent runtime,
- * which both verdicts hold for. Only on a remote run is the caller the runner.
+ * is a command's normal outcome), not the ABSENCE of the output the agent's
+ * contract requires (nothing called `output`) — an output the runner does send
+ * is validated like any other. Both halves are needed. `runner_kind` is a
+ * header the caller sets at run creation: on a platform-executed run it labels
+ * the client that triggered the run, while the runner is still the platform's
+ * own agent runtime, which both verdicts hold for. Only on a remote run is the
+ * caller the runner.
  */
 function isCommandRun(run: Pick<RunSinkContext, "runOrigin" | "runnerKind">): boolean {
   return run.runOrigin === "remote" && run.runnerKind === COMMAND_RUNNER_KIND;
