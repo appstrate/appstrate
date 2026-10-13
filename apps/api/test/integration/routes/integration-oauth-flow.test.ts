@@ -28,7 +28,7 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
   createStrictAuthorizationServer,
@@ -39,6 +39,7 @@ import {
 import {
   auditEvents,
   packages,
+  packageVersions,
   spacePackages,
   integrationConnections,
   integrationOauthClients,
@@ -276,6 +277,117 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     const refreshed = await storedConnection();
     expect(decryptCredentialsToStringMap(refreshed!.credentialsEncrypted).access_token).toBe(
       provider.issuedAccessTokens[1]!,
+    );
+  });
+
+  // A draft changes with no version minted: once a version exists, the code, the verifier and
+  // the client secret go where that version says.
+  it("reads a published integration's endpoints from its latest version, not its draft", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await seedPublishedVersion(INTEGRATION, "1.0.0");
+
+    const other = createStrictAuthorizationServer({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    try {
+      const [pkg] = await db.select().from(packages).where(eq(packages.id, INTEGRATION)).limit(1);
+      const draft = structuredClone(pkg!.draftManifest) as {
+        auths: Record<string, Record<string, unknown>>;
+      };
+      draft.auths[AUTH_KEY]!.authorization_endpoint = other.authorizationEndpoint;
+      draft.auths[AUTH_KEY]!.token_endpoint = other.tokenEndpoint;
+      await db.update(packages).set({ draftManifest: draft }).where(eq(packages.id, INTEGRATION));
+
+      const authUrl = await beginConnect(ctx);
+      expect(authUrl.startsWith(provider.authorizationEndpoint)).toBe(true);
+      await consentAndCallback(authUrl);
+
+      expect(provider.tokenRequests.map((r) => r.status)).toEqual([200]);
+      expect(other.authorizeRequests).toHaveLength(0);
+      expect(other.tokenRequests).toHaveLength(0);
+      expect(await storedConnection()).not.toBeNull();
+    } finally {
+      other.stop();
+    }
+  });
+
+  it("answers 404 for an auth only the draft of a published integration declares", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await seedPublishedVersion(INTEGRATION, "1.0.0");
+    const [pkg] = await db.select().from(packages).where(eq(packages.id, INTEGRATION)).limit(1);
+    const draft = structuredClone(pkg!.draftManifest) as {
+      auths: Record<string, Record<string, unknown>>;
+    };
+    draft.auths.added = draft.auths[AUTH_KEY]!;
+    await db.update(packages).set({ draftManifest: draft }).where(eq(packages.id, INTEGRATION));
+
+    const res = await app.request(`/api/integrations/${INTEGRATION}/auths/added/connect/oauth2`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(404);
+
+    // What the space is shown as connectable is read from the same manifest.
+    const detail = await app.request(`/api/integrations/${INTEGRATION}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(detail.status).toBe(200);
+    const { auths } = (await detail.json()) as { auths: Array<{ auth_key: string }> };
+    expect(auths.map((a) => a.auth_key)).toEqual([AUTH_KEY]);
+  });
+
+  it("names the cause when the published versions leave nothing to connect through", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const version = await seedPublishedVersion(INTEGRATION, "1.0.0");
+    await db
+      .update(packageVersions)
+      .set({ yanked: true })
+      .where(eq(packageVersions.id, version.id));
+
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { detail: string }).detail).toContain(
+      "no usable published version",
     );
   });
 

@@ -1377,6 +1377,31 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Security
 
+- **Connecting reads the integration's published version, not its draft**
+  (#1947). Every connect flow (OAuth kickoff and callback, the hosted form,
+  the fields and login flows) took the `auth` declaration from the draft, so
+  an edit nobody had published changed where an authorization code, a PKCE
+  verifier and the OAuth client secret were sent. The connect flows, the
+  auths `GET /api/integrations/{id}` lists as connectable and the
+  registration of OAuth clients now read the `latest` published version, as
+  the credential proxy does; the draft serves only while the integration has
+  no published version. An auth the draft adds is listed and connectable
+  once a version declaring it is published.
+
+- **BREAKING (API): a schedule running as an end user takes the authority to
+  borrow one** (#1947). `schedules:write` alone let a member (the `builder`
+  preset, a custom role) name any end user of the space as `actor`, and each
+  fire then ran with that end user's own connections. Naming an end user
+  other than the caller, and any `PATCH` or `DELETE` of a schedule whose
+  stored actor is an end user, now answers `403 forbidden` (`param: actor` on
+  the naming) unless the caller is an API key, which already borrows an end
+  user with `Appstrate-User`, or holds `api-keys:create` in the space and
+  could mint one. The `builder` preset holds no `api-keys:*`. The rule for
+  another member is unchanged (org owner or admin only). Existing schedules
+  keep firing; a builder who created one for an end user no longer edits or
+  deletes it. The dashboard's actor picker lists end users to holders of
+  `api-keys:create` only.
+
 - **BREAKING: an `api_call` encodes each `{{field}}` for the place it takes**
   (#1915), on the three paths (platform credential proxy, sidecar, CLI), through
   one request preparation shared with `connect.login`. A credential value was
@@ -1470,6 +1495,53 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   re-consents what the connection holds plus the auth's `default_scopes`. It
   used to request the current agent's scopes, which then reached every agent
   bound to the connection.
+
+- **Only a platform-realm account joins an organization or reads it over a
+  cookie** (#1949). An `end_user:<space>` account holding an address could
+  accept an invitation sent to that address, be auto-joined by an org-level
+  OAuth client, open the realtime streams' cookie branch once a member, and
+  reach the OAuth client administration, which the realm guard exempted with
+  every `/api/oauth/` path. The membership door (`provisionMember`) answers
+  `403 not_a_platform_account`, the stream branch `401`, and the guard `403` on
+  `/api/oauth/clients*` and `/api/oauth/scopes`; the hosted OIDC pages are
+  public paths and unchanged. A social sign-in callback neither signs in nor
+  links an identity to an account outside its transaction's realm.
+
+- **An agent's tool call cannot name a login input's placeholder** (#1949).
+  While a `connect.tool` login runs, the runner's proxy substitutes `{{key}}`
+  with the login secret in every request the runner sends to the auth's
+  authorized URIs, a parallel tool call's included. The sidecar refuses a call
+  whose arguments name a `{{key}}` of the connection's login inputs, at any
+  time in the run. On such a connection an argument that legitimately
+  contains that text (a mail-merge `{{email}}`) is refused too.
+
+- **Under `RUN_ADAPTER=firecracker`, a `delivery.files` credential belongs to
+  its runner** (#1949). The sidecar wrote it on its own uid with the
+  manifest's mode: `0600` locked the runner out (the SSH integration did not
+  start), `0644` opened it to the agent sharing the guest. The file is written
+  owner-only and the guest's exec wrapper gives it to the runner's uid
+  (`--own`). The fix is in the guest rootfs: it ships with this release's
+  Firecracker artifacts.
+
+- **Hardening** (#1949).
+  - **BREAKING (OIDC): `GET /api/oauth/logout` redirects only to a
+    `postLogoutRedirectUris` entry of an enabled client.** A `redirect_uris`
+    entry is no longer accepted as a fallback, and a client that registered
+    itself (DCR, CIMD) is never redirected to. Before the deploy, list the
+    clients whose logout relied on the fallback
+    (`SELECT client_id, name FROM oauth_clients WHERE post_logout_redirect_uris IS NULL OR post_logout_redirect_uris = '{}'`,
+    column names as in `packages/db/src/schema/oidc.ts`) and register their
+    post-logout URI; until then their logout lands on `/`.
+  - The magic-link confirmation page names no account: it knew the address
+    only from the link's query string.
+  - A remote MCP credential that is not an HTTP header value is refused
+    without quoting it in the boot report.
+  - An integration manifest is refused on write when an `authorized_uris`
+    entry of an auth that injects a credential is plain `http://`, unless its
+    host is listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. Published versions still
+    load.
+  - The transparent egress plane refuses a plain-HTTP request naming two
+    hosts (a repeated `Host`, an absolute-form target for another one).
 
 ## [1.0.0-beta.66] - 2026-10-08
 

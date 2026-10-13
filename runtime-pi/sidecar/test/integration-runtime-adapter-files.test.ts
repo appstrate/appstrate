@@ -47,6 +47,24 @@ describe("materializeFileMountsOnHost (process adapter, CC-5)", () => {
     await rm(scratchRoot, { recursive: true, force: true });
   });
 
+  // A file an earlier spawn left there is no longer the sidecar's to write into (the wrapper gave
+  // it to that runner); a read-only one stands in for it here.
+  it("replaces a file already at the declared path instead of writing into it", async () => {
+    const targetPath = join(scratchRoot, "creds", "key.pem");
+    const mount = (body: string) => ({
+      [targetPath]: { content_b64: Buffer.from(body).toString("base64"), mode: "0400" },
+    });
+    await materializeFileMountsOnHost("run-twice", mount("first"));
+    const { createdPaths, envOverrides } = await materializeFileMountsOnHost(
+      "run-twice",
+      mount("second"),
+    );
+    expect(createdPaths).toEqual([targetPath]);
+    expect(envOverrides).toEqual({});
+    expect(await readFile(targetPath, "utf8")).toBe("second");
+    await rm(scratchRoot, { recursive: true, force: true });
+  });
+
   it("falls back to a scratch path + env override when the manifest path is not writable", async () => {
     // `/run/creds/...` is not writable under normal user perms — exercises
     // the catch-and-fallback branch.

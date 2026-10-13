@@ -2,7 +2,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { BASE_ERROR_CODES, betterAuth, getCurrentAdapter } from "better-auth";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getOAuthState, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -243,27 +243,43 @@ async function readUserRealm(
   return row?.realm;
 }
 
-// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
-// `readRealm` runs only on the verify leg with a resolver installed, so `account.delete`
-// queries nothing elsewhere.
-async function assertMagicLinkAudience(
+// A magic link and a social callback sign in, and link an identity to, an account of their
+// transaction's realm only: asserted at Better Auth's writes. `readRealm` runs only on those two
+// legs with a resolver installed, so `account.delete` queries nothing elsewhere.
+const AUDIENCE_BOUND_PATHS: ReadonlySet<string> = new Set(["/magic-link/verify", "/callback/:id"]);
+
+async function assertSignInAudience(
   readRealm: () => Promise<string | undefined>,
   context: GenericEndpointContext | null,
 ): Promise<void> {
   const resolver = realmResolver.get();
-  if (context?.path !== "/magic-link/verify" || !resolver) return;
+  if (!context?.path || !AUDIENCE_BOUND_PATHS.has(context.path) || !resolver) return;
   const realm = await readRealm();
   if (realm === undefined) return;
   const query = (context.query ?? {}) as Record<string, unknown>;
+  // A social callback whose transaction resolves to no audience (its client disabled since, an
+  // authorize destination naming none) is refused like one of another audience: the resolver
+  // throws there, which on this browser redirect would answer a bare error body.
   const expected = await resolver({
     headers: context.headers ?? null,
     path: context.path,
     query,
+  }).catch((error: unknown) => {
+    if (context.path !== "/callback/:id") throw error;
+    return undefined;
   });
   if (realm === expected) return;
-  logger.warn("auth: refused a magic link for an account outside its audience", { expected });
+  logger.warn("auth: refused a sign-in for an account outside its audience", {
+    expected,
+    path: context.path,
+  });
+  // A magic link carries its error page in the query; a social callback, in the OAuth state its
+  // sign-in stored.
   const raw = query.errorCallbackURL ?? query.callbackURL;
-  const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
+  const callback =
+    typeof raw === "string"
+      ? decodeURIComponent(raw)
+      : ((await getOAuthState().catch(() => null))?.errorURL ?? "/");
   throw refusalRedirect(context, callback, "signup_disabled");
 }
 
@@ -1278,9 +1294,16 @@ function buildAuth(options: CreateAuthOptions) {
         },
       },
       account: {
+        // A social callback links its identity to the account holding the address: never one of
+        // another realm.
+        create: {
+          before: async (account, context) => {
+            await assertSignInAudience(() => readUserRealm(account.userId, context), context);
+          },
+        },
         delete: {
           before: async (account, context) => {
-            await assertMagicLinkAudience(() => readUserRealm(account.userId, context), context);
+            await assertSignInAudience(() => readUserRealm(account.userId, context), context);
           },
         },
       },
@@ -1292,14 +1315,14 @@ function buildAuth(options: CreateAuthOptions) {
           // on every request. BA creates the session row by INSERT — we
           // return a patch to merge the realm before the write.
           before: async (sess, context) => {
-            // One read serves both the magic-link audience check and the patch.
+            // One read serves both the audience check and the patch.
             const realm = await readUserRealm(sess.userId, context);
             if (realm === undefined) {
               throw new Error(
                 `auth: no user row for session user ${sess.userId} — refusing to create a session without its realm`,
               );
             }
-            await assertMagicLinkAudience(async () => realm, context);
+            await assertSignInAudience(async () => realm, context);
             return { data: { realm } };
           },
         },

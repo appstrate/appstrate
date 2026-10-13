@@ -20,6 +20,10 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
+  (`./integration`): the `http://` `authorized_uris` entries of the auths
+  that inject a credential over HTTP, as write-path issues. `isTrustedHost`
+  exempts a host the operator designated as internal.
 - **`findUnexposedDefaultTools`** (`@appstrate/core/integration`): the
   write-path rule listing a manifest's `default_tools` entries that the
   integration does not expose (`resolveIntegrationToolCatalog`). It judges a

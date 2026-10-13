@@ -20,7 +20,11 @@
  *     hostname from it. NO TLS termination — privacy model identical to
  *     the CONNECT tunnel (the sidecar never sees plaintext);
  *   - HTTP: read the request head, take the hostname from the `Host`
- *     header (the only place it exists — the wire target IP is ours);
+ *     header (the only place it exists — the wire target IP is ours), and
+ *     refuse a head that names two (a repeated `Host`, an absolute-form
+ *     target for another host). Only this FIRST head is read: the splice is
+ *     blind, so a later request on the same kept-alive connection reaches
+ *     the same pinned address with whatever `Host` it carries;
  *   - apply the exact same SSRF floor as the CONNECT listener (literal
  *     layer + resolve-and-pin DNS-rebind layer, fail closed) and the same
  *     egress allowlist, that of the runner the peer belongs to
@@ -93,34 +97,49 @@ export interface TransparentListenerHandle {
 /** Cap on plain-HTTP head accumulation while hunting for the Host header. */
 const MAX_HTTP_HEAD_BYTES = 16 * 1024;
 
-/**
- * Pull the hostname out of a plain-HTTP request head. Accepts both the
- * origin-form (`GET /x HTTP/1.1` + `Host: api.example.com`) every direct
- * client sends and — as a byproduct — the absolute-form some broken
- * forward-proxy clients emit. Strips any `:port` suffix (the port is the
- * listener's own). Returns null until the head terminator arrives.
- */
-function extractHttpHost(head: string): string | null {
-  const headerEnd = head.indexOf("\r\n\r\n");
-  if (headerEnd === -1) return null;
-  for (const line of head.slice(0, headerEnd).split("\r\n").slice(1)) {
-    const colon = line.indexOf(":");
-    if (colon === -1) continue;
-    if (line.slice(0, colon).trim().toLowerCase() !== "host") continue;
-    const value = line
-      .slice(colon + 1)
-      .trim()
-      .toLowerCase();
-    if (!value) return null;
-    // IPv6 literal `[::1]:80` — keep brackets, strip port after `]`.
-    if (value.startsWith("[")) {
-      const close = value.indexOf("]");
-      return close === -1 ? null : value.slice(1, close);
-    }
-    const portIdx = value.lastIndexOf(":");
-    return portIdx === -1 ? value : value.slice(0, portIdx);
+/** The hostname of a `Host` value or a URL authority: lowercased, port and IPv6 brackets off. */
+function hostnameOf(authority: string): string | null {
+  const value = authority.trim().toLowerCase();
+  if (!value) return null;
+  if (value.startsWith("[")) {
+    const close = value.indexOf("]");
+    return close === -1 ? null : value.slice(1, close);
   }
-  return null;
+  const portIdx = value.lastIndexOf(":");
+  return portIdx === -1 ? value : value.slice(0, portIdx);
+}
+
+/**
+ * The one hostname a plain-HTTP request head names (the port is the listener's own); `missing`
+ * when it names none or never ends; `ambiguous` when an upstream could read another name than the
+ * one the floor vets. The upstream parses the head itself, so anything two parsers may read
+ * differently is refused rather than interpreted: a second `Host` line, a bare CR or LF or a
+ * folded line (which hide or move one), and an absolute-form target (`GET http://other/
+ * HTTP/1.1`) that names another host than `Host` or carries userinfo or a backslash.
+ */
+function extractHttpHost(head: string): { host: string } | "missing" | "ambiguous" {
+  const headerEnd = head.indexOf("\r\n\r\n");
+  if (headerEnd === -1) return "missing";
+  const [requestLine = "", ...headers] = head.slice(0, headerEnd).split("\r\n");
+  if (headers.some((line) => /[\r\n]|^[ \t]/.test(line)) || /[\r\n]/.test(requestLine)) {
+    return "ambiguous";
+  }
+  const hosts = headers.flatMap((line) => {
+    const colon = line.indexOf(":");
+    return colon !== -1 && line.slice(0, colon).trim().toLowerCase() === "host"
+      ? [line.slice(colon + 1)]
+      : [];
+  });
+  if (hosts.length === 0) return "missing";
+  if (hosts.length > 1) return "ambiguous";
+  const host = hostnameOf(hosts[0]!);
+  if (host === null) return "missing";
+  const target = requestLine.split(" ")[1] ?? "";
+  if (target.startsWith("/") || target === "*") return { host };
+  // Absolute-form: some forward-proxy clients emit it, with the host `Host` names.
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(target)?.[1];
+  if (authority === undefined || /[@\\]/.test(authority)) return "ambiguous";
+  return hostnameOf(authority) === host ? { host } : "ambiguous";
 }
 
 /** Accumulate socket data until the HTTP head terminator (or the cap). */
@@ -181,13 +200,16 @@ export function createTransparentEgressListener(
         // Collect enough of the preamble to learn the intended hostname.
         let preamble: Buffer;
         let targetHost: string | null;
+        let refusal = "no-sni";
         if (isTls) {
           preamble =
             extractSni(first) !== null ? first : await collectUntilSniParses(clientSocket, first);
           targetHost = extractSni(preamble);
         } else {
           preamble = await collectHttpHead(clientSocket, first);
-          targetHost = extractHttpHost(preamble.toString("latin1"));
+          const named = extractHttpHost(preamble.toString("latin1"));
+          targetHost = typeof named === "string" ? null : named.host;
+          refusal = named === "ambiguous" ? "ambiguous-host" : "no-host-header";
         }
         // The socket entered flowing mode when the preamble collectors
         // attached data listeners; from here to the splice there is an
@@ -208,7 +230,7 @@ export function createTransparentEgressListener(
           emit({
             kind: "tunnel-refused",
             target: `<unknown>:${upstreamPort}`,
-            reason: isTls ? "no-sni" : "no-host-header",
+            reason: refusal,
           });
           clientSocket.destroy();
           return;

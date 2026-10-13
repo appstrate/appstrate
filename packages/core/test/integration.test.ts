@@ -33,6 +33,7 @@ import {
   resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
+  findCleartextInjectedCredentials,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
   findUnexposedDefaultTools,
@@ -882,6 +883,40 @@ describe("scope tokens — RFC 6749 §3.3", () => {
     expect(findInvalidScopeTokens({ auths: { primary: { default_scopes: ["openid"] } } })).toEqual(
       [],
     );
+  });
+});
+
+describe("findCleartextInjectedCredentials — no plain-http entry for an injected credential", () => {
+  const HTTP = { http: { in: "header", name: "Authorization", value: "{$credential.token}" } };
+  const paths = (auth: Record<string, unknown>, trusted?: (host: string) => boolean) =>
+    findCleartextInjectedCredentials({ auths: { primary: auth } }, trusted).map((v) =>
+      v.path.join("."),
+    );
+
+  it("refuses each http:// entry of an injecting auth, and only those", () => {
+    const authorized_uris = [
+      "https://api.example.com/**",
+      "http://api.example.com/**",
+      "HTTP://legacy.example.com/v1/*",
+      "{$credential.site_url}/**",
+      "http://{$credential.host}/**",
+    ];
+    expect(paths({ type: "custom", authorized_uris, delivery: HTTP })).toEqual([
+      "auths.primary.authorized_uris.1",
+      "auths.primary.authorized_uris.2",
+      "auths.primary.authorized_uris.4",
+    ]);
+    expect(paths({ type: "api_key", authorized_uris: ["http://api.example.com/**"] })).toEqual([
+      "auths.primary.authorized_uris.0",
+    ]);
+  });
+
+  it("accepts http:// for a host the operator designated, and for an auth that injects nothing", () => {
+    const authorized_uris = ["http://vault.internal/**", "http://api.example.com/**"];
+    expect(
+      paths({ type: "custom", authorized_uris, delivery: HTTP }, (h) => h === "vault.internal"),
+    ).toEqual(["auths.primary.authorized_uris.1"]);
+    expect(paths({ type: "custom", authorized_uris })).toEqual([]);
   });
 });
 

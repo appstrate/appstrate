@@ -67,6 +67,7 @@
   "error.copyFailed": "Could not copy: the browser refused access to the clipboard.",
   "error.downloadFailed": "Download failed.",
   "apiError.invalid_request": "Request refused: {{message}}",
+  "apiError.not_a_platform_account": "This account belongs to a space's application and cannot join an organization. Sign in with a platform account.",
   "apiError.validation_failed": "The submitted data is invalid.",
   "apiError.unauthorized": "Authentication refused: {{message}}",
   "apiError.forbidden": "Action refused: {{message}}",

@@ -15,6 +15,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { packages } from "@appstrate/db/schema";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import {
   apiIntegrationManifest,
   envDelivery,
@@ -81,6 +82,26 @@ describe("writing an injecting auth's allowlist", () => {
     const m = manifest({ type: "api_key" }) as { auths: { api: { delivery: unknown } } };
     m.auths.api.delivery = { http: { in: "header", name: "X-Key", value: "{$outputs.api_key}" } };
     await expectRefused(await create(m), "manifest.auths.api.delivery.http.value");
+  });
+
+  it("create refuses a plain http:// entry, and accepts it for a host the operator designated", async () => {
+    const cleartext = manifest({
+      type: "api_key",
+      authorizedUris: ["https://api.example.com/**", "http://vault.internal/**"],
+    });
+    await expectRefused(await create(cleartext), "manifest.auths.api.authorized_uris.1");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+
+    const previous = process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
+    process.env.EGRESS_ALLOW_INTERNAL_HOSTS = "vault.internal";
+    resetEnvCache();
+    try {
+      expect((await create(cleartext)).status).toBe(201);
+    } finally {
+      if (previous === undefined) delete process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
+      else process.env.EGRESS_ALLOW_INTERNAL_HOSTS = previous;
+      resetEnvCache();
+    }
   });
 
   it("create accepts allow_all_uris on an auth the proxy injects nothing for", async () => {
