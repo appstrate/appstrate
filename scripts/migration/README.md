@@ -1322,7 +1322,7 @@ pre-flight or the dry run only.
 It prints the database it is connected to, then per column the count of rows holding the old name
 and each row's id (a role's with its `org_id` and `key`), never a key hash. One transaction,
 `pg_dump` first:
-`set -a && . ./.env && set +a && bun scripts/migration/0046-rename-credential-proxy-call-scope.ts`
+`set -a && . ./.env && set +a && bun scripts/migration/0046-split-credential-proxy-call-scope.ts`
 is the dry run (rolled back); `--apply` commits. It refuses an empty `DATABASE_URL`. A second run
 finds nothing to rewrite.
 

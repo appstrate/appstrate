@@ -445,8 +445,7 @@ interface ConnectionSelectionContext {
  * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
  * rows in reach (default `own`): `usable` walks the cascade, pins aside; under `own` no org default
  * applies, and an integration an ENFORCED one governs answers `run_required`. `null` when nothing
- * answers; an id out of reach reads the same whether it names a colleague's row
- * or no row at all. Either way the pick passes the resolver's health checks.
+ * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -516,7 +515,7 @@ export async function selectAccessibleConnection(
   }
   if (error?.code === "must_choose_connection") {
     const candidates = error.candidateConnections ?? [];
-    throw mustChoose(packageId, candidates, "No single own connection applies");
+    throw mustChoose(packageId, candidates, "No single connection applies");
   }
   if (error?.code === "override_outranked") {
     throw proxyProblem(

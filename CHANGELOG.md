@@ -218,7 +218,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   (#1929): the write of an enabled schedule is refused `409` until they do;
   see Changed.
 
-- **Run `scripts/migration/0046-rename-credential-proxy-call-scope.ts --apply`
+- **Run `scripts/migration/0046-split-credential-proxy-call-scope.ts --apply`
   in the window** (#1894, #1957). `credential-proxy:call` is split into
   `credential-proxy:call-run`, for a call made for a run, and
   `credential-proxy:call-own`, for a call outside one; the pair is what
@@ -227,7 +227,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   puts `credential-proxy:call-run` in place of the old name and appends
   `credential-proxy:call-own`: existing API keys and custom roles keep both
   paths, and what a call answers differently is under Changed. Run it dry
-  (`set -a && . ./.env && set +a && bun scripts/migration/0046-rename-credential-proxy-call-scope.ts`),
+  (`set -a && . ./.env && set +a && bun scripts/migration/0046-split-credential-proxy-call-scope.ts`),
   then with `--apply`, after the migrate step and before the new release
   serves requests; never on the running previous release, which ignores the
   new names. A client that mints keys naming `credential-proxy:call` names

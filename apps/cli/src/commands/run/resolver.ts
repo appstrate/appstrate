@@ -17,7 +17,7 @@
  *     `apps/cli/src/commands/run.ts` for the resolution priority. It must
  *     grant `credential-proxy:call-run` when `extraHeaders` names a registered
  *     run (`X-Run-Id`), `credential-proxy:call-own` otherwise: the call then
- *     names no connection, reaching the caller's own and, with both, an org default's.
+ *     names no connection: the caller's own, or with both the org default first.
  *
  *   - `local`  — reads a local JSON creds file (integration-keyed) for
  *     offline runs. Credentials are plaintext on disk; the CLI never

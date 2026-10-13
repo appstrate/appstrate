@@ -11,7 +11,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { db } from "@appstrate/db/client";
 import { apiKeys, spaceRoles } from "@appstrate/db/schema";
-import { runRenameCredentialProxyCallScope } from "../migration/0046-rename-credential-proxy-call-scope.ts";
+import { runSplitCredentialProxyCallScope } from "../migration/0046-split-credential-proxy-call-scope.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import { createTestContext, type TestContext } from "../../apps/api/test/helpers/auth.ts";
 import { seedApiKey, seedSpaceRole } from "../../apps/api/test/helpers/seed.ts";
@@ -35,7 +35,7 @@ const AFTER: Record<string, string[]> = {
 let ctx: TestContext;
 const lines: string[] = [];
 const run = (apply: boolean) =>
-  runRenameCredentialProxyCallScope({ apply, out: (line) => lines.push(line) });
+  runSplitCredentialProxyCallScope({ apply, out: (line) => lines.push(line) });
 
 /** Every key's scopes and every role's permissions, by fixture name. */
 async function stored() {

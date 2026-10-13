@@ -1392,34 +1392,6 @@ describe("POST /api/credential-proxy/proxy — outside a run with credential-pro
     expect(await listed({ "Appstrate-User": endUser.id })).toEqual([]);
     expect(upstreamAuth).toEqual([]);
   });
-
-  it("an end-user under a key holding both permissions reaches a member's shared connection, never the creator's unshared one", async () => {
-    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
-    const both = await mintProxyKey(ctx, [
-      "credential-proxy:call-own",
-      "credential-proxy:call-run",
-    ]);
-    const asEndUser = { Authorization: `Bearer ${both}`, "Appstrate-User": endUser.id };
-    const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
-    const creators = await seedGmailConnection(ctx, "creator-own");
-
-    expect((await call({ ...asEndUser, "X-Connection-Id": shared })).status).toBe(200);
-    await expectProblem(await call({ ...asEndUser, "X-Connection-Id": creators }), 404, {
-      code: "credential_not_found",
-    });
-    expect(upstreamAuth).toEqual(["Bearer tok-theirs-shared"]);
-
-    await drainAudits(5_000);
-    const rows = await db.select().from(connectionCalls);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      connectionId: shared,
-      actorType: "end_user",
-      actorId: endUser.id,
-      ownerType: "user",
-      ownerId: colleague.user.id,
-    });
-  });
 });
 
 describe("POST /api/credential-proxy/proxy — outside a run, both proxy permissions reach the connections usable in the space", () => {
@@ -1477,7 +1449,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
     };
   }
 
-  function call(caller: Caller, connectionId?: string) {
+  function call(caller: Caller, connectionId?: string, extra: Record<string, string> = {}) {
     return app.request("/api/credential-proxy/proxy", {
       method: "GET",
       headers: {
@@ -1488,8 +1460,16 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
         ...(connectionId ? { "X-Connection-Id": connectionId } : {}),
+        ...extra,
       },
     });
+  }
+
+  async function flagNeedsReconnection(connectionId: string) {
+    await db
+      .update(integrationConnections)
+      .set({ needsReconnection: true })
+      .where(eq(integrationConnections.id, connectionId));
   }
 
   /** What a call answers: the connection it used, or the platform's refusal. */
@@ -1562,9 +1542,33 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
       },
     },
     {
+      situation: "an enforced default of several members, one of them named",
+      orgDefault: { members: ["shared", "shared2"], enforce: true },
+      named: "shared2",
+      answers: { both: { uses: "shared2" } },
+    },
+    {
+      situation: "an enforced default with a member not shared into the space, none named",
+      orgDefault: { members: ["shared", "private"], enforce: true },
+      answers: { both: { status: 409, code: "pinned_connection_unavailable" } },
+    },
+    {
+      situation: "an enforced default with a member not shared into the space, another named",
+      orgDefault: { members: ["shared", "private"], enforce: true },
+      named: "shared",
+      answers: { both: { uses: "shared" } },
+    },
+    {
       situation: "a soft default, none named",
       orgDefault: { members: ["shared"], enforce: false },
       answers: { both: { uses: "shared" }, "call-own alone": { uses: "own" } },
+    },
+    {
+      situation: "a soft default of several members, none named",
+      orgDefault: { members: ["shared", "shared2"], enforce: false },
+      answers: {
+        both: { status: 409, code: "must_choose_connection", candidates: ["shared", "shared2"] },
+      },
     },
     {
       situation: "a soft default, an own connection named",
@@ -1628,8 +1632,74 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
       actorId: ctx.user.id,
       outcome: "200",
     });
-    expect(colleague.user.id).not.toBe(ctx.user.id);
   });
+
+  // `Appstrate-User` on an API key: the actor is the end-user, with the key's permissions.
+  it("an end-user under a key holding both permissions reaches a member's shared connection, never the creator's unshared one", async () => {
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const asEndUser = { "Appstrate-User": endUser.id };
+    const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
+    const creators = await seedGmailConnection(ctx, "creator-own");
+
+    expect((await call("both", shared, asEndUser)).status).toBe(200);
+    await expectProblem(await call("both", creators, asEndUser), 404, {
+      code: "credential_not_found",
+    });
+    expect(upstreamAuth).toEqual(["Bearer tok-theirs-shared"]);
+
+    await drainAudits(5_000);
+    const rows = await db.select().from(connectionCalls);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      connectionId: shared,
+      actorType: "end_user",
+      actorId: endUser.id,
+      ownerType: "user",
+      ownerId: colleague.user.id,
+    });
+  });
+
+  it("no candidate at all: 404 credential_not_found in the wording of the usable reach, named or not", async () => {
+    await seedGmailConnection(colleague, LABELS.private);
+
+    const none = await expectProblem(await call("both"), 404, { code: "credential_not_found" });
+    expect(none.detail).toBe(
+      `No connection of integration '${INTEGRATION_ID}' is usable in this space`,
+    );
+    const named = await expectProblem(await call("both", crypto.randomUUID()), 404, {
+      code: "credential_not_found",
+    });
+    expect(named.detail).toBe(
+      `X-Connection-Id names no connection of integration '${INTEGRATION_ID}' usable in this space`,
+    );
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  it("a shared connection that needs reconnecting, named: 409 needs_reconnection", async () => {
+    const ids = await seedConnections();
+    await flagNeedsReconnection(ids.shared);
+
+    const body = await expectProblem(await call("both", ids.shared), 409, {
+      code: "needs_reconnection",
+    });
+    expect((body.errors as { connection_id: string }[])[0]!.connection_id).toBe(ids.shared);
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  for (const enforce of [true, false]) {
+    it(`${enforce ? "an enforced" : "a soft"} default with a member that needs reconnecting: 409 needs_reconnection when none is named, another member named is served`, async () => {
+      const ids = await seedConnections();
+      await orgDefault(ctx, [ids.shared, ids.shared2], enforce);
+      await flagNeedsReconnection(ids.shared2);
+
+      const body = await expectProblem(await call("both"), 409, { code: "needs_reconnection" });
+      expect((body.errors as { connection_id: string }[])[0]!.connection_id).toBe(ids.shared2);
+      expect(upstreamAuth).toEqual([]);
+
+      expect((await call("both", ids.shared)).status).toBe(200);
+      expect(upstreamAuth).toEqual([`Bearer tok-${LABELS.shared}`]);
+    });
+  }
 
   /** The problem bodies of `call("both", id)` for each id, without the members naming the request. */
   async function refusals(connectionIds: string[]): Promise<string[]> {
@@ -1843,18 +1913,18 @@ describe("GET /api/credential-proxy/connections", () => {
     await seedGmailConnection(colleague, "theirs-private");
     const ownAlone = ["credential-proxy:call-own"];
 
+    const usable = sorted([
+      [own, true, false],
+      [shared, false, false],
+      [shared2, false, false],
+    ]);
+
     expect(await listedFor(ownAlone)).toEqual([[own, true, false]]);
-    expect(await listedFor(BOTH_PATHS)).toEqual(
-      sorted([
-        [own, true, false],
-        [shared, false, false],
-        [shared2, false, false],
-      ]),
-    );
+    expect(await listedFor(BOTH_PATHS)).toEqual(usable);
 
     // Soft: every row stays nameable. Enforced: naming a row outside the default is a 400.
     await orgDefault(ctx, [shared], false);
-    expect(await listedFor(BOTH_PATHS)).toHaveLength(3);
+    expect(await listedFor(BOTH_PATHS)).toEqual(usable);
     await db.update(integrationOrgDefaults).set({ enforce: true });
     expect(await listedFor(BOTH_PATHS)).toEqual([[shared, false, false]]);
     expect(await listedFor(ownAlone)).toEqual([[own, true, true]]);

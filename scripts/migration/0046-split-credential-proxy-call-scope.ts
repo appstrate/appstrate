@@ -5,7 +5,7 @@
  * 0046 — the stored `credential-proxy:call` becomes `credential-proxy:call-run` and `call-own`:
  *
  *   set -a && . ./.env && set +a && \
- *     bun scripts/migration/0046-rename-credential-proxy-call-scope.ts [--apply]
+ *     bun scripts/migration/0046-split-credential-proxy-call-scope.ts [--apply]
  *
  * The permission of a credential-proxy call made for a run is `credential-proxy:call-run`, and a
  * stored permission string the platform does not know grants nothing. Two columns store permission
@@ -37,21 +37,21 @@ const OLD = "credential-proxy:call";
 const RUN = "credential-proxy:call-run";
 const OWN = "credential-proxy:call-own";
 
-/** The rows whose `column` holds the old name: exactly what {@link renamed} removes. */
+/** The rows whose `column` holds the old name: exactly what {@link split} removes. */
 const holdsOld = (column: AnyPgColumn): SQL => sql`${OLD} = ANY(${column})`;
 
-const renamed = (column: AnyPgColumn): SQL<string[]> =>
+const split = (column: AnyPgColumn): SQL<string[]> =>
   sql<string[]>`array_append(array_replace(${column}, ${OLD}, ${RUN}), ${OWN})`;
 
-interface RenamedRows {
+interface RewrittenRows {
   apiKeyIds: string[];
   roles: Array<{ id: string; orgId: string; key: string }>;
 }
 
-export async function runRenameCredentialProxyCallScope(options: {
+export async function runSplitCredentialProxyCallScope(options: {
   apply: boolean;
   out: (line: string) => void;
-}): Promise<RenamedRows> {
+}): Promise<RewrittenRows> {
   const { apply, out } = options;
   // Imported here: `@appstrate/db/client` opens its database on import, after the entry point's guard.
   const { db, toRows } = await import("@appstrate/db/client");
@@ -62,7 +62,7 @@ export async function runRenameCredentialProxyCallScope(options: {
   );
   out(`database: ${target!.name} at ${target!.addr ?? "local socket"}:${target!.port ?? "-"}`);
 
-  const result: RenamedRows = { apiKeyIds: [], roles: [] };
+  const result: RewrittenRows = { apiKeyIds: [], roles: [] };
   try {
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL lock_timeout = '5s'");
@@ -70,7 +70,7 @@ export async function runRenameCredentialProxyCallScope(options: {
 
       const keys = await tx
         .update(apiKeys)
-        .set({ scopes: renamed(apiKeys.scopes) })
+        .set({ scopes: split(apiKeys.scopes) })
         .where(holdsOld(apiKeys.scopes))
         .returning({ id: apiKeys.id });
       result.apiKeyIds = keys.map((row) => row.id).sort();
@@ -79,7 +79,7 @@ export async function runRenameCredentialProxyCallScope(options: {
 
       const roles = await tx
         .update(spaceRoles)
-        .set({ permissions: renamed(spaceRoles.permissions) })
+        .set({ permissions: split(spaceRoles.permissions) })
         .where(holdsOld(spaceRoles.permissions))
         .returning({ id: spaceRoles.id, orgId: spaceRoles.orgId, key: spaceRoles.key });
       result.roles = roles.sort((a, b) => a.id.localeCompare(b.id));
@@ -114,7 +114,7 @@ if (import.meta.main) {
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0046 — ${apply ? "APPLY" : "DRY RUN"}`);
-    await runRenameCredentialProxyCallScope({ apply, out });
+    await runSplitCredentialProxyCallScope({ apply, out });
     code = 0;
   } catch (error) {
     process.stdout.write(`0046: FAILED, nothing committed — ${getErrorMessage(error)}\n`);

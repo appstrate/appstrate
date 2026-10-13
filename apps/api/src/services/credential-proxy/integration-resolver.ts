@@ -224,9 +224,7 @@ interface ConnectionOutsideRun {
   run_required: boolean;
 }
 
-/**
- * It decrypts nothing: the answer reaches a model's context through the MCP module.
- */
+/** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
 export async function listConnectionsOutsideRun(
   scope: { orgId: string; spaceId: string },
   actor: Actor,

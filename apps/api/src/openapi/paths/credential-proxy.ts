@@ -37,8 +37,9 @@ const proxySharedDescription =
   "default. A caller who also holds `credential-proxy:call-run` reaches the connections " +
   "usable in the space, their own and those shared into it, through the resolver's cascade " +
   "without agent pins: the rows a run in the space binds for that caller. " +
-  "`GET /api/credential-proxy/connections` lists what a call would accept. Holding one " +
-  "permission never opens the other path.\n\n" +
+  "`GET /api/credential-proxy/connections` lists the candidates of a call outside a run " +
+  "and, per row, what such a call would still refuse. Holding one permission never opens " +
+  "the other path.\n\n" +
   "Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: " +
   "outside a run the call reaches the end-user's own connections, and with both permissions " +
   "those a member shared into the space.\n\n" +
@@ -220,8 +221,12 @@ const proxyParameters = [
       "shared connection is used only when named or designated by an org default; no " +
       "candidate at all is a `404 credential_not_found`. A " +
       "default set of one is used, several are a `409 must_choose_connection` over the set " +
-      "(an enforced default then takes one of its members, a soft one any candidate), " +
-      "and a member the caller cannot reach is a `409 pinned_connection_unavailable`.\n\n" +
+      "(an enforced default then takes one of its members, a soft one any candidate). With " +
+      "nothing named, a default's whole set is checked as a run's would be, before any " +
+      "choice is offered: a member the caller cannot reach answers " +
+      "`409 pinned_connection_unavailable` and one that needs reconnecting " +
+      "`409 needs_reconnection`, even when another member would serve; a named member that " +
+      "passes those checks is used.\n\n" +
       "Either way a connection that would be used and needs reconnecting, a default's member " +
       "included, is a `409 needs_reconnection`, and a non-uuid value a `400`.",
     schema: { type: "string", format: "uuid" },
