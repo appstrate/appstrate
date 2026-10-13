@@ -4,12 +4,13 @@
  * Unit tests for `parseRunTarget` — splits the `appstrate run <arg>`
  * argument into a path or a package id. Detection is strict so an
  * accidentally-typed package id never silently resolves to a missing
- * file.
+ * file. And for `registryVersion`, which names the id's version the way
+ * `POST /api/runs/remote` takes it.
  */
 
 import { describe, it, expect } from "bun:test";
 import { PackageSpecError } from "../src/lib/package-spec.ts";
-import { parseRunTarget } from "../src/commands/run/package-spec.ts";
+import { parseRunTarget, registryVersion } from "../src/commands/run/package-spec.ts";
 
 describe("parseRunTarget — package id", () => {
   it("parses @scope/name with no spec", () => {
@@ -101,4 +102,20 @@ describe("parseRunTarget — invalid id", () => {
     expect(() => parseRunTarget("")).toThrow(PackageSpecError);
     expect(() => parseRunTarget("   ")).toThrow(PackageSpecError);
   });
+});
+
+describe("registryVersion", () => {
+  it.each([
+    [undefined, { stage: "published", spec: undefined }],
+    ["published", { stage: "published", spec: undefined }],
+    ["draft", { stage: "draft", spec: undefined }],
+    ["1.2.3", { stage: "published", spec: "1.2.3" }],
+    ["^1.0.0", { stage: "published", spec: "^1.0.0" }],
+    ["beta", { stage: "published", spec: "beta" }],
+  ] as const)(
+    "names %p as a stage, and as a spec only when the server resolves one",
+    (spec, named) => {
+      expect(registryVersion(spec)).toEqual(named);
+    },
+  );
 });

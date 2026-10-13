@@ -24,7 +24,6 @@ import {
   buildApiCallExtensionFactory,
   buildRuntimeToolExtensions,
   emitRuntimeReady,
-  startSinkHeartbeat,
   type SinkHeartbeatHandle,
 } from "@appstrate/runner-pi";
 import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
@@ -40,6 +39,7 @@ import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
 import { resolveAuthContext, explicitApiKey, resolveApiKeyTarget, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
+import { DEFAULT_IO, STDERR_ERROR_IO } from "../lib/io.ts";
 import {
   resolveModel,
   resolvePresetModel,
@@ -61,6 +61,10 @@ import {
 import {
   shouldReport,
   startReportSession,
+  startReportHeartbeat,
+  finalizeWithin,
+  hostSnapshot,
+  SAFETY_NET_FINALIZE_TIMEOUT_MS,
   bundleIdentity,
   ReportConfigError,
   ReportStartError,
@@ -82,8 +86,8 @@ import {
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
-import { DRAFT_SELECTOR, PackageSpecError, PUBLISHED_SELECTOR } from "../lib/package-spec.ts";
-import { parseRunTarget } from "./run/package-spec.ts";
+import { PackageSpecError } from "../lib/package-spec.ts";
+import { parseRunTarget, registryVersion } from "./run/package-spec.ts";
 import { fetchBundleForRun } from "./run/bundle-fetch.ts";
 import {
   fetchRunConfigPayload,
@@ -97,6 +101,7 @@ import {
   type ExecutionMode,
 } from "./run/mode.ts";
 import { runRemote } from "./run/remote-runner.ts";
+import { runCommandAsRunner } from "./run/command-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
 import { resolveLocalInput, validateLocalInput, type StoredInputLayer } from "./run/input.ts";
 import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
@@ -104,6 +109,12 @@ import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts
 export interface RunCommandOptions {
   profile?: string;
   bundle: string;
+  /**
+   * Everything after the first `--`: a command the CLI runs as the runner of a
+   * remote run of the agent, with no model. Undefined when the invocation has
+   * no `--`; its presence alone selects command mode (see `run/mode.ts`).
+   */
+  command?: readonly string[] | undefined;
   input?: string;
   inputFile?: string;
   snapshot?: string;
@@ -200,12 +211,23 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
 
     if (executionMode === "remote") {
       await runCommandRemote(opts, target);
+    } else if (executionMode === "command") {
+      await runCommandUnderRun(opts, target);
     } else {
       await runCommandLocal(opts);
     }
   } catch (err) {
-    exitWithError(err);
+    exitRunWithError(err, opts.command);
   }
+}
+
+/**
+ * End `appstrate run` on `err`. With a command, stdout belongs to the command
+ * in every outcome — `x=$(appstrate run @a -- cmd)` must never capture an error
+ * of the CLI — so the same rendering goes to stderr.
+ */
+export function exitRunWithError(err: unknown, command: readonly string[] | undefined): never {
+  exitWithError(err, command === undefined ? DEFAULT_IO : STDERR_ERROR_IO);
 }
 
 async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
@@ -589,14 +611,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // and finalises them as `failed`. A local-only CLI run (no
     // reportSession) has no platform to talk to — skip.
     if (reportSession) {
-      heartbeat = startSinkHeartbeat({
-        url: `${reportSession.sinkUrl.replace(/\/$/, "")}/heartbeat`,
-        runSecret: reportSession.runSecret,
-        onError: (err) => {
-          if (!opts.json) {
-            process.stderr.write(`warn: heartbeat failed: ${getErrorMessage(err)}\n`);
-          }
-        },
+      heartbeat = startReportHeartbeat(reportSession, (err) => {
+        if (!opts.json) {
+          process.stderr.write(`warn: heartbeat failed: ${getErrorMessage(err)}\n`);
+        }
       });
     }
 
@@ -731,6 +749,58 @@ async function runCommandRemote(
   if (shutdownSignal.aborted) process.exit(shutdownExitCode());
 }
 
+// ---------------------------------------------------------------------------
+// Command execution path
+// ---------------------------------------------------------------------------
+
+/**
+ * `appstrate run @scope/agent -- <command>`: register a remote run of the
+ * agent and run the command as its runner (`run/command-runner.ts`). Same
+ * credentials as a local run that reaches its integrations through the
+ * instance: a headless API key or the profile's session, with a named space.
+ *
+ * The agent's bundle is never fetched: the run is registered by id, so a role
+ * that may run the agent and call the proxy for a run needs no read access to
+ * the agent's content.
+ */
+async function runCommandUnderRun(
+  opts: RunCommandOptions,
+  target: ReturnType<typeof parseRunTarget>,
+): Promise<void> {
+  const resolverInputs = requireSpaceForLocalRun(await buildResolverInputs("remote", opts));
+  if (
+    target.kind !== "id" ||
+    !opts.command ||
+    !resolverInputs ||
+    !("bearerToken" in resolverInputs)
+  ) {
+    // Unreachable from the CLI: `resolveExecutionMode` refuses the first two,
+    // and `buildResolverInputs("remote", …)` returns remote inputs or throws.
+    // A typed early exit narrows the rest of the function without casts.
+    throw new ExecutionModeError("command mode requires an `@scope/agent` id and a command");
+  }
+
+  const exitCode = await runCommandAsRunner(
+    {
+      command: opts.command,
+      packageId: target.packageId,
+      spec: target.spec,
+      context: reportContextOf(resolverInputs),
+      // Sent verbatim: the server resolves it over the agent's defaults and
+      // validates it against the agent's input schema.
+      input: await resolveInput(opts),
+      ttlSeconds: opts.sinkTtl,
+      connectionOverrides: opts.connectionOverrides,
+    },
+    { signal: shutdownSignal, onShutdown },
+  );
+
+  // On a signal the coordinator owns the exit, with the signal's own code;
+  // same backstop as the two other paths.
+  if (shutdownSignal.aborted) process.exit(shutdownExitCode());
+  if (exitCode !== 0) process.exitCode = exitCode;
+}
+
 /**
  * Patch an HttpSink's `finalize` in place so the caller can tell
  * whether it has already been invoked (by the runner, mid-run). The
@@ -747,34 +817,6 @@ function attachFinalizeTracker(sink: HttpSink): () => Promise<void> | null {
     return sent;
   };
   return () => first;
-}
-
-/**
- * Cap on the safety-net finalize POST: HttpSink retries with backoff and Bun's
- * `fetch` has no default timeout, so a dead platform could hold the CLI open
- * after Ctrl-C. The run watchdog (60s default) covers what is abandoned here.
- */
-const SAFETY_NET_FINALIZE_TIMEOUT_MS = 5_000;
-
-/**
- * Wait for `pending`, a finalize through `sink`, aborting the sink once
- * `timeoutMs` has passed: the request and its retries are cancelled, so
- * nothing is left running.
- */
-async function finalizeWithin(
-  sink: HttpSink,
-  pending: Promise<void>,
-  timeoutMs: number,
-): Promise<void> {
-  const timer = setTimeout(
-    () => sink.abort(new Error(`finalize POST timed out after ${timeoutMs}ms`)),
-    timeoutMs,
-  );
-  try {
-    await pending;
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,14 +1107,7 @@ async function registerReportSession(
   const fallback: ReportFallback = opts.reportFallback ?? "abort";
 
   const reportCtx =
-    resolverInputs && "bearerToken" in resolverInputs
-      ? ({
-          instance: resolverInputs.instance,
-          bearerToken: resolverInputs.bearerToken,
-          spaceId: resolverInputs.spaceId,
-          orgId: resolverInputs.orgId ?? null,
-        } satisfies ReportContext)
-      : null;
+    resolverInputs && "bearerToken" in resolverInputs ? reportContextOf(resolverInputs) : null;
 
   if (!shouldReport(mode, reportCtx) || !reportCtx) return null;
 
@@ -1086,7 +1121,6 @@ async function registerReportSession(
     bundleSource.kind === "bytes"
       ? {
           kind: "registry",
-          bundle,
           packageId: bundleSource.packageId,
           stage: bundleSource.registryStage,
           ...(bundleSource.spec ? { spec: bundleSource.spec } : {}),
@@ -1103,12 +1137,18 @@ async function registerReportSession(
       ttlSeconds: opts.sinkTtl,
       connectionOverrides: opts.connectionOverrides,
     },
-    {
-      os: `${process.platform} ${process.arch}`,
-      cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
-      bundle: bundleIdentity(bundle),
-    },
+    { ...hostSnapshot(), bundle: bundleIdentity(bundle) },
   );
+}
+
+/** The instance and credentials a run is registered with. */
+function reportContextOf(inputs: SpacedRemoteResolverInputs): ReportContext {
+  return {
+    instance: inputs.instance,
+    bearerToken: inputs.bearerToken,
+    spaceId: inputs.spaceId,
+    orgId: inputs.orgId ?? null,
+  };
 }
 
 function appendResolverHeaders(
@@ -1238,10 +1278,7 @@ async function resolveBundleSource(
     packageId: target.packageId,
     version: fetched.version,
     registryStage: fetched.stage,
-    spec:
-      target.spec === DRAFT_SELECTOR || target.spec === PUBLISHED_SELECTOR
-        ? undefined
-        : target.spec,
+    spec: registryVersion(target.spec).spec,
     integrity: fetched.integrity,
   };
 }
@@ -1274,21 +1311,13 @@ export function _resolveReportSessionForTesting(
 }
 
 /**
- * Test-only access to the finalize tracker and the bounded safety-net finalize.
- * Exercised by `apps/cli/test/run-finalize-tracker.test.ts` to assert
- * the cancel-path safety net (detect runner cancellation immediately
- * rather than waiting for the heartbeat watchdog).
+ * Test-only access to the finalize tracker. Exercised by
+ * `apps/cli/test/run-finalize-tracker.test.ts` to assert the cancel-path
+ * safety net (detect runner cancellation immediately rather than waiting for
+ * the heartbeat watchdog).
  */
 export function _attachFinalizeTrackerForTesting(sink: HttpSink): () => Promise<void> | null {
   return attachFinalizeTracker(sink);
-}
-
-export function _finalizeWithinForTesting(
-  sink: HttpSink,
-  pending: Promise<void>,
-  timeoutMs: number,
-): Promise<void> {
-  return finalizeWithin(sink, pending, timeoutMs);
 }
 
 /** Pi loop knobs from the user's shell, strictly parsed like the container's. */

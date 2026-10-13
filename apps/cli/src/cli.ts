@@ -64,7 +64,8 @@ import { SYNC_TARGETS, type SyncTarget } from "./lib/skills-sync/targets.ts";
 import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
-import { runCommand } from "./commands/run.ts";
+import { exitRunWithError, runCommand } from "./commands/run.ts";
+import { commandAfterSeparator } from "./commands/run/mode.ts";
 import { parseConnectionFlags } from "./commands/run/connection-flag.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
 import {
@@ -1058,11 +1059,17 @@ program
 program
   .command("run")
   .description(
-    "Execute an agent — by package id (default: remote, on the pinned Appstrate instance) or from a local file path (default: in-process via PiRunner). Pass --local / --remote to override the per-target default.",
+    "Execute an agent — by package id (default: remote, on the pinned Appstrate instance) or from a local file path (default: in-process via PiRunner). Pass --local / --remote to override the per-target default.\n\n" +
+      'With a command after `--`, no agent executes: the CLI registers a run of @scope/agent on the instance and runs the command as its runner, with no model. The command reads the run id from APPSTRATE_RUN_ID and reaches the connections the run bound by naming it on its credential-proxy calls (`appstrate api … -H "X-Run-Id: $APPSTRATE_RUN_ID"`). stdout and the exit code are the command\'s (the CLI prints on stderr only); the run ends success on exit 0, failed otherwise, cancelled on a signal. Accepts --connection, --input, --input-file, --sink-ttl and --api-key only.',
   )
+  .usage("[options] <bundle> [-- <command> [args...]]")
   .argument(
     "<bundle>",
     "Either @scope/agent[@spec] (id; default: remote execution) or a path to a .afps / .afps-bundle file (default: local execution)",
+  )
+  .argument(
+    "[command...]",
+    "After a literal `--`: a command to run as the runner of a run of @scope/agent, instead of executing the agent",
   )
   .option(
     "--local",
@@ -1145,44 +1152,61 @@ program
     "-q, --quiet",
     "Suppress per-tool output lines (name, args, result). Errors and final summary still print.",
   )
-  .action(async (bundle: string, opts) => {
+  .action(async (bundle: string, operands: string[], opts, self: Command) => {
+    // Operands past <bundle> are a command only behind a `--`. Without one they
+    // stay the excess arguments commander refuses on its own when no variadic
+    // argument is declared — same message, same exit.
+    const command = commandAfterSeparator(process.argv.slice(2));
+    if (operands.length !== (command?.length ?? 0)) {
+      const received = 1 + operands.length - (command?.length ?? 0);
+      self.error(`error: too many arguments for 'run'. Expected 1 argument but got ${received}.`, {
+        code: "commander.excessArguments",
+      });
+    }
     const globalOpts = program.opts<{ profile?: string }>();
-    await runCommand({
-      profile: globalOpts.profile,
-      bundle,
-      local: opts.local === true,
-      remote: opts.remote === true,
-      integrations: typeof opts.integrations === "string" ? opts.integrations : undefined,
-      credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
-      apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
-      input: typeof opts.input === "string" ? opts.input : undefined,
-      inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
-      snapshot: typeof opts.snapshot === "string" ? opts.snapshot : undefined,
-      model: typeof opts.model === "string" ? opts.model : undefined,
-      modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,
-      modelSource: typeof opts.modelSource === "string" ? opts.modelSource : undefined,
-      llmApiKey: typeof opts.llmApiKey === "string" ? opts.llmApiKey : undefined,
-      runId: typeof opts.runId === "string" ? opts.runId : undefined,
-      output: typeof opts.output === "string" ? opts.output : undefined,
-      json: opts.json === true,
-      report: parseReportMode(opts.report),
-      reportFallback: parseReportFallback(opts.reportFallback),
-      sinkTtl: parseSinkTtl(opts.sinkTtl),
-      proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
-      connectionOverrides: parseConnectionFlags(opts.connection as string[]),
-      // Same `--no-X` mapping: commander stores the negated flag at
-      // `opts.inherit === false`. Default (no flag) is `undefined` →
-      // inheritance enabled.
-      noInherit: opts.inherit === false,
-      // Tri-state, unlike `--no-inherit` above: declaring BOTH the
-      // positive flag and its `--no-` negation makes commander leave the
-      // key unset when neither is passed, so `undefined` genuinely means
-      // "auto" (resolved from --json + stdin TTY) rather than "off".
-      // Proven end-to-end in test/run-signal-policy.test.ts.
-      cancelOnExit: typeof opts.cancelOnExit === "boolean" ? opts.cancelOnExit : undefined,
-      verbose: opts.verbose === true,
-      quiet: opts.quiet === true,
-    });
+    try {
+      await runCommand({
+        profile: globalOpts.profile,
+        bundle,
+        command,
+        local: opts.local === true,
+        remote: opts.remote === true,
+        integrations: typeof opts.integrations === "string" ? opts.integrations : undefined,
+        credsFile: typeof opts.credsFile === "string" ? opts.credsFile : undefined,
+        apiKey: typeof opts.apiKey === "string" ? opts.apiKey : undefined,
+        input: typeof opts.input === "string" ? opts.input : undefined,
+        inputFile: typeof opts.inputFile === "string" ? opts.inputFile : undefined,
+        snapshot: typeof opts.snapshot === "string" ? opts.snapshot : undefined,
+        model: typeof opts.model === "string" ? opts.model : undefined,
+        modelApi: typeof opts.modelApi === "string" ? opts.modelApi : undefined,
+        modelSource: typeof opts.modelSource === "string" ? opts.modelSource : undefined,
+        llmApiKey: typeof opts.llmApiKey === "string" ? opts.llmApiKey : undefined,
+        runId: typeof opts.runId === "string" ? opts.runId : undefined,
+        output: typeof opts.output === "string" ? opts.output : undefined,
+        json: opts.json === true,
+        report: parseReportMode(opts.report),
+        reportFallback: parseReportFallback(opts.reportFallback),
+        sinkTtl: parseSinkTtl(opts.sinkTtl),
+        proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
+        connectionOverrides: parseConnectionFlags(opts.connection as string[]),
+        // Same `--no-X` mapping: commander stores the negated flag at
+        // `opts.inherit === false`. Default (no flag) is `undefined` →
+        // inheritance enabled.
+        noInherit: opts.inherit === false,
+        // Tri-state, unlike `--no-inherit` above: declaring BOTH the
+        // positive flag and its `--no-` negation makes commander leave the
+        // key unset when neither is passed, so `undefined` genuinely means
+        // "auto" (resolved from --json + stdin TTY) rather than "off".
+        // Proven end-to-end in test/run-signal-policy.test.ts.
+        cancelOnExit: typeof opts.cancelOnExit === "boolean" ? opts.cancelOnExit : undefined,
+        verbose: opts.verbose === true,
+        quiet: opts.quiet === true,
+      });
+    } catch (err) {
+      // What reaches here is a malformed option value thrown while the options
+      // above are read (`runCommand` ends its own errors).
+      exitRunWithError(err, command);
+    }
   });
 
 function parseReportMode(raw: unknown): "auto" | "true" | "false" | undefined {

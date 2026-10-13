@@ -22,7 +22,12 @@
  * package every parse.
  */
 
-import { PackageSpecError, splitPackageSpec } from "../../lib/package-spec.ts";
+import {
+  DRAFT_SELECTOR,
+  PackageSpecError,
+  PUBLISHED_SELECTOR,
+  splitPackageSpec,
+} from "../../lib/package-spec.ts";
 
 const PACKAGE_ID_RE = /^@[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
 
@@ -76,6 +81,21 @@ export function parseRunTarget(raw: string): ParsedRunTarget {
 
   // Unscoped: treat as path so `bundle.afps` (cwd-relative) keeps working.
   return { kind: "path", path: trimmed };
+}
+
+/**
+ * How `POST /api/runs/remote` names the version `spec` selects. `draft` is the
+ * `stage`; a `spec` is sent only when the server has one to resolve (a semver,
+ * a range or a dist-tag), which neither reserved selector is.
+ */
+export function registryVersion(spec: string | undefined): {
+  stage: "draft" | "published";
+  spec: string | undefined;
+} {
+  return {
+    stage: spec === DRAFT_SELECTOR ? "draft" : "published",
+    spec: spec === DRAFT_SELECTOR || spec === PUBLISHED_SELECTOR ? undefined : spec,
+  };
 }
 
 function looksLikePath(value: string): boolean {

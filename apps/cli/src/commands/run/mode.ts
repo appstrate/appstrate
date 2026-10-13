@@ -3,7 +3,7 @@
 /**
  * Execution mode resolution for `appstrate run`.
  *
- * Two modes:
+ * Three modes:
  *
  * - `remote` — the pinned Appstrate instance executes the run inside its
  *   own Docker container (same path as the dashboard "Run" button). The
@@ -14,7 +14,14 @@
  *   shell, FS, and env. Best for the dev-loop on a bundle you authored:
  *   sub-second feedback, `--snapshot` replays, planting in your debugger.
  *
- * Default rule (no flag): `target.kind === "id"` → remote, `path` → local.
+ * - `command` — `appstrate run @scope/agent -- <command> [args…]`: no agent
+ *   executes. The CLI registers an ordinary remote run of the agent and is
+ *   its runner, and what runs under it is the command, which reaches the
+ *   connections the run bound through the credential proxy (`X-Run-Id`).
+ *   Resolved by the presence of a command, never by a flag.
+ *
+ * Default rule (no flag, no command): `target.kind === "id"` → remote,
+ * `path` → local.
  * Rationale: `./bundle.afps` is "this file I just built" (local makes
  * sense). `@scope/agent` is "the published agent the platform knows
  * about" (remote matches dashboard parity and isolates third-party code
@@ -28,12 +35,13 @@
  *   does not upload local bundles to inline runs — would be silently
  *   different execution; explicit refusal is clearer than half-magic).
  *
- * `--local` and `--remote` are mutually exclusive.
+ * `--local` and `--remote` are mutually exclusive, and both are refused
+ * with a command.
  */
 
 import type { parseRunTarget } from "./package-spec.ts";
 
-export type ExecutionMode = "local" | "remote";
+export type ExecutionMode = "local" | "remote" | "command";
 
 type RunTarget = ReturnType<typeof parseRunTarget>;
 
@@ -41,6 +49,8 @@ type RunTarget = ReturnType<typeof parseRunTarget>;
 interface ModeResolutionOpts {
   local?: boolean;
   remote?: boolean;
+  /** Everything after the first `--`; undefined when the invocation has none. */
+  command?: readonly string[] | undefined;
   // Local-only flags — flagged at validation time when in remote mode.
   snapshot?: string;
   credsFile?: string;
@@ -53,6 +63,15 @@ interface ModeResolutionOpts {
   sinkTtl?: number;
   // Remote-only flag — flagged at validation time when in local mode.
   cancelOnExit?: boolean | undefined;
+  // Accepted by both agent-executing modes — flagged in command mode only.
+  model?: string;
+  output?: string;
+  json?: boolean;
+  verbose?: boolean;
+  quiet?: boolean;
+  proxy?: string;
+  noInherit?: boolean;
+  runId?: string;
 }
 
 export class ExecutionModeError extends Error {
@@ -65,13 +84,27 @@ export class ExecutionModeError extends Error {
 }
 
 /**
+ * The command of `appstrate run … -- <command> [args…]`: everything after the
+ * first literal `--` of the raw arguments, or undefined when there is none.
+ * Read off `argv` because commander drops that separator before the `run`
+ * action sees its operands, leaving `run @a/b x` and `run @a/b -- x` alike.
+ */
+export function commandAfterSeparator(argv: readonly string[]): string[] | undefined {
+  const at = argv.indexOf("--");
+  return at === -1 ? undefined : argv.slice(at + 1);
+}
+
+/**
  * Resolve the execution mode from the parsed target + opts.
  *
- * Throws `ExecutionModeError` only on flag conflicts (`--local --remote`)
- * or when `--remote` is paired with a path target. Default-mode resolution
- * never throws — it picks based on `target.kind`.
+ * Throws `ExecutionModeError` only on flag conflicts (`--local --remote`),
+ * when `--remote` is paired with a path target, or when a command is given
+ * something it cannot run under. Default-mode resolution never throws — it
+ * picks based on `target.kind`.
  */
 export function resolveExecutionMode(target: RunTarget, opts: ModeResolutionOpts): ExecutionMode {
+  if (opts.command !== undefined) return resolveCommandMode(target, opts);
+
   if (opts.local && opts.remote) {
     throw new ExecutionModeError(
       "--local and --remote are mutually exclusive",
@@ -95,16 +128,123 @@ export function resolveExecutionMode(target: RunTarget, opts: ModeResolutionOpts
   return target.kind === "id" ? "remote" : "local";
 }
 
+/** Command mode: the target is an agent of the instance, and no flag picks where an agent executes. */
+function resolveCommandMode(target: RunTarget, opts: ModeResolutionOpts): ExecutionMode {
+  if (opts.command?.length === 0) {
+    throw new ExecutionModeError(
+      "`--` is followed by no command",
+      "Write the command after it: appstrate run @scope/agent -- <command> [args…]",
+    );
+  }
+  if (target.kind === "path") {
+    throw new ExecutionModeError(
+      "A command runs under an agent registered on the instance, not a local bundle path",
+      "Pass an `@scope/agent` id before the `--`.",
+    );
+  }
+  const flag = opts.local ? "--local" : opts.remote ? "--remote" : null;
+  if (flag) {
+    throw new ExecutionModeError(
+      `${flag} selects where the agent executes, and a command replaces that execution`,
+      `Drop ${flag}, or drop the \`-- <command>\` to run the agent itself.`,
+    );
+  }
+  return "command";
+}
+
+const NO_AGENT_EXECUTES = "no agent executes, so no model is called";
+const PROXY_ONLY = "the command reaches connections through the instance's credential proxy only";
+const NOTHING_TO_RENDER = "the CLI renders no agent event: the output is the command's own";
+
+/**
+ * Flags a command run has nothing to act on, by the option that carries each.
+ * `--cancel-on-exit` is told apart from its negation in `commandModeOffenders`.
+ */
+const COMMAND_MODE_REFUSALS: ReadonlyArray<{
+  option: keyof ModeResolutionOpts;
+  flag: string;
+  reason: string;
+}> = [
+  {
+    option: "snapshot",
+    flag: "--snapshot",
+    reason: "snapshot replay seeds an agent's ExecutionContext, and no agent executes",
+  },
+  { option: "credsFile", flag: "--creds-file", reason: PROXY_ONLY },
+  { option: "integrations", flag: "--integrations", reason: PROXY_ONLY },
+  { option: "llmApiKey", flag: "--llm-api-key", reason: NO_AGENT_EXECUTES },
+  { option: "model", flag: "--model", reason: NO_AGENT_EXECUTES },
+  { option: "modelApi", flag: "--model-api", reason: NO_AGENT_EXECUTES },
+  { option: "modelSource", flag: "--model-source", reason: NO_AGENT_EXECUTES },
+  {
+    option: "report",
+    flag: "--report",
+    reason: "the run is always registered on the instance: it is what the command's calls name",
+  },
+  {
+    option: "reportFallback",
+    flag: "--report-fallback",
+    reason: "a refused registration ends the command: there is no console-only run to fall back to",
+  },
+  {
+    option: "output",
+    flag: "--output",
+    reason: "a command produces no RunResult; redirect its stdout instead",
+  },
+  { option: "json", flag: "--json", reason: NOTHING_TO_RENDER },
+  { option: "verbose", flag: "--verbose", reason: NOTHING_TO_RENDER },
+  { option: "quiet", flag: "--quiet", reason: NOTHING_TO_RENDER },
+  {
+    option: "proxy",
+    flag: "--proxy",
+    reason: "the command's outbound traffic is its own; the run records no proxy",
+  },
+  {
+    option: "noInherit",
+    flag: "--no-inherit",
+    reason: "the per-space run-config (model, proxy) is not read",
+  },
+  {
+    option: "runId",
+    flag: "--run-id",
+    reason: "the instance assigns the run id; the command reads it from APPSTRATE_RUN_ID",
+  },
+];
+
+function commandModeOffenders(opts: ModeResolutionOpts): { flag: string; reason: string }[] {
+  const offenders = COMMAND_MODE_REFUSALS.filter(({ option }) => {
+    const value = opts[option];
+    return value !== undefined && value !== false;
+  }).map(({ flag, reason }) => ({ flag, reason }));
+  if (opts.cancelOnExit !== undefined) {
+    offenders.push({
+      flag: opts.cancelOnExit ? "--cancel-on-exit" : "--no-cancel-on-exit",
+      reason: "the run ends with the command: a signal always stops both",
+    });
+  }
+  return offenders;
+}
+
 /**
  * Validate that the user-supplied flags are compatible with the resolved
  * execution mode. Local-only flags are rejected in remote mode with a
  * clear hint pointing at `--local` as the opt-in, and symmetrically for
- * remote-only flags in local mode.
+ * remote-only flags in local mode. Command mode refuses every flag that
+ * configures an agent's execution or its rendering.
  *
  * Kept separate from `resolveExecutionMode` so the dispatch can branch
  * on mode FIRST.
  */
 export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpts): void {
+  if (mode === "command") {
+    throwOffenders(
+      commandModeOffenders(opts),
+      "command",
+      "Drop these flags, or drop the `-- <command>` to run the agent itself.",
+    );
+    return;
+  }
+
   if (mode === "local") {
     // `--cancel-on-exit` decides what a signal does to a PLATFORM-side
     // run. A local run executes in this very process — it dies with the
@@ -183,11 +323,23 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
     });
   }
 
-  if (offenders.length === 0) return;
+  throwOffenders(
+    offenders,
+    "remote",
+    "Pass --local to opt into in-process execution, or drop these flags.",
+  );
+}
 
+/** One line per offender, so the user fixes them in one pass; silent when there is none. */
+function throwOffenders(
+  offenders: readonly { flag: string; reason: string }[],
+  mode: ExecutionMode,
+  hint: string,
+): void {
+  if (offenders.length === 0) return;
   const list = offenders.map((o) => `  ${o.flag} — ${o.reason}`).join("\n");
   throw new ExecutionModeError(
-    `The following flags are not supported in remote execution mode:\n${list}`,
-    "Pass --local to opt into in-process execution, or drop these flags.",
+    `The following flags are not supported in ${mode} execution mode:\n${list}`,
+    hint,
   );
 }

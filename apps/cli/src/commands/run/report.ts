@@ -25,6 +25,7 @@
  *                           when telemetry is down.
  */
 
+import { startSinkHeartbeat, type SinkHeartbeatHandle } from "@appstrate/runner-pi";
 import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
@@ -41,6 +42,17 @@ interface ReportOptions {
   ttlSeconds?: number;
   /** `--connection` picks, sent as the body's `connection_overrides`. */
   connectionOverrides?: ConnectionOverrides | undefined;
+  /**
+   * The caller's input, which the server resolves and validates against the
+   * agent's schema. A command run sends it; a locally executed agent resolves
+   * its own and registers `{}`.
+   */
+  input?: Record<string, unknown> | undefined;
+  /**
+   * What kind of runner this is, sent as `X-Appstrate-Runner-Kind` and kept on
+   * `runs.runner_kind`. Unset, the platform infers it from the credential.
+   */
+  runnerKind?: string | undefined;
 }
 
 export interface ReportContext {
@@ -87,7 +99,8 @@ interface ReportContextSnapshot {
   os: string;
   cliVersion: string;
   gitSha?: string;
-  bundle: { name: string; version: string };
+  /** The bundle the runner loaded; absent when it loaded none. */
+  bundle?: { name: string; version: string };
 }
 
 const CONTEXT_SNAPSHOT_MAX_BYTES = 16 * 1024;
@@ -118,13 +131,13 @@ export function shouldReport(mode: ReportMode, ctx: ReportContext | null): boole
  *                  or a runner whose package isn't in the catalog).
  *   - `registry` — declare the package by id and let the server load
  *                  its own copy. Deterministic attribution, no shadow
- *                  row, no "Inline" badge in the UI.
+ *                  row, no "Inline" badge in the UI. Needs no bundle on
+ *                  the runner's side.
  */
 export type ReportSource =
   | { kind: "inline"; bundle: Bundle }
   | {
       kind: "registry";
-      bundle: Bundle;
       packageId: string;
       /** Lifecycle stage of the package the runner downloaded — wire field is `stage`. */
       stage: "draft" | "published";
@@ -154,11 +167,12 @@ export async function startReportSession(
     "X-Space-Id": ctx.spaceId,
   };
   if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
+  if (opts.runnerKind) headers["X-Appstrate-Runner-Kind"] = opts.runnerKind;
 
   const sink = opts.ttlSeconds ? { sink: { ttl_seconds: opts.ttlSeconds } } : {};
   const baseBody = {
     spaceId: ctx.spaceId,
-    input: {},
+    input: opts.input ?? {},
     contextSnapshot: truncateSnapshot(contextSnapshot),
     ...sink,
     ...(opts.connectionOverrides ? { connection_overrides: opts.connectionOverrides } : {}),
@@ -225,6 +239,58 @@ export async function startReportSession(
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
   };
+}
+
+/** The host half of a run's `contextSnapshot`: where the runner executes, and which CLI. */
+export function hostSnapshot(): { os: string; cliVersion: string } {
+  return {
+    os: `${process.platform} ${process.arch}`,
+    cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
+  };
+}
+
+/**
+ * Start the run's liveness keep-alive: a signed POST to `<sink>/heartbeat`,
+ * the column the platform's stall watchdog reads. Same helper as the
+ * runtime-pi container.
+ */
+export function startReportHeartbeat(
+  session: ReportSession,
+  onError: (err: unknown) => void,
+): SinkHeartbeatHandle {
+  return startSinkHeartbeat({
+    url: `${session.sinkUrl.replace(/\/$/, "")}/heartbeat`,
+    runSecret: session.runSecret,
+    onError,
+  });
+}
+
+/**
+ * Cap on the safety-net finalize POST: HttpSink retries with backoff and Bun's
+ * `fetch` has no default timeout, so a dead platform could hold the CLI open
+ * after Ctrl-C. The run watchdog (60s default) covers what is abandoned here.
+ */
+export const SAFETY_NET_FINALIZE_TIMEOUT_MS = 5_000;
+
+/**
+ * Wait for `pending`, a finalize through `sink`, aborting the sink once
+ * `timeoutMs` has passed: the request and its retries are cancelled, so
+ * nothing is left running.
+ */
+export async function finalizeWithin(
+  sink: HttpSink,
+  pending: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  const timer = setTimeout(
+    () => sink.abort(new Error(`finalize POST timed out after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  try {
+    await pending;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -328,8 +394,8 @@ function truncateSnapshot(snap: ReportContextSnapshot): Record<string, unknown> 
   const obj: Record<string, unknown> = {
     os: snap.os,
     cliVersion: snap.cliVersion,
-    bundle: snap.bundle,
   };
+  if (snap.bundle) obj.bundle = snap.bundle;
   if (snap.gitSha) obj.gitSha = snap.gitSha;
   const serialized = JSON.stringify(obj);
   if (serialized.length > CONTEXT_SNAPSHOT_MAX_BYTES) {

@@ -77,6 +77,7 @@ function makeBundle(): Bundle {
 
 interface CapturedCall {
   url: string;
+  headers: Headers;
   body: Record<string, unknown>;
 }
 
@@ -90,7 +91,7 @@ function installStubFetch(responder: (call: CapturedCall) => Response): {
     const url = typeof input === "string" ? input : input.toString();
     const raw = init?.body ?? "{}";
     const body = JSON.parse(typeof raw === "string" ? raw : "{}") as Record<string, unknown>;
-    const call: CapturedCall = { url, body };
+    const call: CapturedCall = { url, headers: new Headers(init?.headers), body };
     calls.push(call);
     return responder(call);
   }) as typeof fetch;
@@ -139,7 +140,6 @@ describe("startReportSession — source discrimination", () => {
   it("posts kind: registry with packageId+stage for id-mode bundles (no manifest leak)", async () => {
     const reportSource: ReportSource = {
       kind: "registry",
-      bundle: makeBundle(),
       packageId: "@scope/agent",
       stage: "published",
       spec: "1.0.0",
@@ -197,10 +197,42 @@ describe("startReportSession — source discrimination", () => {
     expect("connection_overrides" in stub.calls[1]!.body).toBe(false);
   });
 
+  // A command run sends both; a locally executed agent resolves its own input
+  // and lets the platform infer the runner's kind.
+  it("sends the caller's input and the runner kind only when given them", async () => {
+    const reportSource: ReportSource = {
+      kind: "registry",
+      packageId: "@scope/agent",
+      stage: "draft",
+    };
+    await startReportSession(
+      reportSource,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort", input: { since: "2026-01-01" }, runnerKind: "command" },
+      { os: SNAPSHOT.os, cliVersion: SNAPSHOT.cliVersion },
+    );
+    await startReportSession(
+      reportSource,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+
+    expect(stub.calls[0]!.body.input).toEqual({ since: "2026-01-01" });
+    expect(stub.calls[0]!.headers.get("x-appstrate-runner-kind")).toBe("command");
+    // No bundle on the runner's side, none in the snapshot.
+    expect(stub.calls[0]!.body.contextSnapshot).toEqual({
+      os: SNAPSHOT.os,
+      cliVersion: SNAPSHOT.cliVersion,
+    });
+    expect(stub.calls[1]!.body.input).toEqual({});
+    expect(stub.calls[1]!.headers.has("x-appstrate-runner-kind")).toBe(false);
+    expect(stub.calls[1]!.body.contextSnapshot).toEqual(SNAPSHOT);
+  });
+
   it("omits spec on draft registry sources", async () => {
     const reportSource: ReportSource = {
       kind: "registry",
-      bundle: makeBundle(),
       packageId: "@scope/agent",
       stage: "draft",
     };

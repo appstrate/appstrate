@@ -25,6 +25,7 @@
 import { CLI_USER_AGENT } from "../../lib/version.ts";
 import { normalizeInstance } from "../../lib/instance-url.ts";
 import { DRAFT_SELECTOR, PUBLISHED_SELECTOR } from "../../lib/package-spec.ts";
+import { registryVersion } from "./package-spec.ts";
 import { verifyArtifactIntegrity } from "@appstrate/core/integrity";
 
 export class BundleFetchError extends Error {
@@ -185,7 +186,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   // explicit `@draft` sends it. We don't trust `versionHeader === "draft"`
   // alone for this — the request shape is the authoritative signal, and the
   // response is a sanity check.
-  const stage: "draft" | "published" = input.spec === DRAFT_SELECTOR ? "draft" : "published";
+  const { stage } = registryVersion(input.spec);
 
   const bytes = new Uint8Array(await res.arrayBuffer());
   // The bytes we just downloaded must match the server-issued integrity.

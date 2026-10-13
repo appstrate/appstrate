@@ -21,10 +21,8 @@ import {
   type RunResult,
   type TerminalRunResult,
 } from "@appstrate/afps-runtime/runner";
-import {
-  _attachFinalizeTrackerForTesting as attach,
-  _finalizeWithinForTesting as finalizeWithin,
-} from "../src/commands/run.ts";
+import { _attachFinalizeTrackerForTesting as attach } from "../src/commands/run.ts";
+import { finalizeWithin } from "../src/commands/run/report.ts";
 
 const failedResult = (): TerminalRunResult => ({ ...emptyRunResult(), status: "failed" });
 

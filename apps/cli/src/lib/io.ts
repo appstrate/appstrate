@@ -97,3 +97,15 @@ export const DEFAULT_IO: CommandIO = {
     clack.cancel(message);
   },
 };
+
+/**
+ * `DEFAULT_IO` with the terminal error on stderr, same rendering. For an
+ * invocation whose stdout is not the CLI's to write: `appstrate run … --
+ * <command>` leaves it to the command.
+ */
+export const STDERR_ERROR_IO: CommandIO = {
+  ...DEFAULT_IO,
+  cancel: (message) => {
+    clack.cancel(message, { output: process.stderr });
+  },
+};
