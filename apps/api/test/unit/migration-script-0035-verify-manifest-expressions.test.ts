@@ -5,14 +5,16 @@
  * current schema: its query reads every org integration draft and published version, and the
  * report lists the expressions the platform does not evaluate, the `{{field}}` placeholders a
  * delivery template leaves as literal text and the injected credentials a run refuses as
- * `exfiltration`, plus two advisories (a scope that is not one token, a secret-named credential
- * field the connect form shows in clear), and nothing for a clean manifest. Every version is gated — a range resolves
+ * `exfiltration`, plus three advisories (a scope that is not one token, a `default_tools` entry
+ * the integration does not expose, a secret-named credential field the connect form shows in
+ * clear), and nothing for a clean manifest. Every version is gated — a range resolves
  * older ones too — and a system package is not read at all.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { PGlite } from "@electric-sql/pglite";
 import { journalPGlite } from "../helpers/journal.ts";
+import { remoteIntegrationManifest } from "../helpers/integration-manifests.ts";
 import {
   STORED_MANIFESTS_QUERY,
   manifestIssues,
@@ -146,5 +148,24 @@ describe("0035 — stored manifests the release refuses", () => {
       `${CLEAN}@draft [clear-secret] auths.k.credentials.schema.properties.api_token`,
     ]);
     expect(report).toMatchObject({ expressions: 0, exfiltration: 0, advisories: 2 });
+  });
+
+  it("lists a default_tools entry the integration does not expose", () => {
+    const manifest = JSON.stringify({
+      ...remoteIntegrationManifest({
+        name: CLEAN,
+        auths: { k: { type: "oauth2" } },
+        tools_policy: { search: {} },
+      }),
+      default_tools: ["search", "serach"],
+    });
+    expect(manifestIssues([{ id: CLEAN, version: "draft", manifest }])).toEqual({
+      lines: [
+        `${CLEAN}@draft [default-tools] default_tools: default_tools contains "serach" which is not a tool this integration exposes`,
+      ],
+      expressions: 0,
+      exfiltration: 0,
+      advisories: 1,
+    });
   });
 });
