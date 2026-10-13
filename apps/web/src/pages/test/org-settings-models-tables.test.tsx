@@ -151,6 +151,35 @@ describe("the credentials table, where a subscription needs reconnecting", () =>
   });
 });
 
+describe("the credentials table, where an organization subscription needs reconnecting", () => {
+  const ORG_SUBSCRIPTION = credential({
+    id: "cred_org_sub",
+    label: "Abonnement de l'équipe",
+    providerId: "claude-code",
+    authMode: "oauth2",
+    oauth_email: "team@example.com",
+    needs_reconnection: true,
+    allowed_actions: ["edit", "delete", "reconnect"],
+  });
+  const reconnect = settingsFr["credentials.oauth.reconnect"];
+  const rowFor = (c: ModelProviderCredentialInfo) =>
+    rowOf(credentialsPage([c]), `data-testid="credential-row-${c.id}"`);
+
+  it("names the organization as its owner", () => {
+    expect(rowFor(ORG_SUBSCRIPTION)).toContain(`>${settingsFr["source.org"]}<`);
+  });
+
+  it("offers the reconnect where the server lists it", () => {
+    expect(rowFor(ORG_SUBSCRIPTION)).toContain(reconnect);
+  });
+
+  it("withholds it from a reader the server does not allow, with the badge still shown", () => {
+    const row = rowFor({ ...ORG_SUBSCRIPTION, allowed_actions: ["test"] });
+    expect(row).not.toContain(reconnect);
+    expect(row).toContain(settingsFr["credentials.oauth.needsReconnection"]);
+  });
+});
+
 describe("the credentials table, where a subscription the holder may re-pair is healthy", () => {
   const html = credentialsPage([
     { ...BOB_SUBSCRIPTION, allowed_actions: ["edit", "delete", "test", "reconnect"] },

@@ -2,9 +2,10 @@
 
 /**
  * Onboarding-only quick-connect cards for OAuth model providers.
- * One click opens the pairing dialog; on success the helper seeds the
- * org's `org_models` with the registry's featured models so the user
- * can hit "Continue" without touching the manual form.
+ * One click opens the pairing dialog for an organization subscription; on
+ * success the helper seeds the org's `org_models` with the registry's featured
+ * models, bound to it, so the user can hit "Continue" without touching the
+ * manual form.
  *
  * The list is module-driven: every OAuth provider the platform loaded
  * (`useProvidersRegistry()` filtered by `authMode === "oauth2"`) gets a
@@ -35,6 +36,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useAutoSeedFeaturedModels } from "../hooks/use-auto-seed-models";
 import { quickConnectProviders } from "../lib/provider-registry-helpers";
+import { hasOrgSubscription } from "../lib/oauth-pairing";
 
 interface CardProps {
   entry: ProviderRegistryEntry;
@@ -136,6 +138,7 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
         >
           <OAuthPairingBody
             providerId={entry.providerId}
+            ownerType="org"
             onConnected={(newId) => {
               setDialogOpen(false);
               void handleConnected(newId);
@@ -160,16 +163,11 @@ export function OnboardingQuickConnect() {
   return (
     <div className="flex flex-col gap-2">
       {entries.map((entry) => {
-        const alreadyConnected =
-          credentialsQuery.data?.some(
-            (k) =>
-              k.authMode === "oauth2" && k.providerId === entry.providerId && !k.needs_reconnection,
-          ) ?? false;
         return (
           <QuickConnectCard
             key={entry.providerId}
             entry={entry}
-            alreadyConnected={alreadyConnected}
+            alreadyConnected={hasOrgSubscription(credentialsQuery.data, entry.providerId)}
           />
         );
       })}

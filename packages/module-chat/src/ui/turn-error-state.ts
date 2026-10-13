@@ -76,12 +76,14 @@ const FIX = {
  * `memberText`: the whole sentence for a reader who cannot apply the fix `text` asks for.
  * `policyDisabledText`: the whole sentence when the organization refuses personal
  * credentials, which withdraws the `personalModels` fix altogether.
+ * `otherwise`: what a reader lacking this fix's permissions is offered instead.
  */
 interface Fixable {
   text: string;
   memberText?: string;
   policyDisabledText?: string;
   fix: keyof typeof FIX;
+  otherwise?: Fixable;
 }
 
 const DEAD_CREDENTIAL: Fixable = {
@@ -100,8 +102,19 @@ const DEAD_CREDENTIAL: Fixable = {
 const REFUSAL: Record<string, Fixable | { text: string; fix?: undefined }> = {
   quota_exceeded: { text: "turn.error.quotaExceeded", fix: "billing" },
   subscription_blocked: { text: "turn.error.subscriptionBlocked", fix: "billing" },
-  // Raised for a dead subscription, which is always its holder's own.
-  needs_reconnection: { text: "turn.error.needsReconnection", fix: "personalModels" },
+  // The dead subscription is the organization's or the caller's own, and the
+  // refusal does not say which. The organization's models page lists both for
+  // whoever manages its credentials; anyone else can reconnect only their own.
+  needs_reconnection: {
+    text: "turn.error.needsReconnection",
+    fix: "models",
+    otherwise: {
+      text: "turn.error.needsReconnectionOwn",
+      memberText: "turn.error.needsReconnectionMember",
+      policyDisabledText: "turn.error.needsReconnectionMember",
+      fix: "personalModels",
+    },
+  },
   org_deleting: { text: "turn.error.orgDeleting" },
   model_credential_required: {
     text: "turn.error.modelCredentialRequired",
@@ -118,12 +131,14 @@ interface TurnErrorState {
 }
 
 function withFix(
-  { text, memberText, policyDisabledText, fix }: Fixable,
+  { text, memberText, policyDisabledText, fix, otherwise }: Fixable,
   t: ChatTranslate,
   can: ChatCan,
   personalModelCredentials: boolean | undefined,
 ): Pick<TurnErrorState, "text" | "action"> {
   const { permissions, label, href } = FIX[fix];
+  const permitted = permissions.every((permission) => can(permission));
+  if (!permitted && otherwise) return withFix(otherwise, t, can, personalModelCredentials);
   // Until the policy is known, neither the link nor the refusal is claimed.
   if (fix === "personalModels" && personalModelCredentials === undefined) return { text: t(text) };
   // A personal credential cannot be added while the organization refuses them:
@@ -134,8 +149,7 @@ function withFix(
         ? t(policyDisabledText)
         : `${t(text)} ${t("turn.error.contactAdmin")}`,
     };
-  if (permissions.every((permission) => can(permission)))
-    return { text: t(text), action: { label: t(label), href } };
+  if (permitted) return { text: t(text), action: { label: t(label), href } };
   return { text: memberText ? t(memberText) : `${t(text)} ${t("turn.error.contactAdmin")}` };
 }
 

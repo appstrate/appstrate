@@ -40,9 +40,15 @@ import {
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { pairingRequestBody, type CredentialOwnerType } from "../lib/oauth-pairing";
 
 interface OAuthPairingBodyProps {
   providerId: string;
+  /**
+   * Who owns the subscription: the organization, or the caller. For a reconnect,
+   * the owner of `credentialId`.
+   */
+  ownerType: CredentialOwnerType;
   /** Existing credential targeted by a reconnect; omitted for a new connection. */
   credentialId?: string;
   /**
@@ -61,6 +67,7 @@ interface OAuthPairingBodyProps {
 
 export function OAuthPairingBody({
   providerId,
+  ownerType,
   credentialId,
   onConnected,
   onBusyChange,
@@ -132,7 +139,7 @@ export function OAuthPairingBody({
     registeredRef.current = false;
     try {
       const res = await createPairing.mutateAsync({
-        body: { providerId, ...(credentialId ? { credentialId } : {}) },
+        body: pairingRequestBody({ providerId, ownerType, credentialId }),
       });
       setPairing({ id: res.id, command: res.command });
       // Register so `<PendingPairingsWatcher>` can poll this to completion

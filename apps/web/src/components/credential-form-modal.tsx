@@ -286,9 +286,12 @@ function CredentialFormBody({
   );
 
   // OAuth-selected: the pairing body owns the connection (the helper POSTs creds
-  // back). An existing row is renamed here, and reconnected only when flagged.
+  // back). An existing row is renamed here, and re-paired when it is flagged and
+  // the server allows the caller to reconnect it.
   if (isOAuthSelected && selectedOption?.providerId) {
-    const showPairing = !isEditing || !!credential?.needs_reconnection;
+    const showPairing = credential
+      ? !!credential.needs_reconnection && credential.allowed_actions.includes("reconnect")
+      : true;
     return (
       <>
         <Modal
@@ -346,6 +349,7 @@ function CredentialFormBody({
               <OAuthPairingBody
                 key={selectedOption.providerId}
                 providerId={selectedOption.providerId}
+                ownerType={credential?.owner_type ?? (personal ? "user" : "org")}
                 credentialId={credential?.id}
                 onConnected={() => onClose()}
                 onBusyChange={oauthDismiss.onBusyChange}

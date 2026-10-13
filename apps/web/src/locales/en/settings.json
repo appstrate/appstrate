@@ -746,7 +746,7 @@
   "models.form.createCredentialHint": "A model provider key will be created automatically.",
   "models.form.useExistingKey": "My keys",
   "models.form.identityLabel": "Credential",
-  "models.form.eachMemberRequired": "Choose “Each member uses their own credential”: a subscription is personal and cannot serve an organization model.",
+  "models.form.subscriptionRequired": "Choose an organization subscription or “Each member uses their own credential”.",
   "models.form.apiKeyRequired": "Enter an API key or pick an existing one.",
   "models.form.discoverButton": "Detect models",
   "models.form.manualButton": "Configure manually",
