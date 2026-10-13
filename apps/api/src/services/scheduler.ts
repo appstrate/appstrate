@@ -6,7 +6,13 @@ import { getCache } from "../infra/index.ts";
 import { and, eq, asc, inArray, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { schedules, endUsers, runs, notifications } from "@appstrate/db/schema";
+import {
+  schedules,
+  endUsers,
+  runs,
+  notifications,
+  type ScheduleDisabledReason,
+} from "@appstrate/db/schema";
 import { activeRunStatusValues } from "@appstrate/core/run-status";
 import { resolveSpaceRole, spacePermissions } from "../lib/space-role.ts";
 import { loadSpaceAccess } from "../lib/space-lookup.ts";
@@ -27,6 +33,7 @@ import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { toLaunchOverrides } from "./integration-connection-resolver.ts";
+import { isScheduleOwned } from "./schedule-connections.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion, versionRefOf } from "./agent-version-resolver.ts";
@@ -188,12 +195,16 @@ export async function assertScheduleActorValid(
   }
 }
 
-async function disableScheduleForInvalidActor(scheduleId: string): Promise<void> {
+/** A fire disabling its own schedule: the refusal it met is not coming back. */
+async function disableScheduleAtFire(
+  scheduleId: string,
+  reason: ScheduleDisabledReason,
+): Promise<void> {
   await db
     .update(schedules)
     .set({
       enabled: false,
-      disabledReason: "actor_invalid",
+      disabledReason: reason,
       nextRunAt: null,
       updatedAt: new Date(),
     })
@@ -271,10 +282,11 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     const fired = await triggerScheduledRun(scheduleId, claim);
     if (!fired) return;
 
-    // The trigger may have disabled the schedule (invalid actor), and a write may land after its
-    // read, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on the cron it
-    // was computed from, else the concurrent writer's value stands. Bookkeeping only: `updatedAt`
-    // is the write token of `updateSchedule`, so bumping it would 409 an overlapping PATCH.
+    // The trigger may have disabled the schedule (`disableScheduleAtFire`), and a write may land
+    // after its read, so the UPDATE itself decides: a nextRunAt only onto a row still enabled on
+    // the cron it was computed from, else the concurrent writer's value stands. Bookkeeping only:
+    // `updatedAt` is the write token of `updateSchedule`, so bumping it would 409 an overlapping
+    // PATCH.
     const nextRun = computeNextRun(fired.cronExpression, fired.timezone);
     await db
       .update(schedules)
@@ -357,9 +369,11 @@ export async function shutdownScheduleWorker(): Promise<void> {
 
 /**
  * Fire one scheduled run from the schedule row, read now; any `ApiError` becomes a visible failed
- * run (`failSchedule()`). Returns the cron the fire read, or `null` when the row is gone or
- * disabled (its job is removed) or `claim` refuses the occurrence. A failed read throws before
- * `claim`, leaving the occurrence unconsumed for the job's failure to report.
+ * run (`failSchedule()`), and one only a write to the schedule clears — its actor, its connection
+ * choice — disables it too (`disableScheduleAtFire`). Returns the cron the fire read, or `null`
+ * when the row is gone or disabled (its job is removed) or `claim` refuses the occurrence. A
+ * failed read throws before `claim`, leaving the occurrence unconsumed for the job's failure to
+ * report.
  */
 export async function triggerScheduledRun(
   scheduleId: string,
@@ -427,7 +441,7 @@ export async function triggerScheduledRun(
         actorType: actor.type,
         actorId: actor.id,
       });
-      await disableScheduleForInvalidActor(scheduleId);
+      await disableScheduleAtFire(scheduleId, "actor_invalid");
       await failSchedule(`Schedule disabled: ${invalidScheduleActorReason(actor)}`);
       return row;
     }
@@ -541,13 +555,18 @@ export async function triggerScheduledRun(
       });
     } catch (err) {
       if (err instanceof ApiError) {
+        // The write rule, repeated: a verdict only a write to this schedule clears would fail
+        // every tick, so the fire disables it. Any other refusal is repaired elsewhere: armed.
+        const choiceRefused = err.fieldErrors?.some(isScheduleOwned) ?? false;
         logger.warn("Agent readiness check failed, skipping schedule", {
           scheduleId,
           packageId,
           code: err.code,
           detail: err.message,
+          disabled: choiceRefused,
         });
-        await failSchedule(err.message);
+        if (choiceRefused) await disableScheduleAtFire(scheduleId, "connection_choice_invalid");
+        await failSchedule(choiceRefused ? `Schedule disabled: ${err.message}` : err.message);
         return row;
       }
       logger.error("Unexpected error during schedule preflight", {

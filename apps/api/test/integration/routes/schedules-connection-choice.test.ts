@@ -973,7 +973,7 @@ describe("schedule fires — a named set binds, an unnamed one takes the fallbac
     });
   });
 
-  it("fires a schedule stored without a set on its actor's one connection, and fails on two", async () => {
+  it("fires a schedule stored without a set on its actor's one connection, and disables it on two", async () => {
     const schedule = await seedSchedule({
       packageId: AGENT,
       orgId: ctx.orgId,
@@ -997,5 +997,8 @@ describe("schedule fires — a named set binds, an unnamed one takes the fallbac
     const refused = fires.find((run) => run.id !== bound!.id)!;
     expect(refused).toMatchObject({ status: "failed", resolvedConnections: null });
     expect(refused.error).toContain(`Integration '${INTEGRATION}' needs a connection choice`);
+    // The choice is the schedule's to make: the fire that meets it open disables the schedule.
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, schedule.id));
+    expect(row).toMatchObject({ enabled: false, disabledReason: "connection_choice_invalid" });
   });
 });

@@ -26,9 +26,11 @@ import type { Actor } from "../lib/actor.ts";
 /**
  * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, a set
  * an admin pin or enforced default outranks, and — when the schedule's OWN set decided it — a
- * pick on an auth serving no selected tool or no pick at all for a required integration.
+ * pick on an auth serving no selected tool or no pick at all for a required integration. The
+ * write refuses them and a fire meeting one disables the schedule: it reads the resolver's error
+ * (the write) and the 409 item translated from it (the fire) alike.
  */
-function isScheduleOwned(e: ConnectionResolutionError): boolean {
+export function isScheduleOwned(e: Pick<ResolutionFieldError, "code" | "source">): boolean {
   switch (e.code) {
     case "must_choose_connection":
     case "override_connection_unavailable":
