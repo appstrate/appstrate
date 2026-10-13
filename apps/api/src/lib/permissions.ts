@@ -177,9 +177,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     // Files: read only — deleting is preset admin or the creator (per-file capability check).
     "files:read",
     // Schedules: read only. Even with `schedules:write`/`schedules:delete` (builder, custom
-    // roles) a caller writes schedules running as themselves or an end user; a schedule running as
-    // another member lends that member's connections to its runs, so naming such an actor and any
-    // write to such a schedule is an org owner/admin act (`mayGovernMemberSchedule` in
+    // roles) a caller writes schedules running as themselves; a schedule running as
+    // another member or an end user lends that identity's connections to its runs, so naming such an actor and any
+    // write to such a schedule is an org owner/admin act, or an API key's for an end user (`mayGovernScheduleActor` in
     // routes/schedules.ts).
     "schedules:read",
     "persistence:read",

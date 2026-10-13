@@ -297,34 +297,44 @@ const actorSchema = z
   });
 
 /**
- * A schedule running as ANOTHER member fires with that member's reach, so naming such an actor and
- * writing such a schedule is an org owner/admin act on their own credential: a delegate (API key,
- * third-party OAuth client) is refused. `memberId` is `null` for an end-user actor.
+ * A schedule fires with its actor's reach, so naming another identity as actor and writing such a
+ * schedule is an act of authority over that identity. Another MEMBER: an org owner/admin on their
+ * own credential, and no delegate (API key, third-party OAuth client). An END USER: the same
+ * owner/admin, or an API key, which already borrows any end-user of its space with
+ * `Appstrate-User`. `actor` is `null` when the write names none.
  */
-function mayGovernMemberSchedule(c: Context<AppEnv>, memberId: string | null | undefined): boolean {
-  if (!memberId) return true;
+function mayGovernScheduleActor(c: Context<AppEnv>, actor: Actor | null): boolean {
+  if (!actor) return true;
   const caller = getActor(c);
-  if (caller.type === "user" && caller.id === memberId) return true;
+  if (caller.type === actor.type && caller.id === actor.id) return true;
+  if (actor.type === "end_user" && c.get("authMethod") === "api_key") return true;
   return (
     isUserPrincipal(c) &&
     (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c))
   );
 }
 
-const CHOOSE_MEMBER_ACTOR =
-  "Only an organization owner or admin, on their own credential, can make another member a schedule's actor.";
-const WRITE_MEMBER_SCHEDULE =
-  "Only an organization owner or admin, on their own credential, can change a schedule that runs as another member.";
+const CHOOSE_OTHER_ACTOR =
+  "Only an organization owner or admin, on their own credential, can make another member a schedule's actor; an end-user actor also accepts an API key.";
+const WRITE_OTHER_ACTOR_SCHEDULE =
+  "Only an organization owner or admin, on their own credential, can change a schedule that runs as another member; one that runs as an end-user also accepts an API key.";
 
-/** 403 unless {@link mayGovernMemberSchedule}. */
+/** 403 unless {@link mayGovernScheduleActor}. */
 function assertMayGovern(
   c: Context<AppEnv>,
-  memberId: string | null | undefined,
+  actor: Actor | null,
   detail: string,
   param?: string,
 ): void {
-  if (mayGovernMemberSchedule(c, memberId)) return;
+  if (mayGovernScheduleActor(c, actor)) return;
   throw new ApiError({ status: 403, code: "forbidden", title: "Forbidden", detail, param });
+}
+
+/** The actor a write body names, unresolved: `null` when it names none. */
+function selectedActor(
+  selected: { userId?: string; endUserId?: string } | undefined,
+): Actor | null {
+  return actorFromIds(selected?.userId ?? null, selected?.endUserId ?? null);
 }
 
 /**
@@ -484,7 +494,7 @@ export function createSchedulesRouter() {
       );
 
       // Before resolving the actor, so a refused caller cannot probe who is a member.
-      assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
+      assertMayGovern(c, selectedActor(data.actor), CHOOSE_OTHER_ACTOR, "actor");
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
       // Reject a `model_id_override` that references no real model up front, so
@@ -578,7 +588,11 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(c, id, scope);
-    assertMayGovern(c, existing.userId, WRITE_MEMBER_SCHEDULE);
+    assertMayGovern(
+      c,
+      actorFromIds(existing.userId, existing.endUserId),
+      WRITE_OTHER_ACTOR_SCHEDULE,
+    );
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -743,7 +757,7 @@ export function createSchedulesRouter() {
 
     // Re-point the actor when the caller selected one (validated against
     // this org/space scope). `undefined` leaves the existing actor untouched.
-    assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
+    assertMayGovern(c, selectedActor(data.actor), CHOOSE_OTHER_ACTOR, "actor");
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
@@ -868,7 +882,12 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
-    assertMayGovern(c, (await loadScheduleOr404(c, id, scope)).userId, WRITE_MEMBER_SCHEDULE);
+    const existing = await loadScheduleOr404(c, id, scope);
+    assertMayGovern(
+      c,
+      actorFromIds(existing.userId, existing.endUserId),
+      WRITE_OTHER_ACTOR_SCHEDULE,
+    );
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",

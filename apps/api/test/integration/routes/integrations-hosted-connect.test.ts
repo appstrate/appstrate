@@ -694,9 +694,10 @@ async function sshManifest(name = SSH_ID): Promise<IntegrationManifest> {
  */
 function registerSshAsSystemPackage() {
   let restore: () => void;
-  beforeAll(() => {
+  beforeAll(async () => {
+    const manifest = (await sshManifest()) as unknown as SystemPackageEntry["manifest"];
     restore = _setSystemPackagesForTesting(
-      new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]),
+      new Map([[SSH_ID, { packageId: SSH_ID, manifest } as SystemPackageEntry]]),
     );
   });
   afterAll(() => restore());

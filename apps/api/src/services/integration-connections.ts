@@ -178,7 +178,11 @@ import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.t
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
-import { getIntegration, getOrgWideIntegrationManifest } from "./integration-service.ts";
+import {
+  getIntegration,
+  getIntegrationManifestForConnect,
+  getOrgWideIntegrationManifest,
+} from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
 
 // ─────────────────────────────────────────────
@@ -4065,10 +4069,9 @@ export async function getIntegrationAuthStatuses(
 }
 
 /**
- * Surfaces the manifest's `auth` declaration verbatim — used by the
- * OAuth initiate handler to read endpoints + resource + scopes without
- * a second DB round-trip. Returns the full manifest too so callers that
- * need the wider catalog don't re-fetch.
+ * The `auth` declaration every connect flow acts on (kickoff, hosted page, callback, strategies),
+ * with its manifest: the published one, never the draft of a published integration
+ * ({@link getIntegrationManifestForConnect}).
  */
 export async function readIntegrationAuth(
   scope: SpaceScope,
@@ -4078,8 +4081,20 @@ export async function readIntegrationAuth(
   manifest: IntegrationManifest;
   auth: NonNullable<IntegrationManifest["auths"]>[string];
 }> {
-  const manifest = await loadManifestOrThrow(scope, packageId);
+  const manifest = await getIntegrationManifestForConnect(scope, packageId);
+  if (!manifest) {
+    throw notFound(`Integration '${packageId}' not found in this organization`);
+  }
   return { manifest, auth: lookupAuth(manifest, authKey) };
+}
+
+/** 404 unless the integration's draft declares `authKey` — what its OAuth clients are registered against. */
+export async function assertIntegrationAuthDeclared(
+  scope: SpaceScope | OrgScope,
+  packageId: string,
+  authKey: string,
+): Promise<void> {
+  lookupAuth(await loadManifestOrThrow(scope, packageId), authKey);
 }
 
 // ─────────────────────────────────────────────

@@ -984,15 +984,112 @@ describe("Schedules API", () => {
         expect(((await list.json()) as { data: unknown[] }).data).toHaveLength(0);
       });
 
-      it("lets a builder name themselves or an end user", async () => {
+      it("lets a builder name themselves", async () => {
         const builder = await memberContext(ctx, "member", "builder");
-        const eu = await seedEndUser({
-          orgId: ctx.orgId,
-          spaceId: ctx.defaultSpaceId,
-          externalId: `ext-${Date.now()}`,
-        });
         expect((await create(builder, { userId: builder.user.id })).status).toBe(201);
-        expect((await create(builder, { endUserId: eu.id })).status).toBe(201);
+      });
+
+      describe("an end-user actor", () => {
+        let eu: string;
+
+        beforeEach(async () => {
+          const endUser = await seedEndUser({
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            externalId: `ext-${crypto.randomUUID()}`,
+          });
+          eu = endUser.id;
+        });
+
+        async function scheduleRunningAsEndUser(): Promise<string> {
+          const created = await create(ctx, { endUserId: eu });
+          expect(created.status).toBe(201);
+          return ((await created.json()) as { id: string }).id;
+        }
+
+        // A builder holds no `api-keys:*`, so no way to borrow an end-user: a schedule must not be one.
+        it("refuses a builder naming an end user, and writes nothing", async () => {
+          const builder = await memberContext(ctx, "member", "builder");
+          const res = await create(builder, { endUserId: eu });
+          expect(res.status).toBe(403);
+          expect(await res.json()).toMatchObject({ code: "forbidden", param: "actor" });
+          const list = await app.request(`/api/schedules`, { headers: authHeaders(ctx) });
+          expect(((await list.json()) as { data: unknown[] }).data).toHaveLength(0);
+        });
+
+        it("refuses a builder every write to a schedule running as an end user", async () => {
+          const builder = await memberContext(ctx, "member", "builder");
+          const id = await scheduleRunningAsEndUser();
+
+          for (const body of [
+            { name: "Renamed" },
+            { enabled: false },
+            { actor: { endUserId: eu } },
+            { actor: { userId: builder.user.id } },
+          ]) {
+            const res = await patch(builder, id, body);
+            expect(`${JSON.stringify(body)}: ${res.status}`).toBe(`${JSON.stringify(body)}: 403`);
+          }
+          expect((await remove(builder, id)).status).toBe(403);
+
+          const read = await app.request(`/api/schedules/${id}`, { headers: authHeaders(ctx) });
+          expect(await read.json()).toMatchObject({ name: null, enabled: true, endUserId: eu });
+        });
+
+        it("refuses a builder moving their own schedule to an end user", async () => {
+          const builder = await memberContext(ctx, "member", "builder");
+          const created = await create(builder);
+          const { id } = (await created.json()) as { id: string };
+          const moved = await patch(builder, id, { actor: { endUserId: eu } });
+          expect(moved.status).toBe(403);
+          expect(await moved.json()).toMatchObject({ code: "forbidden", param: "actor" });
+        });
+
+        it("lets an org admin name one, edit and delete the schedule", async () => {
+          const admin = await memberContext(ctx, "admin");
+          const created = await create(admin, { endUserId: eu });
+          expect(created.status).toBe(201);
+          const { id } = (await created.json()) as { id: string };
+          expect((await patch(admin, id, { name: "Renamed" })).status).toBe(200);
+          expect((await remove(admin, id)).status).toBe(204);
+        });
+
+        // An API key already borrows any end-user of its space with `Appstrate-User`.
+        it("lets an API key name one, with and without Appstrate-User", async () => {
+          const key = await seedApiKey({
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            createdBy: ctx.user.id,
+            scopes: ["schedules:read", "schedules:write", "schedules:delete"],
+          });
+          const keyHeaders = {
+            Authorization: `Bearer ${key.rawKey}`,
+            "Content-Type": "application/json",
+          };
+          const body = JSON.stringify({ cron_expression: "0 9 * * *", actor: { endUserId: eu } });
+
+          const named = await app.request(`/api/agents/${fid}/schedules`, {
+            method: "POST",
+            headers: keyHeaders,
+            body,
+          });
+          expect(named.status).toBe(201);
+          const { id } = (await named.json()) as { id: string };
+
+          const patched = await app.request(`/api/schedules/${id}`, {
+            method: "PATCH",
+            headers: keyHeaders,
+            body: JSON.stringify({ name: "Renamed" }),
+          });
+          expect(patched.status).toBe(200);
+
+          const asEndUser = await app.request(`/api/agents/${fid}/schedules`, {
+            method: "POST",
+            headers: { ...keyHeaders, "Appstrate-User": eu },
+            body,
+          });
+          expect(asEndUser.status).toBe(201);
+        });
       });
 
       it("lets an org admin name another member", async () => {

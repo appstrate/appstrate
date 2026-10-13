@@ -634,6 +634,42 @@ export async function getIntegration(
 }
 
 /**
+ * The manifest a CONNECT reads for an integration placed in the caller's space: the `latest`
+ * published version (a system package's own), and the draft only while nothing is published.
+ *
+ * A draft changes with no version minted, so once a version exists the endpoints a connect sends
+ * an authorization code, a PKCE verifier and the client secret to are read from that version,
+ * like the credential proxy ({@link readIntegrationManifestForProxy}). `null` as
+ * {@link getIntegration}, and when versions exist but none resolves or parses: the draft is not a
+ * fallback for a published integration.
+ */
+export async function getIntegrationManifestForConnect(
+  scope: SpaceScope,
+  packageId: string,
+): Promise<IntegrationManifest | null> {
+  const placed = await getIntegration(scope, packageId);
+  if (!placed) return null;
+  const res = await resolvePublishedManifest(packageId, "integration", scope.orgId);
+  if (!res.ok) {
+    if (res.reason === "no_published_version") return placed.manifest;
+    logger.warn("Integration has no usable published version to connect through", {
+      packageId,
+      reason: res.reason,
+    });
+    return null;
+  }
+  const parsed = parseIntegrationManifest(res.rawManifest);
+  if (!parsed.ok) {
+    logger.warn("Published integration manifest failed validation; treating as missing", {
+      packageId,
+      version: res.version,
+    });
+    return null;
+  }
+  return parsed.manifest;
+}
+
+/**
  * Read the DRAFT manifest of an integration the ORGANIZATION can resolve —
  * org-wide, with no placement conjunct, on purpose.
  *

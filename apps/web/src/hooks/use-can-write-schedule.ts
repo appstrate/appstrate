@@ -2,11 +2,16 @@
 
 import { useAuth } from "./use-auth";
 import { usePermissions } from "./use-permissions";
-import { mayGovernMemberSchedule } from "../lib/schedule-governance";
+import { mayGovernScheduleActor } from "../lib/schedule-governance";
 
-/** {@link mayGovernMemberSchedule} for a loaded schedule; `false` while it is not. */
-export function useCanWriteSchedule(schedule: { userId: string | null } | undefined): boolean {
+/** {@link mayGovernScheduleActor} for a loaded schedule; `false` while it is not. */
+export function useCanWriteSchedule(
+  schedule: { userId: string | null; endUserId: string | null } | undefined,
+): boolean {
   const { user } = useAuth();
   const { orgRole } = usePermissions();
-  return !!schedule && mayGovernMemberSchedule(schedule.userId, { userId: user?.id, orgRole });
+  return (
+    !!schedule &&
+    mayGovernScheduleActor(schedule.userId ?? schedule.endUserId, { userId: user?.id, orgRole })
+  );
 }
