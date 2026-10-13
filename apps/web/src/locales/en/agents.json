@@ -192,6 +192,7 @@
   "run.infoAgent": "Agent",
   "run.infoRunnerPlatform": "Platform",
   "run.infoRunnerRemote": "Remote",
+  "run.infoRunnerCommand": "command",
   "run.infoDuration": "Duration",
   "run.infoStartedAt": "Started",
   "run.infoCompletedAt": "Completed",

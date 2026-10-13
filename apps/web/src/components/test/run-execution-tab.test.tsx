@@ -153,3 +153,25 @@ describe("TurnsTable without a context window", () => {
     expect(html).toContain("bg-muted-foreground/15");
   });
 });
+
+describe("Runner row", () => {
+  const runnerRow = (overrides: Partial<EnrichedRun>): string =>
+    render(<RunExecutionTab run={makeRun(overrides)} logs={[]} turns={[]} />);
+
+  it("names a command runner between the origin and the runner's name, on a remote run only", () => {
+    const origin = agentsFr["run.infoRunnerRemote"];
+    const kind = agentsFr["run.infoRunnerCommand"];
+    const command = { runOrigin: "remote", runner_kind: "command" } as const;
+
+    expect(runnerRow({ ...command, runner_name: "pierres-mbp" })).toContain(
+      `${origin} · ${kind} · pierres-mbp`,
+    );
+    expect(runnerRow(command)).toContain(`${origin} · ${kind}<`);
+    // Another kind keeps the two-part label; on a platform run the kind is the
+    // triggering client's, not the runner's.
+    expect(runnerRow({ runOrigin: "remote", runner_kind: "cli", runner_name: "ci" })).toContain(
+      `${origin} · ci`,
+    );
+    expect(runnerRow({ runOrigin: "platform", runner_kind: "command" })).not.toContain(kind);
+  });
+});
