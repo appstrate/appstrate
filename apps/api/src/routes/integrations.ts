@@ -137,6 +137,7 @@ import { createConnectRunExecutor } from "../services/connect/connect-run-launch
 import { readReconnectTarget } from "../services/integration-scope-resolver.ts";
 import { isUserConnectionCreationBlocked } from "../services/integration-connection-resolver.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
+import { removeNamingLayer } from "../services/schedules-named-by-layer.ts";
 import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
@@ -1563,17 +1564,22 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deletePin(scope, agentPackageId, packageId, null);
+      const { previous, disabledScheduleIds } = await removeNamingLayer(
+        { kind: "admin_pin", spaceId: scope.spaceId, integrationId: packageId, agentPackageId },
+        (tx) => deletePin(tx, scope, agentPackageId, packageId, null),
+      );
+      await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
           before: pinAudit(previous),
+          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — 204 whether the pin existed or not.
-      return c.body(null, 204);
+      // Idempotent delete — a count of 0 when there was no pin.
+      return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 
@@ -1624,17 +1630,22 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deleteOrgDefault(scope, packageId);
+      const { previous, disabledScheduleIds } = await removeNamingLayer(
+        { kind: "org_default", spaceId: scope.spaceId, integrationId: packageId },
+        (tx) => deleteOrgDefault(tx, scope, packageId),
+      );
+      await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.org_default.deleted",
           resourceType: "integration_org_default",
           resourceId: packageId,
           before: orgDefaultAudit(previous),
+          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — 204 whether a default existed or not.
-      return c.body(null, 204);
+      // Idempotent delete — a count of 0 when no default was set.
+      return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 

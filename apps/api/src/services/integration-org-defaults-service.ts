@@ -19,6 +19,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
+import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { validatePinTargets } from "./integration-pins-service.ts";
 
@@ -122,12 +123,13 @@ export async function upsertOrgDefault(
   return { previous: previous ? toSummary(previous) : null, orgDefault: toSummary(row!) };
 }
 
-/** Delete the org default; `previous` is the one removed, `null` when none was set. */
+/** Delete the org default in `tx`; `previous` is the one removed, `null` when none was set. */
 export async function deleteOrgDefault(
+  tx: Tx,
   scope: SpaceScope,
   integrationId: string,
 ): Promise<{ previous: OrgDefaultSummary | null }> {
-  const [row] = await db
+  const [row] = await tx
     .delete(integrationOrgDefaults)
     .where(orgDefaultKey(scope, integrationId))
     .returning();

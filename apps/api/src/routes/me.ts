@@ -90,6 +90,7 @@ import {
 import { serveOwnConnectionCalls } from "./connection-calls-handler.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
+import { removeNamingLayer } from "../services/schedules-named-by-layer.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
 import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
@@ -326,16 +327,27 @@ router.delete(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const { previous } = await deletePin(scope, agentPackageId, integrationPackageId, userId);
+    const { previous, disabledScheduleIds } = await removeNamingLayer(
+      {
+        kind: "member_pin",
+        spaceId: scope.spaceId,
+        integrationId: integrationPackageId,
+        agentPackageId,
+        userId,
+      },
+      (tx) => deletePin(tx, scope, agentPackageId, integrationPackageId, userId),
+    );
+    await removeScheduleJobs(disabledScheduleIds);
     if (previous) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
         before: pinAudit(previous),
+        ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
       });
     }
-    return c.body(null, 204);
+    return c.json({ schedules_disabled_count: disabledScheduleIds.length });
   },
 );
 

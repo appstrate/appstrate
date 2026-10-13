@@ -41,6 +41,7 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { notFound } from "../lib/errors.ts";
+import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
@@ -330,16 +331,17 @@ async function upsertPin(args: {
 }
 
 /**
- * Delete one pin row — the admin pin for `userId: null`, else that member's; `previous` is the
- * set it held, `null` when there was none.
+ * Delete one pin row in `tx` — the admin pin for `userId: null`, else that member's; `previous` is
+ * the set it held, `null` when there was none.
  */
 export async function deletePin(
+  tx: Tx,
   scope: SpaceScope,
   agentPackageId: string,
   integrationId: string,
   userId: string | null,
 ): Promise<{ previous: string[] | null }> {
-  const [row] = await db
+  const [row] = await tx
     .delete(integrationPins)
     .where(pinKey(scope, agentPackageId, integrationId, userId))
     .returning({ connectionIds: integrationPins.connectionIds });

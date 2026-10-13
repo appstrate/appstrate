@@ -1839,7 +1839,10 @@ export interface paths {
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
-        /** Remove the space-wide default connection (admin) */
+        /**
+         * Remove the space-wide default connection (admin)
+         * @description Removes the space's default set for this integration, soft or enforced. In the same transaction, every enabled schedule whose fire bound this integration through it and that nothing names the set for afterwards — no `connection_overrides` key, no admin pin or pin of its actor on its agent, no org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds; re-enabling it requires naming its set. Idempotent: `schedules_disabled_count` is 0 when there was nothing to remove.
+         */
         delete: operations["deleteIntegrationOrgDefault"];
         options?: never;
         head?: never;
@@ -1921,7 +1924,10 @@ export interface paths {
          */
         put: operations["upsertIntegrationPin"];
         post?: never;
-        /** Remove an admin pin (admin) */
+        /**
+         * Remove an admin pin (admin)
+         * @description Removes the agent's admin pin for this integration. In the same transaction, every enabled schedule whose fire bound this integration through it and that nothing names the set for afterwards — no `connection_overrides` key, no admin pin or pin of its actor on its agent, no org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds; re-enabling it requires naming its set. Idempotent: `schedules_disabled_count` is 0 when there was nothing to remove.
+         */
         delete: operations["deleteIntegrationPin"];
         options?: never;
         head?: never;
@@ -2291,7 +2297,7 @@ export interface paths {
         post?: never;
         /**
          * Clear the caller's pin on a (agent, integration)
-         * @description Removes the caller's member pin so the resolver falls back to layers 5-6 (soft org default, then accessible connections). Idempotent — 204 even when no row exists.
+         * @description Removes the caller's member pin so the resolver falls back to layers 5-6 (soft org default, then accessible connections). In the same transaction, every enabled schedule whose fire bound this integration through it and that nothing names the set for afterwards — no `connection_overrides` key, no admin pin or pin of its actor on its agent, no org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds; re-enabling it requires naming its set. Idempotent: `schedules_disabled_count` is 0 when there was nothing to remove.
          */
         delete: operations["deleteMyIntegrationPin"];
         options?: never;
@@ -6938,10 +6944,10 @@ export interface components {
             name: string | null;
             enabled: boolean;
             /**
-             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. Cleared by re-enabling.
+             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: the pin or org default that named an integration's set for its fire was removed, and nothing else names it; re-enabling requires naming the set (`connection_overrides`, a pin or an org default). Cleared by re-enabling.
              * @enum {string|null}
              */
-            disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | null;
+            disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | "connection_set_unnamed" | null;
             cron_expression: string;
             timezone: string;
             input: {
@@ -14329,14 +14335,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Default removed (idempotent — 204 whether a default existed or not) */
-            204: {
+            /** @description Default removed, or none was set */
+            200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @description How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove. */
+                        schedules_disabled_count: number;
+                    };
+                };
             };
             403: components["responses"]["Forbidden"];
         };
@@ -14625,14 +14636,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Pin removed (idempotent — 204 whether the pin existed or not) */
-            204: {
+            /** @description Pin removed, or there was none */
+            200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @description How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove. */
+                        schedules_disabled_count: number;
+                    };
+                };
             };
             403: components["responses"]["Forbidden"];
         };
@@ -16580,12 +16596,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Pin cleared (or never existed) */
-            204: {
+            /** @description Pin cleared, or there was none */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @description How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove. */
+                        schedules_disabled_count: number;
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */

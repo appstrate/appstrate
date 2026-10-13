@@ -1,0 +1,386 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Removing the layer that names an integration's connection set for a schedule's fire — a member
+ * pin, an admin pin, an org default — disables the schedules it leaves unnamed
+ * (`connection_set_unnamed`): those the fire bound through that layer and that no
+ * `connection_overrides` key, pin or org default names the set for afterwards, however many
+ * connections their actor holds. Each DELETE answers how many it disabled.
+ */
+
+import { describe, it, expect, beforeEach } from "bun:test";
+import { asc, eq } from "drizzle-orm";
+import {
+  auditEvents,
+  integrationOrgDefaults,
+  integrationPins,
+  schedules,
+} from "@appstrate/db/schema";
+import { getTestApp } from "../../helpers/app.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
+import {
+  createTestContext,
+  authHeaders,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { seedEndUser, seedSchedule } from "../../helpers/seed.ts";
+import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
+import {
+  seedConnectionTestIntegration,
+  seedIntegrationConnection,
+} from "../../helpers/run-connection-fixtures.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
+import {
+  disableSchedulesLeftUnnamed,
+  schedulesBoundThrough,
+} from "../../../src/services/schedules-named-by-layer.ts";
+
+const app = getTestApp();
+
+const AGENT = "@unnamed/agent";
+const OTHER_AGENT = "@unnamed/other-agent";
+const INTEGRATION = "@unnamed/svc";
+
+const memberPinPath = (agent = AGENT) =>
+  `/api/me/integration-pins/${agent}/integrations/${INTEGRATION}`;
+const ADMIN_PIN_PATH = `/api/integrations/${INTEGRATION}/pins/${AGENT}`;
+const ORG_DEFAULT_PATH = `/api/integrations/${INTEGRATION}/default`;
+
+/** An agent manifest configuring the integration with `config`; `null` declares none. */
+function agentManifest(
+  id: string,
+  config: Record<string, unknown> | null = { tools: ["search"] },
+): Record<string, unknown> {
+  return {
+    name: id,
+    version: "1.0.0",
+    type: "agent",
+    schema_version: "0.2",
+    display_name: "Layer Removal Agent",
+    ...(config
+      ? {
+          dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+          integrations_configuration: { [INTEGRATION]: config },
+        }
+      : {}),
+  };
+}
+
+describe("removing the layer that names a schedule's connection set", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "unnamed" });
+    await seedConnectionTestIntegration(ctx, INTEGRATION);
+    await seedAgent(AGENT);
+  });
+
+  async function seedAgent(id: string, config?: Record<string, unknown> | null): Promise<void> {
+    await seedSchedulableAgent({
+      id,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      manifest: agentManifest(id, config),
+    });
+  }
+
+  /** An armed schedule of the context's user on `AGENT`, unless `overrides` say otherwise. */
+  function armedSchedule(overrides: Partial<Parameters<typeof seedSchedule>[0]> = {}) {
+    return seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      userId: ctx.user.id,
+      enabled: true,
+      nextRunAt: new Date(Date.now() + 3_600_000),
+      ...overrides,
+    });
+  }
+
+  /** A connection of the context's user, shared into the space: what a pin or default may name. */
+  async function sharedConnection(): Promise<string> {
+    const id = await seedIntegrationConnection(ctx, INTEGRATION);
+    await seedShares(id, [ctx.defaultSpaceId]);
+    return id;
+  }
+
+  /** A pin on `agent`: the admin's, or `userId`'s own. */
+  async function pin(
+    connectionIds: string[],
+    { userId = null, agent = AGENT }: { userId?: string | null; agent?: string } = {},
+  ): Promise<void> {
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: agent,
+      integrationId: INTEGRATION,
+      userId,
+      connectionIds,
+    });
+  }
+
+  async function orgDefault(connectionIds: string[], enforce = false): Promise<void> {
+    await db.insert(integrationOrgDefaults).values({
+      spaceId: ctx.defaultSpaceId,
+      integrationId: INTEGRATION,
+      connectionIds,
+      enforce,
+    });
+  }
+
+  /** DELETE `path` as the org owner; the count it answers. */
+  async function remove(path: string): Promise<number> {
+    const res = await app.request(path, { method: "DELETE", headers: authHeaders(ctx) });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const body = (await res.json()) as { schedules_disabled_count: number };
+    expect(Object.keys(body)).toEqual(["schedules_disabled_count"]);
+    return body.schedules_disabled_count;
+  }
+
+  async function rowOf(id: string) {
+    const [row] = await db.select().from(schedules).where(eq(schedules.id, id));
+    return row!;
+  }
+
+  /** The schedules disabled for an unnamed set, by id. */
+  async function unnamed(): Promise<string[]> {
+    const rows = await db
+      .select({ id: schedules.id })
+      .from(schedules)
+      .where(eq(schedules.disabledReason, "connection_set_unnamed"))
+      .orderBy(asc(schedules.id));
+    return rows.map((row) => row.id);
+  }
+
+  /** The ids of the still-enabled schedules among `rows`. */
+  async function stillArmed(rows: { id: string }[]): Promise<string[]> {
+    const enabled: string[] = [];
+    for (const { id } of rows) if ((await rowOf(id)).enabled) enabled.push(id);
+    return enabled;
+  }
+
+  /** The disabled schedules the removal's audit entry records, `null` when it records none. */
+  async function auditedAs(action: string): Promise<string[] | null> {
+    const [audit] = await db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.action, action));
+    const after = audit!.after as { disabledScheduleIds: string[] } | null;
+    return after ? [...after.disabledScheduleIds].sort() : null;
+  }
+
+  describe("a member pin — DELETE /api/me/integration-pins/{agent}/integrations/{integration}", () => {
+    const ownPin = (ids: string[], agent = AGENT) => pin(ids, { userId: ctx.user.id, agent });
+
+    for (const held of [2, 1]) {
+      // The verdict does not count the actor's connections: one would bind by fallback.
+      it(`disables the schedule the pin bound, its actor holding ${held} connection(s)`, async () => {
+        const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
+        if (held === 2) await seedIntegrationConnection(ctx, INTEGRATION);
+        await ownPin([pinned]);
+        const schedule = await armedSchedule();
+
+        expect(await remove(memberPinPath())).toBe(1);
+        expect(await rowOf(schedule.id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_set_unnamed",
+          nextRunAt: null,
+          connectionOverrides: null,
+        });
+        expect(await auditedAs("integration.member_pin.deleted")).toEqual([schedule.id]);
+      });
+    }
+
+    for (const [what, set] of [
+      ["to none", []],
+      ["an unreachable connection", [crypto.randomUUID()]],
+    ] as const) {
+      // The pin decided the fire without binding: a warning, then an error, carry its source.
+      it(`disables the schedule of a pin naming ${what}`, async () => {
+        await seedIntegrationConnection(ctx, INTEGRATION);
+        await ownPin([...set]);
+        const schedule = await armedSchedule();
+
+        expect(await remove(memberPinPath())).toBe(1);
+        expect(await unnamed()).toEqual([schedule.id]);
+      });
+    }
+
+    it("spares a schedule naming its own set, another member's, another agent's and a paused one", async () => {
+      const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([pinned]);
+      await seedAgent(OTHER_AGENT);
+      const colleague = await memberContext(ctx, "member");
+      const bound = await armedSchedule();
+      const spared = [
+        await armedSchedule({ connectionOverrides: { [INTEGRATION]: [pinned] } }),
+        await armedSchedule({ connectionOverrides: { [INTEGRATION]: [] } }),
+        await armedSchedule({ userId: colleague.user.id }),
+        await armedSchedule({ packageId: OTHER_AGENT }),
+      ];
+      const paused = await armedSchedule({ enabled: false, nextRunAt: null });
+
+      expect(await remove(memberPinPath())).toBe(1);
+      expect(await unnamed()).toEqual([bound.id]);
+      expect(await stillArmed(spared)).toEqual(spared.map((s) => s.id));
+      expect(await rowOf(paused.id)).toMatchObject({ enabled: false, disabledReason: null });
+    });
+
+    it("spares a schedule a soft org default still names the set for", async () => {
+      const shared = await sharedConnection();
+      await ownPin([shared]);
+      await orgDefault([shared]);
+      const schedule = await armedSchedule();
+
+      expect(await remove(memberPinPath())).toBe(0);
+      expect((await rowOf(schedule.id)).enabled).toBe(true);
+      expect(await auditedAs("integration.member_pin.deleted")).toBeNull();
+    });
+
+    it("spares a schedule an admin pin governs", async () => {
+      const shared = await sharedConnection();
+      await pin([shared]);
+      await ownPin([shared]);
+      const schedule = await armedSchedule();
+
+      expect(await remove(memberPinPath())).toBe(0);
+      expect((await rowOf(schedule.id)).enabled).toBe(true);
+    });
+
+    for (const [fired, config] of [
+      ["no integration", null],
+      ["the integration inert", { tools: [] }],
+    ] as const) {
+      // The draft declares it with a tool: only the schedule firing the draft was bound.
+      it(`judges the version each schedule fires — published declares ${fired}`, async () => {
+        const QUIET = "@unnamed/quiet";
+        await seedDivergedAgent({
+          id: QUIET,
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          userId: ctx.user.id,
+          published: agentManifest(QUIET, config),
+          draft: agentManifest(QUIET),
+        });
+        await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)], QUIET);
+        const published = await armedSchedule({ packageId: QUIET });
+        const draft = await armedSchedule({ packageId: QUIET, versionOverride: "draft" });
+
+        expect(await remove(memberPinPath(QUIET))).toBe(1);
+        expect(await unnamed()).toEqual([draft.id]);
+        expect((await rowOf(published.id)).enabled).toBe(true);
+      });
+    }
+
+    it("answers 0 and disables nothing when there is no pin", async () => {
+      await seedIntegrationConnection(ctx, INTEGRATION);
+      const schedule = await armedSchedule();
+
+      expect(await remove(memberPinPath())).toBe(0);
+      expect((await rowOf(schedule.id)).enabled).toBe(true);
+    });
+  });
+
+  describe("an admin pin — DELETE /api/integrations/{integration}/pins/{agent}", () => {
+    it("disables the schedules of every actor it bound, sparing an actor with a pin of their own", async () => {
+      const shared = await sharedConnection();
+      await pin([shared]);
+      const colleague = await memberContext(ctx, "member");
+      await pin([shared], { userId: colleague.user.id });
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+      const bound = [
+        await armedSchedule(),
+        await armedSchedule({ userId: null, endUserId: endUser.id }),
+      ];
+      const pinnedByActor = await armedSchedule({ userId: colleague.user.id });
+
+      expect(await remove(ADMIN_PIN_PATH)).toBe(2);
+      const disabled = bound.map((s) => s.id).sort();
+      expect(await unnamed()).toEqual(disabled);
+      expect((await rowOf(pinnedByActor.id)).enabled).toBe(true);
+      expect(await auditedAs("integration.pin.deleted")).toEqual(disabled);
+    });
+
+    it("spares them all when an org default names the set", async () => {
+      const shared = await sharedConnection();
+      await pin([shared]);
+      await orgDefault([shared]);
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+      const spared = [
+        await armedSchedule(),
+        await armedSchedule({ userId: null, endUserId: endUser.id }),
+      ];
+
+      expect(await remove(ADMIN_PIN_PATH)).toBe(0);
+      expect(await stillArmed(spared)).toEqual(spared.map((s) => s.id));
+    });
+  });
+
+  describe("an org default — DELETE /api/integrations/{integration}/default", () => {
+    for (const enforce of [false, true]) {
+      it(`disables across agents what the ${enforce ? "enforced" : "soft"} default bound, sparing what another layer names`, async () => {
+        const PLAIN = "@unnamed/plain";
+        const PINNED = "@unnamed/pinned";
+        await seedAgent(OTHER_AGENT);
+        await seedAgent(PLAIN, null);
+        await seedAgent(PINNED);
+        const shared = await sharedConnection();
+        await orgDefault([shared], enforce);
+        await pin([shared], { agent: PINNED });
+        const colleague = await memberContext(ctx, "member");
+        await pin([shared], { userId: colleague.user.id });
+        const bound = [await armedSchedule(), await armedSchedule({ packageId: OTHER_AGENT })];
+        const spared = [
+          await armedSchedule({ packageId: PLAIN }),
+          await armedSchedule({ packageId: PINNED }),
+          await armedSchedule({ userId: colleague.user.id }),
+          await armedSchedule({ connectionOverrides: { [INTEGRATION]: [shared] } }),
+        ];
+
+        expect(await remove(ORG_DEFAULT_PATH)).toBe(2);
+        const disabled = bound.map((s) => s.id).sort();
+        expect(await unnamed()).toEqual(disabled);
+        expect(await stillArmed(spared)).toEqual(spared.map((s) => s.id));
+        expect(await auditedAs("integration.org_default.deleted")).toEqual(disabled);
+      });
+    }
+  });
+
+  // The fires are read before the removal's transaction opens: it judges again, on the rows it locks.
+  describe("a schedule write landing between the read of the fires and the removal", () => {
+    it("spares a bound schedule the write names a set for, or pauses", async () => {
+      const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
+      await pin([pinned], { userId: ctx.user.id });
+      const [named, paused, left] = [
+        await armedSchedule(),
+        await armedSchedule(),
+        await armedSchedule(),
+      ];
+      const layer = {
+        kind: "member_pin",
+        spaceId: ctx.defaultSpaceId,
+        integrationId: INTEGRATION,
+        agentPackageId: AGENT,
+        userId: ctx.user.id,
+      } as const;
+      const bound = await schedulesBoundThrough(layer);
+      expect([...bound].sort()).toEqual([named.id, paused.id, left.id].sort());
+
+      await db
+        .update(schedules)
+        .set({ connectionOverrides: { [INTEGRATION]: [pinned] } })
+        .where(eq(schedules.id, named.id));
+      await db.update(schedules).set({ enabled: false }).where(eq(schedules.id, paused.id));
+      const disabled = await db.transaction(async (tx) => {
+        await tx.delete(integrationPins);
+        return disableSchedulesLeftUnnamed(tx, layer, bound, "connection_set_unnamed");
+      });
+
+      expect(disabled).toEqual([left.id]);
+      expect(await unnamed()).toEqual([left.id]);
+      expect(await rowOf(paused.id)).toMatchObject({ enabled: false, disabledReason: null });
+    });
+  });
+});

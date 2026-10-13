@@ -123,6 +123,24 @@ const orgDefaultConnectionIdSetJsonSchema = {
     "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
+/** What removing a pin or an org default answers. */
+export const namingLayerRemovalSchema = {
+  type: "object",
+  required: ["schedules_disabled_count"],
+  properties: {
+    schedules_disabled_count: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove.",
+    },
+  },
+} as const;
+
+/** The schedules a pin or org default removal disables, closing each removal's description. */
+export const namingLayerRemovalEffect =
+  "In the same transaction, every enabled schedule whose fire bound this integration through it and that nothing names the set for afterwards — no `connection_overrides` key, no admin pin or pin of its actor on its agent, no org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds; re-enabling it requires naming its set. Idempotent: `schedules_disabled_count` is 0 when there was nothing to remove.";
+
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
 export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
 
@@ -1816,6 +1834,7 @@ export const integrationsPaths = {
       operationId: "deleteIntegrationPin",
       tags: ["Integrations"],
       summary: "Remove an admin pin (admin)",
+      description: `Removes the agent's admin pin for this integration. ${namingLayerRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1823,9 +1842,10 @@ export const integrationsPaths = {
         agentPackageIdParam,
       ],
       responses: {
-        "204": {
-          description: "Pin removed (idempotent — 204 whether the pin existed or not)",
+        "200": {
+          description: "Pin removed, or there was none",
           headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1924,15 +1944,17 @@ export const integrationsPaths = {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
       summary: "Remove the space-wide default connection (admin)",
+      description: `Removes the space's default set for this integration, soft or enforced. ${namingLayerRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
-        "204": {
-          description: "Default removed (idempotent — 204 whether a default existed or not)",
+        "200": {
+          description: "Default removed, or none was set",
           headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

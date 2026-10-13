@@ -20,6 +20,8 @@ import {
   integrationPackageIdParam,
   lockedBySchema,
   namedSpaceSchema,
+  namingLayerRemovalEffect,
+  namingLayerRemovalSchema,
   shareableSpacesSchema,
 } from "./integrations.ts";
 
@@ -455,7 +457,8 @@ export const mePaths = {
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
         "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
-        "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
+        "(soft org default, then accessible connections). " +
+        namingLayerRemovalEffect,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -463,7 +466,10 @@ export const mePaths = {
         integrationPackageIdParam,
       ],
       responses: {
-        "204": { description: "Pin cleared (or never existed)" },
+        "200": {
+          description: "Pin cleared, or there was none",
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",

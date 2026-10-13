@@ -314,7 +314,7 @@ describe("/api/me/integration-pins", () => {
       const second = await seedConnectionFor(ctx.user.id);
       expect((await putPin([first])).status).toBe(200);
       expect((await putPin([second])).status).toBe(200);
-      expect((await deletePin()).status).toBe(204);
+      expect((await deletePin()).status).toBe(200);
 
       const resourceId = `${INTEGRATION}#${AGENT}`;
       expect(await pinAudits("integration.member_pin.upserted")).toEqual([
@@ -373,13 +373,14 @@ describe("/api/me/integration-pins", () => {
   // ─── DELETE ───────────────────────────────────────────
 
   describe("DELETE /integration-pins", () => {
-    it("204 deletes the caller's pin", async () => {
+    it("200 deletes the caller's pin", async () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connectionId])).status).toBe(200);
 
       const res = await deletePin();
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ schedules_disabled_count: 0 });
 
       // Subsequent GET returns empty list.
       const list = await app.request(
@@ -535,7 +536,7 @@ describe("/api/me/integration-pins", () => {
       expect((await putPin([connectionId])).status).toBe(200);
       const headers = await keyHeaders(["integrations:connect"]);
       const res = await app.request(deletePath, { method: "DELETE", headers });
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
       expect(await pinnedConnections()).toEqual([]);
     });
 
@@ -543,7 +544,7 @@ describe("/api/me/integration-pins", () => {
       const connectionId = await seedConnectionFor(ctx.user.id);
       expect((await putPin([connectionId])).status).toBe(200);
       const res = await app.request(deletePath, { method: "DELETE", headers: authHeaders(ctx) });
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
       expect(await pinnedConnections()).toEqual([]);
     });
 
