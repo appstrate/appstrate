@@ -508,11 +508,7 @@ export async function validateAgentIntegrationSelections(
   return errors;
 }
 
-/**
- * The mcp-server `source.server` resolves to once the bundle carrying `extraManifests` is
- * imported: its version range over the carried + existing versions
- * ({@link resolvePostImportManifest}). `null` when the bundle carries none, or none resolves.
- */
+/** {@link resolvePostImportManifest} for `source.server`; `null` when the bundle carries none. */
 async function resolvePostImportServer(
   localRef: { name: string; version: string },
   orgId: string,
@@ -526,8 +522,7 @@ async function resolvePostImportServer(
 
 /**
  * {@link findUnexposedDefaultTools} for a `local` integration, against the `tools[]` of the
- * mcp-server a run spawns — after the import of the bundle carrying `extraManifests`, when given.
- * Nothing while that server does not resolve or declares no `tools[]`.
+ * mcp-server a run spawns, once the bundle carrying `extraManifests` is imported when given.
  */
 export async function findUnexposedLocalDefaultTools(
   manifest: Record<string, unknown>,

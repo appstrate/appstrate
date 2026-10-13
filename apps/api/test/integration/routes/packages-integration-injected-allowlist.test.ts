@@ -157,10 +157,29 @@ describe("a default_tools entry the integration provably does not expose", () =>
     await expectNothingWritten();
   });
 
-  it("accepts a remote default naming a tool its tools_policy does not list", async () => {
-    const res = await create({
+  it("refuses a remote default naming a tool its tools_policy does not list", async () => {
+    const policed = (defaultTools: string[]) => ({
       ...remoteIntegrationManifest({ name: ID, auths, tools_policy: { search: {} } }),
-      default_tools: ["serach"],
+      default_tools: defaultTools,
+    });
+    const res = await create(policed(["search", "serach"]));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { errors?: Record<string, unknown>[] };
+    expect(body.errors).toEqual([
+      expect.objectContaining({
+        field: "manifest.default_tools",
+        code: "invalid_manifest",
+        message: 'default_tools contains "serach" which is not a tool this integration exposes',
+      }),
+    ]);
+    await expectNothingWritten();
+    expect((await create(policed(["search"]))).status).toBe(201);
+  });
+
+  it("accepts any remote default name when the integration declares no tools_policy", async () => {
+    const res = await create({
+      ...remoteIntegrationManifest({ name: ID, auths }),
+      default_tools: ["anything"],
     });
     expect(res.status).toBe(201);
   });

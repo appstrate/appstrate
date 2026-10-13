@@ -642,15 +642,9 @@ export async function importBundle(
 }
 
 /**
- * Every manifest the bundle carries, for the post-import catalog its gates judge against.
- *
- * Built for the whole bundle: a manifest may reference a package that appears
- * anywhere in the package set, not only before it in iteration order.
- *
- * Grouped by package id but keeping EVERY version, because a bundle may carry
- * several versions of one package and the referencing range picks one. Flattening
- * to one manifest per id let an agent pinning `^1` be judged against a carried
- * `2.0.0` — a verdict about a version the run would never resolve.
+ * The manifests the bundle carries, by package id, for the post-import catalog its gates judge
+ * against. Every version of an id is kept: a bundle may carry several, and the range referencing
+ * the package picks one.
  */
 function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
   const carried = new Map<string, CarriedVersion[]>();
@@ -690,9 +684,11 @@ function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
  * keyed by package id, is resolved together with existing versions and
  * dist-tags. Same map covers the mcp-servers a local integration references.
  */
-async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
-  const carried = carriedVersionsById(bundle);
-
+async function assertBundleAgentsExposeCallableTools(
+  bundle: Bundle,
+  orgId: string,
+  carried: ReadonlyMap<string, CarriedVersion[]>,
+): Promise<void> {
   const errors: ValidationFieldError[] = [];
   for (const [identity, pkg] of bundle.packages) {
     const parsed = parsePackageIdentity(identity);
@@ -732,7 +728,11 @@ function assertBundleRootConforms(bundle: Bundle): void {
  * The part of the root's `default_tools` rule {@link assertBundleRootConforms} cannot judge: a
  * `local` integration's names against the mcp-server its run spawns once the bundle is imported.
  */
-async function assertBundleRootDefaultToolsExposed(bundle: Bundle, orgId: string): Promise<void> {
+async function assertBundleRootDefaultToolsExposed(
+  bundle: Bundle,
+  orgId: string,
+  carried: ReadonlyMap<string, CarriedVersion[]>,
+): Promise<void> {
   const root = bundle.packages.get(bundle.root);
   const parsed = parsePackageIdentity(bundle.root);
   if (!root || (parsed && isSystemPackage(parsed.packageId))) return;
@@ -740,7 +740,7 @@ async function assertBundleRootDefaultToolsExposed(bundle: Bundle, orgId: string
     await findUnexposedLocalDefaultTools(
       root.manifest as unknown as Record<string, unknown>,
       orgId,
-      carriedVersionsById(bundle),
+      carried,
     ),
     `${bundle.root}: `,
   );
@@ -759,8 +759,9 @@ export async function preflightBundleImport(
   const bundle = await readOrBuildBundle(bytes, scope);
   assertBundleRootConforms(bundle);
   await authorize(bundle);
-  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
-  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId);
+  const carried = carriedVersionsById(bundle);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
+  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId, carried);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }

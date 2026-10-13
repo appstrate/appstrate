@@ -24,6 +24,7 @@ import {
 import { seedPackage, seedSpace, seedUnreachableSpace } from "../../helpers/seed.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
+import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { asc, eq, and } from "drizzle-orm";
 import {
   auditEvents,
@@ -316,6 +317,29 @@ describe("GET /api/integrations/:packageId", () => {
     // AFPS §4.4 — the manifest's declared default_tools is surfaced verbatim
     // so an agent-builder sees what tools it inherits without selecting any.
     expect(body.default_tools).toEqual(["api_call"]);
+  });
+
+  it("builds a local integration's tool catalog from its mcp-server's tools", async () => {
+    await seedIntegration(ctx.orgId, gmailManifest("@myorg/gmail"));
+    await seedPackage({
+      id: "@myorg/gmail-server",
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      source: "local",
+      draftManifest: {
+        ...mcpServerManifest({ name: "@myorg/gmail-server", version: "0.1.0" }),
+        tools: [{ name: "search", description: "Search threads" }, { name: "send" }],
+      },
+    });
+    const res = await app.request("/api/integrations/@myorg/gmail", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tool_catalog: unknown[] };
+    expect(body.tool_catalog).toEqual([
+      { name: "search", description: "Search threads" },
+      { name: "send" },
+    ]);
   });
 
   it("flags has_system_client when a shared platform client serves the oauth2 auth", async () => {
