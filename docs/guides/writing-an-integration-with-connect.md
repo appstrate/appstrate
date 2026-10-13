@@ -842,13 +842,16 @@ when it declares the integration without `integrations_configuration.<id>.tools`
 array of tool names from the catalog.
 
 ```jsonc
-"default_tools": ["list_issues", "search_issues"]
+"default_tools": ["list_issues"]
 ```
 
 - An integration that declares none has no default, and the platform supplies none:
   every agent MUST select its tools explicitly. An agent that selects nothing is
-  refused at publish and import (`no_tools_selected`), and a draft or inline run of it
-  fails at boot.
+  refused at publish and import (`no_tools_selected`). A draft or inline run of it
+  aborts at boot once it binds a connection to the integration; when no auth of the
+  integration is mandatory (`_meta["dev.appstrate/auth"].required`) and the agent
+  neither marks it `required` nor selects a scope, the dependency is inert and the run
+  starts without the integration.
 - A declared default is what an agent that chooses nothing can call. List what such an
   agent should have, and keep each tool within the auth's `default_scopes`: a
   connection made with those scopes cannot serve a default tool that requires more.

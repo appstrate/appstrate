@@ -245,6 +245,15 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   Migration `0092` only creates `connection_calls`, the proxy's call journal
   (see Added), and rewrites nothing.
 
+- **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
+  and read its `[default-tools]` lines** (#1923). It writes nothing. Each
+  `[default-tools]` advisory names a stored organization integration, draft
+  or published version, whose `default_tools` holds a tool the integration
+  does not expose. Such an integration keeps loading and running; its next
+  write is refused until the entry is removed or the tool is declared in
+  `tools_policy` (see Changed). An advisory never changes the script's exit
+  code.
+
 ### Changed
 
 - **BREAKING (API): the credential proxy has one permission per path,
@@ -440,31 +449,38 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 - **Every system integration backed by an MCP server declares its
   `default_tools`** (#1923). An agent that declares one of them and selects no
-  tool inherits that list, where it got zero tools: publish and import refused
-  it with `no_tools_selected`, and an inline or draft run aborted at container
-  boot. The 14 that declared none move one patch version: browser-use 1.0.2,
-  browserless 1.0.2, canva-mcp 1.0.3, clickup-mcp 1.2.4, coolify-mcp 1.0.2,
-  expo-mcp 1.0.1, github-git 1.0.4, github-mcp 1.1.5, gitlab-mcp 1.0.1,
+  tool inherits that list, where its selection was empty: publish and import
+  refused it with `no_tools_selected`, and an inline or draft run aborted at
+  container boot once it bound a connection to the integration. github-mcp
+  and github-git have no mandatory auth, so a bare dependency on either was
+  inert and the run started without the integration: it now carries the
+  default (93 tools for github-mcp, 7 for github-git) and is resolved like any
+  selection, bound to a usable connection or reported in the launch's
+  `warnings`. The 14 that declared none move one patch version: browser-use
+  1.0.2, browserless 1.0.2, canva-mcp 1.0.3, clickup-mcp 1.2.4, coolify-mcp
+  1.0.2, expo-mcp 1.0.1, github-git 1.0.4, github-mcp 1.1.5, gitlab-mcp 1.0.1,
   gmail-mcp 2.3.7, mcpemails 1.0.2, notion-mcp 1.0.3, ssh 1.0.3, twenty-mcp
   1.0.2. Each list names its tools, never `"*"`, and is built as the
   integration's exposed surface within the auth's default scopes: every tool
   that is not hidden, less any whose `required_scopes` the auth's
   `default_scopes` do not cover. So gmail-mcp, canva-mcp and mcpemails default
-  to their read tools, and an agent that writes with them selects those tools.
-  The other eleven default to their whole exposed surface, write tools
-  included (`ssh_exec`, `push`): narrowing one to what a task needs is the
-  agent author's selection. The platform supplies no fallback: an integration
-  that declares no `default_tools` still requires an explicit selection
+  to the tools their default scopes (identity and read scopes) cover, fewer
+  than their catalog, and an agent that needs another selects it. The other
+  eleven default to their whole exposed surface, write tools included
+  (`ssh_exec`, `push`): narrowing one to what a task needs is the agent
+  author's selection. The platform supplies no fallback: an integration that
+  declares no `default_tools` still requires an explicit selection
   (`docs/architecture/INTEGRATIONS_RUNTIME.md`, "Least-privilege selection").
-  In the chat, the context lists a default of up to 12 tools by name and gives
-  a longer one as a count, and the instructions tell the model to select only
-  the tools a task needs, inheriting a default only when the task needs all of
-  it.
+  The MCP server's instructions and the chat's tell the model to select only
+  the tools an agent needs and to inherit a default only when it needs all of
+  it; the chat's context lists a default of up to 12 tools by name and gives a
+  longer one as a count.
 
 - **BREAKING (API): every write of an integration manifest refuses a
   `default_tools` entry the integration does not expose** (#1923). Create,
-  draft save, file write, import, publish, restore and fork answer `400`
-  `validation_failed` with one `errors[]` item per entry,
+  draft save, file write, import (of a bundle, its root package only),
+  publish, restore and fork answer `400` `validation_failed` with one
+  `errors[]` item per entry,
   `{ field: "manifest.default_tools", code: "invalid_manifest" }`, whose
   `message` names the tool. A `source.kind: "none"` integration is always
   judged, by the manifest schema. Any other source but `local` is judged on
@@ -473,8 +489,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   A `local` source is not judged from its manifest. Off the schema, a stored
   manifest that names such a tool still loads, but a draft carrying one can no
   longer be saved or published, and a published version carrying one can no
-  longer be restored or forked, until the default is corrected. The
-  system-package build applies the same rule.
+  longer be restored or forked. Two remedies: remove the entry from
+  `default_tools`, or, when the upstream does serve the tool, declare it in
+  `tools_policy` (`{}` for one that needs no scope). The system-package build
+  applies the same rule.
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
