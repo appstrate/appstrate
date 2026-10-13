@@ -784,20 +784,19 @@ origin and strips it otherwise.
 
 `tools_policy` (renamed from 1.x `tools` in AFPS) is an OPTIONAL table keyed by tool
 name. It carries per-tool authorization metadata for `local` and `remote` sources.
-Whether it is also the catalog — the names an agent can select, and the names
-`default_tools` may hold — depends on the source:
+Whether its keys also bound the names an agent can select depends on the source:
 
 - `source.kind: "local"` — the catalog is the `tools[]` array of the referenced
   `mcp-server` package. `tools_policy` is a **sparse policy overlay** on it: it need
   not name every tool, and a key adds no tool.
-- `source.kind: "remote"` — the manifest is the only catalog the platform can read
-  before a run. Once `tools_policy` declares any tool, its keys ARE what an agent can
-  select by name: another name is refused (`unknown_tool`), whatever the endpoint
-  advertises. A tool outside it is reachable only through the `"*"` wildcard, which an
-  agent may use when the integration declares `allow_undeclared_tools: true`. So
-  declare every tool an agent should be able to pick, with `{}` for one that needs no
-  scope. With no `tools_policy` at all, the manifest names no MCP tool, and a
-  `default_tools` entry is not checked.
+- `source.kind: "remote"` — the catalog is the endpoint's, read at run time. Once
+  `tools_policy` declares any tool, its keys ARE what an agent can select by name:
+  another name is refused (`unknown_tool`), whatever the endpoint advertises. A tool
+  outside it is reachable only through the `"*"` wildcard, which an agent may use
+  when the integration declares `allow_undeclared_tools: true`. So declare every
+  tool an agent should be able to pick, with `{}` for one that needs no scope. The
+  keys do not bound `default_tools`, which may name a tool the table omits. With no
+  `tools_policy` at all, the manifest names no MCP tool.
 - `source.kind: "none"` — there is no MCP-tool catalog and `tools_policy` is
   generally not used; the tools are the `api_call` capabilities.
 
@@ -837,9 +836,9 @@ referenced by a `connect.tool` (run-start primitives) are auto-hidden, so
 
 ### `default_tools`
 
-`default_tools` (Appstrate extension) is the OPTIONAL tool selection an agent inherits
-when it declares the integration without `integrations_configuration.<id>.tools`: an
-array of tool names from the catalog.
+`default_tools` (Appstrate extension, being standardised in AFPS: afps-spec#39) is the
+OPTIONAL tool selection an agent inherits when it declares the integration without
+`integrations_configuration.<id>.tools`: an array of tool names.
 
 ```jsonc
 "default_tools": ["list_issues"]
@@ -855,11 +854,14 @@ array of tool names from the catalog.
 - A declared default is what an agent that chooses nothing can call. List what such an
   agent should have, and keep each tool within the auth's `default_scopes`: a
   connection made with those scopes cannot serve a default tool that requires more.
-- An entry the integration does not expose is refused on every write of the manifest:
-  always for a `none` source, and for a `remote` source once it declares a
-  `tools_policy` (`400 validation_failed`, carrying an `invalid_manifest` error on
-  `manifest.default_tools`). A `local` source's entries are not checked against the
-  referenced `mcp-server` at that point.
+- An entry the platform can prove unexposed is refused when the manifest is written
+  (`400 validation_failed`, carrying an `invalid_manifest` error on
+  `manifest.default_tools`): for every source, a name `hidden_tools` lists or a
+  `connect.tool` name; for a `none` source declaring no root `_meta` key outside
+  `dev.appstrate/`, a name outside its catalog; for a `local` source, a name outside
+  the catalog of the referenced `mcp-server`, on create, save, import and publish,
+  when that package resolves. A `remote` source's other names are accepted: one the
+  endpoint does not serve selects nothing at run time.
 - `"*"` is accepted only with `allow_undeclared_tools: true`, and grants whatever the
   upstream advertises. Prefer names.
 

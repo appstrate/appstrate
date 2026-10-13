@@ -248,11 +248,14 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 - **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
   and read its `[default-tools]` lines** (#1923). It writes nothing. Each
   `[default-tools]` advisory names a stored organization integration, draft
-  or published version, whose `default_tools` holds a tool the integration
-  does not expose. Such an integration keeps loading and running; its next
-  write is refused until the entry is removed or the tool is declared in
-  `tools_policy` (see Changed). An advisory never changes the script's exit
-  code.
+  or published version, whose `default_tools` holds a tool its manifest proves
+  unexposed: one `hidden_tools` lists, a connect tool, or, on a
+  `source.kind: "none"` integration with no root `_meta` key outside
+  `dev.appstrate/`, one outside the manifest's catalog. A `remote` or `local`
+  integration so listed keeps loading and running, and its next write is
+  refused until the entry is removed; on a `none` one the manifest schema
+  refuses the entry on read too, so remove it before the deploy (see
+  Changed). An advisory never changes the script's exit code.
 
 ### Changed
 
@@ -471,28 +474,43 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   author's selection. The platform supplies no fallback: an integration that
   declares no `default_tools` still requires an explicit selection
   (`docs/architecture/INTEGRATIONS_RUNTIME.md`, "Least-privilege selection").
+  An inherited `"*"` is the wildcard form for scopes, like a written one: the
+  auth's `default_scopes`, unioned with the agent's `scopes`.
   The MCP server's instructions and the chat's tell the model to select only
   the tools an agent needs and to inherit a default only when it needs all of
   it; the chat's context lists a default of up to 12 tools by name and gives a
   longer one as a count.
 
-- **BREAKING (API): every write of an integration manifest refuses a
-  `default_tools` entry the integration does not expose** (#1923). Create,
-  draft save, file write, import (of a bundle, its root package only),
-  publish, restore and fork answer `400` `validation_failed` with one
-  `errors[]` item per entry,
+- **BREAKING (API): a write of an integration manifest refuses a
+  `default_tools` entry the platform can prove unexposed** (#1923). The
+  refusal is `400` `validation_failed` with one `errors[]` item per entry,
   `{ field: "manifest.default_tools", code: "invalid_manifest" }`, whose
-  `message` names the tool. A `source.kind: "none"` integration is always
-  judged, by the manifest schema. Any other source but `local` is judged on
-  the write paths only (`findUnexposedDefaultTools`,
-  `@appstrate/core/integration`), and only when it declares a `tools_policy`.
-  A `local` source is not judged from its manifest. Off the schema, a stored
-  manifest that names such a tool still loads, but a draft carrying one can no
-  longer be saved or published, and a published version carrying one can no
-  longer be restored or forked. Two remedies: remove the entry from
-  `default_tools`, or, when the upstream does serve the tool, declare it in
-  `tools_policy` (`{}` for one that needs no scope). The system-package build
-  applies the same rule.
+  `message` names the tool (`findUnexposedDefaultTools`,
+  `@appstrate/core/integration`). What is refused depends on the source:
+  - every source, on create, draft save, file write, import (of a bundle, its
+    root package only), publish, restore and fork: a name `hidden_tools`
+    lists, or the name of a connect tool;
+  - `source.kind: "none"`, by the manifest schema, so on read too: a name
+    outside the manifest's catalog (the tools `_meta["dev.appstrate/api"]`
+    supplies, plus any `tools_policy` key), when every root `_meta` key of the
+    manifest is in the `dev.appstrate/` namespace (a manifest with no `_meta`
+    counts);
+  - `local`, on create, draft save, import (of a bundle, its root package
+    only, before anything is written) and publish: a name outside the
+    `tools[]` of the referenced mcp-server, at the version a run would spawn
+    (the one a bundle carries, when it satisfies `source.server.version`),
+    and outside the integration's `api_call` tools. When the mcp-server does
+    not resolve, nothing more is judged;
+  - `remote`: nothing else. `tools_policy` is a policy table, not a catalog,
+    so a default naming a tool absent from it is accepted; at run time a name
+    the endpoint does not serve selects nothing, and a run left with no
+    callable tool still aborts.
+
+  A stored `remote` or `local` manifest that names a refused tool still loads;
+  its next write is refused. Two remedies: remove the entry from
+  `default_tools`, or, for `local`, have the mcp-server declare the tool. An
+  agent's own `tools` are judged as before: against a `remote` integration
+  that declares a `tools_policy` they name its keys (`unknown_tool`).
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
