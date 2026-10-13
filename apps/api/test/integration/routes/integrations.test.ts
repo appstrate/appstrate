@@ -1716,7 +1716,7 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       });
     expect((await write("PUT", { connection_ids: [a] })).status).toBe(200);
     expect((await write("PUT", { connection_ids: [b], enforce: true })).status).toBe(200);
-    expect((await write("DELETE")).status).toBe(204);
+    expect((await write("DELETE")).status).toBe(200);
 
     const rows = await db
       .select({ action: auditEvents.action, before: auditEvents.before, after: auditEvents.after })
@@ -1759,15 +1759,22 @@ describe("GET/PUT/DELETE /api/integrations/:packageId/default (org default conne
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ connection_ids: [connId] }),
     });
-    const del = await app.request("/api/integrations/@myorg/gmail/default", {
-      method: "DELETE",
-      headers: authHeaders(ctx),
-    });
-    expect(del.status).toBe(204);
+    const del = () =>
+      app.request("/api/integrations/@myorg/gmail/default", {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+    const removed = await del();
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ schedules_disabled_count: 0 });
     const get = await app.request("/api/integrations/@myorg/gmail/default", {
       headers: authHeaders(ctx),
     });
     expect(get.status).toBe(204);
+    // Idempotent: nothing left to remove answers the same.
+    const again = await del();
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ schedules_disabled_count: 0 });
   });
 
   it("forbids a non-admin member from setting the default (403)", async () => {

@@ -652,6 +652,20 @@
       "when": 1791883605327,
       "tag": "0092_connection_calls",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791891037351,
+      "tag": "0093_schedule_disabled_reason_connection_set_unnamed",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791900141138,
+      "tag": "0094_schedule_disabled_reason_connection_choice_invalid",
+      "breakpoints": true
     }
   ]
 }

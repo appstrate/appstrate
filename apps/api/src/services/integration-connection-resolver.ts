@@ -155,6 +155,13 @@ interface ResolveConnectionsInput {
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
+/** Inert: nothing the spawn resolver would start, so no verdict is needed — unless required. */
+function isInert(req: IntegrationRequirement): boolean {
+  return (
+    !req.required && !req.hasSelectedTools && req.agentScopes.length === 0 && !req.hasMandatoryAuth
+  );
+}
+
 /** Walks the cascade (file header) per integration. */
 export function resolveConnections(input: ResolveConnectionsInput): ConnectionResolutionResult {
   const resolved: ResolvedConnectionMap = {};
@@ -177,15 +184,7 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   };
 
   for (const req of input.requirements) {
-    // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
-    if (
-      !req.required &&
-      !req.hasSelectedTools &&
-      req.agentScopes.length === 0 &&
-      !req.hasMandatoryAuth &&
-      !input.includeInert
-    )
-      continue;
+    if (isInert(req) && !input.includeInert) continue;
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
       record(
         req.integrationId,
@@ -842,16 +841,34 @@ interface ResolveConnectionsForRunInput {
   manifestCache?: IntegrationManifestCache;
 }
 
+/** The requirement of each integration `agentManifest` declares whose manifest loads. */
+async function requirementsOf(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<IntegrationRequirement[]> {
+  const requirements = await Promise.all(
+    parseManifestIntegrations(agentManifest).map((entry) => buildRequirement(entry, manifestCache)),
+  );
+  return requirements.filter((r): r is IntegrationRequirement => r !== null);
+}
+
+/**
+ * The integrations a run of `agentManifest` resolves a set for, whoever runs it and whatever the
+ * layers hold: those it declares whose manifest loads and that are not inert.
+ */
+export async function integrationsResolvedForRun(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<string[]> {
+  const requirements = await requirementsOf(agentManifest, manifestCache);
+  return requirements.filter((req) => !isInert(req)).map((req) => req.integrationId);
+}
+
 export async function resolveConnectionsForRun(
   input: ResolveConnectionsForRunInput,
 ): Promise<ConnectionResolutionResult> {
-  const entries = parseManifestIntegrations(input.agentManifest);
-  if (entries.length === 0) return { resolved: {}, errors: [], warnings: [] };
-
-  const requirements = await Promise.all(
-    entries.map((entry) => buildRequirement(entry, input.manifestCache)),
-  );
-  const validReqs = requirements.filter((r): r is IntegrationRequirement => r !== null);
+  const validReqs = await requirementsOf(input.agentManifest, input.manifestCache);
+  if (validReqs.length === 0) return { resolved: {}, errors: [], warnings: [] };
 
   const { actorUserId, actorEndUserId } = actorIdentityOf(input.actor);
 

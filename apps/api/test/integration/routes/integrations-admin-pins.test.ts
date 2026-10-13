@@ -649,7 +649,7 @@ describe("/api/integrations/:packageId admin surface", () => {
   // ─── DELETE /:packageId/pins/:agentPackageId ──────────
 
   describe("DELETE /:packageId/pins/:agentPackageId", () => {
-    it("ALLOW: admin removes a pin (204)", async () => {
+    it("ALLOW: admin removes a pin (200)", async () => {
       const connId = await seedSharedConnection();
       expect((await putPin([connId])).status).toBe(200);
 
@@ -658,7 +658,8 @@ describe("/api/integrations/:packageId admin surface", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ schedules_disabled_count: 0 });
     });
 
     it("audits upsert and delete with the set before and after, under the member pins' resource id", async () => {
@@ -670,7 +671,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(del.status).toBe(204);
+      expect(del.status).toBe(200);
 
       const rows = await db
         .select({
@@ -705,13 +706,14 @@ describe("/api/integrations/:packageId admin surface", () => {
       ]);
     });
 
-    it("returns 204 when the pin doesn't exist (idempotent)", async () => {
+    it("returns 200 with a count of 0 when the pin doesn't exist (idempotent)", async () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ schedules_disabled_count: 0 });
     });
 
     it("DENY: non-admin member gets 401/403", async () => {

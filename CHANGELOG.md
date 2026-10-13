@@ -789,6 +789,14 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   disabled is not refused. The dashboard's schedule form names
   the caller's own default connection when it saves a schedule running as
   them.
+- **BREAKING (API): removing a pin or an org default answers `200` with the
+  number of schedules it disabled** (#1933).
+  `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`,
+  `DELETE /api/integrations/{packageId}/pins/{agentPackageId}` and
+  `DELETE /api/integrations/{packageId}/default` answer
+  `200 { "schedules_disabled_count": <integer> }` where they answered `204`.
+  The count is that of the schedules the removal disabled (see Fixed), 0 when
+  it disabled none, nothing to remove included.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -1234,6 +1242,42 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **A fire refused over the schedule's own connection choice disables the
+  schedule** (#1954). It recorded a failed run and stayed armed, failing at
+  every tick, on the verdicts the schedule write refuses
+  (`must_choose_connection`, `override_connection_unavailable`,
+  `override_outranked`, and `auth_serves_no_selected_tool` or
+  `required_integration_unbound` decided by its own `connection_overrides`).
+  A fire whose refusal carries any of them disables the schedule, removes its
+  job and records one failed run naming those verdicts
+  (`Schedule disabled: …`). `disabled_reason` is the new
+  `connection_choice_invalid` (migration `0094`, no operator step). The
+  schedule stays disabled until it is re-enabled, which goes through the
+  schedule write rule, even when the cause is reverted elsewhere (the
+  connection shared again, the pin removed, the extra connection deleted).
+  The disable applies only to the row the fire read: a schedule written while
+  its fire ran is left as written, with a failed run and no disable, and the
+  next tick judges it; the invalid-actor disable follows the same rule. Every
+  other refusal (not connected, needs reconnection, an inactive integration,
+  a pin naming an unavailable connection) records a failed run and leaves the
+  schedule armed, as before.
+- **Removing the pin or org default that named a schedule's connection set
+  disables the schedule** (#1933). It stayed armed: its next fire failed at
+  every tick (`must_choose_connection`), bound the actor's one own connection
+  (another account) or ran without the integration. The removal disables, in
+  its transaction, every enabled schedule whose fired version uses the
+  integration (declared, not inert) and whose set nothing names afterwards (no
+  `connection_overrides` key, admin pin, pin of its actor or org default),
+  however many connections its actor holds. `disabled_reason` is the new
+  `connection_set_unnamed` (migration `0093`, no operator step); the audit
+  entry lists `disabledScheduleIds` and the route answers the count (see
+  Changed). A connection delete that empties a member pin disables the same
+  schedules with `connection_deleted`, counted per `pins[]` item by
+  `delete-impact` (`schedules_disabled_count`). Re-enabling goes through the
+  schedule write rule. The dashboard says how many schedules each removal
+  disables. Not re-judged: a schedule whose fired version does not resolve, a
+  layer added above its set, a new version declaring an integration no layer
+  names.
 - **`integration.connection.scope_widened` is recorded once, by the write that
   moved the row.** A reconnect completing while a client promotion widened the
   same row recorded it twice. (#1925)

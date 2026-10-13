@@ -437,6 +437,8 @@
   "connections.pinImpact.shrinks_one": "il passera de {{from}} à {{count}} connexion",
   "connections.pinImpact.shrinks_other": "il passera de {{from}} à {{count}} connexions",
   "connections.pinImpact.resets": "plus aucune connexion choisie : il revient au défaut de l'espace ou à votre unique connexion personnelle ; sinon, il faudra en choisir ou en connecter une (ses exécutions échouent d'ici là)",
+  "connections.pinImpact.disablesSchedules_one": "une de vos planifications s'appuie sur cette sélection : elle sera désactivée",
+  "connections.pinImpact.disablesSchedules_other": "{{count}} de vos planifications s'appuient sur cette sélection : elles seront désactivées",
   "connections.scheduleImpact.intro_one": "Cette connexion sera retirée de la sélection de votre planification :",
   "connections.scheduleImpact.intro_other": "Cette connexion sera retirée de la sélection de vos {{count}} planifications :",
   "connections.scheduleImpact.shrinks_one": "elle passera de {{from}} à {{count}} connexion",

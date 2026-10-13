@@ -326,16 +326,23 @@ router.delete(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const { previous } = await deletePin(scope, agentPackageId, integrationPackageId, userId);
+    const { previous, disabledScheduleIds } = await deletePin(
+      scope,
+      agentPackageId,
+      integrationPackageId,
+      userId,
+    );
+    await removeScheduleJobs(disabledScheduleIds);
     if (previous) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
         before: pinAudit(previous),
+        ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
       });
     }
-    return c.body(null, 204);
+    return c.json({ schedules_disabled_count: disabledScheduleIds.length });
   },
 );
 
