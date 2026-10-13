@@ -73,6 +73,7 @@ import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
@@ -108,6 +109,8 @@ export function createCredentialProxyRouter() {
   const limits = getCredentialProxyLimits();
 
   router.use("/proxy", proxyStatusMarker());
+  // `Idempotency-Key` is the upstream's here: the global guard lets it through to be relayed.
+  router.use("/proxy", relayIdempotencyKey());
   router.use("/*", requireSpaceContext());
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.

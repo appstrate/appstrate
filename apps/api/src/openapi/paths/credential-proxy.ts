@@ -58,6 +58,9 @@ const proxySharedDescription =
   "connection lacks the value or the target should not use it.\n\n" +
   "Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) " +
   "take `1` or `0`; any other value is a 400.\n\n" +
+  "An `Idempotency-Key` header is the upstream's here (Stripe's, for one): it is relayed with " +
+  "the caller's other headers, whatever the verb. The platform de-duplicates nothing on it, " +
+  "so it is not a parameter of this operation and no `Idempotent-Replayed` is answered.\n\n" +
   "Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an " +
   "upstream response relayed whatever its status (a relayed 401 carries no platform " +
   "`WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), " +
