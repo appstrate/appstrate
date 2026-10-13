@@ -11,9 +11,9 @@
  *
  * These are write-only mutations: the picker reads pin state off the
  * server-authoritative agent-resolution verdict (`member_pinned_connection_ids`)
- * and refetches it itself after a pick, so no integration read is invalidated
- * here. Member pins are private per actor — the API endpoint filters by the
- * caller's user_id, so we never see other users' pins client-side.
+ * and refetches it itself after a pick, so no pin read is invalidated here. Member
+ * pins are private per actor — the API endpoint filters by the caller's
+ * user_id, so we never see other users' pins client-side.
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";

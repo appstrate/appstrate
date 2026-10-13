@@ -98,10 +98,7 @@ export function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
 }
 
-/**
- * Says how many schedules removing a pin or a space default disabled (it alone named their
- * connections for the integration) and refetches their views, cached as enabled.
- */
+/** Says how many schedules removing a pin or a space default disabled, and refetches them. */
 export function warnSchedulesDisabled(qc: ReturnType<typeof useQueryClient>, count: number) {
   toast.warning(i18n.t("agents:schedule.disabledUnnamed", { count }));
   invalidateSchedules(qc);

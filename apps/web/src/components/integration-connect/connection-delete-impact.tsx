@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What a delete rewrites among the caller's own member pins and schedule overrides, how many of
- * their schedules a dropped pin disables, and how many schedules of other people the delete
- * disables, said before the user confirms. The confirmation owns the query and keeps its button
- * disabled while it is in flight.
+ * What a delete rewrites among the caller's own member pins and schedule overrides, and how many
+ * schedules it disables, said before the user confirms. The confirmation owns the
+ * query and keeps its button disabled while it is in flight.
  */
 
 import { useTranslation } from "react-i18next";
