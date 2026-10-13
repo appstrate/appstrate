@@ -35,6 +35,7 @@ import {
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
   findInvalidScopeTokens,
   scopeTokenSchema,
 } from "../src/integration.ts";
@@ -2394,26 +2395,26 @@ describe("_meta namespace key validation (delegated to upstream 0.1 schema)", ()
   });
 });
 
-describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
-  // An api-only integration (source.kind "none") exposing `api_call` on `key`.
-  // For a "none" source the full tool catalog is knowable from this manifest
-  // alone, so array membership is validated.
-  function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return baseManifest({
-      source: { kind: "none" },
-      auths: {
-        key: {
-          type: "api_key",
-          credentials: { schema: { type: "object", properties: {} } },
-          authorized_uris: ["https://api/**"],
-          delivery: { env: { K: { value: "{$credential.k}" } } },
-        },
+// An api-only integration (source.kind "none") exposing `api_call` on `key`.
+// For a "none" source the full tool catalog is knowable from this manifest
+// alone, so array membership is validated.
+function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "none" },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: {} } },
+        authorized_uris: ["https://api/**"],
+        delivery: { env: { K: { value: "{$credential.k}" } } },
       },
-      _meta: { "dev.appstrate/api": { auths: { key: {} } } },
-      ...overrides,
-    });
-  }
+    },
+    _meta: { "dev.appstrate/api": { auths: { key: {} } } },
+    ...overrides,
+  });
+}
 
+describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
   it("accepts default_tools naming a real exposed tool (api_call) on an api-only source", () => {
     const r = integrationManifestSchema.safeParse(apiManifest({ default_tools: ["api_call"] }));
     expect(r.success).toBe(true);
@@ -2451,6 +2452,89 @@ describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
       baseManifest({ default_tools: ["some_remote_tool"] }),
     );
     expect(r.success).toBe(true);
+  });
+});
+
+describe("findUnexposedDefaultTools — write-path default_tools membership", () => {
+  const REMOTE = baseManifest().source;
+  const LOCAL = { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } };
+  const unexposed = (name: string) => ({
+    path: ["default_tools"],
+    message: `default_tools contains "${name}" which is not a tool this integration exposes`,
+  });
+  /** A remote integration declaring its catalog (`search`, `send`) through `tools_policy`. */
+  const remote = (overrides: Record<string, unknown> = {}) =>
+    baseManifest({ tools_policy: { search: {}, send: {} }, ...overrides });
+  /** The schema accepts the manifest and the policy finds nothing in it. */
+  function expectNothing(manifest: Record<string, unknown>) {
+    expect(errorPaths(manifest)).toEqual([]);
+    expect(findUnexposedDefaultTools(manifest)).toEqual([]);
+  }
+
+  it("names an entry the declared catalog does not hold, which the schema still reads", () => {
+    const manifest = remote({ default_tools: ["search", "serach"] });
+    expect(findUnexposedDefaultTools(manifest)).toEqual([unexposed("serach")]);
+    expect(errorPaths(manifest)).toEqual([]);
+  });
+
+  it("refuses an entry listed in hidden_tools", () => {
+    expect(
+      findUnexposedDefaultTools(
+        remote({ default_tools: ["search", "send"], hidden_tools: ["send"] }),
+      ),
+    ).toEqual([unexposed("send")]);
+  });
+
+  it("finds nothing when every entry is exposed", () => {
+    expectNothing(remote({ default_tools: ["search", "send"] }));
+    expectNothing(remote({ default_tools: [] }));
+  });
+
+  it("finds nothing for a remote source that declares no catalog", () => {
+    expectNothing(baseManifest({ default_tools: ["some_remote_tool"] }));
+  });
+
+  it("finds nothing for a local source, whose catalog is the mcp-server's", () => {
+    expectNothing(remote({ source: LOCAL, default_tools: ["nope"] }));
+    expect(findUnexposedDefaultTools(remote({ default_tools: ["nope"] }))).toEqual([
+      unexposed("nope"),
+    ]);
+  });
+
+  it('finds nothing for the wildcard "*"', () => {
+    expectNothing(
+      apiManifest({ source: REMOTE, default_tools: "*", allow_undeclared_tools: true }),
+    );
+  });
+
+  it("accepts api_call as a default only where _meta exposes it", () => {
+    const tools_policy = { search: {} };
+    const default_tools = ["search", API_CALL_TOOL_NAME];
+    expectNothing(apiManifest({ source: REMOTE, tools_policy, default_tools }));
+    expect(findUnexposedDefaultTools(remote({ default_tools }))).toEqual([
+      unexposed(API_CALL_TOOL_NAME),
+    ]);
+  });
+
+  it("reports for a none source what the schema refuses", () => {
+    for (const manifest of [
+      apiManifest({ default_tools: ["api_call", "nope"] }),
+      apiManifest({ default_tools: ["api_call"], hidden_tools: ["api_call"] }),
+    ]) {
+      const found = findUnexposedDefaultTools(manifest);
+      expect(found).toHaveLength(1);
+      const r = integrationManifestSchema.safeParse(manifest);
+      expect(r.error?.issues.map(({ path, message }) => ({ path, message }))).toEqual(found);
+    }
+    expectNothing(apiManifest({ default_tools: ["api_call"] }));
+  });
+
+  it("leaves a manifest the structural schema refuses to that schema", () => {
+    expect(findUnexposedDefaultTools(null)).toEqual([]);
+    expect(
+      findUnexposedDefaultTools(remote({ default_tools: ["nope"], auths: { oauth: null } })),
+    ).toEqual([]);
+    expect(findUnexposedDefaultTools(remote({ default_tools: [42] }))).toEqual([]);
   });
 });
 

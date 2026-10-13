@@ -636,12 +636,16 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
   //     wildcard selection — a default cannot grant the passthrough surface the
   //     integration author did not opt into).
-  //   - an array MUST contain strings; for `source.kind: "none"` (api-only — the
-  //     full catalog is knowable from this manifest alone) every entry MUST be a
-  //     real catalog tool, which catches typos like `["api_calll"]`. For
-  //     local/remote sources the authoritative tool list lives in the referenced
-  //     mcp-server (not resolvable in a pure-manifest superRefine), so array
-  //     membership is left to runtime — mirroring the agent-side leniency.
+  //   - an array MUST contain strings, and every entry MUST be a tool the
+  //     integration exposes (catches typos like `["api_calll"]`), judged where
+  //     the catalog is known:
+  //       · `source.kind: "none"` (api-only — this manifest is the whole
+  //         catalog): here, so no such manifest parses;
+  //       · any other non-local source that declares a catalog: the write
+  //         paths only (`findUnexposedDefaultTools`), so a stored manifest
+  //         stays readable;
+  //       · `local`: the catalog is the referenced mcp-server's, resolved at
+  //         the agent freeze points.
   const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
   if (defaultTools !== undefined) {
     if (isToolsWildcard(defaultTools)) {
@@ -660,17 +664,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         path: ["default_tools"],
       });
     } else if (manifest.source?.kind === "none") {
-      const catalog = new Set(
-        resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-      );
-      for (const name of defaultTools) {
-        if (!catalog.has(name)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `default_tools contains "${name}" which is not a tool this integration exposes`,
-            path: ["default_tools"],
-          });
-        }
+      for (const issue of unexposedDefaultTools(manifest)) {
+        ctx.addIssue({ code: "custom", ...issue });
       }
     }
   }
@@ -1111,6 +1106,47 @@ export function readDefaultTools(
   if (isToolsWildcard(raw)) return TOOLS_WILDCARD;
   if (Array.isArray(raw) && raw.every((v) => typeof v === "string")) return raw as string[];
   return undefined;
+}
+
+/**
+ * The `default_tools` entries absent from the catalog the manifest declares
+ * ({@link resolveIntegrationToolCatalog}): a default is a selection an agent
+ * could make explicitly. Nothing is judged for a `local` source, whose catalog
+ * is the referenced mcp-server's, nor for an empty catalog on a source other
+ * than `none`: a remote integration declaring no tool discovers them at connect
+ * time.
+ */
+function unexposedDefaultTools(
+  manifest: IntegrationManifest,
+): Pick<AuthManifestIssue, "path" | "message">[] {
+  const defaults = readDefaultTools(manifest);
+  const kind = manifest.source?.kind;
+  if (defaults === undefined || isToolsWildcard(defaults) || kind === "local") return [];
+  const catalog = new Set(
+    resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
+  );
+  if (catalog.size === 0 && kind !== "none") return [];
+  return defaults
+    .filter((name) => !catalog.has(name))
+    .map((name) => ({
+      path: ["default_tools"],
+      message: `default_tools contains "${name}" which is not a tool this integration exposes`,
+    }));
+}
+
+/**
+ * The `default_tools` entries of a manifest that its declared tool catalog does
+ * not hold. A WRITE-path policy: {@link integrationManifestSchema} applies it to
+ * a `none` source only, so a stored manifest of any other source stays readable.
+ * A manifest the structural schema refuses yields nothing: its shape is that
+ * schema's to report.
+ */
+export function findUnexposedDefaultTools(
+  manifest: unknown,
+): Pick<AuthManifestIssue, "path" | "message">[] {
+  return afpsIntegrationManifestSchema.safeParse(manifest).success
+    ? unexposedDefaultTools(manifest as IntegrationManifest)
+    : [];
 }
 
 /**

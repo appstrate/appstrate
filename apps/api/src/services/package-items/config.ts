@@ -11,6 +11,7 @@ import {
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
@@ -97,6 +98,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
       ...findInvalidScopeTokens(manifest),
       ...findUnboundedInjectedCredentials(manifest),
       ...findUnevaluableExpressions(manifest),
+      ...findUnexposedDefaultTools(manifest),
     ],
     manifestIsStoredFile: true,
   },

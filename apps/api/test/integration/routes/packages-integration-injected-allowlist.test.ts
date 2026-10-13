@@ -4,7 +4,8 @@
  * An auth that injects a credential over HTTP must bound its hosts (#1641): every path that
  * writes an integration manifest refuses `allow_all_uris` or a host-unbounded `authorized_uris`
  * entry on it (`CONFIG_BY_TYPE.checkManifest`), and accepts an auth the proxy injects nothing for.
- * The same gate refuses an expression the platform does not evaluate.
+ * The same gate refuses an expression the platform does not evaluate, and a `default_tools`
+ * entry the manifest's declared tool catalog does not hold.
  */
 
 import { etagVersion, ifMatch } from "../../helpers/etag.ts";
@@ -14,7 +15,11 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { packages } from "@appstrate/db/schema";
-import { apiIntegrationManifest, envDelivery } from "../../helpers/integration-manifests.ts";
+import {
+  apiIntegrationManifest,
+  envDelivery,
+  remoteIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -76,6 +81,27 @@ describe("writing an injecting auth's allowlist", () => {
     const m = manifest({ type: "api_key" }) as { auths: { api: { delivery: unknown } } };
     m.auths.api.delivery = { http: { in: "header", name: "X-Key", value: "{$outputs.api_key}" } };
     await expectRefused(await create(m), "manifest.auths.api.delivery.http.value");
+  });
+
+  it("create refuses a default_tools entry outside the declared catalog; a stored one still reads", async () => {
+    const remote = (default_tools: string[]) => ({
+      ...remoteIntegrationManifest({
+        name: ID,
+        auths: { api: { type: "api_key" } },
+        tools_policy: { search: {} },
+      }),
+      default_tools,
+    });
+    await expectRefused(await create(remote(["serach"])), "manifest.default_tools");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+    expect((await create(remote(["search"]))).status).toBe(201);
+
+    const stored = remote(["serach"]);
+    await db.update(packages).set({ draftManifest: stored }).where(eq(packages.id, ID));
+    const res = await app.request(`/api/integrations/${ID}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { manifest: { default_tools: string[] } };
+    expect(body.manifest.default_tools).toEqual(["serach"]);
   });
 
   it("create accepts allow_all_uris on an auth the proxy injects nothing for", async () => {
