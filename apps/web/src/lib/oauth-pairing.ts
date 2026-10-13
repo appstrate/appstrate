@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { paths } from "../api/client";
+import { isTransientError } from "../api/errors";
 import type { ModelProviderCredentialInfo } from "../hooks/use-model-provider-credentials";
 
 type PairingRequestBody =
   paths["/api/model-providers-oauth/pairing"]["post"]["requestBody"]["content"]["application/json"];
+
+type PairingStatus =
+  paths["/api/model-providers-oauth/pairing/{id}"]["get"]["responses"][200]["content"]["application/json"]["status"];
+
+/**
+ * Where the poll of a pairing stands: the status the server states, or `lost`
+ * once it refuses to state one (the row is gone, or the caller may no longer
+ * read it).
+ */
+export type PairingPollState = PairingStatus | "lost";
 
 /**
  * What a pairing produces: a new subscription owned as `ownerType` says, or the
@@ -25,6 +36,19 @@ export function pairingRequestBody(
   return input.credentialId !== undefined
     ? { providerId: input.providerId, credentialId: input.credentialId }
     : { providerId: input.providerId, owner_type: input.ownerType };
+}
+
+/**
+ * A refusal ends the poll as `lost`, even over a cached `pending`. A transient
+ * error leaves the last known status standing, and no answer yet is `pending`.
+ * `error` is `null` or `undefined` when the last request succeeded.
+ */
+export function pairingPollState(
+  status: PairingStatus | undefined,
+  error: unknown,
+): PairingPollState {
+  if (error != null && !isTransientError(error)) return "lost";
+  return status ?? "pending";
 }
 
 /**

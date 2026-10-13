@@ -7,7 +7,7 @@
  */
 
 import { MutationCache, QueryClient } from "@tanstack/react-query";
-import { ApiError } from "../api/errors";
+import { ApiError, isTransientError } from "../api/errors";
 import { onMutationError } from "./mutation-error";
 
 declare module "@tanstack/react-query" {
@@ -31,15 +31,9 @@ const mutationCache = new MutationCache({
   },
 });
 
-/**
- * A 4xx is the server's answer, not a hiccup: asking again returns the same
- * refusal after the retry delay. 408 and 429 are the two that a second attempt
- * can change.
- */
+/** One retry, of a transient failure only: a refusal comes back unchanged after the retry delay. */
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
-  if (failureCount >= 1) return false;
-  if (!(error instanceof ApiError)) return true;
-  return error.status >= 500 || error.status === 408 || error.status === 429;
+  return failureCount < 1 && isTransientError(error);
 }
 
 export const queryClient = new QueryClient({

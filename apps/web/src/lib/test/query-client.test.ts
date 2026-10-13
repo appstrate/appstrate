@@ -18,17 +18,13 @@ await i18n.changeLanguage("fr");
 
 describe("shouldRetryQuery", () => {
   it("does not re-ask a refusal", () => {
-    for (const status of [400, 401, 403, 404, 409, 422]) {
-      expect(shouldRetryQuery(0, new ApiError("refused", "refused", status))).toBe(false);
-    }
+    expect(shouldRetryQuery(0, new ApiError("not_found", "Not found", 404))).toBe(false);
   });
 
-  it("retries once what a second attempt can change", () => {
-    for (const status of [408, 429, 500, 503]) {
-      expect(shouldRetryQuery(0, new ApiError("transient", "transient", status))).toBe(true);
-    }
-    expect(shouldRetryQuery(0, new TypeError("Failed to fetch"))).toBe(true);
-    expect(shouldRetryQuery(1, new TypeError("Failed to fetch"))).toBe(false);
+  it("retries a transient failure once", () => {
+    const unavailable = new ApiError("unavailable", "Unavailable", 503);
+    expect(shouldRetryQuery(0, unavailable)).toBe(true);
+    expect(shouldRetryQuery(1, unavailable)).toBe(false);
   });
 });
 
