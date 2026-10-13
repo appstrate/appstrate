@@ -133,7 +133,7 @@ export const NO_FALLBACK_HINT =
 export function spaceArgumentRefusal(spaces: OrgWideSpaces, spaceId: unknown): Refusal | undefined {
   const accepted = spaces.reachable.map((s) => s.id);
   const list = spaces.reachable.map(describeSpace).join("; ");
-  if (spaceId === undefined) {
+  if (spaceId === undefined || spaceId === null) {
     return {
       code: "missing_argument",
       error: `space_id is required. Spaces you can act in: ${list}.`,
