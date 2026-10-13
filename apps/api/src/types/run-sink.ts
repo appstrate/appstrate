@@ -27,6 +27,8 @@ export interface RunSinkContext {
   spaceId: string;
   packageId: string;
   runOrigin: "platform" | "remote";
+  /** `runs.runner_kind`, the classifier the caller declared at run creation. */
+  runnerKind: string | null;
   sinkSecretEncrypted: string;
   sinkExpiresAt: Date | null;
   sinkClosedAt: Date | null;

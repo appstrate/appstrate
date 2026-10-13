@@ -1480,7 +1480,7 @@ export const schemas = {
       runner_kind: {
         type: ["string", "null"],
         description:
-          "Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context.",
+          "Classifier of the runner, sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context. Free-form (`cli`, `github-action`, …) and drives the dashboard icon, with one value the platform reads: `command`, a runner that executes a command and calls no LLM. A remote run (`runOrigin: remote`) of that kind executes no agent: it may finish `success` with zero tokens and without the output the agent's schema requires.",
       },
       agent_scope: {
         type: ["string", "null"],

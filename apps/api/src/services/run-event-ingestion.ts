@@ -36,6 +36,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 import { logger } from "../lib/logger.ts";
+import { COMMAND_RUNNER_KIND } from "../lib/runner-context.ts";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import { rowValueErrorCode, type Tx } from "../lib/db-helpers.ts";
 import { getCache, getEventBuffer } from "../infra/index.ts";
@@ -148,6 +149,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       agentScope: runs.agentScope,
       agentName: runs.agentName,
       runOrigin: runs.runOrigin,
+      runnerKind: runs.runnerKind,
       sinkSecretEncrypted: runs.sinkSecretEncrypted,
       sinkExpiresAt: runs.sinkExpiresAt,
       sinkClosedAt: runs.sinkClosedAt,
@@ -386,7 +388,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // `agent_deleted` is a designed state (see `runAgentIdentity` in
     // `state/runs.ts`). Failing the run here would fabricate a verdict about
     // work that may have completed fine, so the runner's own status stands.
-  } else if (status === "success" && effective.manifest.output?.schema) {
+  } else if (status === "success" && !isCommandRun(run) && effective.manifest.output?.schema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
@@ -482,7 +484,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   if (status === "success") {
-    if (runHadZeroTokens(validatedUsage)) {
+    if (!isCommandRun(run) && runHadZeroTokens(validatedUsage)) {
       status = "failed";
       errorMessage = LLM_UNREACHABLE_MESSAGE;
     }
@@ -963,6 +965,19 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  */
 function runHadZeroTokens(usage: TokenUsage): boolean {
   return (usage.input_tokens ?? 0) === 0 && (usage.output_tokens ?? 0) === 0;
+}
+
+/**
+ * Is the run's runner a command? No agent executed then, so neither verdict on
+ * an agent's execution judges the run: not the LLM-liveness check (zero tokens
+ * is a command's normal outcome), not the agent's output contract (nothing
+ * called `output`). Both halves are needed. `runner_kind` is a header the caller
+ * sets at run creation: on a platform-executed run it labels the client that
+ * triggered the run, while the runner is still the platform's own agent runtime,
+ * which both verdicts hold for. Only on a remote run is the caller the runner.
+ */
+function isCommandRun(run: Pick<RunSinkContext, "runOrigin" | "runnerKind">): boolean {
+  return run.runOrigin === "remote" && run.runnerKind === COMMAND_RUNNER_KIND;
 }
 
 /**

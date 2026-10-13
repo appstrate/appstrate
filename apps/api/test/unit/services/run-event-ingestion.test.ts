@@ -37,6 +37,7 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
     spaceId: "spc_1",
     packageId: "@acme/agent",
     runOrigin: "remote",
+    runnerKind: null,
     sinkSecretEncrypted: encrypt("s".repeat(32)),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
     sinkClosedAt: null,

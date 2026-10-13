@@ -5,7 +5,7 @@ import { User, Calendar, Key, UserCircle, Terminal, Workflow, Globe } from "luci
 import type { EnrichedRun } from "@appstrate/shared-types";
 
 function RunnerIcon({ kind }: { kind: string | null | undefined }) {
-  if (kind === "cli") return <Terminal size={12} className="shrink-0" />;
+  if (kind === "cli" || kind === "command") return <Terminal size={12} className="shrink-0" />;
   if (kind === "github-action") return <Workflow size={12} className="shrink-0" />;
   return <Globe size={12} className="shrink-0" />;
 }

@@ -3706,7 +3706,7 @@
         "operationId": "finalizeRemoteRun",
         "tags": ["Runs"],
         "summary": "Terminal RunResult — close the sink (HMAC, idempotent)",
-        "description": "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a \"could not reach the LLM API\" error). On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.",
+        "description": "Closes the run. Flushes any buffered events (accepting sequence gaps — no more will arrive), sets terminal status/result/cost/duration on the `runs` row, broadcasts the `onRunStatusChange` module event. Idempotent: a replay after the sink is closed returns `200 { ok: true }` without re-broadcasting.\n\nThe runner declares the outcome; the platform infers none of it. `status` is required, and `usage` is required when `status` is `success` — either missing is a 400. Two rules can still turn a reported `success` into `failed`: an output that violates the agent's declared output schema, and a `usage` with zero `input_tokens` and zero `output_tokens`, which means the LLM was never reached (the run is failed with a \"could not reach the LLM API\" error). Neither rule applies to a remote run whose `runner_kind` is `command`: its runner executes a command and no agent, so it reports a zero `usage` and no output on a success. On any other status, a missing `usage` keeps the last cumulative usage the run reported through `appstrate.metric` events.",
         "parameters": [
           {
             "name": "runId",
@@ -3782,7 +3782,7 @@
                   },
                   "usage": {
                     "$ref": "#/components/schemas/TokenUsage",
-                    "description": "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached). The schema is the contract: it is the stored shape, and what a runner must send. A counter that breaks it makes the whole usage invalid, which is a 400 on a success. Undeclared keys and malformed `tiers` bands also break it, but the server tolerates them so that a platform and a runner of different versions still agree: it drops them, never stores them, and keeps the counters, priced at the base rate."
+                    "description": "Authoritative terminal token usage written to the `runs` row. Required when `status` is `success`; a success with zero `input_tokens` and `output_tokens` is recorded as `failed` (LLM never reached), except on a remote run whose `runner_kind` is `command`. The schema is the contract: it is the stored shape, and what a runner must send. A counter that breaks it makes the whole usage invalid, which is a 400 on a success. Undeclared keys and malformed `tiers` bands also break it, but the server tolerates them so that a platform and a runner of different versions still agree: it drops them, never stores them, and keeps the counters, priced at the base rate."
                   },
                   "cost": {
                     "type": "number",
@@ -32143,7 +32143,7 @@
           },
           "runner_kind": {
             "type": ["string", "null"],
-            "description": "Free-form classifier driving the dashboard icon (`cli`, `github-action`, …). Sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context."
+            "description": "Classifier of the runner, sourced from `X-Appstrate-Runner-Kind` or inferred from the auth context. Free-form (`cli`, `github-action`, …) and drives the dashboard icon, with one value the platform reads: `command`, a runner that executes a command and calls no LLM. A remote run (`runOrigin: remote`) of that kind executes no agent: it may finish `success` with zero tokens and without the output the agent's schema requires."
           },
           "agent_scope": {
             "type": ["string", "null"],

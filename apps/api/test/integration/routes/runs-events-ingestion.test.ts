@@ -97,6 +97,10 @@ async function seedRunWithSink(
     modelCost?: ModelCost | null;
     /** Persisted on `runs.versionRef` — pins the manifest finalize validates against. */
     versionRef?: string;
+    /** Persisted on `runs.runOrigin` — who executes the run. Defaults to `platform`. */
+    runOrigin?: "platform" | "remote";
+    /** Persisted on `runs.runnerKind` — the classifier the caller declared. */
+    runnerKind?: string | null;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -107,7 +111,8 @@ async function seedRunWithSink(
     spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     ...(overrides.versionRef !== undefined ? { versionRef: overrides.versionRef } : {}),
-    runOrigin: "platform",
+    runOrigin: overrides.runOrigin ?? "platform",
+    ...(overrides.runnerKind !== undefined ? { runnerKind: overrides.runnerKind } : {}),
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
     sinkClosedAt: overrides.sinkClosedAt ?? null,
@@ -1333,6 +1338,58 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
   });
 
+  // A command runner (`appstrate run @scope/agent -- <command>`) calls no LLM:
+  // zero tokens is its normal outcome. The exemption needs BOTH facts — on a
+  // platform-executed run `runner_kind` only labels the client that triggered
+  // it, and the platform's own agent runtime is still the runner.
+  describe("zero-token success, by who runs the run", () => {
+    const zeroTokenSuccess = {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    };
+
+    it("stays success for a remote run whose runner is a command, with no ledger row", async () => {
+      const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+        tokenUsage: null,
+        runOrigin: "remote",
+        runnerKind: "command",
+      });
+
+      const res = await postFinalize(runId, zeroTokenSuccess);
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("success");
+      expect(row?.error).toBeNull();
+      expect(row?.tokenUsage).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+      expect(await db.select().from(llmUsage).where(eq(llmUsage.runId, runId))).toHaveLength(0);
+    });
+
+    for (const [label, seed] of [
+      [
+        "a platform run a `command` client triggered",
+        { runOrigin: "platform", runnerKind: "command" },
+      ],
+      ["a remote run of another kind", { runOrigin: "remote", runnerKind: "cli" }],
+      ["a remote run that declares no kind", { runOrigin: "remote", runnerKind: null }],
+    ] as const) {
+      it(`still flips to failed for ${label}`, async () => {
+        const runId = await seedRunWithSink(ctx, "@test/final-agent", {
+          tokenUsage: null,
+          ...seed,
+        });
+
+        const res = await postFinalize(runId, zeroTokenSuccess);
+        expect(res.status).toBe(200);
+
+        const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+        expect(row?.status).toBe("failed");
+        expect(row?.error).toMatch(/could not reach the LLM API/);
+      });
+    }
+  });
+
   // The platform infers no part of the outcome: a success without `usage`
   // and a body without `status` are 400s, and the run stays open for a
   // corrected finalize (or the watchdog).
@@ -2363,6 +2420,51 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
     expect(row?.error).toMatch(/without calling the required `output` tool/);
     expect(row?.error).not.toMatch(/^Output validation failed/);
   });
+
+  // A command runner executes no agent, so the agent's output contract does
+  // not judge its run — on a remote run only, as for the zero-token check.
+  it("a remote command run stays success without the output the schema requires", async () => {
+    const runId = await seedRunWithSink(ctx, "@test/schema-agent", {
+      tokenUsage: null,
+      runOrigin: "remote",
+      runnerKind: "command",
+    });
+
+    const res = await postFinalize(runId, {
+      status: "success",
+      durationMs: 100,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    });
+    expect(res.status).toBe(200);
+
+    const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+    expect(row?.status).toBe("success");
+    expect(row?.error).toBeNull();
+    expect(row?.result).toBeNull();
+  });
+
+  for (const [label, seed] of [
+    ["a remote run of another kind", { runOrigin: "remote", runnerKind: "cli" }],
+    [
+      "a platform run a `command` client triggered",
+      { runOrigin: "platform", runnerKind: "command" },
+    ],
+  ] as const) {
+    it(`${label} still fails without the output the schema requires`, async () => {
+      const runId = await seedRunWithSink(ctx, "@test/schema-agent", seed);
+
+      const res = await postFinalize(runId, {
+        status: "success",
+        durationMs: 100,
+        usage: { input_tokens: 100, output_tokens: 50 },
+      });
+      expect(res.status).toBe(200);
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
+      expect(row?.status).toBe("failed");
+      expect(row?.error).toMatch(/without calling the required `output` tool/);
+    });
+  }
 
   it("a platform-SYNTHESISED success still gets the `output` tool wording when the schema was unmet", async () => {
     // Lost finalize POST + container exit 0: execute-background synthesises
