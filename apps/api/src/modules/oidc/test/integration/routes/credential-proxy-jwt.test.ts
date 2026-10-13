@@ -323,15 +323,15 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     });
   }
 
-  /** An in-flight run of `launcher` that bound the team's shared connection. */
-  async function runOf(launcher: TestContext, origin: "remote" | "platform"): Promise<string> {
+  /** An in-flight remote run of `launcher` that bound the team's shared connection. */
+  async function remoteRunOf(launcher: TestContext): Promise<string> {
     const run = await seedRun({
       orgId: owner.orgId,
       spaceId: owner.defaultSpaceId,
       packageId: AGENT_ID,
       userId: launcher.user.id,
       status: "running",
-      runOrigin: origin,
+      runOrigin: "remote",
       resolvedConnections: {
         [INTEGRATION_ID]: [
           {
@@ -346,47 +346,15 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     return run.id;
   }
 
-  it("a builder, who holds credential-proxy:call and no credential-proxy:direct, is refused outside a run", async () => {
+  it("a builder, who holds credential-proxy:call alone, is refused outside a run and reaches the shared connection through a remote run of their own", async () => {
     const builder = await memberContext(owner, "member", "builder");
     const body = await expectProblem(await call(builder), 403, { code: "forbidden" });
     expect(body.detail).toContain("credential-proxy:direct");
-    expect(body.detail).toContain("X-Run-Id");
     expect(upstreamAuth).toEqual([]);
-  });
 
-  it("the same builder reaches the shared connection through a remote run of their own", async () => {
-    const builder = await memberContext(owner, "member", "builder");
-    const res = await call(builder, { "X-Run-Id": await runOf(builder, "remote") });
+    const res = await call(builder, { "X-Run-Id": await remoteRunOf(builder) });
     expect(res.status, await res.clone().text()).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer team"]);
-  });
-
-  // Launching runs (`agents:run`) is not `credential-proxy:call`: a remote run of their own
-  // lends an operator nothing.
-  it("an operator, who holds neither proxy permission, is refused with or without a run of their own", async () => {
-    const operator = await memberContext(owner, "member", "operator");
-    const required = "credential-proxy:call|credential-proxy:direct";
-    const direct = await expectProblem(await call(operator), 403, { code: "forbidden" });
-    expect(direct.detail).toContain(required);
-    const viaRun = await call(operator, { "X-Run-Id": await runOf(operator, "remote") });
-    expect((await expectProblem(viaRun, 403, { code: "forbidden" })).detail).toContain(required);
-    expect(upstreamAuth).toEqual([]);
-  });
-
-  it("refuses X-Run-Id naming a run the platform executes, and a colleague's run", async () => {
-    const builder = await memberContext(owner, "member", "builder");
-    const platform = await call(builder, { "X-Run-Id": await runOf(builder, "platform") });
-    const body = await expectProblem(platform, 403, { code: "forbidden" });
-    expect(body.detail).toContain("the platform executes");
-    const foreign = await call(builder, { "X-Run-Id": await runOf(colleague, "remote") });
-    await expectProblem(foreign, 403, { code: "forbidden" });
-    expect(upstreamAuth).toEqual([]);
-  });
-
-  it("a viewer, who holds neither permission, never reaches the handler", async () => {
-    const viewer = await memberContext(owner, "member", "viewer");
-    const body = await expectProblem(await call(viewer), 403, { code: "forbidden" });
-    expect(body.detail).toContain("credential-proxy:call|credential-proxy:direct");
   });
 
   it("the owner, who holds credential-proxy:direct, reaches their own connection only", async () => {

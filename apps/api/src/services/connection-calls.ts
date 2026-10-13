@@ -37,7 +37,6 @@ export interface ConnectionCallView {
   runId: string | null;
   method: string;
   host: string;
-  path: string;
   outcome: string;
   duration_ms: number;
   request_id: string | null;
@@ -74,7 +73,6 @@ function toView(row: ConnectionCallRow): ConnectionCallView {
     runId: row.runId,
     method: row.method,
     host: row.host,
-    path: row.path,
     outcome: row.outcome,
     duration_ms: row.durationMs,
     request_id: row.requestId,
@@ -153,60 +151,4 @@ export async function listOwnConnectionCalls(
         )
       : undefined;
   return listCalls(and(eq(connectionCalls.connectionId, owned.id), binding), filters, page);
-}
-
-const CSV_COLUMNS = [
-  "id",
-  "createdAt",
-  "spaceId",
-  "connection_id",
-  "integration_package_id",
-  "owner_type",
-  "owner_id",
-  "actor_type",
-  "actor_id",
-  "apiKeyId",
-  "auth_method",
-  "runId",
-  "method",
-  "host",
-  "path",
-  "outcome",
-  "duration_ms",
-  "request_id",
-] as const satisfies readonly (keyof ConnectionCallView)[];
-
-/**
- * The columns holding text a caller writes. The others are identifiers the platform minted or
- * validated: an integration id always starts with `@` and is exported as it is.
- */
-const CALLER_TEXT_COLUMNS: ReadonlySet<keyof ConnectionCallView> = new Set([
-  "runId",
-  "method",
-  "host",
-  "path",
-  "outcome",
-  "request_id",
-]);
-
-/**
- * One RFC 4180 field. In a `callerText` column, a value a spreadsheet would read as a formula
- * (leading `=`, `+`, `-`, `@`, tab or CR) is prefixed with `'`.
- */
-function csvField(value: string | number | null, callerText: boolean): string {
-  if (value === null) return "";
-  if (typeof value === "number") return String(value);
-  const text = callerText && /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-/** The rows as RFC 4180 CSV: a header line naming the wire fields, CRLF line ends. */
-export function connectionCallsCsv(rows: readonly ConnectionCallView[]): string {
-  const lines = [CSV_COLUMNS.join(",")];
-  for (const row of rows) {
-    lines.push(
-      CSV_COLUMNS.map((column) => csvField(row[column], CALLER_TEXT_COLUMNS.has(column))).join(","),
-    );
-  }
-  return `${lines.join("\r\n")}\r\n`;
 }

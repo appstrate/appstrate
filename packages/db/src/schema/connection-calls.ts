@@ -15,10 +15,10 @@ import { pgTable, text, timestamp, bigserial, integer, uuid, index } from "drizz
  * `end_user`), NULL when the connection was gone by then. `actor_type` / `actor_id` are who acted,
  * `api_key_id` the key they acted through, if any.
  *
- * `host` and `path` come from the target as the caller wrote it, before substitution: a
- * `{{field}}` placeholder is stored as written and no query string is kept, so the row never holds
- * a decrypted credential value. `outcome` is the upstream's HTTP status as a string, or the
- * proxy's own problem code when the proxy answered itself.
+ * `host` comes from the target as the caller wrote it, before substitution: a `{{field}}`
+ * placeholder is stored as written, so the row never holds a decrypted credential value. `outcome`
+ * is the upstream's HTTP status as a string, or the proxy's own problem code when the proxy
+ * answered itself.
  */
 export const connectionCalls = pgTable(
   "connection_calls",
@@ -37,7 +37,6 @@ export const connectionCalls = pgTable(
     runId: text("run_id"),
     method: text("method").notNull(),
     host: text("host").notNull(),
-    path: text("path").notNull(),
     outcome: text("outcome").notNull(),
     durationMs: integer("duration_ms").notNull(),
     requestId: text("request_id"),

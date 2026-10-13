@@ -16,7 +16,6 @@ CREATE TABLE "connection_calls" (
 	"run_id" text,
 	"method" text NOT NULL,
 	"host" text NOT NULL,
-	"path" text NOT NULL,
 	"outcome" text NOT NULL,
 	"duration_ms" integer NOT NULL,
 	"request_id" text,

@@ -9,12 +9,12 @@
  *   - `GET /api/integrations/calls`: a holder of `integrations:configure` reads every call made in
  *     the request space, and never another space's or another organization's.
  *
- * Both take the same filters, keyset pagination and `?format=csv`.
+ * Both take the same filters and keyset pagination.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
+import { connectionCalls } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import {
@@ -25,11 +25,9 @@ import {
 } from "../../helpers/auth.ts";
 import { seedApiKey, seedEndUser, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
+import { seedIntegrationConnection } from "../../helpers/run-connection-fixtures.ts";
 import { recordConnectionCall } from "../../../src/services/credential-proxy/call-journal.ts";
-import {
-  connectionCallsCsv,
-  type ConnectionCallView,
-} from "../../../src/services/connection-calls.ts";
+import { type ConnectionCallView } from "../../../src/services/connection-calls.ts";
 
 const app = getTestApp();
 
@@ -57,29 +55,6 @@ describe("connection call journal routes", () => {
       await seedPackage({ id, orgId: ctx.orgId, type: "integration", source: "local" });
     }
   });
-
-  /** A connection of the member `owner`, or of an end-user. */
-  async function seedConnection(
-    owner: string | { endUserId: string },
-    integrationId = CRM,
-  ): Promise<string> {
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId,
-        authKey: "primary",
-        accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: typeof owner === "string" ? owner : null,
-        endUserId: typeof owner === "string" ? null : owner.endUserId,
-        credentialsEncrypted: "x",
-        scopesGranted: [],
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
-  }
 
   /** Journal one call made by the owner in the default space, unless `overrides` say otherwise. */
   async function record(
@@ -116,7 +91,7 @@ describe("connection call journal routes", () => {
 
   describe("GET /api/me/connections/:connectionId/calls", () => {
     it("lists every call made with the caller's connection, whoever made it, newest first", async () => {
-      const connectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId);
       await record(connectionId, {
         actor: { type: "user", id: colleague.user.id },
@@ -147,7 +122,6 @@ describe("connection call journal routes", () => {
         runId: "run_1",
         method: "POST",
         host: "api.example.com",
-        path: "/v1/users",
         outcome: "unauthorized_target",
         duration_ms: 12,
         request_id: "req_2",
@@ -156,8 +130,8 @@ describe("connection call journal routes", () => {
 
     it("lists the calls made from every space, and none of another connection", async () => {
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
-      const connectionId = await seedConnection(ctx.user.id);
-      const otherConnectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
+      const otherConnectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId);
       await record(connectionId, { spaceId: elsewhere.id });
       await record(otherConnectionId);
@@ -169,7 +143,7 @@ describe("connection call journal routes", () => {
     });
 
     it("404s a connection the caller does not own, though they made calls with it", async () => {
-      const connectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId, { actor: { type: "user", id: colleague.user.id } });
 
       const res = await app.request(ownDoor(connectionId), { headers: authHeaders(colleague) });
@@ -186,7 +160,7 @@ describe("connection call journal routes", () => {
 
     it("caps a delegated credential with integrations:read and confines it to its space", async () => {
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
-      const connectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId);
       await record(connectionId, { spaceId: elsewhere.id });
       const key = (scopes: string[]) =>
@@ -212,8 +186,8 @@ describe("connection call journal routes", () => {
 
     it("under Appstrate-User, reads the end-user's own connections only", async () => {
       const endUser = await seedEndUser({ spaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
-      const theirs = await seedConnection({ endUserId: endUser.id });
-      const creators = await seedConnection(ctx.user.id);
+      const theirs = await seedIntegrationConnection(ctx, CRM, { endUserId: endUser.id });
+      const creators = await seedIntegrationConnection(ctx, CRM);
       await record(theirs, { actor: { type: "end_user", id: endUser.id }, requestId: "req_eu" });
       await record(creators, { requestId: "req_creator" });
       const key = await seedApiKey({
@@ -241,7 +215,7 @@ describe("connection call journal routes", () => {
     });
 
     it("filters by actor, and refuses the space door's connection filter", async () => {
-      const connectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId);
       await record(connectionId, { actor: { type: "user", id: colleague.user.id } });
 
@@ -291,8 +265,8 @@ describe("connection call journal routes", () => {
     });
 
     it("lists the space's calls whatever the connection and its owner", async () => {
-      const mine = await seedConnection(ctx.user.id);
-      const theirs = await seedConnection(colleague.user.id);
+      const mine = await seedIntegrationConnection(ctx, CRM);
+      const theirs = await seedIntegrationConnection(colleague, CRM);
       await record(mine);
       await record(theirs, { actor: { type: "user", id: colleague.user.id } });
 
@@ -307,7 +281,7 @@ describe("connection call journal routes", () => {
     it("never lists another space's calls, nor another organization's", async () => {
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
       const outside = await createTestContext({ orgSlug: "outside" });
-      const connectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
       await record(connectionId, { requestId: "req_here" });
       await record(connectionId, { spaceId: elsewhere.id, requestId: "req_elsewhere" });
       await record(crypto.randomUUID(), {
@@ -327,8 +301,8 @@ describe("connection call journal routes", () => {
     });
 
     it("filters by connection, actor, run and date", async () => {
-      const crm = await seedConnection(ctx.user.id);
-      const mail = await seedConnection(colleague.user.id, MAIL);
+      const crm = await seedIntegrationConnection(ctx, CRM);
+      const mail = await seedIntegrationConnection(colleague, MAIL);
       await record(crm, { requestId: "req_old" });
       await record(crm, { requestId: "req_run", runId: "run_7" });
       await record(mail, {
@@ -371,7 +345,7 @@ describe("connection call journal routes", () => {
         "actor_type=user",
         "start_date=yesterday",
         "startingAfter=abc",
-        "format=xml",
+        "format=csv",
         "limit=0",
         "limit=201",
       ]) {
@@ -381,7 +355,7 @@ describe("connection call journal routes", () => {
     });
 
     it("pages newest first on the row id, following the Link header", async () => {
-      const connectionId = await seedConnection(ctx.user.id);
+      const connectionId = await seedIntegrationConnection(ctx, CRM);
       for (let i = 0; i < 5; i++) await record(connectionId, { requestId: `req_${i}` });
 
       const pages = await walkLinkPages<Page>(app, `${SPACE_DOOR}?limit=2`, authHeaders(ctx));
@@ -398,40 +372,6 @@ describe("connection call journal routes", () => {
         "req_1",
         "req_0",
       ]);
-    });
-
-    it("exports a page as CSV, with the same filters and the same Link header", async () => {
-      const crm = await seedConnection(ctx.user.id);
-      const mail = await seedConnection(ctx.user.id, MAIL);
-      for (let i = 0; i < 3; i++) await record(crm);
-      await record(mail, { integrationId: MAIL });
-
-      const query = `connection_id=${crm}&limit=2`;
-      const json = await page(`${SPACE_DOOR}?${query}`);
-      const res = await app.request(`${SPACE_DOOR}?${query}&format=csv`, {
-        headers: authHeaders(ctx),
-      });
-
-      expect(res.status).toBe(200);
-      expect(res.headers.get("Content-Type")).toStartWith("text/csv");
-      expect(res.headers.get("Content-Disposition")).toContain("attachment");
-      expect(res.headers.get("Link")).toContain(`startingAfter=${json.data[1]!.id}`);
-      expect(res.headers.get("Link")).toContain("format=csv");
-      const csv = await res.text();
-      expect(csv).toBe(connectionCallsCsv(json.data));
-      expect(csv.trimEnd().split("\r\n")).toHaveLength(3);
-    });
-
-    it("lifts the page size to 10000 rows for a CSV export", async () => {
-      const res = await app.request(`${SPACE_DOOR}?format=csv&limit=10000`, {
-        headers: authHeaders(ctx),
-      });
-      expect(res.status).toBe(200);
-
-      const over = await app.request(`${SPACE_DOOR}?format=csv&limit=10001`, {
-        headers: authHeaders(ctx),
-      });
-      expect(over.status).toBe(400);
     });
   });
 });

@@ -86,7 +86,6 @@ column connection_calls.org_id uuid not null
 column connection_calls.outcome text not null
 column connection_calls.owner_id text
 column connection_calls.owner_type text
-column connection_calls.path text not null
 column connection_calls.request_id text
 column connection_calls.run_id text
 column connection_calls.space_id text not null

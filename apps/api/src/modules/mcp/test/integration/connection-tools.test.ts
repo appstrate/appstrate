@@ -30,14 +30,10 @@ import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import {
   createTestContext,
   memberContext,
+  memberHolding,
   type TestContext,
 } from "../../../../../test/helpers/auth.ts";
-import {
-  seedApiKey,
-  seedSpace,
-  seedSpaceMember,
-  seedSpaceRole,
-} from "../../../../../test/helpers/seed.ts";
+import { seedApiKey, seedSpace, seedSpaceMember } from "../../../../../test/helpers/seed.ts";
 import { seedShares } from "../../../../../test/helpers/connection-shares.ts";
 import {
   seedProxyConnection,
@@ -222,19 +218,6 @@ const get = (path: string, overrides: Record<string, unknown> = {}) => ({
   target: `${UPSTREAM}${path}`,
   ...overrides,
 });
-
-/** A member of `owner`'s org holding exactly `permissions` in its default space. */
-async function memberHolding(owner: TestContext, permissions: string[]): Promise<TestContext> {
-  const member = await memberContext(owner, "member");
-  const role = await seedSpaceRole({ orgId: owner.orgId, permissions });
-  await seedSpaceMember({
-    spaceId: owner.defaultSpaceId,
-    userId: member.user.id,
-    presetRole: null,
-    customRoleId: role.id,
-  });
-  return member;
-}
 
 describe("mcp connection tools", () => {
   /** The organization's owner: preset `admin` in the default space. */

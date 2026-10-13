@@ -1212,8 +1212,6 @@ export interface paths {
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
-         *     An `Idempotency-Key` header is the upstream's here (Stripe's, for one): it is relayed with the caller's other headers, whatever the verb. The platform de-duplicates nothing on it, so it is not a parameter of this operation and no `Idempotent-Replayed` is answered.
-         *
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         get: operations["credentialProxyGet"];
@@ -1230,8 +1228,6 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
-         *
-         *     An `Idempotency-Key` header is the upstream's here (Stripe's, for one): it is relayed with the caller's other headers, whatever the verb. The platform de-duplicates nothing on it, so it is not a parameter of this operation and no `Idempotent-Replayed` is answered.
          *
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
@@ -1250,8 +1246,6 @@ export interface paths {
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
          *
-         *     An `Idempotency-Key` header is the upstream's here (Stripe's, for one): it is relayed with the caller's other headers, whatever the verb. The platform de-duplicates nothing on it, so it is not a parameter of this operation and no `Idempotent-Replayed` is answered.
-         *
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         post: operations["credentialProxyPost"];
@@ -1268,8 +1262,6 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
-         *
-         *     An `Idempotency-Key` header is the upstream's here (Stripe's, for one): it is relayed with the caller's other headers, whatever the verb. The platform de-duplicates nothing on it, so it is not a parameter of this operation and no `Idempotent-Replayed` is answered.
          *
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
@@ -1289,8 +1281,6 @@ export interface paths {
          *     URL and headers can contain `{{credential_field}}` placeholders substituted against the integration's credential schema, each value encoded for the place it takes: percent-encoded as one URL component (a placeholder that starts the URL is a base URL, inserted as is), a header value as is. Set `X-Substitute-Body: 1` to substitute the request body too (verbs that carry one), each value escaped for the body's `Content-Type`: JSON (a value inside a string literal is escaped, a bare `{{field}}` becomes a JSON string), form, XML, multipart (a value holding a line break or the boundary delimiter is refused; in a part header a placeholder must sit inside a quoted string, where a value holding `"` or `\` is refused) or `text/plain` (as is). A body holding a placeholder under any other `Content-Type`, under none, or under one that itself holds a placeholder, is a 400 `invalid_request`, as is one header name written twice in different case; a body with no placeholder is sent untouched. A value its place cannot carry (a line break in a header, a character outside RFC 6265 `cookie-octet` in a `Cookie` header, a path segment rendered `.` or `..`) is a `credential_unusable` naming the placeholder, never encoded around. So is a path segment a field leaves empty (`/x/{{field}}` with an unset optional field): either the connection lacks the value or the target should not use it.
          *
          *     Boolean control headers (`X-Substitute-Body`, `X-Stream-Request`, `X-Stream-Response`) take `1` or `0`; any other value is a 400.
-         *
-         *     An `Idempotency-Key` header is the upstream's here (Stripe's, for one): it is relayed with the caller's other headers, whatever the verb. The platform de-duplicates nothing on it, so it is not a parameter of this operation and no `Idempotent-Replayed` is answered.
          *
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
@@ -1524,7 +1514,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host and path, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page, in either format. An unknown query parameter is a 400, never an ignored filter. In the CSV, a cell of `runId`, `method`, `host`, `path`, `outcome` or `request_id` (the text a caller writes) that a spreadsheet would read as a formula (leading `=`, `+`, `-`, `@`, tab or carriage return) is prefixed with `'`; identifiers are exported as they are. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -2160,7 +2150,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made with one of the caller's connections
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page, in either format. An unknown query parameter is a 400, never an ignored filter. In the CSV, a cell of `runId`, `method`, `host`, `path`, `outcome` or `request_id` (the text a caller writes) that a spreadsheet would read as a formula (leading `=`, `+`, `-`, `@`, tab or carriage return) is prefixed with `'`; identifiers are exported as they are. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listMyConnectionCalls"];
         put?: never;
@@ -12910,9 +12900,6 @@ export interface operations {
                 start_date?: string;
                 /** @description Only the calls made at or before this instant (ISO 8601 with an offset). */
                 end_date?: string;
-                /** @description `csv` answers the same rows as `text/csv` (RFC 4180, one header line naming the fields below), `limit` then defaulting to its maximum of 10000. */
-                format?: "json" | "csv";
-                /** @description Page size: 1 to 200 as JSON (default 50), 1 to 10000 as CSV (default 10000). */
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
                 startingAfter?: string;
@@ -12973,8 +12960,6 @@ export interface operations {
                             method: string;
                             /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
                             host: string;
-                            /** @description The target's path as the caller wrote it, before substitution, without query string or fragment. Empty when the target does not parse. */
-                            path: string;
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
@@ -12983,7 +12968,6 @@ export interface operations {
                         }[];
                         hasMore: boolean;
                     };
-                    "text/csv": string;
                 };
             };
             400: components["responses"]["ValidationError"];
@@ -16068,9 +16052,6 @@ export interface operations {
                 start_date?: string;
                 /** @description Only the calls made at or before this instant (ISO 8601 with an offset). */
                 end_date?: string;
-                /** @description `csv` answers the same rows as `text/csv` (RFC 4180, one header line naming the fields below), `limit` then defaulting to its maximum of 10000. */
-                format?: "json" | "csv";
-                /** @description Page size: 1 to 200 as JSON (default 50), 1 to 10000 as CSV (default 10000). */
                 limit?: number;
                 /** @description Cursor: the `id` of the last call of the previous page. Follow the RFC 5988 `Link: <…>; rel="next"` response header instead of building it by hand. */
                 startingAfter?: string;
@@ -16128,8 +16109,6 @@ export interface operations {
                             method: string;
                             /** @description The target's host as the caller wrote it, before substitution: a `{{field}}` placeholder is kept as written, never its value. `<templated>` or `<unparseable>` when the target names no readable host. */
                             host: string;
-                            /** @description The target's path as the caller wrote it, before substitution, without query string or fragment. Empty when the target does not parse. */
-                            path: string;
                             /** @description The upstream's HTTP status (`200`, `404`, …), or the proxy's own problem code when the proxy answered itself (`unauthorized_target`, `upstream_timeout`, …). */
                             outcome: string;
                             duration_ms: number;
@@ -16138,7 +16117,6 @@ export interface operations {
                         }[];
                         hasMore: boolean;
                     };
-                    "text/csv": string;
                 };
             };
             400: components["responses"]["ValidationError"];

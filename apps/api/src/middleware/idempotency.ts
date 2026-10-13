@@ -46,23 +46,6 @@ export function isIdempotencyAware(handler: unknown): boolean {
   return hasHandlerMarker(handler, IDEMPOTENCY_AWARE);
 }
 
-const IDEMPOTENCY_KEY_RELAYED = Symbol.for("appstrate.idempotencyKeyRelayed");
-
-/**
- * Mount on a route that relays its request to an upstream (the credential proxy): there
- * `Idempotency-Key` is the upstream's, sent on with the caller's other headers, and the platform
- * neither de-duplicates on it nor refuses it. Does nothing at run time: `idempotencyGuard` reads
- * the mount, as it reads `idempotency()`'s.
- */
-export function relayIdempotencyKey() {
-  return markHandler((_c: Context<AppEnv>, next: Next) => next(), IDEMPOTENCY_KEY_RELAYED);
-}
-
-/** True when `handler` is a middleware produced by `relayIdempotencyKey()`. */
-export function relaysIdempotencyKey(handler: unknown): boolean {
-  return hasHandlerMarker(handler, IDEMPOTENCY_KEY_RELAYED);
-}
-
 /**
  * Never throws on the body's shape: it runs after the handler has committed (a launch has
  * created its run), so a throw would turn that success into a 500 and strand the lock.

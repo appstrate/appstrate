@@ -52,12 +52,7 @@ export {
 // Canonical `{{var}}` credential substitution — shared by the platform
 // credential proxy (`@appstrate/connect` re-export) and the portable
 // integration resolver.
-export {
-  substituteVars,
-  templateHost,
-  templateLocation,
-  unresolvedPlaceholders,
-} from "./template-vars.ts";
+export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 
 // `{{name}}` into a whole HTTP request, each value encoded for its place: `api_call` and the login paths.
 export {

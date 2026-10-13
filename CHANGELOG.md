@@ -888,12 +888,12 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 - **A journal of the credential proxy's calls** (#1894). Every call that may
   have sent a connection's credential writes one row once its outcome is
   known: who acted and through which API key, the connection and its owner,
-  the integration, the run it named, the method, the target's host and path,
-  the outcome, the duration and the `Request-Id`. The outcome is the
+  the integration, the run it named, the method, the target's host, the
+  outcome, the duration and the `Request-Id`. The outcome is the
   upstream's status for a response relayed, the proxy's own code for a
   failure after dispatch, a buffered body that breaks off after its headers
   included. A refusal decided before anything was sent writes none. Two
-  reads, JSON or `?format=csv`, newest first, paginated by the `Link` header:
+  reads, newest first, paginated by the `Link` header:
   - `GET /api/me/connections/{connectionId}/calls`: the connection's owner
     reads every call made with it, whoever made it and from whichever space;
   - `GET /api/integrations/calls`: a holder of `integrations:configure` reads
@@ -901,11 +901,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
   Limits: it covers the platform proxy only (calls outside a run and the
   calls of remote runs), so an `api_call` made by a run the platform executes
-  is in that run's logs, not here. Host and path are stored as the caller
-  wrote them, before substitution and without userinfo, query string or
-  fragment: a `{{field}}` placeholder is kept as written, and so is a secret
-  written literally in a path. A row is written best-effort, off the response
-  path. A streamed response is journaled when it is handed over. The owner's
+  is in that run's logs, not here. The host is stored as the caller wrote it,
+  before substitution: a `{{field}}` placeholder is kept as written, and no
+  path, query string or userinfo is stored. A row is written best-effort, off
+  the response path. A streamed response is journaled when it is handed over. The owner's
   read answers `404` once the connection is deleted; the space's read still
   lists its calls. No retention job exists.
 
@@ -1121,12 +1120,6 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   the payload Pi builds.
 
 ### Fixed
-
-- **An `Idempotency-Key` sent to the credential proxy reaches the upstream**
-  (#1894). On `/api/credential-proxy/proxy` the header is the upstream's
-  (Stripe's, for one): it is relayed with the caller's other headers,
-  whatever the verb, where a mutating call carrying one was refused
-  `400 idempotency_not_supported`. The platform de-duplicates nothing on it.
 
 - **A session is refused for a user with no user row.** The session hook throws
   instead of creating a session without a realm.

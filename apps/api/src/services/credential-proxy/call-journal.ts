@@ -11,14 +11,13 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { templateLocation } from "@appstrate/afps-runtime/resolvers";
+import { templateHost } from "@appstrate/afps-runtime/resolvers";
 import { actorFromIds, type Actor } from "../../lib/actor.ts";
 import { logger } from "../../lib/logger.ts";
 
 // Caps on the text a caller writes.
 const MAX_METHOD_LENGTH = 16;
 const MAX_HOST_LENGTH = 255;
-const MAX_PATH_LENGTH = 2048;
 
 interface ConnectionCall {
   orgId: string;
@@ -57,9 +56,6 @@ export async function recordConnectionCall(input: ConnectionCall): Promise<void>
       )
       .limit(1);
     const owner = connection ? actorFromIds(connection.userId, connection.endUserId) : null;
-    // Read on the template, never the substituted URL: no userinfo, query string or fragment, a
-    // placeholder as written, so neither half holds a decrypted credential value.
-    const { host, path } = templateLocation(input.target);
     await db.insert(connectionCalls).values({
       orgId: input.orgId,
       spaceId: input.spaceId,
@@ -73,8 +69,9 @@ export async function recordConnectionCall(input: ConnectionCall): Promise<void>
       authMethod: input.authMethod,
       runId: input.runId,
       method: input.method.slice(0, MAX_METHOD_LENGTH),
-      host: host.slice(0, MAX_HOST_LENGTH),
-      path: path.slice(0, MAX_PATH_LENGTH),
+      // Read on the template, never the substituted URL: a placeholder as written, so the row
+      // holds no decrypted credential value.
+      host: templateHost(input.target).slice(0, MAX_HOST_LENGTH),
       outcome: input.outcome,
       // A wall-clock difference: a clock stepped back mid-call reads negative.
       durationMs: Math.max(input.durationMs, 0),

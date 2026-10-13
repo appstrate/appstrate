@@ -70,40 +70,25 @@ export function referencesField(input: string, fields: Readonly<Record<string, u
 }
 
 /**
- * The host and path `template` (a URL template) names, each `{{key}}` in them written as
- * `{{key}}`: what a message echoes for the target and what a journal keeps of it. Never a rendered
- * value, and an untemplated part shown as the caller wrote it, so an echo never tells whether a
- * literal host matches a credential value; never userinfo, a query string or a fragment. A leading
- * `{{key}}` stands for a whole base URL. A templated URL that does not parse (a `{{port}}`) has the
- * host `<templated>`, any other unparseable one `<unparseable>`, both with an empty path. The path
- * is also empty for a scheme other than http(s), whose "path" is the whole opaque remainder.
+ * The host `template` (a URL template) names, each `{{key}}` in it written as `{{key}}`: what a
+ * message echoes for the target. Never a rendered value, and an untemplated host shown as the
+ * caller wrote it, so an echo never tells whether a literal host matches a credential value. A
+ * leading `{{key}}` stands for a whole base URL; a templated host that does not parse (a
+ * `{{port}}`) is `<templated>`.
  */
-export function templateLocation(template: string): { host: string; path: string } {
-  // A marker the template does not hold, so restoring the keys rewrites no text of the caller's.
-  let stem = "xph";
-  while (template.toLowerCase().includes(stem)) stem += "q";
+export function templateHost(template: string): string {
   const keys: string[] = [];
   const marked = template.replace(PLACEHOLDER, (_match, key: string) => {
     keys.push(key);
-    return `${stem}${keys.length - 1}x`;
+    return `xph${keys.length - 1}x`;
   });
   const url =
     parseUrl(marked) ?? (/^\s*\{\{/.test(template) ? parseUrl(`https://${marked}`) : null);
-  if (!url) return { host: keys.length > 0 ? "<templated>" : "<unparseable>", path: "" };
-  const restore = (part: string) =>
-    part.replace(new RegExp(`${stem}(\\d+)x`, "g"), (match, i: string) => {
-      const key = keys[Number(i)];
-      return key === undefined ? match : `{{${key}}}`;
-    });
-  return {
-    host: restore(url.hostname),
-    path: url.protocol === "http:" || url.protocol === "https:" ? restore(url.pathname) : "",
-  };
-}
-
-/** The host of {@link templateLocation}: what a message echoes for the target. */
-export function templateHost(template: string): string {
-  return templateLocation(template).host;
+  if (!url) return keys.length > 0 ? "<templated>" : "<unparseable>";
+  return url.hostname.replace(/xph(\d+)x/g, (match, i: string) => {
+    const key = keys[Number(i)];
+    return key === undefined ? match : `{{${key}}}`;
+  });
 }
 
 function parseUrl(input: string): URL | null {

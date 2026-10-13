@@ -44,11 +44,6 @@
  * second thing to maintain, and the failure mode of it going stale is exactly
  * the silence this change exists to remove.
  *
- * A route that relays its request to an upstream mounts `relayIdempotencyKey()`
- * instead: there the header is the upstream's (a payment API's, say), it travels
- * with the caller's other headers, and the platform makes no promise about it —
- * so there is none to be honest about, and the guard lets it through.
- *
  * The OpenAPI side (the `Idempotency-Key` parameter on the supported
  * operations) is the one hand-written mirror, and
  * `test/integration/middleware/idempotency-contract.test.ts` fails when it
@@ -69,7 +64,7 @@ import type { Context, Next } from "hono";
 import { matchedRoutes } from "hono/route";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError } from "../lib/errors.ts";
-import { isIdempotencyAware, relaysIdempotencyKey } from "./idempotency.ts";
+import { isIdempotencyAware } from "./idempotency.ts";
 
 /**
  * Methods on which the header is ignored rather than refused.
@@ -112,9 +107,6 @@ export function idempotencyGuard() {
 
     // Honoured here — hand off to `idempotency()` further down the chain.
     if (routes.some((r) => isIdempotencyAware(r.handler))) return next();
-
-    // The upstream's header on a route that relays its request: no promise of the platform's.
-    if (routes.some((r) => relaysIdempotencyKey(r.handler))) return next();
 
     // No concrete endpoint matched: this is a 404 (or the SPA fallback), and a
     // "not found" is the more useful answer than a header complaint.

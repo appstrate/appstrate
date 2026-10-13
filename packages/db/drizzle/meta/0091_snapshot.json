@@ -7210,12 +7210,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "outcome": {
           "name": "outcome",
           "type": "text",

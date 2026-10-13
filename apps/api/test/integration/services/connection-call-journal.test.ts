@@ -8,10 +8,11 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { connectionCalls, integrationConnections } from "@appstrate/db/schema";
+import { connectionCalls } from "@appstrate/db/schema";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedEndUser, seedPackage } from "../../helpers/seed.ts";
+import { seedIntegrationConnection } from "../../helpers/run-connection-fixtures.ts";
 import { recordConnectionCall } from "../../../src/services/credential-proxy/call-journal.ts";
 
 const INTEGRATION = "@journal/crm";
@@ -24,25 +25,6 @@ describe("recordConnectionCall", () => {
     ctx = await createTestContext({ orgSlug: "journal" });
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
   });
-
-  async function seedConnection(owner: { userId?: string; endUserId?: string }): Promise<string> {
-    const [row] = await db
-      .insert(integrationConnections)
-      .values({
-        integrationId: INTEGRATION,
-        authKey: "primary",
-        accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-        label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
-        orgId: ctx.orgId,
-        spaceId: ctx.defaultSpaceId,
-        userId: owner.userId ?? null,
-        endUserId: owner.endUserId ?? null,
-        credentialsEncrypted: "x",
-        scopesGranted: [],
-      })
-      .returning({ id: integrationConnections.id });
-    return row!.id;
-  }
 
   function call(
     connectionId: string,
@@ -71,7 +53,7 @@ describe("recordConnectionCall", () => {
   }
 
   it("writes one row carrying every value of the call", async () => {
-    const connectionId = await seedConnection({ userId: ctx.user.id });
+    const connectionId = await seedIntegrationConnection(ctx, INTEGRATION);
 
     await call(connectionId, {
       actor: { type: "end_user", id: "eu_actor" },
@@ -100,7 +82,6 @@ describe("recordConnectionCall", () => {
       runId: "run_1",
       method: "POST",
       host: "api.example.com",
-      path: "/v1/users",
       outcome: "upstream_timeout",
       durationMs: 1235,
       requestId: "req_42",
@@ -110,7 +91,9 @@ describe("recordConnectionCall", () => {
 
   it("names an end-user owner", async () => {
     const endUser = await seedEndUser({ spaceId: ctx.defaultSpaceId, orgId: ctx.orgId });
-    const connectionId = await seedConnection({ endUserId: endUser.id });
+    const connectionId = await seedIntegrationConnection(ctx, INTEGRATION, {
+      endUserId: endUser.id,
+    });
 
     await call(connectionId);
 
@@ -125,35 +108,31 @@ describe("recordConnectionCall", () => {
     expect(row).toMatchObject({ ownerType: null, ownerId: null, outcome: "200" });
   });
 
-  it("stores the target as its template: no query string, no substituted value", async () => {
-    const connectionId = await seedConnection({ userId: ctx.user.id });
+  it("stores the host as the target's template: no substituted value", async () => {
+    const connectionId = await seedIntegrationConnection(ctx, INTEGRATION);
 
     await call(connectionId, {
       target: "https://{{subdomain}}.example.com/v1/{{account}}/items?api_key={{api_key}}&q=1",
     });
 
     const [row] = await rows();
-    expect(row).toMatchObject({
-      host: "{{subdomain}}.example.com",
-      path: "/v1/{{account}}/items",
-    });
+    expect(row!.host).toBe("{{subdomain}}.example.com");
   });
 
-  it("caps the host and the path it stores", async () => {
-    const connectionId = await seedConnection({ userId: ctx.user.id });
+  it("caps the host it stores", async () => {
+    const connectionId = await seedIntegrationConnection(ctx, INTEGRATION);
     const labels = ["a", "b", "c", "d", "e"].map((letter) => letter.repeat(60));
 
     await call(connectionId, { target: `https://${labels.join(".")}/${"p".repeat(5000)}` });
 
     const [row] = await rows();
     expect(row!.host).toHaveLength(255);
-    expect(row!.path).toHaveLength(2048);
   });
 
   it("never throws: a call the database refuses is dropped", async () => {
     // Neither id is a UUID, so the owner lookup and the insert both fail.
     await expect(call("not-a-uuid", { orgId: "not-a-uuid" })).resolves.toBeUndefined();
-    const connectionId = await seedConnection({ userId: ctx.user.id });
+    const connectionId = await seedIntegrationConnection(ctx, INTEGRATION);
     await expect(call(connectionId, { orgId: "not-a-uuid" })).resolves.toBeUndefined();
 
     expect(await rows()).toHaveLength(0);

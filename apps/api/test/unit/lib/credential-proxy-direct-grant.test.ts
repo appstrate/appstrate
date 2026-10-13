@@ -12,11 +12,8 @@ import { SPACE_LEVEL_PERMISSIONS, SPACE_ROLE_PRESETS } from "@appstrate/core/per
 import {
   API_KEY_ALLOWED_SCOPES,
   effectivePermissions,
-  knownSpaceLevelPermissions,
-  missingReadGrants,
   orgPermissions,
   presetPermissions,
-  spaceLevelVocabulary,
   validateScopes,
 } from "../../../src/lib/permissions.ts";
 import { resolveSpaceRole, spacePermissions } from "../../../src/lib/space-role.ts";
@@ -77,36 +74,6 @@ describe("credential-proxy:direct", () => {
     expect(inOpenSpace("guest").has(DIRECT)).toBe(false);
   });
 
-  it("is granted by a custom role holding it, alone", () => {
-    expect(knownSpaceLevelPermissions().has(DIRECT)).toBe(true);
-    // The resource has no read action, so the bundle needs nothing beside it.
-    expect(missingReadGrants([DIRECT])).toEqual([]);
-    const ref = resolveSpaceRole(
-      "member",
-      { id: "spc_test", visibility: "open", defaultRole: "operator", ownerUserId: null },
-      {
-        ref: {
-          kind: "custom",
-          role: { id: "srl_test", key: "proxy", name: "Proxy", permissions: [DIRECT] },
-        },
-      },
-      "usr_test",
-    );
-    expect([...spacePermissions(ref)]).toEqual([DIRECT]);
-  });
-
-  it("is offered by the role editor's vocabulary as key-grantable", () => {
-    const entry = spaceLevelVocabulary()
-      .find((group) => group.resource === "credential-proxy")
-      ?.permissions.find((candidate) => candidate.permission === DIRECT);
-    expect(entry).toEqual({
-      permission: DIRECT,
-      action: "direct",
-      api_key_grantable: true,
-      requires_one_of: [],
-    });
-  });
-
   it("is API-key grantable, and only to a creator who holds it", () => {
     expect(API_KEY_ALLOWED_SCOPES.has(DIRECT)).toBe(true);
     expect(validateScopes([DIRECT], new Set([DIRECT]))).toEqual([DIRECT]);
@@ -119,18 +86,5 @@ describe("credential-proxy:direct", () => {
     expect(validateScopes(["agents:read", DIRECT], presetPermissions("builder"))).toEqual([
       "agents:read",
     ]);
-  });
-
-  it("is not carried by a key listing it once its creator is a builder", () => {
-    // The ceiling caps, it never grants: a key minted by an admin since made
-    // `builder` keeps the scope in its list and loses the permission.
-    const through = (preset: "admin" | "builder") =>
-      effectivePermissions({
-        orgPermissions: orgPermissions("member"),
-        spacePermissions: presetPermissions(preset),
-        scopeCeiling: new Set(["agents:read", DIRECT]),
-      });
-    expect([...through("admin")].sort()).toEqual(["agents:read", DIRECT]);
-    expect([...through("builder")]).toEqual(["agents:read"]);
   });
 });

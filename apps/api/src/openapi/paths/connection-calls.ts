@@ -28,7 +28,6 @@ const connectionCallSchema = {
     "runId",
     "method",
     "host",
-    "path",
     "outcome",
     "duration_ms",
     "request_id",
@@ -71,12 +70,6 @@ const connectionCallSchema = {
         "is kept as written, never its value. `<templated>` or `<unparseable>` when the target " +
         "names no readable host.",
     },
-    path: {
-      type: "string",
-      description:
-        "The target's path as the caller wrote it, before substitution, without query string or " +
-        "fragment. Empty when the target does not parse.",
-    },
     outcome: {
       type: "string",
       description:
@@ -118,20 +111,10 @@ const filterParameters = [
     description: "Only the calls made at or before this instant (ISO 8601 with an offset).",
   },
   {
-    name: "format",
-    in: "query",
-    required: false,
-    schema: { type: "string", enum: ["json", "csv"], default: "json" },
-    description:
-      "`csv` answers the same rows as `text/csv` (RFC 4180, one header line naming the fields " +
-      "below), `limit` then defaulting to its maximum of 10000.",
-  },
-  {
     name: "limit",
     in: "query",
     required: false,
-    schema: { type: "integer", minimum: 1, maximum: 10000, default: 50 },
-    description: "Page size: 1 to 200 as JSON (default 50), 1 to 10000 as CSV (default 10000).",
+    schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
   },
   {
     name: "startingAfter",
@@ -145,11 +128,8 @@ const filterParameters = [
 ] as const;
 
 const PAGINATION =
-  "Newest first, keyset-paginated on `id`: the `Link` header names the next page, in either " +
-  "format. An unknown query parameter is a 400, never an ignored filter. In the CSV, a cell of " +
-  "`runId`, `method`, `host`, `path`, `outcome` or `request_id` (the text a caller writes) that a " +
-  "spreadsheet would read as a formula (leading `=`, `+`, `-`, `@`, tab or carriage return) is " +
-  "prefixed with `'`; identifiers are exported as they are. Rate-limited to 60/min.";
+  "Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown " +
+  "query parameter is a 400, never an ignored filter. Rate-limited to 60/min.";
 
 const callsPage = {
   description: "A page of calls, newest first.",
@@ -166,7 +146,6 @@ const callsPage = {
         },
       },
     },
-    "text/csv": { schema: { type: "string" } },
   },
 } as const;
 
@@ -221,7 +200,7 @@ export const connectionCallsPaths = {
       description:
         "Every call the credential proxy (`/api/credential-proxy/proxy`) made in the current " +
         "space, whatever the connection and whoever owns it: who used which connection, against " +
-        "which host and path, with what outcome. One row per call that may have sent a " +
+        "which host, with what outcome. One row per call that may have sent a " +
         "credential, successful or not. Requires `integrations:configure`, the permission that " +
         "governs which credential the space resolves to; it is session-only, so no API key " +
         "reads this journal. Calls made in another space are never listed, including those made " +

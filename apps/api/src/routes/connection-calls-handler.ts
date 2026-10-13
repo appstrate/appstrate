@@ -4,7 +4,7 @@
  * The two reads of the credential proxy's call journal, mounted by the routers that own their
  * paths: `GET /api/me/connections/{connectionId}/calls` (the connection's owner, `routes/me.ts`)
  * and `GET /api/integrations/calls` (the space's governor, `routes/integrations.ts`). Same query
- * string, same row shape, JSON or `?format=csv`.
+ * string, same row shape.
  */
 
 import type { Context } from "hono";
@@ -17,7 +17,6 @@ import { parseListPagination } from "../lib/list-query.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import {
-  connectionCallsCsv,
   listOwnConnectionCalls,
   listSpaceConnectionCalls,
   type ConnectionCallFilters,
@@ -25,9 +24,7 @@ import {
   type ConnectionCallView,
 } from "../services/connection-calls.ts";
 
-const JSON_PAGE = { defaultLimit: 50, maxLimit: 200 };
-/** A CSV export is one bounded page; its `Link` header continues it. */
-const CSV_PAGE = { defaultLimit: 10_000, maxLimit: 10_000 };
+const PAGE = { defaultLimit: 50, maxLimit: 200 };
 
 // Strict: an unknown or misspelled filter is a 400, never a silently widened journal.
 const ownCallsQueryShape = {
@@ -35,7 +32,6 @@ const ownCallsQueryShape = {
   runId: z.string().min(1).optional(),
   start_date: z.iso.datetime({ offset: true }).optional(),
   end_date: z.iso.datetime({ offset: true }).optional(),
-  format: z.enum(["json", "csv"]).optional(),
   // A row id: a positive integer within the safe range.
   startingAfter: z
     .string()
@@ -54,8 +50,7 @@ type CallsQuery = z.infer<typeof spaceCallsQuerySchema>;
 function readQuery(
   c: Context<AppEnv>,
   query: CallsQuery,
-): { filters: ConnectionCallFilters; page: ConnectionCallPage; csv: boolean } {
-  const csv = query.format === "csv";
+): { filters: ConnectionCallFilters; page: ConnectionCallPage } {
   return {
     filters: {
       connectionId: query.connection_id?.toLowerCase(),
@@ -65,24 +60,20 @@ function readQuery(
       endDate: query.end_date ? new Date(query.end_date) : undefined,
     },
     page: {
-      limit: parseListPagination(c, csv ? CSV_PAGE : JSON_PAGE).limit,
+      limit: parseListPagination(c, PAGE).limit,
       startingAfter: query.startingAfter ? Number(query.startingAfter) : undefined,
     },
-    csv,
   };
 }
 
-function send(c: Context<AppEnv>, result: ListEnvelope<ConnectionCallView>, csv: boolean) {
+function send(c: Context<AppEnv>, result: ListEnvelope<ConnectionCallView>) {
   const lastId = result.data.at(-1)?.id;
   setCursorLinkHeader({
     c,
     hasMore: result.hasMore,
     lastId: lastId === undefined ? undefined : String(lastId),
   });
-  if (!csv) return c.json(result);
-  c.header("Content-Type", "text/csv; charset=utf-8");
-  c.header("Content-Disposition", 'attachment; filename="connection-calls.csv"');
-  return c.body(connectionCallsCsv(result.data));
+  return c.json(result);
 }
 
 /**
@@ -95,7 +86,7 @@ export async function serveOwnConnectionCalls(c: Context<AppEnv>): Promise<Respo
   const missing = () => notFound(`Connection '${connectionId}' not found`);
   // The id hits a `uuid` column: a non-UUID would raise PG `22P02` and surface as a 500.
   if (!z.uuid().safeParse(connectionId).success) throw missing();
-  const { filters, page, csv } = readQuery(c, parseBody(ownCallsQuerySchema, c.req.query()));
+  const { filters, page } = readQuery(c, parseBody(ownCallsQuerySchema, c.req.query()));
   const result = await listOwnConnectionCalls(
     connectionPrincipal(c),
     connectionId.toLowerCase(),
@@ -103,11 +94,11 @@ export async function serveOwnConnectionCalls(c: Context<AppEnv>): Promise<Respo
     page,
   );
   if (!result) throw missing();
-  return send(c, result, csv);
+  return send(c, result);
 }
 
 /** `GET /api/integrations/calls`: every call made in the request space, whatever the connection. */
 export async function serveSpaceConnectionCalls(c: Context<AppEnv>): Promise<Response> {
-  const { filters, page, csv } = readQuery(c, parseBody(spaceCallsQuerySchema, c.req.query()));
-  return send(c, await listSpaceConnectionCalls(getSpaceScope(c), filters, page), csv);
+  const { filters, page } = readQuery(c, parseBody(spaceCallsQuerySchema, c.req.query()));
+  return send(c, await listSpaceConnectionCalls(getSpaceScope(c), filters, page));
 }

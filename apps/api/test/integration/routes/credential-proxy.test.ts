@@ -40,6 +40,7 @@ import {
   createTestContext,
   createTestUser,
   memberContext,
+  memberHolding,
   type TestContext,
 } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
@@ -49,9 +50,7 @@ import {
   seedPackage,
   seedRun,
   seedSpace,
-  seedSpaceMember,
   seedSpacePackage,
-  seedSpaceRole,
   seedPublishedVersion,
 } from "../../helpers/seed.ts";
 import {
@@ -195,19 +194,6 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
 
 /** Both proxy paths: outside a run, and for one. */
 const BOTH_PATHS = ["credential-proxy:direct", "credential-proxy:call", "agents:run", "runs:read"];
-
-/** A member of `ctx`'s org holding exactly `permissions` in its default space (a custom role). */
-async function memberHolding(ctx: TestContext, permissions: string[]): Promise<TestContext> {
-  const member = await memberContext(ctx, "member");
-  const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
-  await seedSpaceMember({
-    spaceId: ctx.defaultSpaceId,
-    userId: member.user.id,
-    presetRole: null,
-    customRoleId: role.id,
-  });
-  return member;
-}
 
 /** A fresh org, as the member the proxy is called by: both paths are open to them. */
 async function proxyCallerContext(): Promise<TestContext> {
@@ -1045,7 +1031,6 @@ describe("POST /api/credential-proxy/proxy — X-Run-Id binds the run's set", ()
       runId: null,
       method: "GET",
       host: "gmail.googleapis.com",
-      path: "/gmail/v1/users/me/messages",
       outcome: "200",
       requestId: res.headers.get("Request-Id"),
     });
