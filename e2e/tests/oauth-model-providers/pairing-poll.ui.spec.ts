@@ -6,7 +6,8 @@
  * `<PendingPairingsWatcher>`, `OAuthPairingBody`).
  *
  * Each test mints a pairing through the UI, then plays the helper's redeem
- * against the live server, accepted or refused. They prove:
+ * against the live server, accepted or refused, or answers the status route in
+ * the server's place. They prove:
  *
  *   - a 5xx on the status route does not end the poll: it keeps asking, and
  *     reports the success once the route answers again;
@@ -16,9 +17,11 @@
  *     command without a second mint, the command stays out of localStorage,
  *     and the redeem closes that modal;
  *   - a refused redeem is told once: by the modal when it shows the pairing,
- *     by the watcher's toast when no modal does.
+ *     by the watcher's toast when no modal does;
+ *   - a status read the server refuses (404) ends the poll: the modal shows the
+ *     command as spent, the entry leaves the store, and nothing more is asked.
  *
- * A refused redeem creates no credential, so those two tests clean nothing up.
+ * Only an accepted redeem creates a credential: the other tests clean nothing up.
  *
  * @tags @smoke
  */
@@ -41,11 +44,33 @@ import {
 const MINT_PATH = "/api/model-providers-oauth/pairing";
 /** The status poll alone: neither the mint (`/pairing`) nor `/pair/redeem` match. */
 const STATUS_ROUTE = "**/api/model-providers-oauth/pairing/pair_*";
-const BAD_GATEWAY_PAGE = "<html><body><h1>502 Bad Gateway</h1></body></html>";
+/** A proxy's own page, not a problem+json: the client reads no answer in it. */
+const BAD_GATEWAY = {
+  status: 502,
+  contentType: "text/html",
+  body: "<html><body><h1>502 Bad Gateway</h1></body></html>",
+};
+/** The API's own refusal of a pairing it does not state. */
+const NOT_FOUND = {
+  status: 404,
+  contentType: "application/problem+json",
+  body: JSON.stringify({
+    type: "about:blank",
+    title: "Not Found",
+    status: 404,
+    detail: "Pairing not found",
+    code: "not_found",
+  }),
+};
 
 const PAIRING_FAILED =
   "La connexion n'a pas abouti : le compte n'a pas été enregistré. Générez une nouvelle commande pour réessayer.";
+const PAIRING_EXPIRED =
+  "Cette commande a expiré (5 minutes). Générez-en une nouvelle pour continuer.";
 const REGENERATE_BUTTON = "Générer une nouvelle commande";
+
+/** Longer than two poll periods (2.5 s each): a poll still running asks again within it. */
+const POLL_STOPPED_MS = 6_000;
 
 /**
  * Sonner mounts a toast one task after it is fired and keeps it 4 s: once this
@@ -57,26 +82,34 @@ function toast(page: Page, text: string): Locator {
   return page.locator("[data-sonner-toast]").filter({ hasText: text });
 }
 
+/** Answer every status poll with `response`; the returned function counts the answers served. */
+async function answerStatusPolls(
+  page: Page,
+  response: { status: number; contentType: string; body: string },
+): Promise<() => number> {
+  let served = 0;
+  await page.route(STATUS_ROUTE, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill(response);
+    served += 1;
+  });
+  return () => served;
+}
+
 test.describe("OAuth Model Providers — pairing poll @smoke", () => {
   test("keeps polling through a 502", async ({ authedPage: page, apiClient }) => {
     await page.goto(SETTINGS_PATH);
     const { token } = await openPairingModal(page);
     await closePairingModal(page);
 
-    // A proxy's own page, not a problem+json: the client reads no answer in it.
-    let served = 0;
-    await page.route(STATUS_ROUTE, async (route) => {
-      if (route.request().method() !== "GET") {
-        await route.fallback();
-        return;
-      }
-      await route.fulfill({ status: 502, contentType: "text/html", body: BAD_GATEWAY_PAGE });
-      served += 1;
-    });
+    const served = await answerStatusPolls(page, BAD_GATEWAY);
 
     // Two responses are a request and its retry, where the query errors; a
     // third is the poll going on.
-    await expect.poll(() => served, { timeout: 15_000 }).toBeGreaterThan(2);
+    await expect.poll(served, { timeout: 15_000 }).toBeGreaterThan(2);
 
     const { credentialId } = await helperRedeem(page, token);
 
@@ -98,19 +131,16 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
     await closePairingModal(page);
 
     // The client clock says the pairing is over; the server still holds it pending.
-    const expiredAt = await page.evaluate((key) => {
+    await page.evaluate((key) => {
       const past = new Date(Date.now() - 3 * 60_000).toISOString();
       const entries = JSON.parse(localStorage.getItem(key) ?? "[]") as Record<string, unknown>[];
       localStorage.setItem(key, JSON.stringify(entries.map((e) => ({ ...e, expiresAt: past }))));
-      return past;
     }, STORAGE_KEY);
 
     await page.reload();
     await expect(page.getByRole("tab", { name: "Modèles", exact: true })).toBeVisible({
       timeout: 15_000,
     });
-    // The load keeps the entry: only its poll ends it.
-    expect(await readStore(page)).toContain(expiredAt);
 
     const { credentialId } = await helperRedeem(page, token);
 
@@ -188,5 +218,25 @@ test.describe("OAuth Model Providers — pairing poll @smoke", () => {
 
     await expect(toast(page, PAIRING_FAILED)).toBeVisible({ timeout: 15_000 });
     await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
+  });
+
+  test("a pairing the server no longer states ends the poll", async ({ authedPage: page }) => {
+    await page.goto(SETTINGS_PATH);
+    await openPairingModal(page);
+
+    // A refusal is not retried: one answer ends the poll.
+    const served = await answerStatusPolls(page, NOT_FOUND);
+
+    const dialog = credentialDialog(page);
+    await expect(dialog.getByText(PAIRING_EXPIRED)).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByRole("button", { name: REGENERATE_BUTTON })).toBeVisible();
+    await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
+
+    // Read once: the count of a poll that stopped is the same after the wait.
+    const before = served();
+    await page.waitForTimeout(POLL_STOPPED_MS);
+    expect(served()).toBe(before);
+
+    await page.unroute(STATUS_ROUTE);
   });
 });

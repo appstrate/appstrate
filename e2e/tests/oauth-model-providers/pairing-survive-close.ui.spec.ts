@@ -1,27 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Browser coverage for the "pairing survives the modal being closed" fix
+ * Browser coverage for a pairing whose modal is gone before the helper redeems
  * (apps/web: `pairing-store`, `<PendingPairingsWatcher>`, `OAuthPairingBody`,
  * `usePairingDismissConfirm`).
  *
- * The earlier UI smoke (`oauth-ui.ui.spec.ts`) only proves the page renders;
- * the API contract (`pairing-lifecycle.api.spec.ts`) only proves the
- * mint/redeem wiring. Neither exercises the actual regression this PR fixes:
- * the dashboard used to cancel the pending pairing when its modal unmounted,
- * so a helper that redeemed AFTER the user closed the modal hit a deleted
- * token and the credential was silently lost.
+ * Each test mints a pairing through the UI, then plays the helper's redeem
+ * against the live server. They prove:
  *
- * Both tests drive the real browser against the live server, mint a pairing
- * through the UI, then simulate the helper's redeem (bearer-auth, the exact
- * path `@appstrate/connect-helper` uses) and assert the connection completes
- * via the session-level watcher — proving:
- *
- *   - closing the modal mid-flow does NOT fire `DELETE /pairing`;
- *   - the watcher fires the success toast + refreshes the credential list
- *     even though the modal that started the flow is gone;
+ *   - closing the modal mid-flow never fires `DELETE /pairing`;
+ *   - the watcher fires the success toast and refreshes the credential list
+ *     with no modal open;
  *   - the pairing survives a full page reload (persisted to localStorage);
- *   - only non-secret fields are persisted (never the bearer token);
+ *   - only non-secret fields are persisted, never the bearer token;
  *   - the localStorage entry is cleared once the pairing completes.
  *
  * @tags @smoke
@@ -43,7 +34,7 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     authedPage: page,
     apiClient,
   }) => {
-    // Fail loudly if the dashboard ever cancels the pairing on close again.
+    // Closing the modal never cancels its pairing: no DELETE is sent.
     const pairingDeletes: string[] = [];
     page.on("request", (r) => {
       if (r.method() === "DELETE" && r.url().includes("/model-providers-oauth/pairing/")) {
