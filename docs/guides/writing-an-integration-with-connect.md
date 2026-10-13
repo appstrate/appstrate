@@ -1089,7 +1089,7 @@ register a client by hand for an auth whose server each connection names. Declar
 ### Examples
 
 GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by URL
-(`scripts/system-packages/integration-gitlab-mcp-1.0.0/manifest.json`):
+(`scripts/system-packages/integration-gitlab-mcp-1.0.1/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1121,7 +1121,7 @@ GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by U
 ```
 
 Coolify — always self-hosted, so no `default`, and a team token the user pastes
-(`scripts/system-packages/integration-coolify-mcp-1.0.1/manifest.json`):
+(`scripts/system-packages/integration-coolify-mcp-1.0.2/manifest.json`):
 
 ```jsonc
 "source": {
