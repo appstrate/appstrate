@@ -742,6 +742,7 @@
   "credentials.oauth.close": "Fermer",
   "credentials.oauth.generatingCommand": "Génération de la commande de connexion…",
   "credentials.oauth.pairingExpired": "Cette commande a expiré (5 minutes). Générez-en une nouvelle pour continuer.",
+  "credentials.oauth.pairingFailed": "La connexion n'a pas abouti : le compte n'a pas été enregistré. Générez une nouvelle commande pour réessayer.",
   "credentials.oauth.regenerateCommand": "Générer une nouvelle commande",
   "models.form.createCredentialHint": "Une clé de provider de modèle sera créée automatiquement.",
   "models.form.useExistingKey": "Mes clés",

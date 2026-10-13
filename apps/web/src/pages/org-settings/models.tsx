@@ -46,6 +46,7 @@ import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
+import { MODEL_TEST_FAILURE_KEYS } from "../../lib/test-result";
 import { isModelUnpriced } from "./model-pricing";
 
 export function ModelsList({
@@ -191,6 +192,7 @@ export function ModelsList({
                                 result={testResults[m.id]!}
                                 successKey="models.testSuccess"
                                 failedKey="models.testFailed"
+                                failureKeys={MODEL_TEST_FAILURE_KEYS}
                               />
                             )}
                             <Button

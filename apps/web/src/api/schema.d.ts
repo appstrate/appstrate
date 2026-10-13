@@ -2464,7 +2464,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing token: post the OAuth credential bundle back to the platform
-         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off after the mint. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
+         * @description Canonical pairing-redeem route used by `@appstrate/connect-helper`. Bearer-only — authenticated by the pairing token previously minted via `POST /api/model-providers-oauth/pairing` (carry as `Authorization: Bearer appp_<token>`). The pairing's `userId` / `orgId` / provider / owner and optional reconnect target are pinned at mint time, so a tampered helper cannot redirect the redeem to a different org, provider, owner or credential. The request carries no principal, so the member who minted the pairing is judged again on what the organization grants them at this moment, by the rules of the mint: a new connection needs `model-provider-credentials:write` (organization) or `model-provider-credentials:connect` (personal) and answers `403` without it, or once the member left; a reconnect needs the credential to still list `reconnect` for them and answers `404` otherwise. A personal credential answers `403 personal_model_credentials_disabled` when the organization turned `personal_model_credentials` off after the mint. The token is single-use and consumed before anything is judged: a refused redeem burns it (a retry answers `410`), and a new pairing must be minted. Cookie/API-key requests 401. Server-side this re-derives identity slots defensively via the provider's `extractTokenIdentity` hook before creating or updating `model_provider_credentials`.
          */
         post: operations["redeemOAuthModelProviderPairing"];
         delete?: never;
@@ -2502,7 +2502,7 @@ export interface paths {
         };
         /**
          * Read pairing status (for dashboard polling)
-         * @description Polled by the dashboard while the user runs the helper. Returns `pending` until the helper consumes the token, `consumed` afterwards, `expired` once the TTL elapsed without consumption. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:write` or `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.
+         * @description Polled by the dashboard while the user runs the helper. Returns `pending` until the helper consumes the token, `consumed` afterwards, `expired` once the TTL elapsed without consumption. `consumed` means the token was used, not that the connection succeeded: `credentialId` is set once the redeem created or reconnected a credential, and `consumed` with a `null` `credentialId` is a redeem that did not complete — in progress for an instant, or refused. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:write` or `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.
          */
         get: operations["getOAuthModelProviderPairing"];
         put?: never;
@@ -17296,7 +17296,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Validation error (`validation_failed`, the offending fields in `errors[]`): an unknown or unregistered `providerId`, an unknown field, or `owner_type` sent with `credentialId` (reported on `owner_type`). */
+            /** @description Validation error (`validation_failed`, the offending fields in `errors[]`): an unknown or unregistered `providerId`, an unknown field, or `owner_type` sent with `credentialId` (reported on `owner_type`). `personal_credential_custom_endpoint` — `owner_type: user` on a provider whose endpoint is the organization's to choose. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -17349,7 +17349,7 @@ export interface operations {
                         expiresAt: string;
                         /**
                          * Format: uuid
-                         * @description ID of the model_provider_credentials row created by the helper. Null while the pairing is still pending or expired without consumption.
+                         * @description ID of the model_provider_credentials row the redeem created or reconnected. Null while the pairing is pending, when it expired unused, and when its redeem was refused.
                          */
                         credentialId: string | null;
                     };

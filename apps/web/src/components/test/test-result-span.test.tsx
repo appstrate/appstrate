@@ -11,6 +11,10 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
+import settingsFr from "../../locales/fr/settings.json";
+import agentsFr from "../../locales/fr/agents.json";
+import { MODEL_TEST_FAILURE_KEYS } from "../../lib/test-result.ts";
+
 const { TestResultSpan } = await import("../test-result-span.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
@@ -51,5 +55,21 @@ describe("TestResultSpan", () => {
     const html = line({ ok: false, latency: 3, message: "Authentication failed", status: 401 });
     expect(html).toContain("Échec : Authentication failed");
     expect(html).toContain("text-destructive");
+  });
+
+  it("words a model's dead credential as the model page does, not as an integration connection", () => {
+    const dead = { ok: false, latency: 0, error: "NEEDS_RECONNECTION", message: "server detail" };
+    const html = render(
+      <TestResultSpan
+        result={dead}
+        successKey="models.testSuccess"
+        failedKey="models.testFailed"
+        failureKeys={MODEL_TEST_FAILURE_KEYS}
+      />,
+    );
+    expect(html).toContain(settingsFr["models.credentialUnavailableHint"]);
+    expect(html).not.toContain(agentsFr["error.needsReconnection"]);
+    // A surface with no sentence of its own keeps the generic one.
+    expect(line(dead)).toContain(agentsFr["error.needsReconnection"]);
   });
 });

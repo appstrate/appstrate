@@ -4,8 +4,10 @@
  * Pairing-token UI shared by the unified credential modal when the user
  * selects an OAuth model provider. Mints a one-shot pairing via
  * `POST /api/model-providers-oauth/pairing`, surfaces the `npx
- * @appstrate/connect-helper <token>` command, polls until the helper
- * consumes the token, then notifies the caller via `onConnected`.
+ * @appstrate/connect-helper <token>` command, polls until the helper's
+ * redeem links a credential, then notifies the caller via `onConnected`. A
+ * redeem the server refuses ends on the same "generate a new command" state
+ * as an expired token.
  *
  * The pairing is registered in `pairingStore` on mint and is deliberately
  * NOT cancelled on unmount: closing this modal mid-flow (tab switch,
@@ -35,7 +37,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import {
   useCreateModelProviderPairing,
-  useModelProviderPairingStatus,
+  useModelProviderPairingOutcome,
 } from "../hooks/use-model-provider-pairing";
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
@@ -72,9 +74,9 @@ export function OAuthPairingBody({
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
   const createPairing = useCreateModelProviderPairing();
-  const pairingStatus = useModelProviderPairingStatus(pairing?.id ?? null, {
-    enabled: !!pairing,
-  });
+  const { outcome, credentialId: connectedId } = useModelProviderPairingOutcome(
+    pairing?.id ?? null,
+  );
 
   // Whether this pairing is registered with `<PendingPairingsWatcher>`
   // (needs an org context at mint). When it is, the watcher owns the global
@@ -100,7 +102,7 @@ export function OAuthPairingBody({
   // here instead. Deferred via queueMicrotask so the parent's
   // setState-on-close doesn't tear into this effect.
   useEffect(() => {
-    if (pairingStatus.data?.status !== "consumed") return;
+    if (outcome !== "connected" || !connectedId) return;
     if (firedRef.current) return;
     firedRef.current = true;
     if (!registeredRef.current) {
@@ -108,24 +110,23 @@ export function OAuthPairingBody({
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
     }
-    const credentialId = pairingStatus.data.credentialId;
-    if (credentialId && onConnected) queueMicrotask(() => onConnected(credentialId));
+    if (onConnected) queueMicrotask(() => onConnected(connectedId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pairingStatus.data?.status, pairingStatus.data?.credentialId]);
+  }, [outcome, connectedId]);
 
-  // Report "busy" while a token is minted and still pending — hosts use it
+  // Report "busy" while a token is minted and its outcome awaited — hosts use it
   // to confirm before an accidental dismiss. Ref keeps the latest callback
   // without making it an effect dependency; reset to false on unmount.
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
-  const status = pairingStatus.data?.status;
-  const busy = !!pairing && status !== "consumed" && status !== "expired";
+  const busy = !!pairing && outcome === "waiting";
   useEffect(() => {
     onBusyChangeRef.current?.(busy);
   }, [busy]);
   useEffect(() => () => onBusyChangeRef.current?.(false), []);
 
-  const isExpired = status === "expired";
+  // A refused redeem ends like an expired token: the command is spent.
+  const isSpent = outcome === "expired" || outcome === "failed";
   const command = pairing?.command ?? "";
 
   async function generatePairing() {
@@ -162,14 +163,20 @@ export function OAuthPairingBody({
     <div className="flex flex-col gap-4 text-sm">
       <p>{t("credentials.oauth.cliInstructions")}</p>
 
-      {createPairing.isPending || (!pairing && !isExpired) ? (
+      {createPairing.isPending || !pairing ? (
         <div className="bg-muted text-muted-foreground flex items-center gap-2 rounded-md p-3 text-xs">
           <Spinner />
           <span>{t("credentials.oauth.generatingCommand")}</span>
         </div>
-      ) : isExpired ? (
+      ) : isSpent ? (
         <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-          <p>{t("credentials.oauth.pairingExpired")}</p>
+          <p>
+            {t(
+              outcome === "failed"
+                ? "credentials.oauth.pairingFailed"
+                : "credentials.oauth.pairingExpired",
+            )}
+          </p>
           <Button type="button" variant="outline" size="sm" onClick={handleRegenerate}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
             {t("credentials.oauth.regenerateCommand")}
