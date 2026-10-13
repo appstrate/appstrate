@@ -161,6 +161,7 @@ describe("list_connections", () => {
     integration_package_id: INTEGRATION,
     connection_id: "8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11",
     label: "acct-1",
+    owned_by_actor: true,
     auth_key: "api",
     scopes_granted: [],
     authorized_uris: ["https://api.example.com/**"],

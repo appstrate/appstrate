@@ -19,7 +19,9 @@
  *
  *   4. The access rule is the API-key door's (`credential-proxy.test.ts`):
  *      `credential-proxy:call-run` for a run the caller executes,
- *      `credential-proxy:call-own` outside one, on the caller's own connections only.
+ *      `credential-proxy:call-own` outside one, on the caller's own connections, and with
+ *      both on those shared into the space. The owner of a personal space, which no API key
+ *      enters, has no path outside a run there.
  *
  * Injection itself is covered by `credential-proxy-injection.test.ts`. Here we
  * only care that the auth gate lets the right principals in, on the right
@@ -37,10 +39,11 @@ import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   createTestContext,
   memberContext,
+  memberHolding,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
-import { seedPackage, seedRun } from "../../../../../../test/helpers/seed.ts";
+import { seedPackage, seedRun, seedSpace } from "../../../../../../test/helpers/seed.ts";
 import { expectProblem } from "../../../../../../test/helpers/assertions.ts";
 import { seedShares } from "../../../../../../test/helpers/connection-shares.ts";
 import {
@@ -345,32 +348,56 @@ describe("POST /api/credential-proxy/proxy — one permission per path, through 
     return run.id;
   }
 
-  it("a builder, who holds credential-proxy:call-run alone, is refused outside a run and reaches the shared connection through a remote run of their own", async () => {
-    const builder = await memberContext(owner, "member", "builder");
-    const body = await expectProblem(await call(builder), 403, { code: "forbidden" });
+  it("credential-proxy:call-run alone: refused outside a run, the shared connection reached through a remote run of the caller's", async () => {
+    const callRunOnly = await memberHolding(owner, ["credential-proxy:call-run"]);
+    const body = await expectProblem(await call(callRunOnly), 403, { code: "forbidden" });
     expect(body.detail).toContain("credential-proxy:call-own");
     expect(upstreamAuth).toEqual([]);
 
-    const res = await call(builder, { "X-Run-Id": await remoteRunOf(builder) });
+    const res = await call(callRunOnly, { "X-Run-Id": await remoteRunOf(callRunOnly) });
     expect(res.status, await res.clone().text()).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer team"]);
   });
 
-  it("the owner, who holds credential-proxy:call-own, reaches their own connection only", async () => {
-    const refused = await call(owner, { "X-Connection-Id": shared });
+  it("credential-proxy:call-own alone: the caller's own connections only", async () => {
+    const member = await memberHolding(owner, ["credential-proxy:call-own"]);
+    const refused = await call(member, { "X-Connection-Id": shared });
     const body = await expectProblem(refused, 404, { code: "credential_not_found" });
-    expect(body.detail).toContain("through a run (X-Run-Id)");
+    expect(body.detail).toContain("also holds credential-proxy:call-run");
     expect(upstreamAuth).toEqual([]);
 
     const mine = await seedProxyConnection(
-      owner,
+      member,
       INTEGRATION_ID,
       "api",
       { api_key: "mine" },
       "mine",
     );
-    expect((await call(owner)).status).toBe(200);
-    expect((await call(owner, { "X-Connection-Id": mine })).status).toBe(200);
+    expect((await call(member)).status).toBe(200);
+    expect((await call(member, { "X-Connection-Id": mine })).status).toBe(200);
     expect(upstreamAuth).toEqual(["Bearer mine", "Bearer mine"]);
+  });
+
+  it("both, as the owner holds them: the shared connection once named, never by the fallback", async () => {
+    await expectProblem(await call(owner), 409, { code: "must_choose_connection" });
+    expect(upstreamAuth).toEqual([]);
+
+    expect((await call(owner, { "X-Connection-Id": shared })).status).toBe(200);
+    expect(upstreamAuth).toEqual(["Bearer team"]);
+  });
+
+  it("the owner of a personal space has no path outside a run there: 403 naming credential-proxy:call-own", async () => {
+    const personal = await seedSpace({
+      orgId: owner.orgId,
+      name: "Perso",
+      ownerUserId: owner.user.id,
+      visibility: "private",
+    });
+    const there = { "X-Space-Id": personal.id };
+    const body = await expectProblem(await call(owner, there), 403, { code: "forbidden" });
+    expect(body.detail).toContain("credential-proxy:call-own");
+    // The control: the run path is open there, so an unknown run is a 404, not this 403.
+    await expectProblem(await call(owner, { ...there, "X-Run-Id": "run_doesnotexist0000" }), 404);
+    expect(upstreamAuth).toEqual([]);
   });
 });

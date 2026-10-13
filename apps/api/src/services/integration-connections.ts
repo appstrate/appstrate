@@ -179,7 +179,10 @@ import {
   toLaunchOverrides,
   translateResolutionError,
 } from "./integration-connection-resolver.ts";
-import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
+import {
+  listOrgDefaultsForResolver,
+  type OrgDefaultPick,
+} from "./integration-org-defaults-service.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
@@ -428,19 +431,24 @@ export interface RunBoundSelection {
   boundSet: () => Promise<readonly { connectionId: string }[]>;
 }
 
+export type ProxyReach = "own" | "usable";
+
 interface ConnectionSelectionContext {
   spaceId: string;
   actor: Actor;
   run?: RunBoundSelection;
+  /** Which rows a call outside a run reads; absent is `own`. */
+  reach?: ProxyReach;
 }
 
 /**
  * The credential proxy's connection of `packageId`. Under a run, a member of its bound set, a
  * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
- * actor's OWN usable rows ({@link listOwnUsableConnections}) and nothing else: no org default
+ * actor's OWN usable rows (the `own` reach) and nothing else: no org default
  * applies, and an integration an ENFORCED one governs answers `run_required`. `null` when nothing
  * answers; an id that is not the actor's own reads the same whether it names a colleague's row,
  * shared or not, or no row at all. Either way the pick passes the resolver's health checks.
+ * The `usable` reach walks the resolver's cascade without pins over the rows usable in the space.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -450,8 +458,12 @@ export async function selectAccessibleConnection(
 ): Promise<ResolvedConnectionRow | null> {
   let named = namedConnectionId?.toLowerCase() ?? null;
   const identity = actorIdentityOf(context.actor);
+  const candidatesOf = (set: readonly SelectableRow[]) =>
+    set.map((r) => candidateOf(identity, r, []));
   const { run } = context;
   let rows: SelectableRow[];
+  // A run's bound set passed governance at kickoff, and the `own` reach skips every layer.
+  let orgDefaults: Record<string, OrgDefaultPick> | null = null;
   if (run) {
     const bound = await run.boundSet();
     if (named) {
@@ -467,37 +479,36 @@ export async function selectAccessibleConnection(
     } else if (bound.length === 0) {
       return null;
     }
-    rows = await loadSelectableRows(
-      and(
-        eq(integrationConnections.integrationId, packageId),
-        usableInSpace(context.spaceId, context.actor),
-      ),
-    );
+    rows = await listReachableConnections(context, "usable", packageId);
     if (!named) {
       const ids = new Set(bound.map((m) => m.connectionId));
       throw mustChoose(
         packageId,
-        rows.filter((r) => ids.has(r.id)).map((r) => candidateOf(identity, r, [])),
+        candidatesOf(rows.filter((r) => ids.has(r.id))),
         `Run '${run.id}' bound several connections`,
       );
     }
   } else {
-    if ((await integrationsRequiringRun(context.spaceId)).has(packageId)) {
+    const reach = context.reach ?? "own";
+    const spaceDefaults = await listOrgDefaultsForResolver(context.spaceId);
+    if (reach === "usable") {
+      orgDefaults = spaceDefaults;
+    } else if (spaceDefaults[packageId]?.enforce) {
       throw proxyProblem(
         "run_required",
-        `Integration '${packageId}' is governed by an enforced org default in this space: ` +
-          `its connections are reached through a run (X-Run-Id) only.`,
+        `Integration '${packageId}' is governed by an enforced org default in this space: it is ` +
+          `reached by a caller who also holds credential-proxy:call-run, or through an agent ` +
+          `run the platform executes.`,
       );
     }
-    rows = await listOwnUsableConnections(context, packageId);
+    rows = await listReachableConnections(context, reach, packageId);
   }
 
-  // Under a run the bound set already passed governance at kickoff, and outside one no org
-  // default applies: the named connection, else the actor's single own one.
   const { resolved, errors } = resolveConnections({
     requirements: [proxyRequirement(packageId, manifest)],
     accessibleConnections: rows,
     pins: [],
+    orgDefaults,
     launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
     ...identity,
   });
@@ -509,47 +520,39 @@ export async function selectAccessibleConnection(
     const candidates = error.candidateConnections ?? [];
     throw mustChoose(packageId, candidates, "No single own connection applies");
   }
+  if (error?.code === "override_outranked") {
+    throw proxyProblem(
+      "connection_not_in_org_default",
+      `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
+        `which binds every call in this space: name one of its members, or none.`,
+    );
+  }
   if (error) throw resolutionConflict(error);
 
-  const picked = resolved[packageId]![0]!;
-  return toResolvedRow(rows.find((r) => r.id === picked.connectionId)!);
+  const set = resolved[packageId]!.map((m) => rows.find((r) => r.id === m.connectionId)!);
+  if (set.length === 1) return toResolvedRow(set[0]!);
+  throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
 
-/**
- * The integrations an ENFORCED org default governs in the space. Their connections are the
- * default's to bind, which only a run's kickoff does: outside a run none of them is reachable.
- */
-export async function integrationsRequiringRun(spaceId: string): Promise<ReadonlySet<string>> {
-  const orgDefaults = await listOrgDefaultsForResolver(spaceId);
-  return new Set(
-    Object.entries(orgDefaults)
-      .filter(([, orgDefault]) => orgDefault.enforce)
-      .map(([integrationId]) => integrationId),
-  );
-}
-
-/**
- * The actor's own rows usable in the space ({@link ownUsableInSpace}), of `packageId` when given,
- * oldest first: everything a credential-proxy call outside a run may reach.
- */
-export function listOwnUsableConnections(
+export function listReachableConnections(
   context: { spaceId: string; actor: Actor },
+  reach: ProxyReach,
   packageId?: string,
 ) {
+  const inReach = reach === "own" ? ownUsableInSpace : usableInSpace;
   return loadSelectableRows(
     and(
       packageId === undefined ? undefined : eq(integrationConnections.integrationId, packageId),
-      ownUsableInSpace(context.spaceId, context.actor),
+      inReach(context.spaceId, context.actor),
     ),
   );
 }
 
-/** The rows `reach` holds, each with its credential revision, in a stable order. */
-function loadSelectableRows(reach: SQL | undefined) {
+function loadSelectableRows(where: SQL | undefined) {
   return db
     .select({ ...getTableColumns(integrationConnections), credentialRevision })
     .from(integrationConnections)
-    .where(reach)
+    .where(where)
     .orderBy(...OLDEST_FIRST);
 }
 

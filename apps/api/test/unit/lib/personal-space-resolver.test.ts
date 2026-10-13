@@ -46,8 +46,7 @@ describe("resolveSpaceRole on a personal space", () => {
   });
 
   it("grants its owner everything `admin` holds but credential-proxy:call-own", () => {
-    // Calling the proxy outside a run is handed out by a space's governor, and
-    // a personal space has none but its owner (RBAC spec §3.6).
+    // Nobody but its owner sees what is called from a personal space (RBAC spec §3.6).
     const admin = presetPermissions("admin");
     for (const orgRole of ["owner", "member"] as const) {
       const owned = spacePermissions(resolveSpaceRole(orgRole, personal, null, OWNER));

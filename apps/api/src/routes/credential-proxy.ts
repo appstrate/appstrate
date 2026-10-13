@@ -26,9 +26,7 @@
  *     `credential-proxy:call-own` without it
  *   - Per-space scope (principal cannot reach providers in another space)
  *   - Run binding — `X-Run-Id` confines the call to its run's bound connections,
- *     a colleague's shared one included; outside a run only the actor's own
- *     connections are reachable, and an integration under an enforced org
- *     default not at all (`selectAccessibleConnection`)
+ *     a colleague's shared one included (`selectAccessibleConnection`)
  *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
@@ -94,9 +92,10 @@ import {
   authorizeProxyCall,
   PROXY_OWN_PERMISSION,
   PROXY_RUN_PERMISSION,
+  reachOutsideRun,
 } from "../services/credential-proxy/access.ts";
 import {
-  listOwnProxyConnections,
+  listConnectionsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -115,7 +114,8 @@ export function createCredentialProxyRouter() {
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
   router.get("/connections", requirePermission("credential-proxy", "call-own"), async (c) => {
-    const data = await listOwnProxyConnections(getSpaceScope(c), getActor(c));
+    const reach = reachOutsideRun(callerPermissions(c));
+    const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
     return c.json(listResponse(data));
   });
 
@@ -149,7 +149,7 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
       const runId = c.req.header("X-Run-Id") || null;
-      await authorizeProxyCall({
+      const reach = await authorizeProxyCall({
         permissions: callerPermissions(c),
         orgId,
         spaceId,
@@ -322,6 +322,7 @@ export function createCredentialProxyRouter() {
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
           ...(run ? { run } : {}),
+          ...(reach ? { reach } : {}),
           integrationId,
           method,
           target,

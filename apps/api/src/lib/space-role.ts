@@ -107,8 +107,7 @@ export function resolveSpaceRole(
  * replica that understands it least.
  *
  * The owner of a personal space holds its preset minus `credential-proxy:call-own`.
- * Calling the proxy outside a run is what a space's governor hands out, and a
- * personal space has none but its owner: nobody else sees what is called from
+ * A personal space has no member but its owner: nobody else sees what is called from
  * it, and no team space's enforced default or `block_user_connections` applies.
  * The preset, and so the role a listing shows, is unchanged.
  */

@@ -9,19 +9,24 @@
  *     and executed by the caller ({@link requireCallerRun}). It reaches what the run bound, a
  *     colleague's shared connection included, which is why launching runs (`agents:run`) is not
  *     enough: registering a remote run would otherwise hand out raw access to that connection.
- *   - outside a run: `credential-proxy:call-own`. It reaches the actor's own connections only
- *     (`selectAccessibleConnection`).
+ *   - outside a run: `credential-proxy:call-own`, on the actor's own connections. Holding
+ *     `credential-proxy:call-run` too: on every connection usable in the space, own or shared.
  */
 
 import type { Actor } from "../../lib/actor.ts";
 import type { Permission } from "../../lib/permissions.ts";
 import { forbidden } from "../../lib/errors.ts";
+import type { ProxyReach } from "../integration-connections.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
 /** What a call made for a run requires. */
 export const PROXY_RUN_PERMISSION = "credential-proxy:call-run" satisfies Permission;
 /** What a call naming no run requires. */
 export const PROXY_OWN_PERMISSION = "credential-proxy:call-own" satisfies Permission;
+
+export function reachOutsideRun(permissions: ReadonlySet<string>): ProxyReach {
+  return permissions.has(PROXY_RUN_PERMISSION) ? "usable" : "own";
+}
 
 interface ProxyAccessInput {
   /** The caller's effective permissions in the space. */
@@ -36,10 +41,10 @@ interface ProxyAccessInput {
 }
 
 /** Throws unless `input` may call the credential proxy on the path its `runId` selects. */
-export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void> {
+export async function authorizeProxyCall(input: ProxyAccessInput): Promise<ProxyReach | null> {
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
   if (runId === null) {
-    if (permissions.has(PROXY_OWN_PERMISSION)) return;
+    if (permissions.has(PROXY_OWN_PERMISSION)) return reachOutsideRun(permissions);
     onDenied(PROXY_OWN_PERMISSION);
     throw forbidden(
       `Insufficient permissions: ${PROXY_OWN_PERMISSION} required to call the credential proxy ` +
@@ -55,6 +60,7 @@ export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void>
     );
   }
   await requireCallerRun({ orgId, spaceId, runId, actor });
+  return null;
 }
 
 /**

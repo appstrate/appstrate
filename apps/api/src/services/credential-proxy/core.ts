@@ -8,7 +8,7 @@
  * Consumed by the `/api/credential-proxy/proxy` public endpoint, used
  * from outside Appstrate to reach the space's integrations: by a remote
  * runner (CLI, GitHub Action, third-party agent) for the run it executes
- * (`X-Run-Id`), or outside any run on the caller's own connections. Which
+ * (`X-Run-Id`), or outside any run. Which
  * of the two a caller may take is `access.ts`'s rule.
  *
  * Credentials are resolved from `integration_connections` (the same
@@ -57,7 +57,7 @@ import {
   IntegrationCredentialNotFoundError,
   type ProxyRunSelection,
 } from "./integration-resolver.ts";
-import { clearUpstreamRejections } from "../integration-connections.ts";
+import { clearUpstreamRejections, type ProxyReach } from "../integration-connections.ts";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -83,11 +83,12 @@ interface ProxyCallInput {
   /**
    * Optional `integration_connections` id pin (from the `X-Connection-Id`
    * header). When set, narrows to that specific connection: a member of the
-   * run's bound set, or outside a run one of the actor's own.
+   * run's bound set, or outside a run one the caller reaches.
    */
   connectionId?: string;
   /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
   run?: ProxyRunSelection;
+  reach?: ProxyReach;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -210,6 +211,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     ...(input.run ? { run: input.run } : {}),
+    ...(input.reach ? { reach: input.reach } : {}),
   };
   let resolved;
   let declaredUris: readonly string[];
