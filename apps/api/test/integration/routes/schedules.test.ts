@@ -11,6 +11,7 @@ import {
   addOrgMember,
   authHeaders,
   memberContext,
+  memberHolding,
   type TestContext,
 } from "../../helpers/auth.ts";
 import {
@@ -1045,17 +1046,27 @@ describe("Schedules API", () => {
           expect(await moved.json()).toMatchObject({ code: "forbidden", param: "actor" });
         });
 
-        it("lets an org admin name one, edit and delete the schedule", async () => {
-          const admin = await memberContext(ctx, "admin");
-          const created = await create(admin, { endUserId: eu });
-          expect(created.status).toBe(201);
-          const { id } = (await created.json()) as { id: string };
-          expect((await patch(admin, id, { name: "Renamed" })).status).toBe(200);
-          expect((await remove(admin, id)).status).toBe(204);
+        // Borrowing an end user is what an API key does with `Appstrate-User`: whoever may mint
+        // one gets the same answer on their session.
+        it("keys the session door on api-keys:create, not on the role's name", async () => {
+          const writes = ["schedules:read", "schedules:write", "schedules:delete", "agents:run"];
+          const without = await memberHolding(ctx, writes);
+          expect((await create(without, { endUserId: eu })).status).toBe(403);
+
+          for (const caller of [
+            await memberHolding(ctx, [...writes, "api-keys:create"]),
+            await memberContext(ctx, "member", "admin"),
+            await memberContext(ctx, "admin"),
+          ]) {
+            const created = await create(caller, { endUserId: eu });
+            expect(created.status).toBe(201);
+            const { id } = (await created.json()) as { id: string };
+            expect((await patch(caller, id, { name: "Renamed" })).status).toBe(200);
+            expect((await remove(caller, id)).status).toBe(204);
+          }
         });
 
-        // An API key already borrows any end-user of its space with `Appstrate-User`.
-        it("lets an API key name one, with and without Appstrate-User", async () => {
+        it("lets an API key name one, patch and delete the schedule", async () => {
           const key = await seedApiKey({
             orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
@@ -1083,12 +1094,24 @@ describe("Schedules API", () => {
           });
           expect(patched.status).toBe(200);
 
-          const asEndUser = await app.request(`/api/agents/${fid}/schedules`, {
+          // Borrowing one end user, it names another: the key's own reach, not a self-match.
+          const second = await seedEndUser({
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            externalId: `ext-${crypto.randomUUID()}`,
+          });
+          const asOther = await app.request(`/api/agents/${fid}/schedules`, {
             method: "POST",
-            headers: { ...keyHeaders, "Appstrate-User": eu },
+            headers: { ...keyHeaders, "Appstrate-User": second.id },
             body,
           });
-          expect(asEndUser.status).toBe(201);
+          expect(asOther.status).toBe(201);
+
+          const deleted = await app.request(`/api/schedules/${id}`, {
+            method: "DELETE",
+            headers: keyHeaders,
+          });
+          expect(deleted.status).toBe(204);
         });
       });
 

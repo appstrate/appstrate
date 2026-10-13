@@ -108,7 +108,6 @@ import {
   listIntegrationConnections,
   loadConnectionShares,
   promoteIntegrationOAuthClient,
-  assertIntegrationAuthDeclared,
   readIntegrationAuth,
   resolveIntegrationActivations,
   resolveIntegrationClientById,
@@ -447,7 +446,7 @@ export function oauthClientHandlers(
       const authKey = c.req.param("authKey")!;
       const scope = scopeOf(c);
       // 404 an unknown integration/auth rather than list nothing (the org tier's service does).
-      if ("spaceId" in scope) await assertIntegrationAuthDeclared(scope, packageId, authKey);
+      if ("spaceId" in scope) await readIntegrationAuth(scope, packageId, authKey);
       return c.json(listResponse(await listIntegrationClients(scope, packageId, authKey)));
     },
 

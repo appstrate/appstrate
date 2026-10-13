@@ -39,6 +39,7 @@ import {
 import {
   auditEvents,
   packages,
+  packageVersions,
   spacePackages,
   integrationConnections,
   integrationOauthClients,
@@ -348,6 +349,46 @@ describe("integration OAuth2 flow (conformant provider)", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(404);
+
+    // What the space is shown as connectable is read from the same manifest.
+    const detail = await app.request(`/api/integrations/${INTEGRATION}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(detail.status).toBe(200);
+    const { auths } = (await detail.json()) as { auths: Array<{ auth_key: string }> };
+    expect(auths.map((a) => a.auth_key)).toEqual([AUTH_KEY]);
+  });
+
+  it("names the cause when the published versions leave nothing to connect through", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const version = await seedPublishedVersion(INTEGRATION, "1.0.0");
+    await db
+      .update(packageVersions)
+      .set({ yanked: true })
+      .where(eq(packageVersions.id, version.id));
+
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { detail: string }).detail).toContain(
+      "no usable published version",
+    );
   });
 
   it("sends the RFC 8707 resource on authorize, code exchange and refresh (AFPS §8.6)", async () => {
