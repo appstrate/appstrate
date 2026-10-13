@@ -31,6 +31,12 @@
  *   - RFC 9209 `Proxy-Status` on every response (`lib/proxy-status.ts`)
  *   - URL allowlist enforced via the integration manifest
  *     (`authorized_uris`; `allow_all_uris` unless a credential is templated)
+ *   - Never sent upstream: the headers of the platform's own inbound request,
+ *     by the one rule `isPlatformRequestHeader`
+ *     (`@appstrate/connect/platform-request-headers`) — the caller's platform
+ *     credential, its tenancy and persona, the platform's markers and
+ *     versioning, the network path an edge adds on the way in, and the
+ *     identity an auth proxy asserts — and this route's control headers
  *   - Upstream `Set-Cookie` never relayed to the caller
  *   - Request / response size caps
  */
@@ -47,6 +53,7 @@ import { MAX_STREAMED_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /** Wall-clock timeout for piping an upstream streaming response to the client. */
 const STREAMING_PIPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import { getActor } from "../lib/actor.ts";
 import { isUuid } from "../lib/db-helpers.ts";
@@ -227,10 +234,15 @@ export function createCredentialProxyRouter() {
         }
       }
 
-      // The proxy's control headers stay here; `fetchApiCall` drops Host, hop-by-hop and
-      // framing headers, a streamed upload's Content-Length coming from `bodyLength`.
+      // The caller's headers go upstream, except the platform's own request headers (its
+      // credential, tenancy and markers) and this route's controls. `fetchApiCall` drops Host,
+      // hop-by-hop and framing headers, a streamed upload's Content-Length coming from
+      // `bodyLength`.
       const fwdHeaders = Object.fromEntries(
-        Object.entries(c.req.header()).filter(([k]) => !PROXY_CONTROL_HEADERS.has(k.toLowerCase())),
+        Object.entries(c.req.header()).filter(([name]) => {
+          const lower = name.toLowerCase();
+          return !isPlatformRequestHeader(lower) && !PROXY_CONTROL_HEADERS.has(lower);
+        }),
       );
 
       const jar = await getCookieJarStore();
@@ -400,22 +412,20 @@ function readFlagHeader(c: Context<AppEnv>, name: string): boolean {
   throw invalidRequest(`${name} must be "1" or "0" (got "${value.slice(0, 32)}")`);
 }
 
+/**
+ * What this route consumes and never sends upstream, beyond the platform's own request headers
+ * (`isPlatformRequestHeader`, which names `X-Run-Id`, the tenancy headers and `Authorization`).
+ */
 const PROXY_CONTROL_HEADERS = new Set([
   "x-integration-id",
   "x-target",
   "x-session-id",
   "x-substitute-body",
-  "x-run-id",
-  "x-org-id",
-  "x-space-id",
   "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",
   "x-stream-response",
   "x-max-response-size",
-  "authorization",
-  "appstrate-user",
-  "appstrate-version",
   // Strip the caller's `accept-encoding` so Bun's upstream fetch picks
   // its own default and auto-decodes transparently — otherwise the
   // caller's list (e.g. `gzip, br, zstd`) can leak through to Gmail,
