@@ -64,7 +64,7 @@ interface PairingMintResponse {
 
 interface PairingStatusResponse {
   id: string;
-  status: "pending" | "consumed" | "expired";
+  status: "pending" | "consumed" | "failed" | "expired";
   consumed_at: string | null;
   expiresAt: string;
   credentialId: string | null;

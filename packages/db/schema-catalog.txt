@@ -229,6 +229,7 @@ column model_provider_pairings.consumed_at timestamp with time zone
 column model_provider_pairings.created_at timestamp with time zone not null default now()
 column model_provider_pairings.credential_id uuid
 column model_provider_pairings.expires_at timestamp with time zone not null
+column model_provider_pairings.failed_at timestamp with time zone
 column model_provider_pairings.id text not null
 column model_provider_pairings.org_id uuid not null
 column model_provider_pairings.owner_user_id text

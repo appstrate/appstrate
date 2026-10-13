@@ -15,6 +15,10 @@
  *      flips `consumed_at` from NULL to now() and returns the row. Any
  *      second consumption (replay, retry, race) loses the UPDATE and gets
  *      a 410 Gone.
+ *   4. The redeem then either links the credential it wrote
+ *      (`linkPairingCredential()`) or, when it ends without one, stamps `failed_at`
+ *      (`markPairingFailed()`). The dashboard's poll reads the outcome off
+ *      those two columns.
  *
  * Single-use semantics rely on the predicate-guarded UPDATE — DO NOT split
  * the consume into a SELECT-then-UPDATE pair, that would re-introduce the
@@ -82,6 +86,7 @@ interface PairingRow {
   id: string;
   expiresAt: Date;
   consumedAt: Date | null;
+  failedAt: Date | null;
   credentialId: string | null;
 }
 
@@ -194,6 +199,7 @@ export async function getPairing(
       id: modelProviderPairings.id,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
+      failedAt: modelProviderPairings.failedAt,
       credentialId: modelProviderPairings.credentialId,
     })
     .from(modelProviderPairings)
@@ -211,9 +217,8 @@ export async function getPairing(
 /**
  * Link the credential created or reconnected by the helper back to its pairing
  * row, so the dashboard's poll endpoint can surface the resulting credential
- * id without a separate list call. Best-effort: if the pairing disappears
- * between consume and link (TTL purge race), log and continue — the credential
- * is already persisted.
+ * id without a separate list call. An update that matches no row (the pairing
+ * was cancelled or reaped during the redeem) is a no-op: the credential stays.
  */
 export async function linkPairingCredential(
   pairingId: string,
@@ -222,6 +227,17 @@ export async function linkPairingCredential(
   await db
     .update(modelProviderPairings)
     .set({ credentialId })
+    .where(eq(modelProviderPairings.id, pairingId));
+}
+
+/**
+ * Record that the redeem which consumed this pairing ended without a
+ * credential, so the dashboard's poll reads `failed` instead of waiting.
+ */
+export async function markPairingFailed(pairingId: string): Promise<void> {
+  await db
+    .update(modelProviderPairings)
+    .set({ failedAt: sql`now()` })
     .where(eq(modelProviderPairings.id, pairingId));
 }
 

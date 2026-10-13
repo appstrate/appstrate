@@ -15,9 +15,12 @@ import {
   createPairing,
   getPairing,
   linkPairingCredential,
+  markPairingFailed,
 } from "../services/model-providers/pairings.ts";
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { logger } from "../lib/logger.ts";
 import { recordAuditAs, recordAuditFromContext } from "../services/audit.ts";
 import { connectHelperCommand } from "../lib/connect-helper.ts";
 import {
@@ -140,33 +143,47 @@ async function handlePairRedeem(c: Context<AppEnv>) {
 
   const consumed = await consumePairing(token);
 
-  const input = await readJsonBody(c, importBody);
+  // The token is spent: a redeem that ends here without a credential is
+  // recorded on the pairing, which the dashboard's poll reads as `failed`.
+  let result: Awaited<ReturnType<typeof importOAuthModelProviderConnection>>;
+  try {
+    const input = await readJsonBody(c, importBody);
 
-  // Body's providerId MUST match what the pairing was minted for —
-  // otherwise the helper could divert the redeem to a different
-  // provider than the user authorized in the dashboard.
-  if (input.providerId !== consumed.providerId) {
-    throw invalidRequest(
-      `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
-      "providerId",
-    );
+    // Body's providerId MUST match what the pairing was minted for —
+    // otherwise the helper could divert the redeem to a different
+    // provider than the user authorized in the dashboard.
+    if (input.providerId !== consumed.providerId) {
+      throw invalidRequest(
+        `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
+        "providerId",
+      );
+    }
+
+    // The redeem holds no principal: it judges the member who minted the pairing
+    // again, on their grants at this moment.
+    result = await importOAuthModelProviderConnection({
+      providerId: input.providerId,
+      accessToken: input.access_token,
+      refreshToken: input.refresh_token,
+      label: input.label,
+      expiresAt: input.expiresAt,
+      email: input.email,
+      accountId: input.account_id,
+      orgId: consumed.orgId,
+      userId: consumed.userId,
+      ownerUserId: consumed.ownerUserId,
+      ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
+    });
+  } catch (err) {
+    // The redeem's own error is the one thrown, whatever happens to the stamp.
+    await markPairingFailed(consumed.id).catch((stampErr) => {
+      logger.error("Pairing failure stamp failed", {
+        pairingId: consumed.id,
+        error: getErrorMessage(stampErr),
+      });
+    });
+    throw err;
   }
-
-  // The redeem holds no principal: it judges the member who minted the pairing
-  // again, on their grants at this moment.
-  const result = await importOAuthModelProviderConnection({
-    providerId: input.providerId,
-    accessToken: input.access_token,
-    refreshToken: input.refresh_token,
-    label: input.label,
-    expiresAt: input.expiresAt,
-    email: input.email,
-    accountId: input.account_id,
-    orgId: consumed.orgId,
-    userId: consumed.userId,
-    ownerUserId: consumed.ownerUserId,
-    ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
-  });
 
   // Link the resulting credential back to the pairing row so the dashboard's
   // GET /pairing/:id poll surfaces it without a separate list call.
@@ -312,9 +329,10 @@ export function createModelProvidersOAuthRouter() {
   });
 
   // GET /api/model-providers-oauth/pairing/:id
-  // Polled by the dashboard while the user runs the helper. Returns
-  // `pending` until the helper consumes the token, `consumed` after,
-  // `expired` once the TTL elapsed without consumption.
+  // Polled by the dashboard while the user runs the helper. The status is the
+  // outcome of the redeem: `consumed` once it linked a credential, `failed`
+  // once it ended without one, `expired` past the TTL, `pending` otherwise — a
+  // redeem in flight included.
   //
   // Wrong-org reads return 404 (not 403) — we never confirm or deny
   // existence of a pairing belonging to a different tenant.
@@ -326,10 +344,10 @@ export function createModelProvidersOAuthRouter() {
     const row = await getPairing(id, orgId, c.get("user").id);
     if (!row) throw notFound("Pairing not found");
 
-    const now = Date.now();
-    let status: "pending" | "consumed" | "expired";
-    if (row.consumedAt) status = "consumed";
-    else if (row.expiresAt.getTime() <= now) status = "expired";
+    let status: "pending" | "consumed" | "failed" | "expired";
+    if (row.credentialId) status = "consumed";
+    else if (row.failedAt) status = "failed";
+    else if (row.expiresAt.getTime() <= Date.now()) status = "expired";
     else status = "pending";
 
     return c.json({

@@ -13,7 +13,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { decryptCredentials } from "@appstrate/connect";
-import { auditEvents, modelProviderCredentials, organizationMembers } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  modelProviderCredentials,
+  modelProviderPairings,
+  organizationMembers,
+} from "@appstrate/db/schema";
 import type { OrgRole } from "@appstrate/core/permissions";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
@@ -26,8 +31,12 @@ import {
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
-import { createPairing } from "../../../src/services/model-providers/pairings.ts";
+import {
+  TEST_OAUTH_HOOKS_PROVIDER_ID,
+  TEST_OAUTH_MODEL_ID,
+  TEST_OAUTH_PROVIDER_ID,
+} from "../../helpers/test-oauth-provider.ts";
+import { consumePairing, createPairing } from "../../../src/services/model-providers/pairings.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 
 const app = getTestApp();
@@ -55,16 +64,20 @@ function mint(ctx: TestContext, body: Record<string, unknown> = {}) {
   });
 }
 
-function redeem(token: string, accessToken = "redeemed-access") {
+function redeemWith(token: string, body: Record<string, unknown>) {
   return app.request(REDEEM, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      providerId: TEST_OAUTH_PROVIDER_ID,
-      access_token: accessToken,
-      refresh_token: "redeemed-refresh",
-      expiresAt: Date.now() + 3_600_000,
-    }),
+    body: JSON.stringify(body),
+  });
+}
+
+function redeem(token: string, accessToken = "redeemed-access") {
+  return redeemWith(token, {
+    providerId: TEST_OAUTH_PROVIDER_ID,
+    access_token: accessToken,
+    refresh_token: "redeemed-refresh",
+    expiresAt: Date.now() + 3_600_000,
   });
 }
 
@@ -108,6 +121,39 @@ function setOrgRole(ctx: TestContext, role: OrgRole) {
     .where(
       and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, ctx.user.id)),
     );
+}
+
+async function mintPairing(ctx: TestContext): Promise<{ id: string; token: string }> {
+  const minted = await mint(ctx, { owner_type: "org" });
+  expect(minted.status).toBe(200);
+  return (await minted.json()) as { id: string; token: string };
+}
+
+/** A pairing as stored and as its minter's poll reads it. */
+async function pairingOutcome(ctx: TestContext, id: string) {
+  const [row] = await db
+    .select()
+    .from(modelProviderPairings)
+    .where(eq(modelProviderPairings.id, id));
+  const res = await app.request(`${PAIRINGS}/${id}`, { headers: authHeaders(ctx) });
+  expect(res.status).toBe(200);
+  const read = (await res.json()) as { status: string; credentialId: string | null };
+  return {
+    stored: {
+      consumed: row!.consumedAt !== null,
+      failed: row!.failedAt !== null,
+      credentialId: row!.credentialId,
+    },
+    read: { status: read.status, credentialId: read.credentialId },
+  };
+}
+
+/** Move a pairing past its TTL. */
+async function expirePairing(id: string): Promise<void> {
+  await db
+    .update(modelProviderPairings)
+    .set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(modelProviderPairings.id, id));
 }
 
 async function credentialCount(orgId: string): Promise<number> {
@@ -317,6 +363,87 @@ describe("subscription pairings — owner_type", () => {
     }
   });
 
+  describe("the pairing records the outcome of its redeem", () => {
+    it("a redeem that wrote a credential reads consumed, with that credential", async () => {
+      const { id, token } = await mintPairing(admin);
+      const res = await redeem(token);
+      expect(res.status).toBe(200);
+      const { credentialId } = (await res.json()) as { credentialId: string };
+
+      const outcome = {
+        stored: { consumed: true, failed: false, credentialId },
+        read: { status: "consumed", credentialId },
+      };
+      expect(await pairingOutcome(admin, id)).toEqual(outcome);
+      await expirePairing(id);
+      expect(await pairingOutcome(admin, id)).toEqual(outcome);
+    });
+
+    it("a redeem refused on its minter's grants reads failed, and a retry is 410", async () => {
+      const secondAdmin = await memberContext(admin, "admin");
+      const { id, token } = await mintPairing(secondAdmin);
+      await setOrgRole(secondAdmin, "guest");
+      expect((await redeem(token)).status).toBe(403);
+
+      const outcome = {
+        stored: { consumed: true, failed: true, credentialId: null },
+        read: { status: "failed", credentialId: null },
+      };
+      expect(await pairingOutcome(secondAdmin, id)).toEqual(outcome);
+      await expirePairing(id);
+      expect(await pairingOutcome(secondAdmin, id)).toEqual(outcome);
+      expect((await redeem(token)).status).toBe(410);
+      expect(await credentialCount(admin.orgId)).toBe(0);
+    });
+
+    for (const [refusal, body, problem] of [
+      [
+        "a body the redeem does not accept",
+        { providerId: TEST_OAUTH_PROVIDER_ID },
+        { code: "validation_failed" },
+      ],
+      [
+        // A registered OAuth provider: the body schema accepts it, the pairing check refuses it.
+        "another provider than the pairing's",
+        { providerId: TEST_OAUTH_HOOKS_PROVIDER_ID, access_token: "a", refresh_token: "r" },
+        {
+          code: "invalid_request",
+          param: "providerId",
+          detail: `providerId in body (${TEST_OAUTH_HOOKS_PROVIDER_ID}) does not match pairing (${TEST_OAUTH_PROVIDER_ID})`,
+        },
+      ],
+    ] as const) {
+      it(`a redeem refused for ${refusal} reads failed`, async () => {
+        const { id, token } = await mintPairing(admin);
+        const res = await redeemWith(token, body);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject(problem);
+
+        expect(await pairingOutcome(admin, id)).toEqual({
+          stored: { consumed: true, failed: true, credentialId: null },
+          read: { status: "failed", credentialId: null },
+        });
+      });
+    }
+
+    it("a consumed pairing with no recorded outcome reads pending, then expired past its expiry", async () => {
+      const { id, token } = await mintPairing(admin);
+      await consumePairing(token);
+      const unrecorded = { consumed: true, failed: false, credentialId: null };
+
+      expect(await pairingOutcome(admin, id)).toEqual({
+        stored: unrecorded,
+        read: { status: "pending", credentialId: null },
+      });
+
+      await expirePairing(id);
+      expect(await pairingOutcome(admin, id)).toEqual({
+        stored: unrecorded,
+        read: { status: "expired", credentialId: null },
+      });
+    });
+  });
+
   describe("the redeem judges the minter again", () => {
     let secondAdmin: TestContext;
 
@@ -371,18 +498,6 @@ describe("subscription pairings — owner_type", () => {
 
       expect((await redeem(token)).status).toBe(403);
       expect(await credentialCount(admin.orgId)).toBe(0);
-    });
-
-    it("a refused redeem burns the pairing: it reads consumed with no credential, and a retry is 410", async () => {
-      const minted = await mint(secondAdmin, { owner_type: "org" });
-      const { id, token } = (await minted.json()) as { id: string; token: string };
-      await setOrgRole(secondAdmin, "guest");
-      expect((await redeem(token)).status).toBe(403);
-
-      const read = await app.request(`${PAIRINGS}/${id}`, { headers: authHeaders(secondAdmin) });
-      expect(read.status).toBe(200);
-      expect(await read.json()).toMatchObject({ status: "consumed", credentialId: null });
-      expect((await redeem(token)).status).toBe(410);
     });
 
     it("refuses every redeem of a minter who is no longer a member", async () => {

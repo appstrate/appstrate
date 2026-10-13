@@ -9,7 +9,7 @@
  * the modal mid-flow (tab switch, accidental dismiss) does not kill the
  * token. This component, mounted once for all authenticated routes, polls
  * each pending pairing and fires the global side effects — the success toast
- * and credential/model-list invalidation once the redeem links a credential,
+ * and credential/model-list invalidation once the redeem produces a credential,
  * the failure toast when it is refused — then drops it from the store. The TTL
  * is the backstop for abandoned ones.
  *
@@ -22,7 +22,7 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { useModelProviderPairingOutcome } from "../hooks/use-model-provider-pairing";
+import { useModelProviderPairingStatus } from "../hooks/use-model-provider-pairing";
 import { useCurrentOrgId } from "../hooks/use-org";
 import {
   pairingStore,
@@ -35,20 +35,20 @@ import {
 function PairingPoll({ pairing }: { pairing: PendingPairing }) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const { outcome } = useModelProviderPairingOutcome(pairing.id);
+  const status = useModelProviderPairingStatus(pairing.id).data?.status;
 
   useEffect(() => {
-    if (outcome === "waiting") return;
-    if (outcome === "connected") {
+    if (!status || status === "pending") return;
+    if (status === "consumed") {
       toast.success(t("credentials.oauth.callbackSuccess"));
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-    } else if (outcome === "failed") {
+    } else if (status === "failed") {
       toast.error(t("credentials.oauth.pairingFailed"));
     }
     removePendingPairing(pairing.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcome]);
+  }, [status]);
 
   return null;
 }

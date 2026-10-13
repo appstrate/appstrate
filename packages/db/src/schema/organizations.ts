@@ -348,7 +348,9 @@ export const modelProviderCredentials = pgTable(
  *      and returns the row only if it was previously unconsumed and
  *      unexpired — guaranteeing single-use semantics under concurrent
  *      retries.
- *   4. A background worker DELETEs rows past `expires_at + 1h` so the
+ *   4. The redeem then links the credential it wrote (`credential_id`) or,
+ *      when it ends without one, records `failed_at`.
+ *   5. A background worker DELETEs rows past `expires_at + 1h` so the
  *      table never grows unboundedly. Consumed rows are kept for the
  *      grace window so audit/UI status reads can still reflect them.
  *
@@ -390,8 +392,10 @@ export const modelProviderPairings = pgTable(
      */
     reconnectCredentialId: uuid("reconnect_credential_id"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    /** When the helper successfully POSTed credentials. NULL means still pending. */
+    /** When the token was redeemed, whether or not the redeem produced a credential. NULL = never redeemed. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    /** When a redeem that consumed the token ended without a credential. */
+    failedAt: timestamp("failed_at", { withTimezone: true }),
     // NOTE — there is deliberately no `consumed_from_ip` here. There was one,
     // written by `consumePairing` (`services/model-providers/pairings.ts`) and
     // read by nothing: no route, no DTO, no OpenAPI field, no module consumer.

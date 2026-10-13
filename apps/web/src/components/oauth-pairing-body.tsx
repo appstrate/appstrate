@@ -5,7 +5,7 @@
  * selects an OAuth model provider. Mints a one-shot pairing via
  * `POST /api/model-providers-oauth/pairing`, surfaces the `npx
  * @appstrate/connect-helper <token>` command, polls until the helper's
- * redeem links a credential, then notifies the caller via `onConnected`. A
+ * redeem produces a credential, then notifies the caller via `onConnected`. A
  * redeem the server refuses ends on the same "generate a new command" state
  * as an expired token.
  *
@@ -37,7 +37,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import {
   useCreateModelProviderPairing,
-  useModelProviderPairingOutcome,
+  useModelProviderPairingStatus,
 } from "../hooks/use-model-provider-pairing";
 import { addPendingPairing } from "../stores/pairing-store";
 import { getCurrentOrgId } from "../stores/org-store";
@@ -74,9 +74,9 @@ export function OAuthPairingBody({
   const [pairing, setPairing] = useState<{ id: string; command: string } | null>(null);
 
   const createPairing = useCreateModelProviderPairing();
-  const { outcome, credentialId: connectedId } = useModelProviderPairingOutcome(
-    pairing?.id ?? null,
-  );
+  const { data } = useModelProviderPairingStatus(pairing?.id ?? null);
+  const status = data?.status;
+  const connectedId = data?.credentialId;
 
   // Whether this pairing is registered with `<PendingPairingsWatcher>`
   // (needs an org context at mint). When it is, the watcher owns the global
@@ -102,7 +102,7 @@ export function OAuthPairingBody({
   // here instead. Deferred via queueMicrotask so the parent's
   // setState-on-close doesn't tear into this effect.
   useEffect(() => {
-    if (outcome !== "connected" || !connectedId) return;
+    if (status !== "consumed" || !connectedId) return;
     if (firedRef.current) return;
     firedRef.current = true;
     if (!registeredRef.current) {
@@ -112,21 +112,21 @@ export function OAuthPairingBody({
     }
     if (onConnected) queueMicrotask(() => onConnected(connectedId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outcome, connectedId]);
+  }, [status, connectedId]);
 
   // Report "busy" while a token is minted and its outcome awaited — hosts use it
   // to confirm before an accidental dismiss. Ref keeps the latest callback
   // without making it an effect dependency; reset to false on unmount.
   const onBusyChangeRef = useRef(onBusyChange);
   onBusyChangeRef.current = onBusyChange;
-  const busy = !!pairing && outcome === "waiting";
+  const busy = !!pairing && (!status || status === "pending");
   useEffect(() => {
     onBusyChangeRef.current?.(busy);
   }, [busy]);
   useEffect(() => () => onBusyChangeRef.current?.(false), []);
 
   // A refused redeem ends like an expired token: the command is spent.
-  const isSpent = outcome === "expired" || outcome === "failed";
+  const isSpent = status === "expired" || status === "failed";
   const command = pairing?.command ?? "";
 
   async function generatePairing() {
@@ -172,7 +172,7 @@ export function OAuthPairingBody({
         <div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
           <p>
             {t(
-              outcome === "failed"
+              status === "failed"
                 ? "credentials.oauth.pairingFailed"
                 : "credentials.oauth.pairingExpired",
             )}

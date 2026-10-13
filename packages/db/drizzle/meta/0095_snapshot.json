@@ -1,5 +1,5 @@
 {
-  "id": "6718fa6d-4175-40e5-833f-f2b5b156eba0",
+  "id": "c7887c7d-fb60-415c-b2f9-a180b284a753",
   "prevId": "d4487ad9-8942-4744-aad0-748305f466f3",
   "version": "7",
   "dialect": "postgresql",
@@ -809,6 +809,12 @@
         },
         "consumed_at": {
           "name": "consumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "failed_at": {
+          "name": "failed_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

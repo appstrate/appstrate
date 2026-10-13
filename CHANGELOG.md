@@ -184,7 +184,7 @@ integration_connections WHERE shared_with_org;` tells whether the step
   rolling back past it means restoring the dump. It leaves every stored
   credential an organization credential (`owner_user_id` NULL), a subscription
   included: each keeps serving the models bound to it. Migration `0095` adds
-  `model_provider_pairings.owner_user_id`. Regenerate after the deploy any
+  `model_provider_pairings.owner_user_id` and `failed_at`. Regenerate after the deploy any
   subscription pairing minted before it (its command is valid 5 minutes): it
   records no owner, which reads as the organization, so one an owner or admin
   minted for a personal subscription would be redeemed as an organization
@@ -634,6 +634,9 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     judges the pairing's minter again, under the membership lock and with their
     current role, by the predicates of the mint: a minter demoted or removed in
     between is refused.
+  - `GET /api/model-providers-oauth/pairing/{id}` gains the status `failed`: a
+    redeem that spent the token and was refused. `consumed` now always carries a
+    `credentialId`, and a redeem in flight reads `pending`.
   - The onboarding quick-connect pairs an organization subscription and seeds
     the models bound to it; a failed seed is shown.
   - Org setting `personal_model_credentials` (default on). Off, personal
