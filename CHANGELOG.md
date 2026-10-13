@@ -183,7 +183,9 @@ integration_connections WHERE shared_with_org;` tells whether the step
   `org_models.credential_id`, `uq_org_models_unbound`, `llm_usage.credential_id`);
   rolling back past it means restoring the dump. It leaves every stored
   credential an organization credential (`owner_user_id` NULL), a subscription
-  included: each keeps serving the models bound to it. No script follows.
+  included: each keeps serving the models bound to it. Migration `0095` adds
+  `model_provider_pairings.owner_user_id`; a pairing pending when it lands
+  needs no step, its redeem is judged like any other.
 
 - **After the deploy, run `scripts/migration/0043-promote-auto-clients-to-org.ts`,
   dry, then with `--apply`, once `0044` and `0041` are done** (#1910). It
@@ -489,11 +491,12 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     an alias. `credentialId` is `null` for `member` and `managed`.
   - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
     `bindable`. `bindable` is true for an organization credential, API key or
-    subscription. `reconnect` is the edit rule applied to an OAuth credential,
-    flagged or not: an organization one for a `model-provider-credentials:write`
-    holder, a personal one for its owner while the organization allows personal
-    credentials. Any other `credentialId` on a pairing is a 404. The registry
-    gains `personal_allowed`.
+    subscription. `reconnect` is listed on an OAuth credential the caller may
+    edit, flagged or not: an organization one for a
+    `model-provider-credentials:write` holder, a personal one for its owner
+    holding `connect` or `write`, while the organization allows personal
+    credentials. A pairing naming a `credentialId` the caller may not reconnect
+    is a 404. The registry gains `personal_allowed`.
   - `model_source` takes `user` (a member's own credential), with `org` and
     `system` (`credential_source` is `MODEL_PAYERS`).
   - `personal_model_credentials` is always served in the organization settings.
@@ -503,7 +506,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     `model_credential_required` on a schedule write is judged on its effective
     model.
   - `llm_usage.payer_user_id` and `runs.payer_user_id` record the member whose
-    credential paid; a run's OAuth door compares against `runs.payer_user_id`.
+    credential paid; a run's OAuth door compares a personal credential's owner
+    against `runs.payer_user_id`.
 
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
@@ -532,11 +536,17 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     organization credential, or a member's (break-glass), takes `delete`. An
     administrator sees no `oauth_email` on a member's subscription, and labels
     are deduplicated within their owner's scope.
-  - `POST /api/model-providers-oauth/pairing` takes the same `owner_type`
-    (default `org`) under the same permissions: `model-provider-credentials:write`
-    for `org`, `connect` for `user`. The pairing records the owner and the
-    redeem writes it. With a `credentialId` (a reconnect), `owner_type` must
-    name that credential's owner, else 404.
+  - `POST /api/model-providers-oauth/pairing` takes
+    `{ providerId, owner_type? }` to create a subscription, with the same
+    `owner_type` (default `org`) under the same permissions:
+    `model-provider-credentials:write` for `org`, `connect` for `user`. It takes
+    `{ providerId, credentialId }` to reconnect one: the owner is the
+    credential's, and `owner_type` beside `credentialId` is a 400. The redeem
+    judges the pairing's minter again, under the membership lock and with their
+    current role, by the predicates of the mint: a minter demoted or removed in
+    between is refused.
+  - The onboarding quick-connect pairs an organization subscription and seeds
+    the models bound to it; a failed seed is shown.
   - Org setting `personal_model_credentials` (default on). Off, personal
     credentials can be neither created, reconnected, probed nor spent, and a run
     pinned to one is refused at its next call.
@@ -549,11 +559,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     a schedule's `model_id_override` (`409 model_credential_required`), a model
     a schedule overrides with cannot be unbound (`409 model_scheduled`), and a
     schedule firing one through an agent's or the organization's default fails.
-  - A subscription is reconnected under the edit rule of any credential: an
-    organization one by a `model-provider-credentials:write` holder, a personal
-    one by its owner. The redeem checks again that the pairing's creator is
-    still a member and, for a personal one, that the organization allows
-    personal credentials.
+  - A subscription is reconnected by whoever may edit it: an organization one
+    by a `model-provider-credentials:write` holder, a personal one by its owner
+    holding `connect` or `write`, while the organization allows personal
+    credentials.
   - A member who leaves the organization takes their personal credentials with
     them. Organization credentials stay, a subscription that member connected
     included.
@@ -1172,6 +1181,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **A subscription pairing's redeem is audited.**
+  `oauth_model_provider.imported` and `oauth_model_provider.reconnected` were
+  dropped: the redeem route carries no organization context. They are recorded
+  with the pairing's organization, and its minter as actor.
 - **A fire refused over the schedule's own connection choice disables the
   schedule** (#1954). It recorded a failed run and stayed armed, failing at
   every tick, on the verdicts the schedule write refuses

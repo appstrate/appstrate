@@ -276,8 +276,9 @@ now is. The sidecar's token door (`/internal/oauth-token/{credentialId}`) gives 
 subscription's token only to a platform run pinned to it. A personal
 subscription also requires the run's recorded payer (`runs.payer_user_id`) to be
 its owner, so a run launched with an API key never gets it. An organization
-subscription serves any run of its organization. A token the sidecar already
-holds lasts up to its 30-second cache, as for a revocation.
+subscription serves any run of its organization pinned to it
+(`runs.model_credential_id`). A token the sidecar already holds lasts up to its
+30-second cache, as for a revocation.
 
 A run resolves its model once, before the `beforeUsage` gate, and its context
 reuses that resolution. What a call costs the organization (`credential_source`)
