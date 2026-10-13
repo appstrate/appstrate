@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0046 — the stored permission `credential-proxy:call` renamed `credential-proxy:call-run`:
+ * 0046 — the stored `credential-proxy:call` becomes `credential-proxy:call-run` and `call-own`:
  *
  *   set -a && . ./.env && set +a && \
  *     bun scripts/migration/0046-rename-credential-proxy-call-scope.ts [--apply]
@@ -16,30 +16,14 @@
  * permission, so no client, token or consent stores it. Audit payloads are history and stay as
  * written.
  *
- * Pre-flight, read-only, on production or a restored dump:
- *
- *   SELECT (SELECT count(*) FROM api_keys
- *            WHERE 'credential-proxy:call' = ANY(scopes)) AS api_keys,
- *          (SELECT count(*) FROM space_roles
- *            WHERE 'credential-proxy:call' = ANY(permissions)) AS space_roles;
- *
- * Measured on the production database on 2026-10-13: 20 `api_keys` rows (of 49) and 0
- * `space_roles` rows.
- *
  * Run it in the deploy window, after the migrate service and BEFORE the release serves a request,
- * `pg_dump` first. The release carrying the rename ignores the old name, and the release before it
- * ignores the new one: `--apply` on the running previous release takes the permission away from
- * every key and role it rewrites, and a release serving before `--apply` serves them without it.
- * On the running previous release, the pre-flight or the dry run only.
- *
- * It does not reach a client that mints keys: one naming `credential-proxy:call` in `scopes` gets
- * a 400 from this release and sends `credential-proxy:call-run`.
+ * `pg_dump` first; on the running previous release, the dry run only (`README.md`, script `0046`).
  *
  * Refuses an empty `DATABASE_URL` (the client would open `./data/pglite`). One transaction; dry
  * run by default (rolled back), `--apply` commits. It prints counts and row ids, never a key hash.
  * Idempotent: the rows rewritten are the rows holding the old name, which the write removes, so a
- * second run finds none. Rollback: the inverse `array_replace` on both columns, or the window's
- * `pg_dump`.
+ * second run finds none. Rollback: the exact inverse on both columns,
+ * `array_remove(array_replace(scopes, RUN, OLD), OWN)`, or the window's `pg_dump`.
  */
 
 import { parseArgs } from "node:util";
@@ -51,14 +35,14 @@ import { getErrorMessage } from "@appstrate/core/errors";
 class DryRunRollback extends Error {}
 
 const OLD = "credential-proxy:call";
-const NEW = "credential-proxy:call-run";
+const RUN = "credential-proxy:call-run";
+const OWN = "credential-proxy:call-own";
 
 /** The rows whose `column` holds the old name: exactly what {@link renamed} removes. */
 const holdsOld = (column: AnyPgColumn): SQL => sql`${OLD} = ANY(${column})`;
 
-/** `column` with the old name renamed where it stands. */
 const renamed = (column: AnyPgColumn): SQL<string[]> =>
-  sql<string[]>`array_replace(${column}, ${OLD}, ${NEW})`;
+  sql<string[]>`array_append(array_replace(${column}, ${OLD}, ${RUN}), ${OWN})`;
 
 interface RenamedRows {
   apiKeyIds: string[];
