@@ -710,8 +710,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   `DELETE /api/integrations/{packageId}/default` answer
   `200 { "schedules_disabled_count": <integer> }` where they answered `204`.
   The count is that of the schedules the removal disabled (see Fixed), 0 when
-  it disabled none or there was nothing to remove: the removals stay
-  idempotent.
+  it disabled none, nothing to remove included.
 - **Google integrations request `userinfo.email` by default** (#1871):
   `@appstrate/gmail` 1.1.7, `@appstrate/gmail-mcp` 2.3.6 and
   `@appstrate/google-{calendar,contacts,drive,forms,sheets}` 1.0.6 list it in
@@ -1158,36 +1157,22 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 ### Fixed
 
 - **Removing the pin or org default that named a schedule's connection set
-  disables the schedule** (#1933). The write of an enabled schedule (#1929)
-  accepts a set named by a member pin, an admin pin or an org default, and
-  removing that layer re-judged nothing: the schedule stayed armed and its
-  next fire failed at every tick (`must_choose_connection`), bound the
-  actor's one own connection (another account) or ran without the
-  integration. The removal now disables, in the same transaction, every
-  enabled schedule whose fire bound the integration through that layer and
-  whose set nothing names afterwards: no `connection_overrides` key, no admin
-  pin or pin of its actor on its agent, no org default. The verdict reads the
-  layer the resolver bound through and the layer rows, never how many
-  connections the actor holds: a member with a single connection who clears
-  their pin sees the schedule disabled too. The schedule's `disabled_reason`
-  is the new `connection_set_unnamed` (migration `0093`, one
-  `ALTER TYPE … ADD VALUE`, no operator step), its jobs are removed and the
-  removal's audit entry lists `disabledScheduleIds`; its route answers the
-  count (see Changed). A connection delete that empties a member pin
-  drops the pin, as before, and now disables the owner's schedules that pin
-  alone named, with the existing reason `connection_deleted`;
-  `GET /api/me/connections/{connectionId}/delete-impact` gives that count on
-  each `pins[]` item (`schedules_disabled_count`). Re-enabling a schedule
-  disabled either way goes through that write rule: it names its set again,
-  in `connection_overrides` or by a pin or default restored. The dashboard
-  shows the number of schedules disabled in a warning toast when a pin or
-  default is removed and per dropped selection in the connection-delete
-  confirmation, and the new reason on the schedule. Not re-judged: a schedule
-  whose fire stops before the cascade when the layer is removed (the
-  integration switched off in the space, an agent version that does not
-  resolve), which stays armed as the write rule leaves it; a layer added
-  above a schedule's set (`override_outranked` at the fire); a new agent
-  version declaring an integration no layer names.
+  disables the schedule** (#1933). It stayed armed: its next fire failed at
+  every tick (`must_choose_connection`), bound the actor's one own connection
+  (another account) or ran without the integration. The removal disables, in
+  its transaction, every enabled schedule whose fired version uses the
+  integration (declared, not inert) and whose set nothing names afterwards (no
+  `connection_overrides` key, admin pin, pin of its actor or org default),
+  however many connections its actor holds. `disabled_reason` is the new
+  `connection_set_unnamed` (migration `0093`, no operator step); the audit
+  entry lists `disabledScheduleIds` and the route answers the count (see
+  Changed). A connection delete that empties a member pin disables the same
+  schedules with `connection_deleted`, counted per `pins[]` item by
+  `delete-impact` (`schedules_disabled_count`). Re-enabling goes through the
+  schedule write rule. The dashboard says how many schedules each removal
+  disables. Not re-judged: a schedule whose fired version does not resolve, a
+  layer added above its set, a new version declaring an integration no layer
+  names.
 - **`integration.connection.scope_widened` is recorded once, by the write that
   moved the row.** A reconnect completing while a client promotion widened the
   same row recorded it twice. (#1925)
