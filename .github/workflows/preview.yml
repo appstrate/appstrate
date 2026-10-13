@@ -179,15 +179,15 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment:
-      name: staging
-      url: ${{ vars.STAGING_URL }}
+    environment: staging
     permissions: {}
     env:
-      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      # The two origins are secrets so that Actions masks them: this
+      # repository's logs are public, and a curl error names its host.
+      COOLIFY_URL: ${{ secrets.COOLIFY_URL }}
       COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
       COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-      STAGING_URL: ${{ vars.STAGING_URL }}
+      STAGING_URL: ${{ secrets.STAGING_URL }}
       VERSION: ${{ needs.resolve.outputs.tag }}-${{ github.sha }}
     steps:
       - name: Point staging at this build

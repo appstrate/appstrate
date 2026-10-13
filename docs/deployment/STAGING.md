@@ -81,10 +81,13 @@ data.
 
 |          |                    |                                                                |
 | -------- | ------------------ | -------------------------------------------------------------- |
-| variable | `COOLIFY_URL`      | origin of the Coolify instance, no trailing slash              |
 | variable | `COOLIFY_APP_UUID` | UUID of the resource                                           |
-| variable | `STAGING_URL`      | public origin of staging, no trailing slash                    |
+| secret   | `COOLIFY_URL`      | origin of the Coolify instance, no trailing slash              |
+| secret   | `STAGING_URL`      | public origin of staging, no trailing slash                    |
 | secret   | `COOLIFY_TOKEN`    | Coolify API token with the `read`, `write`, `deploy` abilities |
+
+The two origins are secrets, not variables, so that Actions masks them in this repository's public
+logs.
 
 Restrict the environment's deployment branches to `main`. That restriction, not the job's `if:`, is
 what keeps the token out of reach of a pull request that edits the workflow.
