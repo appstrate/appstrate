@@ -330,9 +330,10 @@ export const modelProviderCredentials = pgTable(
  * button with the `npx @appstrate/connect-helper <token>` loopback OAuth
  * helper running on the user's machine.
  *
- * The row carries the ownership chosen under RBAC at mint (`owner_user_id`):
- * redeem authenticates with the token alone, has no principal, and copies it
- * onto the credential as is.
+ * Redeem authenticates with the token alone and has no principal: before it
+ * writes, it judges the minter (`user_id`) again on their current role. A new
+ * credential takes the owner recorded at mint (`owner_user_id`); a reconnect
+ * keeps the owner of the credential it updates.
  *
  * Lifecycle:
  *   1. Dashboard POST /api/model-providers-oauth/pairing → row INSERTed,
@@ -370,10 +371,13 @@ export const modelProviderPairings = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     /**
-     * Owner of the credential this pairing produces or reconnects, with the
-     * meaning of `model_provider_credentials.owner_user_id`: NULL = an
-     * organization credential, set = that member's personal one. `user_id`
-     * is the member who minted the pairing, whichever owner they chose.
+     * Owner chosen at mint, with the meaning of
+     * `model_provider_credentials.owner_user_id`: NULL = an organization
+     * credential, set = that member's personal one. A new credential is
+     * written with it. On a reconnect it is the target credential's owner as
+     * read at mint, and redeem does not read it: it judges the credential row
+     * as it is then. `user_id` is the member who minted the pairing, whichever
+     * owner applies.
      */
     ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
     /** Provider id from the OAuth model provider registry. */

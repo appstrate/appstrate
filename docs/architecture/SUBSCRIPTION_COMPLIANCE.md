@@ -22,11 +22,6 @@ credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 > **executable** for agent runs and share the **identical** delivery mechanism
 > (below). They remain **opt-in** modules — not in the `MODULES` default.
 
-> **Operator decision (2026-10-09).** `@appstrate/module-claude-code` and
-> `@appstrate/module-codex` are opt-in and are **never enabled on the Appstrate
-> production deployment** (`deploy/`). Self-hosters who enable them own the risk.
-> Production therefore runs API-key providers only.
-
 ---
 
 ## 1. What is guaranteed in code
@@ -201,8 +196,6 @@ It does **not** make the `claude-code` path compliant (§2.1).
 **Appstrate does not certify "100% ToS compliance."** That is a legal/policy
 determination, not a code property, and the 2026 terms are volatile. Operators
 opt into subscription providers deliberately (via `MODULES`) and own that choice.
-On the production deployment they are not opted into at all (see the operator
-decision at the top).
 
 ### 2.1 Anthropic / `claude-code` — not permitted by the vendor's terms
 
@@ -254,9 +247,9 @@ This is the crux: an operator pointing Appstrate's chat/runner at a Claude
 subscription, as a personal or an organization credential, is doing what the
 page excludes. Appstrate forges no client
 identity (Pi's SDK emits the subscription fingerprint, same as any Pi CLI user),
-but that confers no approval. Treat `claude-code` as a risk a self-hoster may
-take by enabling the module, not as a sanctioned integration, and never enable it
-in production. Re-verify the live page (§4) before relying on this reading.
+but that confers no approval. Treat `claude-code` as a risk an operator takes
+by enabling the module, not as a sanctioned integration. Re-verify the live page
+(§4) before relying on this reading.
 
 ### 2.2 OpenAI / `codex` — a plan-usage program exists for registered apps; the Codex client path is outside it
 
@@ -298,11 +291,10 @@ For automated / headless / team workloads on **either** vendor, the contractuall
 unambiguous option is an **API-key** model provider (OpenAI Platform / Anthropic
 API), billed pay-as-you-go. The subscription providers (`claude-code`, `codex`)
 are a convenience/grey-zone option chosen per-operator; they are not the
-recommended substrate for production automation, and they are **not enabled** on
-the production deployment. A personal subscription spent by its owner alone
-(§1.5) is the narrowest use of this path, and it is still not the clean one. An
-organization subscription is team and automated use of one person's account:
-the workload this section sends to an API key.
+recommended substrate for production automation. A personal subscription spent
+by its owner alone (§1.5) is the narrowest use of this path, and it is still not
+the clean one. An organization subscription is team and automated use of one
+person's account: the workload this section sends to an API key.
 
 ---
 

@@ -19,8 +19,6 @@
  * @earendil-works/pi-ai and POSTs the resulting tokens to
  * `/api/model-providers-oauth/pair/redeem`, which calls
  * `importOAuthModelProviderConnection()` below.
- *
- * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.
  */
 
 import {
