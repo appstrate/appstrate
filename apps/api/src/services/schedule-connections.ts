@@ -24,8 +24,8 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 
 /**
- * The verdicts only an edit of the schedule can clear: an open choice, an unreachable pick, a set
- * an admin pin or enforced default outranks, and — when the schedule's OWN set decided it — a
+ * The verdicts about the schedule's own connection choice: an open choice, an unreachable pick, a
+ * set an admin pin or enforced default outranks, and — when the schedule's OWN set decided it — a
  * pick on an auth serving no selected tool or no pick at all for a required integration. The
  * write refuses them and a fire meeting one disables the schedule: it reads the resolver's error
  * (the write) and the 409 item translated from it (the fire) alike.
