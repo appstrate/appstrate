@@ -24,71 +24,19 @@
  *   - only non-secret fields are persisted (never the bearer token);
  *   - the localStorage entry is cleared once the pairing completes.
  *
- * `claude-code` is used because it needs no identity claim (hook-less), so
- * the synthetic redeem body stays minimal.
- *
  * @tags @smoke
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
-import type { Page } from "@playwright/test";
-
-const SETTINGS_PATH = "/org-settings/models";
-const PROVIDER_ID = "claude-code";
-const PROVIDER_LABEL = /Claude Code/;
-const STORAGE_KEY = "appstrate_pending_pairings";
-
-const CREDENTIAL_DIALOG = "Ajouter une clé de provider de modèle";
-const CONFIRM_DIALOG = "Fermer la fenêtre de connexion ?";
-const SUCCESS_TOAST = "Provider OAuth connecté avec succès";
-
-interface MintedPairing {
-  token: string;
-  command: string;
-}
-
-/**
- * Open the credentials sub-tab, launch the add-credential modal, pick the
- * OAuth provider, and return the freshly-minted command + bearer token read
- * straight from the rendered CLI command.
- */
-async function mintPairingViaUi(page: Page): Promise<MintedPairing> {
-  await page.getByRole("tab", { name: "Clés de providers de modèles", exact: true }).click();
-  await page.getByRole("button", { name: "Ajouter une clé", exact: true }).first().click();
-
-  const dialog = page.getByRole("dialog", { name: CREDENTIAL_DIALOG });
-  await dialog.locator("#pk-provider").click();
-  await page.getByRole("option", { name: PROVIDER_LABEL }).click();
-
-  const code = dialog.locator("code");
-  await expect(code).toContainText("npx @appstrate/connect-helper", { timeout: 15_000 });
-  const command = (await code.innerText()).trim();
-  const token = command.match(/appp_[\w.-]+/)?.[0];
-  expect(token, `bearer token parsed from "${command}"`).toBeTruthy();
-
-  return { token: token as string, command };
-}
-
-/** Simulate the helper redeeming the token (bearer-only, no cookie/org). */
-async function helperRedeem(page: Page, token: string) {
-  const res = await page.request.post("/api/model-providers-oauth/pair/redeem", {
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    data: {
-      providerId: PROVIDER_ID,
-      label: "E2E survive-close",
-      access_token: `fake-${PROVIDER_ID}-access`,
-      refresh_token: `fake-${PROVIDER_ID}-refresh`,
-      expiresAt: Date.now() + 3_600_000,
-      email: `pairing-survive-${Date.now()}@example.test`,
-    },
-  });
-  expect(res.status()).toBe(200);
-  return (await res.json()) as { credentialId: string };
-}
-
-async function readStore(page: Page): Promise<string | null> {
-  return page.evaluate((key) => localStorage.getItem(key), STORAGE_KEY);
-}
+import {
+  SETTINGS_PATH,
+  SUCCESS_TOAST,
+  closePairingModal,
+  deleteCredential,
+  helperRedeem,
+  openPairingModal,
+  readStore,
+} from "../../helpers/pairing.ts";
 
 test.describe("OAuth Model Providers — pairing survives modal close @smoke", () => {
   test("closing the modal mid-flow does not drop the connection", async ({
@@ -104,7 +52,7 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
     });
 
     await page.goto(SETTINGS_PATH);
-    const { token } = await mintPairingViaUi(page);
+    const { token } = await openPairingModal(page);
 
     // The pairing is registered for the watcher — non-secret fields only.
     const stored = await readStore(page);
@@ -116,22 +64,13 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
       "id",
       "orgId",
       "providerId",
+      "target",
     ]);
     expect(stored).not.toContain(token);
     expect(stored).not.toContain("appp_");
 
-    // Close the modal while busy → confirm-on-close guard, then confirm. Both
-    // are the dialog's own text button, not its corner ✕: the ✕ carries the
-    // same accessible name ("Fermer") through a screen-reader-only label, which
-    // is what tells the two apart.
-    const closeButton = (dialogName: string) =>
-      page
-        .getByRole("dialog", { name: dialogName })
-        .getByRole("button", { name: "Fermer", exact: true })
-        .filter({ hasNot: page.locator(".sr-only") });
-    await closeButton(CREDENTIAL_DIALOG).click();
-    await closeButton(CONFIRM_DIALOG).click();
-    await expect(page.getByRole("dialog", { name: CREDENTIAL_DIALOG })).toBeHidden();
+    // Close the modal while busy → confirm-on-close guard, then confirm.
+    await closePairingModal(page);
 
     // Helper redeems AFTER the modal is gone — the watcher must complete it.
     const { credentialId } = await helperRedeem(page, token);
@@ -145,14 +84,13 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
       await expect.poll(() => readStore(page), { timeout: 15_000 }).toBeNull();
       expect(pairingDeletes).toEqual([]);
     } finally {
-      const del = await apiClient.delete(`/model-provider-credentials/${credentialId}`);
-      expect([204, 404]).toContain(del.status());
+      await deleteCredential(apiClient, credentialId);
     }
   });
 
   test("pairing survives a full page reload", async ({ authedPage: page, apiClient }) => {
     await page.goto(SETTINGS_PATH);
-    const { token } = await mintPairingViaUi(page);
+    const { token } = await openPairingModal(page);
     expect(await readStore(page)).not.toBeNull();
 
     // Hard reload — the modal is gone; only the persisted pairing remains.
@@ -174,8 +112,7 @@ test.describe("OAuth Model Providers — pairing survives modal close @smoke", (
       const body = (await list.json()) as { data: { id: string }[] };
       expect(body.data.find((r) => r.id === credentialId)).toBeDefined();
     } finally {
-      const del = await apiClient.delete(`/model-provider-credentials/${credentialId}`);
-      expect([204, 404]).toContain(del.status());
+      await deleteCredential(apiClient, credentialId);
     }
   });
 });
