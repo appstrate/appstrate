@@ -1441,7 +1441,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   bound to the connection.
 
 - **Only a platform-realm account joins an organization or reads it over a
-  cookie** (#PRNUM). An `end_user:<space>` account holding an address could
+  cookie** (#1949). An `end_user:<space>` account holding an address could
   accept an invitation sent to that address, be auto-joined by an org-level
   OAuth client, open the realtime streams' cookie branch once a member, and
   reach the OAuth client administration, which the realm guard exempted with
@@ -1451,7 +1451,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   public paths and unchanged. A social sign-in callback neither signs in nor
   links an identity to an account outside its transaction's realm.
 
-- **An agent's tool call cannot name a login input's placeholder** (#PRNUM).
+- **An agent's tool call cannot name a login input's placeholder** (#1949).
   While a `connect.tool` login runs, the runner's proxy substitutes `{{key}}`
   with the login secret in every request the runner sends to the auth's
   authorized URIs, a parallel tool call's included. The sidecar refuses a call
@@ -1459,14 +1459,14 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   time in the run.
 
 - **Under `RUN_ADAPTER=firecracker`, a `delivery.files` credential belongs to
-  its runner** (#PRNUM). The sidecar wrote it on its own uid with the
+  its runner** (#1949). The sidecar wrote it on its own uid with the
   manifest's mode: `0600` locked the runner out (the SSH integration did not
   start), `0644` opened it to the agent sharing the guest. The file is written
   owner-only and the guest's exec wrapper gives it to the runner's uid
   (`--own`). The fix is in the guest rootfs: it ships with this release's
   Firecracker artifacts.
 
-- **Hardening** (#PRNUM).
+- **Hardening** (#1949).
   - **BREAKING (OIDC): `GET /api/oauth/logout` redirects only to a
     `postLogoutRedirectUris` entry.** A `redirect_uris` entry is no longer
     accepted as a fallback, and a client that registered itself (DCR, CIMD) is
