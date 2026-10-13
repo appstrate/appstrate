@@ -364,7 +364,7 @@ describe("subscription pairings — owner_type", () => {
   });
 
   describe("the pairing records the outcome of its redeem", () => {
-    it("a redeem that wrote a credential reads consumed, with that credential", async () => {
+    it("a redeem that wrote a credential reads connected, with that credential", async () => {
       const { id, token } = await mintPairing(admin);
       const res = await redeem(token);
       expect(res.status).toBe(200);
@@ -372,7 +372,7 @@ describe("subscription pairings — owner_type", () => {
 
       const outcome = {
         stored: { consumed: true, failed: false, credentialId },
-        read: { status: "consumed", credentialId },
+        read: { status: "connected", credentialId },
       };
       expect(await pairingOutcome(admin, id)).toEqual(outcome);
       await expirePairing(id);

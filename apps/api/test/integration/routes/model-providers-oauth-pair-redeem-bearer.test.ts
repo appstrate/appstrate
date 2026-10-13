@@ -115,7 +115,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.status).toBe("consumed");
+    expect(body.status).toBe("connected");
     expect(typeof body.consumed_at).toBe("string");
     expect(body.credentialId).toBe(credentialId);
     expect(body).not.toHaveProperty("consumedAt");

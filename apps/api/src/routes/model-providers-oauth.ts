@@ -330,7 +330,7 @@ export function createModelProvidersOAuthRouter() {
 
   // GET /api/model-providers-oauth/pairing/:id
   // Polled by the dashboard while the user runs the helper. The status is the
-  // outcome of the redeem: `consumed` once it linked a credential, `failed`
+  // outcome of the redeem: `connected` once it linked a credential, `failed`
   // once it ended without one, `expired` past the TTL, `pending` otherwise — a
   // redeem in flight included.
   //
@@ -344,8 +344,8 @@ export function createModelProvidersOAuthRouter() {
     const row = await getPairing(id, orgId, c.get("user").id);
     if (!row) throw notFound("Pairing not found");
 
-    let status: "pending" | "consumed" | "failed" | "expired";
-    if (row.credentialId) status = "consumed";
+    let status: "pending" | "connected" | "failed" | "expired";
+    if (row.credentialId) status = "connected";
     else if (row.failedAt) status = "failed";
     else if (row.expiresAt.getTime() <= Date.now()) status = "expired";
     else status = "pending";

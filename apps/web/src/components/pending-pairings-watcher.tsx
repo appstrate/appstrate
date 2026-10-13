@@ -39,7 +39,7 @@ function PairingPoll({ pairing }: { pairing: PendingPairing }) {
 
   useEffect(() => {
     if (!status || status === "pending") return;
-    if (status === "consumed") {
+    if (status === "connected") {
       toast.success(t("credentials.oauth.callbackSuccess"));
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });

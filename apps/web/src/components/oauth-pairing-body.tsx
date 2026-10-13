@@ -55,8 +55,8 @@ interface OAuthPairingBodyProps {
    */
   onConnected?: (credentialId: string) => void;
   /**
-   * Reports whether a pairing is in flight (minted, not yet
-   * consumed/expired). Hosts use it to confirm-on-close so an accidental
+   * Reports whether a pairing is in flight (minted, its outcome not
+   * yet known). Hosts use it to confirm-on-close so an accidental
    * dismiss doesn't drop the visible command mid-connection.
    */
   onBusyChange?: (busy: boolean) => void;
@@ -102,7 +102,7 @@ export function OAuthPairingBody({
   // here instead. Deferred via queueMicrotask so the parent's
   // setState-on-close doesn't tear into this effect.
   useEffect(() => {
-    if (status !== "consumed" || !connectedId) return;
+    if (status !== "connected" || !connectedId) return;
     if (firedRef.current) return;
     firedRef.current = true;
     if (!registeredRef.current) {
@@ -141,7 +141,7 @@ export function OAuthPairingBody({
       // even if the modal is closed before the helper redeems the token.
       // Only non-secret fields are stored — never the command/token. Without
       // an org context the watcher can't scope the poll, so this body keeps
-      // ownership of the success side effects (see the consumed effect).
+      // ownership of the success side effects (see the connected effect).
       const orgId = getCurrentOrgId();
       if (orgId) {
         addPendingPairing({ id: res.id, providerId, expiresAt: res.expiresAt, orgId });

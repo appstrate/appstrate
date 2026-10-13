@@ -2502,7 +2502,7 @@ export interface paths {
         };
         /**
          * Read pairing status (for dashboard polling)
-         * @description Polled by the dashboard while the user runs the helper. `status` is the outcome of the redeem, read in this order: `consumed` — the redeem created or reconnected a credential, and `credentialId` names it; `failed` — a redeem spent the token and ended without a credential (a refusal or a server error), so a new pairing must be minted; `expired` — no credential, no failure recorded, and the TTL has elapsed; `pending` otherwise. A redeem in flight reads `pending`, and one still running when the TTL elapses reads `expired` until it records its outcome. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:write` or `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.
+         * @description Polled by the dashboard while the user runs the helper. `status` is the outcome of the redeem, read in this order: `connected` — the redeem created or reconnected a credential, and `credentialId` names it; `failed` — a redeem spent the token and ended without a credential (a refusal or a server error), so a new pairing must be minted; `expired` — no credential, no failure recorded, and the TTL has elapsed; `pending` otherwise. A redeem in flight reads `pending`, and one still running when the TTL elapses reads `expired` until it records its outcome. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:write` or `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.
          */
         get: operations["getOAuthModelProviderPairing"];
         put?: never;
@@ -17342,7 +17342,7 @@ export interface operations {
                     "application/json": {
                         id: string;
                         /** @enum {string} */
-                        status: "pending" | "consumed" | "failed" | "expired";
+                        status: "pending" | "connected" | "failed" | "expired";
                         /**
                          * Format: date-time
                          * @description When the token was redeemed, whatever the outcome. Null until a redeem presents it.
@@ -17352,7 +17352,7 @@ export interface operations {
                         expiresAt: string;
                         /**
                          * Format: uuid
-                         * @description ID of the model_provider_credentials row the redeem created or reconnected: always set when `status` is `consumed`, null on every other status.
+                         * @description ID of the model_provider_credentials row the redeem created or reconnected: always set when `status` is `connected`, null on every other status.
                          */
                         credentialId: string | null;
                     };

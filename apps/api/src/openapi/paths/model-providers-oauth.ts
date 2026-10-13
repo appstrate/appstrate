@@ -105,7 +105,7 @@ export const modelProvidersOAuthPaths = {
       tags: ["Model Provider Credentials"],
       summary: "Read pairing status (for dashboard polling)",
       description:
-        "Polled by the dashboard while the user runs the helper. `status` is the outcome of the redeem, read in this order: `consumed` — the redeem created or reconnected a credential, and `credentialId` names it; `failed` — a redeem spent the token and ended without a credential (a refusal or a server error), so a new pairing must be minted; `expired` — no credential, no failure recorded, and the TTL has elapsed; `pending` otherwise. A redeem in flight reads `pending`, and one still running when the TTL elapses reads `expired` until it records its outcome. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:write` or `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.",
+        "Polled by the dashboard while the user runs the helper. `status` is the outcome of the redeem, read in this order: `connected` — the redeem created or reconnected a credential, and `credentialId` names it; `failed` — a redeem spent the token and ended without a credential (a refusal or a server error), so a new pairing must be minted; `expired` — no credential, no failure recorded, and the TTL has elapsed; `pending` otherwise. A redeem in flight reads `pending`, and one still running when the TTL elapses reads `expired` until it records its outcome. The plaintext token is never re-served — only status + timestamps. **Permission:** `model-provider-credentials:write` or `model-provider-credentials:connect`; only the member who minted the pairing can read it — another member's answers `404`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
@@ -127,7 +127,7 @@ export const modelProvidersOAuthPaths = {
                   id: { type: "string", pattern: "^pair_[A-Za-z0-9_-]+$" },
                   status: {
                     type: "string",
-                    enum: ["pending", "consumed", "failed", "expired"],
+                    enum: ["pending", "connected", "failed", "expired"],
                   },
                   consumed_at: {
                     type: ["string", "null"],
@@ -140,7 +140,7 @@ export const modelProvidersOAuthPaths = {
                     type: ["string", "null"],
                     format: "uuid",
                     description:
-                      "ID of the model_provider_credentials row the redeem created or reconnected: always set when `status` is `consumed`, null on every other status.",
+                      "ID of the model_provider_credentials row the redeem created or reconnected: always set when `status` is `connected`, null on every other status.",
                   },
                 },
               },

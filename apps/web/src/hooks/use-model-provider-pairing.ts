@@ -5,7 +5,7 @@
  * pairing flow. The dashboard mints a pairing token, surfaces the
  * matching `npx @appstrate/connect-helper <token>` command to the user,
  * and polls the pairing until the server states the outcome of the helper's
- * redeem: `consumed` (the OAuth dance completed and the credential is stored),
+ * redeem: `connected` (the OAuth dance completed and the credential is stored),
  * `failed` (the redeem was refused), or `expired`.
  *
  * The dashboard never cancels a pairing when its modal closes (that dropped
@@ -25,7 +25,7 @@ export function useCreateModelProviderPairing() {
  * Poll a pairing's status. `id: null` polls nothing.
  *
  * Polls every 2.5s while the status is `pending`; it stops on a terminal one
- * (consumed / failed / expired) and on any errored request.
+ * (connected / failed / expired) and on any errored request.
  */
 export function useModelProviderPairingStatus(id: string | null) {
   // Guarded like the route: either permission that mints a pairing reads it. A
@@ -49,7 +49,7 @@ export function useModelProviderPairingStatus(id: string | null) {
       },
       // Pairing rows are short-lived ephemera — no point caching beyond the
       // polling window. Always refetch on mount so closing+reopening the
-      // modal can't see a stale "consumed" hit from a prior session.
+      // modal can't see a stale "connected" hit from a prior session.
       staleTime: 0,
       gcTime: 0,
     },

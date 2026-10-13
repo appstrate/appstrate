@@ -634,9 +634,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     judges the pairing's minter again, under the membership lock and with their
     current role, by the predicates of the mint: a minter demoted or removed in
     between is refused.
-  - `GET /api/model-providers-oauth/pairing/{id}` gains the status `failed`: a
-    redeem that spent the token and was refused. `consumed` now always carries a
-    `credentialId`, and a redeem in flight reads `pending`.
+  - `GET /api/model-providers-oauth/pairing/{id}` answers one of four statuses:
+    `pending`, `connected`, `failed`, `expired`. `connected` replaces `consumed`
+    and always carries a `credentialId`; `failed` is a redeem that spent the
+    token and ended without a credential; a redeem in flight reads `pending`.
   - The onboarding quick-connect pairs an organization subscription and seeds
     the models bound to it; a failed seed is shown.
   - Org setting `personal_model_credentials` (default on). Off, personal
