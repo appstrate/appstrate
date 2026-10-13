@@ -70,6 +70,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     const result = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
       label: "Test subscription",
       accessToken,
@@ -105,6 +106,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
       importOAuthModelProviderConnection({
         orgId,
         userId,
+        ownerUserId: userId,
         providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
         label: "Test",
         accessToken: tokenWithoutAccountId,
@@ -121,6 +123,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     const imported = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
       label: "Test subscription",
       accessToken,
@@ -144,7 +147,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     expect(oauth!.providerId).toBe(TEST_OAUTH_HOOKS_PROVIDER_ID);
     expect(oauth!.oauth_email).toBe("user@example.com");
     expect(oauth!.needs_reconnection).toBe(false);
-    // A subscription is owned by the account that imported it, never by the org.
+    // The import writes the owner it was given.
     expect(oauth!.owner_type).toBe("user");
     expect(oauth!.owner_id).toBe(userId);
   });
@@ -157,6 +160,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     const imported = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
       label: "Test subscription",
       accessToken,

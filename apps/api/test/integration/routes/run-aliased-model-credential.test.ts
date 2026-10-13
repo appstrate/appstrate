@@ -57,6 +57,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
     const credentialId = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "Backing credential",
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",

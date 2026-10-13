@@ -55,8 +55,9 @@ export interface ChatPlatformDeps {
    * Resolve the chosen model row (`presetId`) for a chat turn, for the session
    * user `userId`: an API-key / unknown provider yields `{ subscription: false }`
    * (llm-proxy-bound); an oauth2 provider yields the real upstream binding + a
-   * fresh access token from the user's own subscription, or a `needsReconnection`
-   * signal when its credential is dead.
+   * fresh access token from the subscription that serves it (the organization's,
+   * or the user's own on an unbound model), or a `needsReconnection` signal when
+   * its credential is dead.
    */
   resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */

@@ -177,16 +177,18 @@ integration_connections WHERE shared_with_org;` tells whether the step
   from this release together. An image built from this tree pulls the new
   base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
-- **Model credentials: `pg_dump` before the deploy, then script `0042` after
-  it** (#1875). Migration `0087` runs at boot (`model_provider_credentials.owner_user_id`,
+- **Model credentials: `pg_dump` before the deploy** (#1875). Migration `0087`
+  runs at boot (`model_provider_credentials.owner_user_id`,
   `org_models.provider_id` backfilled from each bound credential, a nullable
   `org_models.credential_id`, `uq_org_models_unbound`, `llm_usage.credential_id`);
-  rolling back past it means restoring the dump. Then, app up, run
-  `scripts/migration/0042-personal-model-subscriptions.ts` dry, read its report,
-  and run it with `--apply`: it makes existing subscriptions personal to their
-  creator and unbinds the models bound to them, and refuses an organization it
-  cannot migrate safely (`scripts/migration/README.md`). Production never
-  enables a subscription module, so its report should show none.
+  rolling back past it means restoring the dump. It leaves every stored
+  credential an organization credential (`owner_user_id` NULL), a subscription
+  included: each keeps serving the models bound to it. Migration `0095` adds
+  `model_provider_pairings.owner_user_id` and `failed_at`. Regenerate after the deploy any
+  subscription pairing minted before it (its command is valid 5 minutes): it
+  records no owner, which reads as the organization, so one an owner or admin
+  minted for a personal subscription would be redeemed as an organization
+  credential.
 
 - **After the deploy, run `scripts/migration/0043-promote-auto-clients-to-org.ts`,
   dry, then with `--apply`, once `0044` and `0041` are done** (#1910). It
@@ -577,8 +579,13 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     bound to one credential, `member` unbound (each member serves it), `managed`
     an alias. `credentialId` is `null` for `member` and `managed`.
   - Credential DTO: `allowed_actions` (`edit`, `delete`, `test`, `reconnect`),
-    `bindable`. `reconnect` is the pairing route's own rule: the holder's OAuth
-    credential, flagged or not; any other `credentialId` on a pairing is a 404. The registry gains `personal_allowed`.
+    `bindable`. `bindable` is true for an organization credential, API key or
+    subscription. `reconnect` is listed on an OAuth credential the caller may
+    edit, flagged or not: an organization one for a
+    `model-provider-credentials:write` holder, a personal one for its owner
+    holding `connect` or `write`, while the organization allows personal
+    credentials. A pairing naming a `credentialId` the caller may not reconnect
+    is a 404. The registry gains `personal_allowed`.
   - `model_source` takes `user` (a member's own credential), with `org` and
     `system` (`credential_source` is `MODEL_PAYERS`).
   - `personal_model_credentials` is always served in the organization settings.
@@ -588,7 +595,8 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     `model_credential_required` on a schedule write is judged on its effective
     model.
   - `llm_usage.payer_user_id` and `runs.payer_user_id` record the member whose
-    credential paid; a run's OAuth door compares against `runs.payer_user_id`.
+    credential paid; a run's OAuth door compares a personal credential's owner
+    against `runs.payer_user_id`.
 
 - **BREAKING (API): members bring their own model credentials for the models
   the organization leaves to them** (#1875). A model bound to an organization
@@ -599,8 +607,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   fixed endpoint), else refused with `409 model_credential_required`. Only a
   user principal pays (session, CLI, MCP instance token, chat loopback): an API
   key, a third-party OAuth token, an end user and a schedule never spend a
-  personal credential. The rules: `docs/architecture/MODEL_ALIASES.md`,
-  "Who pays".
+  personal credential. One ownership rule covers an API key and a subscription
+  (OAuth): `owner_user_id` NULL is an organization credential, bindable to a
+  model and serving every caller of it; set, it is that member's personal
+  credential. The rules: `docs/architecture/MODEL_ALIASES.md`, "Who pays".
   - Model DTO: `credentialId` is nullable, and `billed_to` (`user` | `org` |
     `null`, for the caller) is added. `POST /api/models` takes `providerId`, which a `null`
     `credentialId` requires; binding a personal credential is refused with
@@ -615,18 +625,40 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
     organization credential, or a member's (break-glass), takes `delete`. An
     administrator sees no `oauth_email` on a member's subscription, and labels
     are deduplicated within their owner's scope.
+  - `POST /api/model-providers-oauth/pairing` takes
+    `{ providerId, owner_type? }` to create a subscription, with the same
+    `owner_type` (default `org`) under the same permissions:
+    `model-provider-credentials:write` for `org`, `connect` for `user`. It takes
+    `{ providerId, credentialId }` to reconnect one: the owner is the
+    credential's, and `owner_type` beside `credentialId` is a 400. The redeem
+    judges the pairing's minter again, under the membership lock and with their
+    current role, by the predicates of the mint: a minter demoted or removed in
+    between is refused.
+  - `GET /api/model-providers-oauth/pairing/{id}` answers one of four statuses:
+    `pending`, `connected`, `failed`, `expired`. `connected` replaces `consumed`
+    and always carries a `credentialId`; `failed` is a redeem that spent the
+    token and ended without a credential; a redeem in flight reads `pending`.
+  - The onboarding quick-connect pairs an organization subscription and seeds
+    the models bound to it; a failed seed is shown.
   - Org setting `personal_model_credentials` (default on). Off, personal
     credentials can be neither created, reconnected, probed nor spent, and a run
     pinned to one is refused at its next call.
   - A run's proxy calls on a member-paid model serve the personal credential
     frozen at launch; one deleted mid-run is never replaced by another payer's.
     The public LLM proxy never serves a subscription. The sidecar's token door
-    serves a subscription only to a run its owner launched without an API key.
+    serves an organization subscription to any run of the organization pinned
+    to it, and a personal one only to a run its owner pays.
   - Schedules spend organization credentials only: a member-paid model cannot be
     a schedule's `model_id_override` (`409 model_credential_required`), a model
     a schedule overrides with cannot be unbound (`409 model_scheduled`), and a
     schedule firing one through an agent's or the organization's default fails.
-  - A subscription is reconnected only by its holder, judged at redeem time.
+  - A subscription is reconnected by whoever may edit it: an organization one
+    by a `model-provider-credentials:write` holder, a personal one by its owner
+    holding `connect` or `write`, while the organization allows personal
+    credentials.
+  - A member who leaves the organization takes their personal credentials with
+    them. Organization credentials stay, a subscription that member connected
+    included.
   - `llm_usage.credential_id` (uuid, no foreign key) records the credential that
     served a call (NULL for a platform key or an alias).
   - `needs_reconnection` is read for the caller on an unbound model: true when
@@ -1242,6 +1274,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Fixed
 
+- **A subscription pairing's redeem is audited.**
+  `oauth_model_provider.imported` and `oauth_model_provider.reconnected` were
+  dropped: the redeem route carries no organization context. They are recorded
+  with the pairing's organization, and its minter as actor.
 - **A fire refused over the schedule's own connection choice disables the
   schedule** (#1954). It recorded a failed run and stayed armed, failing at
   every tick, on the verdicts the schedule write refuses

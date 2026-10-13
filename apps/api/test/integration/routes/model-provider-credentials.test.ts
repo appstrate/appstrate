@@ -57,7 +57,7 @@ describe("Model Provider Keys API", () => {
         data: { providerId: string; personal_allowed: boolean }[];
       };
       const allowed = (id: string) => body.data.find((p) => p.providerId === id)!.personal_allowed;
-      // An overridable endpoint is the organization's to choose; a fixed OAuth provider is personal.
+      // An overridable endpoint is the organization's to choose; a fixed one may also be a member's own.
       expect(allowed("openai-compatible")).toBe(false);
       expect(allowed("test-oauth")).toBe(true);
     });

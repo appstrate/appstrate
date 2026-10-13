@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TestResult } from "@appstrate/shared-types";
 import { toast } from "sonner";
 import { BrainCircuit, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -47,6 +48,22 @@ import { ModelUnavailableBadge } from "../../components/model-availability-badge
 import { DefaultCell } from "../../components/default-cell";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import { isModelUnpriced } from "./model-pricing";
+
+/**
+ * A model's connection-test result. The generic sentence for `NEEDS_RECONNECTION`
+ * words an integration connection and its owner; a model's credential is neither.
+ */
+export function ModelTestResult({ result }: { result: TestResult }) {
+  const { t } = useTranslation("settings");
+  if (!result.ok && result.error === "NEEDS_RECONNECTION") {
+    return (
+      <span className="text-destructive text-sm">{t("models.credentialUnavailableHint")}</span>
+    );
+  }
+  return (
+    <TestResultSpan result={result} successKey="models.testSuccess" failedKey="models.testFailed" />
+  );
+}
 
 export function ModelsList({
   models,
@@ -186,13 +203,7 @@ export function ModelsList({
                             the edit button below. */}
                         {!m.aliased && canWrite && (
                           <>
-                            {testResults[m.id] && (
-                              <TestResultSpan
-                                result={testResults[m.id]!}
-                                successKey="models.testSuccess"
-                                failedKey="models.testFailed"
-                              />
-                            )}
+                            {testResults[m.id] && <ModelTestResult result={testResults[m.id]!} />}
                             <Button
                               variant="ghost"
                               size="sm"

@@ -2,7 +2,8 @@
 
 /**
  * Leaving an organization takes the member's personal model credentials and
- * pairings with it, and leaves organization credentials and other members' alone.
+ * pairings with it, and leaves organization credentials (the ones that member
+ * connected included) and other members' alone.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -11,6 +12,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, modelProviderPairings } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
+import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import {
@@ -68,10 +70,11 @@ describe("leaving an organization — model provider credentials and pairings", 
     stayer = await addMember(ctx);
   });
 
-  it("deletes the leaver's personal credentials and pairings, keeps org credentials", async () => {
+  it("deletes the leaver's personal credentials and pairings, keeps org credentials, the subscription they connected included", async () => {
     const orgCredentialId = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "Org key",
       providerId: FIXED_KEY_PROVIDER,
       apiKey: "sk-org",
@@ -87,6 +90,7 @@ describe("leaving an organization — model provider credentials and pairings", 
     await createOAuthCredential({
       orgId: ctx.orgId,
       userId: leaver,
+      ownerUserId: leaver,
       label: "Leaver subscription",
       providerId: OAUTH_PROVIDER,
       accessToken: "at-leaver",
@@ -94,6 +98,22 @@ describe("leaving an organization — model provider credentials and pairings", 
     });
     await createPairing({
       userId: leaver,
+      ownerUserId: leaver,
+      orgId: ctx.orgId,
+      providerId: OAUTH_PROVIDER,
+      platformUrl: "http://localhost:3000",
+      ttlSeconds: 300,
+    });
+    // An organization subscription the leaver connected, and their pending pairing for another.
+    const { id: orgSubscriptionId } = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: OAUTH_PROVIDER,
+      label: "Org subscription",
+      createdBy: leaver,
+    });
+    await createPairing({
+      userId: leaver,
+      ownerUserId: null,
       orgId: ctx.orgId,
       providerId: OAUTH_PROVIDER,
       platformUrl: "http://localhost:3000",
@@ -109,6 +129,7 @@ describe("leaving an organization — model provider credentials and pairings", 
     });
     await createPairing({
       userId: stayer,
+      ownerUserId: stayer,
       orgId: ctx.orgId,
       providerId: OAUTH_PROVIDER,
       platformUrl: "http://localhost:3000",
@@ -125,7 +146,7 @@ describe("leaving an organization — model provider credentials and pairings", 
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.orgId, ctx.orgId));
     const remainingIds = remaining.map((r) => r.id).sort();
-    expect(remainingIds).toEqual([orgCredentialId, stayerKeyId].sort());
+    expect(remainingIds).toEqual([orgCredentialId, orgSubscriptionId, stayerKeyId].sort());
     expect(await pairingIdsOf(stayer)).toHaveLength(1);
   });
 });

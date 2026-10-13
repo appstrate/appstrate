@@ -710,6 +710,84 @@ describe("buildModelsBatchPayload — the credential they all share", () => {
   });
 });
 
+describe("a subscription provider — the organization's subscription, or each member's", () => {
+  const SUBSCRIPTION = { provider: CLAUDE_CODE, inlineApiKey: "", baseUrl: "", unbound: false };
+  const ROWS = [row({ id: "claude-sonnet-4-5", origin: "catalog" })];
+  const refusal = (over: { selectedCredentialId: string | null; unbound?: boolean }) =>
+    modelFormRefusals({
+      modelId: "claude-sonnet-4-5",
+      manual: false,
+      offeredIds: null,
+      ...SUBSCRIPTION,
+      ...over,
+    }).credentialId;
+
+  it("binds the picked organization subscription, for one model and for a batch", () => {
+    expect(
+      ok(
+        build({
+          provider: CLAUDE_CODE,
+          fields: fields({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" }),
+        }),
+      ),
+    ).toEqual({ modelId: "claude-sonnet-4-5", credentialId: "cred_org_sub" });
+    expect(
+      ok(
+        buildModelsBatchPayload({
+          ...SUBSCRIPTION,
+          selectedCredentialId: "cred_org_sub",
+          rows: ROWS,
+        }),
+      ),
+    ).toEqual({ credentialId: "cred_org_sub", models: [{ modelId: "claude-sonnet-4-5" }] });
+    expect(refusal({ selectedCredentialId: "cred_org_sub" })).toBeNull();
+  });
+
+  it("asks for a subscription or each member while neither is chosen", () => {
+    expect(
+      buildModelsBatchPayload({ ...SUBSCRIPTION, selectedCredentialId: null, rows: ROWS }),
+    ).toEqual({
+      ok: false,
+      field: "credentialId",
+      messageKey: "models.form.subscriptionRequired",
+    });
+    expect(refusal({ selectedCredentialId: null })).toBe(
+      "settings:models.form.subscriptionRequired",
+    );
+  });
+
+  it("leaves the model unbound when each member is chosen", () => {
+    expect(
+      ok(
+        buildModelsBatchPayload({
+          ...SUBSCRIPTION,
+          selectedCredentialId: null,
+          unbound: true,
+          rows: ROWS,
+        }),
+      ),
+    ).toEqual({
+      credentialId: null,
+      providerId: "claude-code",
+      models: [{ modelId: "claude-sonnet-4-5" }],
+    });
+    expect(refusal({ selectedCredentialId: null, unbound: true })).toBeNull();
+  });
+
+  it("mints no credential from a typed key: a subscription is paired, not typed", () => {
+    const typed = { ...SUBSCRIPTION, inlineApiKey: "sk-typed" };
+    expect(buildModelsBatchPayload({ ...typed, selectedCredentialId: null, rows: ROWS })).toEqual({
+      ok: false,
+      field: "credentialId",
+      messageKey: "models.form.subscriptionRequired",
+    });
+    const bound = ok(
+      buildModelsBatchPayload({ ...typed, selectedCredentialId: "cred_org_sub", rows: ROWS }),
+    );
+    expect("newCredential" in bound).toBe(false);
+  });
+});
+
 describe("modelFormRefusals", () => {
   const base = {
     modelId: "",
@@ -742,7 +820,7 @@ describe("modelFormRefusals", () => {
     });
     expect(
       modelFormRefusals({ ...base, provider: CLAUDE_CODE, selectedCredentialId: null }),
-    ).toEqual({ credentialId: "settings:models.form.eachMemberRequired", modelId: null });
+    ).toEqual({ credentialId: "settings:models.form.subscriptionRequired", modelId: null });
     // A typed key answers it; with no provider there is no key row to say it on.
     expect(
       modelFormRefusals({ ...base, selectedCredentialId: null, inlineApiKey: "sk-x" }).credentialId,

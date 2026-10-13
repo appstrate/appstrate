@@ -18,11 +18,13 @@ import { createTestContext, memberContext, type TestContext } from "../../helper
 import {
   seedAgent,
   seedOrgModelProviderKey,
+  seedOrgModelProviderOAuth,
   seedSchedule,
   seedSpace,
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
+import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import {
   createFakeOrchestrator,
   waitForRunPipelineSettled,
@@ -174,6 +176,48 @@ describe("schedule payer — organization credentials only", () => {
     expect(res.status).toBe(409);
     expect(body.code).toBe("model_credential_required");
     expect(body.detail).toContain("bound to an organization credential");
+  });
+
+  it("accepts a schedule on a model bound to an organization subscription, not on one left to each member's", async () => {
+    const createSchedule = (modelDbId: string) =>
+      app.request(`/api/agents/${AGENT_ID}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          version_override: "draft",
+          model_id_override: modelDbId,
+        }),
+      });
+    const orgSubscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      createdBy: ctx.user.id,
+    });
+    const bound = await createOrgModel(ctx.orgId, "Team plan", TEST_OAUTH_MODEL_ID, ctx.user.id, {
+      credentialId: orgSubscription.id,
+    });
+    // The caller's own subscription serves the unbound model for them, never for a schedule.
+    await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      createdBy: ctx.user.id,
+      ownerUserId: ctx.user.id,
+    });
+    const unbound = await createOrgModel(ctx.orgId, "Own plan", TEST_OAUTH_MODEL_ID, ctx.user.id, {
+      credentialId: null,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+    });
+
+    const accepted = await createSchedule(bound);
+    expect(accepted.status).toBe(201);
+    expect(((await accepted.json()) as { model_id_override: string }).model_id_override).toBe(
+      bound,
+    );
+
+    const refused = await createSchedule(unbound);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code: string }).code).toBe("model_credential_required");
   });
 
   it("refuses a schedule whose organization default is an unbound model", async () => {

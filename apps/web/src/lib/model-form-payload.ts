@@ -162,7 +162,8 @@ type CredentialFailure = { ok: false; field: "credentialId"; messageKey: string 
 
 /**
  * The credential half of any create: an existing selection, the inline key to
- * create first, or none when each member brings their own (`unbound`).
+ * create first, or none when each member brings their own (`unbound`). A
+ * subscription (`oauth2`) is paired, never typed: it binds a selection or nothing.
  */
 function resolveCredentialBinding(input: {
   provider: ModelFormProvider | undefined;
@@ -178,12 +179,14 @@ function resolveCredentialBinding(input: {
     }
     return { ok: true, binding: { credentialId: null, providerId: provider.providerId } };
   }
-  // A subscription is personal: an organization model on one is left to each member.
+  const credentialId = input.selectedCredentialId ?? "";
   if (provider?.authMode === "oauth2") {
-    return { ok: false, field: "credentialId", messageKey: "models.form.eachMemberRequired" };
+    if (!credentialId) {
+      return { ok: false, field: "credentialId", messageKey: "models.form.subscriptionRequired" };
+    }
+    return { ok: true, binding: { credentialId } };
   }
   const inlineApiKey = input.inlineApiKey.trim();
-  const credentialId = input.selectedCredentialId ?? "";
   const newCredentialProvider = !credentialId && inlineApiKey ? provider : undefined;
 
   if (!newCredentialProvider) {

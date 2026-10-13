@@ -54,6 +54,7 @@ describe("model credential audit", () => {
     const id = await createOAuthCredential({
       orgId: admin.orgId,
       userId: member.user.id,
+      ownerUserId: member.user.id,
       label: "Member subscription",
       providerId: OAUTH_PROVIDER,
       accessToken: "at-member",
@@ -79,6 +80,7 @@ describe("model credential audit", () => {
     const id = await createOAuthCredential({
       orgId: admin.orgId,
       userId: member.user.id,
+      ownerUserId: member.user.id,
       label: "Own subscription",
       providerId: OAUTH_PROVIDER,
       accessToken: "at-own",
@@ -104,6 +106,7 @@ describe("model credential audit", () => {
     const id = await createApiKeyCredential({
       orgId: admin.orgId,
       userId: admin.user.id,
+      ownerUserId: null,
       label: "Org key",
       providerId: ORG_KEY_PROVIDER,
       apiKey: "sk-before",
@@ -125,6 +128,7 @@ describe("model credential audit", () => {
     const personalId = await createOAuthCredential({
       orgId: admin.orgId,
       userId: otherMember.user.id,
+      ownerUserId: otherMember.user.id,
       label: "Departing subscription",
       providerId: OAUTH_PROVIDER,
       accessToken: "at-departing",

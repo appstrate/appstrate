@@ -611,7 +611,7 @@ function personalCredentialNotBindable(): ApiError {
     code: "personal_credential_not_bindable",
     title: "Invalid Request",
     detail:
-      "A model can only be bound to an organization API key: a subscription or a member's own credential is never shared. Without one, each member serves it with their own credential.",
+      "A model can only be bound to an organization credential: a member's own credential is never shared. Without one, each member serves it with their own credential.",
     param: "credentialId",
   });
 }
@@ -870,7 +870,7 @@ export async function seedOrgModelsForCredential(
   // A seed is an organization binding: a member's own credential is never bound.
   const credential = await loadCredentialBinding(orgId, credentialId);
   if (!credential) throw invalidRequest("credentialId is unknown", "credentialId");
-  if (credential.ownerUserId !== null) throw personalCredentialNotBindable();
+  if (!isBindableCredential(credential)) throw personalCredentialNotBindable();
 
   return db.transaction(async (tx) => {
     // Dedup: skip if any model already references this credential.
@@ -1357,8 +1357,9 @@ async function resolvePersonalModel(
 /**
  * Resolve a model for `payerUserId`, whose personal credentials serve an unbound
  * model (`null`: none applies). A bound or built-in model is the organization's or
- * the platform's whoever calls. `viaProxy` skips subscriptions, which the LLM proxy
- * never serves. `null` when the model is missing or disabled.
+ * the platform's whoever calls. `viaProxy` leaves subscriptions out of the payer's
+ * personal chain (the LLM proxy refuses one, a bound one included, at its own door).
+ * `null` when the model is missing or disabled.
  */
 export async function loadModel(
   orgId: string,
