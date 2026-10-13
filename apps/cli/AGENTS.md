@@ -180,9 +180,10 @@ appstrate api GET /api/credential-proxy/proxy \
 # `--connection` and `--input` go before the `--`. The command names the run
 # itself: $APPSTRATE_RUN_ID is set in its environment only, hence the single
 # quotes. stdout and the exit code are the command's; the run ends success on
-# exit 0, failed otherwise, cancelled on a signal. A run cancelled or failed on
-# the instance refuses the calls naming it: the CLI says so once on stderr and
-# the command keeps running.
+# exit 0, failed otherwise, cancelled on a signal. When the run is closed on
+# the instance (cancelled, failed by the watchdog, or past its sink TTL), the
+# CLI says so once on stderr and the command keeps running, while the instance
+# stops serving the calls that name the run.
 appstrate run @acme/email-sorter -- sh -c '
   appstrate api --fail-with-body GET /api/credential-proxy/proxy \
     -H "X-Run-Id: $APPSTRATE_RUN_ID" \

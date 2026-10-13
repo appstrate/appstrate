@@ -899,7 +899,7 @@ A run executed on the instance (`--remote`, the default for a package id) involv
 appstrate run @scope/agent[@spec] [options] -- <command> [args…]
 ```
 
-With a command after a literal `--`, no agent executes and no model is called. The CLI registers a run of the agent on the instance (`POST /api/runs/remote`) and is its runner: it emits the run's first event, keeps its heartbeat, starts the command and finalizes the run with the command's outcome. The agent's bundle is never fetched. The target is a package id active in the space; a bundle path is refused. The command is what follows a `--` placed after the target, and options go before that `--`. A `--` ahead of the target only ends option parsing, so `appstrate run -- @scope/agent` runs the agent.
+With a command after a literal `--`, no agent executes and no model is called. The CLI registers a run of the agent on the instance (`POST /api/runs/remote`) and is its runner: it emits the run's first event, keeps its heartbeat, starts the command and finalizes the run with the command's outcome. The agent's bundle is never fetched. The target is a package id active in the space; a bundle path is refused. The command is what follows a `--` placed after the target, and options go before that `--`. A `--` ahead of the target only ends option parsing, so `appstrate run -- @scope/agent` runs the agent. A `--` in the place of an option's value is refused (`error: option '…' argument missing`), as in `appstrate run @scope/agent --input -- <command>`.
 
 The command reads the run id from `APPSTRATE_RUN_ID` and names it on its credential-proxy calls. Those calls take the proxy's run path (see Integration calls of a locally executed run) and reach the connections the run bound, including one another member shared into the space and one an enforced org default imposes, which a call outside a run never reaches. `appstrate api` reads no environment variable for the run; the command passes the header itself.
 
@@ -933,7 +933,7 @@ The command's outcome is the run's, and its exit code is the CLI's:
 | The instance refuses the registration      | no run      | 1 (the command is not started)        |
 | The instance refuses the run's first event | `failed`    | 1 (the command is not started)        |
 
-On a signal the CLI finalizes the run `cancelled` at once and stops the command meanwhile: SIGTERM, then SIGKILL after 3 seconds. If the CLI process exits while the command is alive (a second Ctrl-C, a crash), it kills the command with SIGKILL. After a refused first event the `failed` finalize is best effort.
+On a signal the CLI finalizes the run `cancelled` at once, however the command then ends, and stops the command meanwhile: SIGTERM, then SIGKILL after 3 seconds. If the CLI process exits while the command is alive (a second Ctrl-C, a crash), it kills the command with SIGKILL. These signals go to the command's own process. Processes the command started are the command's to stop: `sh -c 'python sync.py'` signalled with SIGTERM leaves `python` running. A Ctrl-C at a terminal reaches the whole foreground process group anyway. After a refused first event the `failed` finalize is best effort.
 
 Every finalize states zero tokens, and the CLI sends no output. The instance does not apply its zero-token check to a run whose runner is a command, and does not judge such a run by the agent's output schema when it emits no output. An output a command runner does emit is validated against that schema like any other run's.
 
