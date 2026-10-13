@@ -149,7 +149,7 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
       const runId = c.req.header("X-Run-Id") || null;
-      const reach = await authorizeProxyCall({
+      await authorizeProxyCall({
         permissions: callerPermissions(c),
         orgId,
         spaceId,
@@ -321,8 +321,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
-          ...(run ? { run } : {}),
-          ...(reach ? { reach } : {}),
+          ...(run ? { run } : { reach: reachOutsideRun(callerPermissions(c)) }),
           integrationId,
           method,
           target,

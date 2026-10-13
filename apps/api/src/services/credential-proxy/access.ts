@@ -40,11 +40,11 @@ interface ProxyAccessInput {
   onDenied: (required: string) => void;
 }
 
-/** Throws unless `input` may take its `runId`'s path; the reach outside a run, `null` for a run. */
-export async function authorizeProxyCall(input: ProxyAccessInput): Promise<ProxyReach | null> {
+/** Throws unless the caller may take the path its `runId` selects. */
+export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void> {
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
   if (runId === null) {
-    if (permissions.has(PROXY_OWN_PERMISSION)) return reachOutsideRun(permissions);
+    if (permissions.has(PROXY_OWN_PERMISSION)) return;
     onDenied(PROXY_OWN_PERMISSION);
     throw forbidden(
       `Insufficient permissions: ${PROXY_OWN_PERMISSION} required to call the credential proxy ` +
@@ -60,7 +60,6 @@ export async function authorizeProxyCall(input: ProxyAccessInput): Promise<Proxy
     );
   }
   await requireCallerRun({ orgId, spaceId, runId, actor });
-  return null;
 }
 
 /**

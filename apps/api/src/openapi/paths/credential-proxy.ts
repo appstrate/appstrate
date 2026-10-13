@@ -204,7 +204,7 @@ const proxyParameters = [
       "**`credential-proxy:call-own` alone**: only the caller's own connections (user or " +
       "end-user) usable in the request's space are candidates — no org default applies, a soft " +
       "one included — in this order: (1) an integration governed by an ENFORCED org default " +
-      "answers `403 call_run_required` whatever is named; (2) a named connection is used when it is " +
+      "answers `403 call_run_permission_required` whatever is named; (2) a named connection is used when it is " +
       "one of the caller's own, of the requested integration; any other id — another member's " +
       "connection, shared into the space or not, or an unknown id — is one and the same " +
       "`404 credential_not_found`; (3) nothing named: exactly one own connection is used, none " +
@@ -298,7 +298,7 @@ const proxyResponses = {
       "does not name its hosts: it is empty or has an entry that leaves the host to the " +
       "caller, or every entry matching the target reaches it through a wildcard past the " +
       "registrable domain written under it, judged with the Public Suffix List (the message " +
-      "then names the host to list) (`http_request_denied`); `call_run_required` — no `X-Run-Id`, " +
+      "then names the host to list) (`http_request_denied`); `call_run_permission_required` — no `X-Run-Id`, " +
       "an enforced org default governs the integration in this space and the caller holds " +
       "`credential-proxy:call-own` without `credential-proxy:call-run` " +
       "(`http_request_denied`); `forbidden` — the principal lacks " +
@@ -333,8 +333,9 @@ const proxyResponses = {
       "`label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in " +
       "`X-Connection-Id`. `needs_reconnection` — the connection that would be bound (the run's " +
       "bound one included) needs its owner to reconnect it. `pinned_connection_unavailable` — " +
-      "no `X-Run-Id`, and the org default that binds the call names a connection the caller " +
-      "cannot reach.",
+      "no `X-Run-Id`: a member of the ORG DEFAULT that binds the call is out of the caller's " +
+      "reach (this path applies no agent pin); `errors[0].source` names the layer, " +
+      "`org_default_enforced` or `org_default`.",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },
@@ -451,7 +452,7 @@ const connectionOutsideRunSchema = {
     "authorized_uris",
     "allow_all_uris",
     "needs_reconnection",
-    "call_run_required",
+    "call_run_permission_required",
   ],
   properties: {
     integration_package_id: {
@@ -498,12 +499,12 @@ const connectionOutsideRunSchema = {
       type: "boolean",
       description: "A call binding it answers `409 needs_reconnection` until it is reconnected.",
     },
-    call_run_required: {
+    call_run_permission_required: {
       type: "boolean",
       description:
         "An enforced org default governs the integration in this space and the caller holds " +
         "no `credential-proxy:call-run`: their call without `X-Run-Id` answers " +
-        "`403 call_run_required`, this connection named or not.",
+        "`403 call_run_permission_required`, this connection named or not.",
     },
   },
 } as const;
@@ -524,9 +525,13 @@ export const credentialProxyPaths = {
         "space, each telling which it is (`owned_by_actor`); of an integration governed by an " +
         "enforced org default, that default's members only. Grouped by integration, oldest " +
         "first within one. An entry the caller does not own is used when named with " +
-        "`X-Connection-Id` or designated by an org default, and several own entries of one " +
-        "integration need `X-Connection-Id`; `call_run_required` and `needs_reconnection` tell which " +
-        "entries a call would still refuse. No credential is decrypted to build it. Requires " +
+        "`X-Connection-Id` or designated by an org default. `call_run_permission_required` and " +
+        "`needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call " +
+        "naming none follows the order that parameter describes on " +
+        "`/api/credential-proxy/proxy`: several own entries of one integration need it, and " +
+        "with `credential-proxy:call-run` an org default binds its set before the caller's own " +
+        "connection, refusing the call while one of its members is out of the caller's reach " +
+        "or needs reconnecting. No credential is decrypted to build it. Requires " +
         "`credential-proxy:call-own`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

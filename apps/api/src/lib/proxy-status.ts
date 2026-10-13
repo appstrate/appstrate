@@ -57,7 +57,7 @@ const PROXY_PROBLEMS = {
     title: "Credential Exfiltration Refused",
     proxyError: "http_request_denied",
   },
-  call_run_required: {
+  call_run_permission_required: {
     status: 403,
     title: "Call-Run Permission Required",
     proxyError: "http_request_denied",
@@ -112,13 +112,14 @@ export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode
 }
 
 /** The problem a proxy answers for `code`; `detail` never names a secret. */
-export function proxyProblem(code: ProxyProblemCode, detail: string): ApiError {
+export function proxyProblem(code: ProxyProblemCode, detail: string, param?: string): ApiError {
   const problem: ProxyProblem = PROXY_PROBLEMS[code];
   return new ApiError({
     status: problem.status,
     code,
     title: problem.title,
     detail,
+    param,
     ...(problem.proxyError
       ? { headers: { "Proxy-Status": proxyErrorStatus(problem.proxyError) } }
       : {}),

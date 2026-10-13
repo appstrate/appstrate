@@ -1319,7 +1319,7 @@ describe("POST /api/credential-proxy/proxy — outside a run with credential-pro
     });
   }
 
-  it("an enforced org default: 403 call_run_required whatever is named, its members never listed", async () => {
+  it("an enforced org default: 403 call_run_permission_required whatever is named, its members never listed", async () => {
     const own = await seedGmailConnection(ctx, "own-1");
     const shared = await seedGmailConnection(colleague, "theirs-shared", { shared: true });
     await orgDefault(ctx, [shared], true);
@@ -1328,7 +1328,7 @@ describe("POST /api/credential-proxy/proxy — outside a run with credential-pro
     for (const id of named) {
       const res = await call(id ? { "X-Connection-Id": id } : {});
       const text = await res.clone().text();
-      await expectProblem(res, 403, { code: "call_run_required" });
+      await expectProblem(res, 403, { code: "call_run_permission_required" });
       expect(res.headers.get("proxy-status")).toBe("appstrate; error=http_request_denied");
       expect(text).toContain("also holds credential-proxy:call-run");
       expect(text).not.toContain(shared);
@@ -1473,7 +1473,9 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
   }
 
   /** What a call answers: the connection it used, or the platform's refusal. */
-  type Answer = { uses: Connection } | { status: number; code: string; candidates?: Connection[] };
+  type Answer =
+    | { uses: Connection }
+    | { status: number; code: string; param?: string; reason?: string; candidates?: Connection[] };
 
   // `call-own alone` is listed where no test of the describe above pins its answer.
   const ROWS: {
@@ -1505,7 +1507,14 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
       situation: "no own connection, a single shared one, none named",
       owned: 0,
       oneShared: true,
-      answers: { both: { status: 409, code: "must_choose_connection", candidates: ["shared"] } },
+      answers: {
+        both: {
+          status: 409,
+          code: "must_choose_connection",
+          reason: "Only connections shared by other members exist",
+          candidates: ["shared"],
+        },
+      },
     },
     {
       situation: "several own connections, none named",
@@ -1514,6 +1523,7 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
         both: {
           status: 409,
           code: "must_choose_connection",
+          reason: "No single connection applies",
           candidates: ["own", "own2", "shared", "shared2"],
         },
       },
@@ -1532,7 +1542,9 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
       situation: "an enforced default, an own connection outside it named",
       orgDefault: { members: ["shared"], enforce: true },
       named: "own",
-      answers: { both: { status: 400, code: "connection_not_in_org_default" } },
+      answers: {
+        both: { status: 400, code: "connection_not_in_org_default", param: "X-Connection-Id" },
+      },
     },
     {
       situation: "an enforced default of several members, none named",
@@ -1604,8 +1616,9 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
           expect(upstreamAuth).toEqual([`Bearer tok-${LABELS[answer.uses]}`]);
           return;
         }
-        const body = await expectProblem(res, answer.status, { code: answer.code });
+        const body = await expectProblem(res, answer.status, answer);
         expect(upstreamAuth).toEqual([]);
+        if (answer.reason) expect(body.detail).toContain(answer.reason);
         if (answer.candidates) {
           const [item] = body.errors as { candidate_connections: { id: string }[] }[];
           expect(item!.candidate_connections.map((c) => c.id).sort()).toEqual(
@@ -1729,8 +1742,20 @@ describe("POST /api/credential-proxy/proxy — outside a run, both proxy permiss
     expect(JSON.parse(outsideDefault[0]!)).toMatchObject({
       status: 400,
       code: "connection_not_in_org_default",
+      param: "X-Connection-Id",
     });
     for (const body of [...notFound, ...outsideDefault]) expect(body).not.toContain("theirs-");
+    expect(upstreamAuth).toEqual([]);
+  });
+
+  it("an enforced default's member the caller cannot reach, named: 404 credential_not_found, the body of an unknown id where no default governs", async () => {
+    const ids = await seedConnections();
+    const [unknown] = await refusals([crypto.randomUUID()]);
+    await orgDefault(ctx, [ids.shared, ids.private], true);
+
+    const [member] = await refusals([ids.private]);
+    expect(member).toBe(unknown!);
+    expect(JSON.parse(member!)).toMatchObject({ status: 404, code: "credential_not_found" });
     expect(upstreamAuth).toEqual([]);
   });
 });
@@ -1808,7 +1833,7 @@ describe("GET /api/credential-proxy/connections", () => {
       allow_all_uris: false,
       needs_reconnection: needsReconnection,
       owned_by_actor: true,
-      call_run_required: false,
+      call_run_permission_required: false,
     });
     const byId = (a: { connection_id: string }, b: { connection_id: string }) =>
       a.connection_id.localeCompare(b.connection_id);
@@ -1892,18 +1917,22 @@ describe("GET /api/credential-proxy/connections", () => {
     for (const secret of secrets) expect(text).not.toContain(secret);
   });
 
-  /** Each listed row as `[connection_id, owned_by_actor, call_run_required]`, sorted by id. */
+  /** Each listed row as `[connection_id, owned_by_actor, call_run_permission_required]`, sorted by id. */
   async function listedFor(scopes: string[]): Promise<[string, boolean, boolean][]> {
     const res = await list(scopes);
     expect(res.status, await res.clone().text()).toBe(200);
     const body = (await res.json()) as {
-      data: { connection_id: string; owned_by_actor: boolean; call_run_required: boolean }[];
+      data: {
+        connection_id: string;
+        owned_by_actor: boolean;
+        call_run_permission_required: boolean;
+      }[];
     };
     return body.data
       .map((c): [string, boolean, boolean] => [
         c.connection_id,
         c.owned_by_actor,
-        c.call_run_required,
+        c.call_run_permission_required,
       ])
       .sort(([a], [b]) => a.localeCompare(b));
   }

@@ -167,7 +167,7 @@ describe("list_connections", () => {
     authorized_uris: ["https://api.example.com/**"],
     allow_all_uris: false,
     needs_reconnection: false,
-    call_run_required: false,
+    call_run_permission_required: false,
   };
 
   it("reads the route in-process, as the caller, and returns its rows", async () => {
@@ -494,7 +494,7 @@ describe("api_call — result", () => {
       ok: () => relayedJson({ ok: true }),
       // The upstream refusing the connection's credential: relayed, not the platform's 401.
       upstream401: () => relayedJson({ error: "invalid_token" }, 401),
-      call_run_required: () => problem(403, "call_run_required", "Refused."),
+      call_run_permission_required: () => problem(403, "call_run_permission_required", "Refused."),
       must_choose: () =>
         problem(409, "must_choose_connection", "Name one with the X-Connection-Id header.", {
           errors: [{ field: "integrations.x", candidate_connections: candidates }],
@@ -509,15 +509,15 @@ describe("api_call — result", () => {
 
     expect(calls).toHaveLength(order.length);
     expect(result.isError).toBe(false);
-    const [ok, upstream401, callRunRequired, mustChoose, rateLimited] = entries(payload);
+    const [ok, upstream401, callRunPermissionRequired, mustChoose, rateLimited] = entries(payload);
     expect(ok).toMatchObject({ index: 0, status: 200, body: { ok: true } });
     expect(upstream401).toMatchObject({ index: 1, status: 401, body: { error: "invalid_token" } });
     expect(upstream401).not.toHaveProperty("error");
-    expect(callRunRequired).toEqual({
+    expect(callRunPermissionRequired).toEqual({
       index: 2,
       error: {
         status: 403,
-        code: "call_run_required",
+        code: "call_run_permission_required",
         detail: "Refused.",
         request_id: "req_1",
       },

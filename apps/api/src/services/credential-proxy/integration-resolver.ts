@@ -45,6 +45,7 @@ import {
   selectAccessibleConnection,
   upstreamRejectionStreak,
   type ProxyReach,
+  type ProxySelectionPath,
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
@@ -94,7 +95,7 @@ export class IntegrationCredentialNotFoundError extends Error {
   }
 }
 
-interface ResolveIntegrationProxyInput {
+type ResolveIntegrationProxyInput = {
   /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
   orgId: string;
@@ -102,10 +103,7 @@ interface ResolveIntegrationProxyInput {
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
-  /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
-  run?: ProxyRunSelection;
-  reach?: ProxyReach;
-}
+} & ProxySelectionPath<ProxyRunSelection>;
 
 interface ResolvedIntegrationProxyCredentials {
   /** `payload.authorizedUris` is rendered for the connection: it decides what matches. */
@@ -221,7 +219,7 @@ interface ConnectionOutsideRun {
   allow_all_uris: boolean;
   /** A call binding it answers `409 needs_reconnection` until its owner reconnects it. */
   needs_reconnection: boolean;
-  call_run_required: boolean;
+  call_run_permission_required: boolean;
 }
 
 /** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
@@ -258,7 +256,7 @@ export async function listConnectionsOutsideRun(
         authorized_uris: listedAuthorizedUris(authDef, connectionVariablesOf(row.variables)),
         allow_all_uris: authDef.allow_all_uris === true,
         needs_reconnection: row.needsReconnection,
-        call_run_required: reach === "own" && enforcedMembers !== null,
+        call_run_permission_required: reach === "own" && enforcedMembers !== null,
       },
     ];
   });
@@ -330,8 +328,7 @@ function resolveConnection(
   return selectAccessibleConnection(input.integrationId, manifest, input.connectionId ?? null, {
     spaceId: input.spaceId,
     actor: input.actor,
-    ...(input.run ? { run: input.run } : {}),
-    ...(input.reach ? { reach: input.reach } : {}),
+    ...(input.run ? { run: input.run } : { reach: input.reach }),
   });
 }
 

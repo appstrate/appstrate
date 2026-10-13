@@ -57,7 +57,7 @@ import {
   IntegrationCredentialNotFoundError,
   type ProxyRunSelection,
 } from "./integration-resolver.ts";
-import { clearUpstreamRejections, type ProxyReach } from "../integration-connections.ts";
+import { clearUpstreamRejections, type ProxySelectionPath } from "../integration-connections.ts";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -69,7 +69,7 @@ interface CookieJarAdapter {
   set(sessionId: string, connectionId: string, jar: CookieJar, ttlSeconds: number): Promise<void>;
 }
 
-interface ProxyCallInput {
+type ProxyCallInput = {
   /** Org of the space — scopes the published integration version the call reads. */
   orgId: string;
   /** Space that owns the credentials. */
@@ -86,9 +86,6 @@ interface ProxyCallInput {
    * run's bound set, or outside a run one the caller reaches.
    */
   connectionId?: string;
-  /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
-  run?: ProxyRunSelection;
-  reach?: ProxyReach;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -146,7 +143,7 @@ interface ProxyCallInput {
   /** Transport override (tests): keeps every per-hop guard, disables the address pin. */
   fetch?: typeof fetch;
   resolveHost?: HostResolver;
-}
+} & ProxySelectionPath<ProxyRunSelection>;
 
 interface ProxyCallResult {
   /** The `integration_connections` row whose credential the call carried. */
@@ -210,8 +207,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     spaceId: input.spaceId,
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-    ...(input.run ? { run: input.run } : {}),
-    ...(input.reach ? { reach: input.reach } : {}),
+    ...(input.run ? { run: input.run } : { reach: input.reach }),
   };
   let resolved;
   let declaredUris: readonly string[];

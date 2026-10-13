@@ -433,18 +433,17 @@ export interface RunBoundSelection {
 
 export type ProxyReach = "own" | "usable";
 
-interface ConnectionSelectionContext {
-  spaceId: string;
-  actor: Actor;
-  run?: RunBoundSelection;
-  reach?: ProxyReach;
-}
+/** What a proxy call selects from: a run's bound set, or the caller's reach outside a run. */
+export type ProxySelectionPath<R extends RunBoundSelection = RunBoundSelection> =
+  { run: R; reach?: never } | { reach: ProxyReach; run?: never };
+
+type ConnectionSelectionContext = { spaceId: string; actor: Actor } & ProxySelectionPath;
 
 /**
  * The credential proxy's connection of `packageId`. Under a run, a member of its bound set, a
  * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
- * rows in reach (default `own`): `usable` walks the cascade, pins aside; under `own` no org default
- * applies, and an integration an ENFORCED one governs answers `call_run_required`. `null` when nothing
+ * rows in reach: `usable` walks the cascade, pins aside; under `own` no org default
+ * applies, and an integration an ENFORCED one governs answers `call_run_permission_required`. `null` when nothing
  * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
  */
 export async function selectAccessibleConnection(
@@ -457,7 +456,7 @@ export async function selectAccessibleConnection(
   const identity = actorIdentityOf(context.actor);
   const candidatesOf = (set: readonly SelectableRow[]) =>
     set.map((r) => candidateOf(identity, r, []));
-  const { run } = context;
+  const { run, reach } = context;
   let rows: SelectableRow[];
   // A run's bound set passed governance at kickoff, and the `own` reach skips every layer.
   let orgDefaults: Record<string, OrgDefaultPick> | null = null;
@@ -486,13 +485,12 @@ export async function selectAccessibleConnection(
       );
     }
   } else {
-    const reach = context.reach ?? "own";
     const spaceDefaults = await listOrgDefaultsForResolver(context.spaceId);
     if (reach === "usable") {
       orgDefaults = spaceDefaults;
     } else if (spaceDefaults[packageId]?.enforce) {
       throw proxyProblem(
-        "call_run_required",
+        "call_run_permission_required",
         `Integration '${packageId}' is governed by an enforced org default in this space: it is ` +
           `reached by a caller who also holds credential-proxy:call-run, or through an agent ` +
           `run the platform executes.`,
@@ -515,13 +513,17 @@ export async function selectAccessibleConnection(
   }
   if (error?.code === "must_choose_connection") {
     const candidates = error.candidateConnections ?? [];
-    throw mustChoose(packageId, candidates, "No single connection applies");
+    const reason = candidates.some((c) => c.ownedByActor)
+      ? "No single connection applies"
+      : "Only connections shared by other members exist";
+    throw mustChoose(packageId, candidates, reason);
   }
   if (error?.code === "override_outranked") {
     throw proxyProblem(
       "connection_not_in_org_default",
       `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
         `which binds every call in this space: name one of its members, or none.`,
+      "X-Connection-Id",
     );
   }
   if (error) throw resolutionConflict(error);
