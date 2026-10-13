@@ -1839,7 +1839,10 @@ export interface paths {
          */
         put: operations["upsertIntegrationOrgDefault"];
         post?: never;
-        /** Remove the space-wide default connection (admin) */
+        /**
+         * Remove the space-wide default connection (admin)
+         * @description Removes the space's default set for this integration, soft or enforced. The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.
+         */
         delete: operations["deleteIntegrationOrgDefault"];
         options?: never;
         head?: never;
@@ -1858,7 +1861,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a custom OAuth client
-         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of the connections it minted; a member pin does not block it. Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration is left empty is disabled); another member's pin keeps the id, and that member's next run fails with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted connection are disabled (`disabled_reason: connection_deleted`), their overrides kept. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Deletes one of this space's custom clients by id (an org-level client id is a 404 here), with the connections it minted. If it was the default, the cascade re-resolves (org default, else system client) with no auto-promotion. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of the connections it minted; a member pin does not block it. Each deleted connection is dropped from its owner's member pins (a pin left empty is removed) and from its owner's schedules' `connection_overrides` (a schedule whose set for an integration is left empty is disabled); another member's pin keeps the id, and that member's next run fails with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted connection are disabled (`disabled_reason: connection_deleted`), their overrides kept. A member pin the delete empties is removed in the delete's transaction, which disables (`disabled_reason: connection_deleted`) its owner's enabled schedules on that pin's agent, in its space, whose fired version uses the integration and whose set nothing else names; their jobs are removed once it commits. Requires `integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteIntegrationOAuthClient"];
         options?: never;
@@ -1921,7 +1924,10 @@ export interface paths {
          */
         put: operations["upsertIntegrationPin"];
         post?: never;
-        /** Remove an admin pin (admin) */
+        /**
+         * Remove an admin pin (admin)
+         * @description Removes the agent's admin pin for this integration. The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.
+         */
         delete: operations["deleteIntegrationPin"];
         options?: never;
         head?: never;
@@ -2139,7 +2145,7 @@ export interface paths {
         post?: never;
         /**
          * Delete one of the caller's own connections (destructive)
-         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. Another member's pins keep the id, and their next run fails (`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Another actor's enabled schedules naming the connection are disabled in the same transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: while the connection stays unreachable, re-enabling one requires a new choice. Delete-impact counts them (`other_schedules_disabled_count`). Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise); a credential bound to a space deletes only a connection scoped to it (403 for one serving the whole organization).
+         * @description Removes the `integration_connections` row globally. Intent is destructive: 'I never want to use this credential anywhere again'. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names the connection: those sets carry no foreign key, so the dead id would fail every consuming run. An admin removes it from the pin(s) or default first. A member pin does not block the delete. The caller's own member pins and schedule overrides drop the connection in the same transaction — a pin it empties is removed (the cascade falls back), and a schedule override it empties drops that integration and disables the schedule (its job is removed) rather than let it fall back unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. A member pin the delete empties is removed in the delete's transaction, which disables (`disabled_reason: connection_deleted`) its owner's enabled schedules on that pin's agent, in its space, whose fired version uses the integration and whose set nothing else names; their jobs are removed once it commits. Another member's pins keep the id, and their next run fails (`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its owner. Another actor's enabled schedules naming the connection are disabled in the same transaction (`disabled_reason: connection_deleted`, jobs removed), their overrides kept: while the connection stays unreachable, re-enabling one requires a new choice. Delete-impact counts them (`other_schedules_disabled_count`). Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). With a delegated or end-user credential, only connections inside its bound organization (and space, when it pins one) can be deleted (204 with no effect otherwise); a credential bound to a space deletes only a connection scoped to it (403 for one serving the whole organization).
          */
         delete: operations["deleteMyConnection"];
         options?: never;
@@ -2180,7 +2186,7 @@ export interface paths {
         };
         /**
          * The caller's pins and schedules a connection delete would rewrite
-         * @description Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's pins and schedules inside it are listed, though the delete also rewrites those outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.
+         * @description Lists the caller's own member pins and schedules whose connection set names this connection — the references `DELETE /api/me/connections/{connectionId}` rewrites — so a client can say, before confirming, what each loses. Each set keeps `connection_count - 1` connections; a pin left with none is removed (the agent falls back to the default resolution), and a schedule override left with none drops that integration AND disables the schedule (`disables: true`) — an unattended run never silently falls back to another account; its owner re-picks and re-enables it. A member pin the delete empties is removed in the delete's transaction, which disables (`disabled_reason: connection_deleted`) its owner's enabled schedules on that pin's agent, in its space, whose fired version uses the integration and whose set nothing else names; their jobs are removed once it commits. Each pin counts them (`schedules_disabled_count`). One schedule entry per (schedule, integration). Other actors' enabled schedules naming the connection are disabled by the delete with their overrides kept (`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, never listed. Other members' pins, admin pins and org defaults are not listed: the delete leaves them untouched. The lists are empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A delegated or end-user credential sees its bound organization (and space) only: a connection outside it answers empty lists, and only the owner's pins and schedules inside it are listed, though the delete also rewrites those outside it. A pinned connection is still listed, though its delete answers 409 `connection_pinned`. An end user has no pins.
          */
         get: operations["getMyConnectionDeleteImpact"];
         put?: never;
@@ -2291,7 +2297,7 @@ export interface paths {
         post?: never;
         /**
          * Clear the caller's pin on a (agent, integration)
-         * @description Removes the caller's member pin so the resolver falls back to layers 5-6 (soft org default, then accessible connections). Idempotent — 204 even when no row exists.
+         * @description Removes the caller's member pin so the resolver falls back to layers 5-6 (soft org default, then accessible connections). The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.
          */
         delete: operations["deleteMyIntegrationPin"];
         options?: never;
@@ -2971,7 +2977,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an org-level OAuth client
-         * @description Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of them. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Deletes one org-level client by id (a space client id is a 404 here), with every connection it minted in any space of the org. Refused with 409 `connection_pinned` while an admin pin or an org default (enforced or soft) names one of them. A member pin the delete empties is removed in the delete's transaction, which disables (`disabled_reason: connection_deleted`) its owner's enabled schedules on that pin's agent, in its space, whose fired version uses the integration and whose set nothing else names; their jobs are removed once it commits. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         delete: operations["deleteOrgIntegrationOAuthClient"];
         options?: never;
@@ -6938,10 +6944,10 @@ export interface components {
             name: string | null;
             enabled: boolean;
             /**
-             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. Cleared by re-enabling.
+             * @description The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). Cleared by re-enabling.
              * @enum {string|null}
              */
-            disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | null;
+            disabled_reason: "actor_invalid" | "actor_left_org" | "connection_deleted" | "connection_unshared" | "connection_set_unnamed" | null;
             cron_expression: string;
             timezone: string;
             input: {
@@ -14329,14 +14335,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Default removed (idempotent — 204 whether a default existed or not) */
-            204: {
+            /** @description Default removed, or none was set */
+            200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @description How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove. */
+                        schedules_disabled_count: number;
+                    };
+                };
             };
             403: components["responses"]["Forbidden"];
         };
@@ -14625,14 +14636,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Pin removed (idempotent — 204 whether the pin existed or not) */
-            204: {
+            /** @description Pin removed, or there was none */
+            200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @description How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove. */
+                        schedules_disabled_count: number;
+                    };
+                };
             };
             403: components["responses"]["Forbidden"];
         };
@@ -16166,6 +16182,8 @@ export interface operations {
                             integration_package_id: string;
                             /** @description Size of the pinned set before the delete. */
                             connection_count: number;
+                            /** @description How many of the caller's enabled schedules the delete disables by removing this pin; 0 when the pin only shrinks. */
+                            schedules_disabled_count: number;
                         }[];
                         schedules: {
                             scheduleId: string;
@@ -16580,12 +16598,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Pin cleared (or never existed) */
-            204: {
+            /** @description Pin cleared, or there was none */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @description How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove. */
+                        schedules_disabled_count: number;
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
             /** @description The credential's scope ceiling lacks `integrations:connect`, or the caller is an end-user — end-users have no member pins (`forbidden`). */

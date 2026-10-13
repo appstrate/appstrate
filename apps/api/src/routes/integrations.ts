@@ -1563,17 +1563,23 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deletePin(scope, agentPackageId, packageId, null);
+      const { previous, disabledScheduleIds } = await deletePin(
+        scope,
+        agentPackageId,
+        packageId,
+        null,
+      );
+      await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
           before: pinAudit(previous),
+          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — 204 whether the pin existed or not.
-      return c.body(null, 204);
+      return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 
@@ -1624,17 +1630,18 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deleteOrgDefault(scope, packageId);
+      const { previous, disabledScheduleIds } = await deleteOrgDefault(scope, packageId);
+      await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.org_default.deleted",
           resourceType: "integration_org_default",
           resourceId: packageId,
           before: orgDefaultAudit(previous),
+          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — 204 whether a default existed or not.
-      return c.body(null, 204);
+      return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 

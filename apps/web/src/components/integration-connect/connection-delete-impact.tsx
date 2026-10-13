@@ -2,7 +2,7 @@
 
 /**
  * What a delete rewrites among the caller's own member pins and schedule overrides, and how many
- * schedules of other people it disables, said before the user confirms. The confirmation owns the
+ * schedules it disables, said before the user confirms. The confirmation owns the
  * query and keeps its button disabled while it is in flight.
  */
 
@@ -61,6 +61,10 @@ export function ConnectionDeleteImpact({
                       from: pin.connection_count,
                     })
                   : t("connections.pinImpact.resets")}
+                {pin.schedules_disabled_count > 0 &&
+                  ` — ${t("connections.pinImpact.disablesSchedules", {
+                    count: pin.schedules_disabled_count,
+                  })}`}
               </li>
             ))}
           </ul>

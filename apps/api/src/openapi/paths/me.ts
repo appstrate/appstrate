@@ -16,10 +16,13 @@ import {
   connectionUpdateDescription,
   connectionUpdateRefusals400,
   connectionUpdateRequestBody,
+  droppedPinEffect,
   integrationConnectionSchema,
   integrationPackageIdParam,
   lockedBySchema,
   namedSpaceSchema,
+  namingLayerRemovalEffect,
+  namingLayerRemovalSchema,
   shareableSpacesSchema,
 } from "./integrations.ts";
 
@@ -455,7 +458,8 @@ export const mePaths = {
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
         "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
-        "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
+        "(soft org default, then accessible connections). " +
+        namingLayerRemovalEffect,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -463,7 +467,10 @@ export const mePaths = {
         integrationPackageIdParam,
       ],
       responses: {
-        "204": { description: "Pin cleared (or never existed)" },
+        "200": {
+          description: "Pin cleared, or there was none",
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
@@ -486,7 +493,9 @@ export const mePaths = {
         "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
         "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
         "an unattended run never silently falls back to another account; its owner re-picks and " +
-        "re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules " +
+        "re-enables it. " +
+        `${droppedPinEffect} Each pin counts them (\`schedules_disabled_count\`). ` +
+        "One schedule entry per (schedule, integration). Other actors' enabled schedules " +
         "naming the connection are disabled by the delete with their overrides kept " +
         "(`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, " +
         "never listed. Other members' pins, admin pins and org defaults are not listed: the delete " +
@@ -524,6 +533,7 @@ export const mePaths = {
                         "agent_display_name",
                         "integration_package_id",
                         "connection_count",
+                        "schedules_disabled_count",
                       ],
                       properties: {
                         agent_package_id: { type: "string" },
@@ -533,6 +543,12 @@ export const mePaths = {
                           type: "integer",
                           minimum: 1,
                           description: "Size of the pinned set before the delete.",
+                        },
+                        schedules_disabled_count: {
+                          type: "integer",
+                          minimum: 0,
+                          description:
+                            "How many of the caller's enabled schedules the delete disables by removing this pin; 0 when the pin only shrinks.",
                         },
                       },
                     },
@@ -639,6 +655,7 @@ export const mePaths = {
         "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
         "integration and disables the schedule (its job is removed) rather than let it fall back " +
         "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
+        `${droppedPinEffect} ` +
         "Another member's pins keep the id, and their next run fails " +
         "(`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its " +
         "owner. Another actor's enabled schedules naming the connection are disabled in the same " +
