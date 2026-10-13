@@ -25,6 +25,10 @@ import {
 import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
+import {
+  localIntegrationManifest,
+  mcpServerManifest,
+} from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { postInstallPackage } from "../../../src/services/post-install-package.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
@@ -1460,6 +1464,102 @@ describe("POST /api/packages/import-bundle — §3.3 gates the root, not depende
       await skillRootBundle("---\nname: root-skill\ndescription: A root skill.\n---\nBody."),
     );
     expect(res.status).toBe(201);
+  });
+
+  const LOCAL_ROOT = "@rootgate/local-integration";
+  const LOCAL_SERVER = "@rootgate/local-server";
+
+  /** The mcp-server `LOCAL_ROOT` references: `1.0.0`, declaring `search` and `send`. */
+  const localServerManifest = {
+    ...mcpServerManifest({ name: LOCAL_SERVER, version: "1.0.0" }),
+    tools: [{ name: "search" }, { name: "send" }],
+  };
+
+  /**
+   * A `local` integration ROOT defaulting to `defaultTools`, carrying the mcp-server it
+   * references unless `carryServer` is false.
+   */
+  async function localIntegrationRootBundle(
+    defaultTools: string[],
+    carryServer = true,
+  ): Promise<Uint8Array> {
+    const rootManifest = {
+      ...localIntegrationManifest({
+        name: LOCAL_ROOT,
+        serverName: LOCAL_SERVER,
+        auths: { api: { type: "api_key" } },
+      }),
+      ...(carryServer ? { dependencies: { mcp_servers: { [LOCAL_SERVER]: "^1.0.0" } } } : {}),
+      default_tools: defaultTools,
+    };
+    const afps = zipSync({ "manifest.json": enc(JSON.stringify(rootManifest, null, 2)) });
+    const identity = `${LOCAL_SERVER}@1.0.0` as const;
+    const catalog: PackageCatalog = {
+      resolve: async (name) => (name === LOCAL_SERVER ? { identity } : null),
+      fetch: async () => ({
+        identity,
+        manifest: localServerManifest as never,
+        files: new Map([
+          ["manifest.json", enc(JSON.stringify(localServerManifest, null, 2))],
+          ["main.js", enc("// mcp server entry stub\n")],
+        ]),
+        integrity: "sha256-recomputed-by-the-builder",
+      }),
+    };
+    const bundle = await buildBundleFromCatalog(extractRootFromAfps(afps), catalog, {
+      depTypes: carryServer ? ["mcp_servers"] : [],
+    });
+    return writeBundleToBuffer(bundle);
+  }
+
+  it("rejects a local integration ROOT defaulting to a tool its carried mcp-server does not declare", async () => {
+    const res = await importBundle(await localIntegrationRootBundle(["search", "archive"]));
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors?: Array<{ field?: string; code?: string; message?: string }>;
+    };
+    expect(body.errors).toEqual([
+      expect.objectContaining({ field: "manifest.default_tools", code: "invalid_manifest" }),
+    ]);
+    expect(body.errors?.[0]?.message).toContain(
+      `${LOCAL_ROOT}@1.0.0: default_tools contains "archive"`,
+    );
+    // Nothing of the bundle was written: neither the root nor the server it carries.
+    await assertDbMissing(packages, eq(packages.id, LOCAL_ROOT));
+    await assertDbMissing(packages, eq(packages.id, LOCAL_SERVER));
+  });
+
+  it("imports the same bundle when the default names tools the carried mcp-server declares", async () => {
+    const res = await importBundle(await localIntegrationRootBundle(["search", "send"]));
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as { imported: Array<{ identity: string }> };
+    expect(body.imported.map((i) => i.identity).sort()).toEqual([
+      `${LOCAL_ROOT}@1.0.0`,
+      `${LOCAL_SERVER}@1.0.0`,
+    ]);
+  });
+
+  it("judges a local integration ROOT against the stored mcp-server when the bundle carries none", async () => {
+    await seedPackage({
+      id: LOCAL_SERVER,
+      orgId: ctx.orgId,
+      type: "mcp-server",
+      draftManifest: localServerManifest,
+    });
+    await seedPackageVersion({
+      packageId: LOCAL_SERVER,
+      version: "1.0.0",
+      manifest: localServerManifest,
+    });
+
+    const refused = await importBundle(await localIntegrationRootBundle(["archive"], false));
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as { errors?: Array<{ field?: string }> };
+    expect(body.errors?.[0]?.field).toBe("manifest.default_tools");
+    await assertDbMissing(packages, eq(packages.id, LOCAL_ROOT));
+
+    const accepted = await importBundle(await localIntegrationRootBundle(["send"], false));
+    expect(accepted.status, await accepted.clone().text()).toBe(201);
   });
 });
 

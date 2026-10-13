@@ -39,6 +39,7 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   expandScopesGranted,
   missingScopesForConnection,
   partitionScopesByAuthCatalog,
@@ -98,7 +99,10 @@ export interface IntegrationRequirement {
   manifest: IntegrationManifest;
   /** The EFFECTIVE selection (below) is non-empty or `"*"` — what the spawn resolver starts. */
   hasSelectedTools: boolean;
-  /** The agent's own tool selection; drives scope inference (`"*"` → the auth's default scopes). */
+  /**
+   * What scopes are inferred from: `"*"` (written or inherited) → the auth's `default_scopes`,
+   * else the agent's own array.
+   */
   agentTools: readonly string[] | "*";
   /** The agent's explicit oauth scopes — the only scope signal of an apiCall integration. */
   agentScopes: readonly string[];
@@ -1039,7 +1043,6 @@ export function requirementOf(
   entry: ManifestIntegrationEntry,
   manifest: IntegrationManifest,
 ): IntegrationRequirement {
-  const wildcard = entry.tools === "*";
   // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);
   const hasSelectedTools =
@@ -1050,9 +1053,9 @@ export function requirementOf(
     hasSelectedTools,
     hasMandatoryAuth: manifestHasRequiredAuth(manifest),
     required: entry.required === true,
-    // Scope inference stays on the agent's OWN selection: the inherited defaults would newly
-    // fail `insufficient_scopes` on connections that work.
-    agentTools: wildcard ? "*" : (entry.tools ?? []),
+    // Not the effective selection: tool names inherited from `default_tools` contribute no
+    // scope, as they would fail `insufficient_scopes` on connections that work.
+    agentTools: resolveScopeToolSelection(entry.tools, manifest),
     agentScopes: entry.scopes ?? [],
     ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),

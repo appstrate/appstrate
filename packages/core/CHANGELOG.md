@@ -24,7 +24,25 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`./integration`): the `http://` `authorized_uris` entries of the auths
   that inject a credential over HTTP, as write-path issues. `isTrustedHost`
   exempts a host the operator designated as internal.
-
+- **`findUnexposedDefaultTools(manifest, mcpServerTools?)`**
+  (`@appstrate/core/integration`): the write-path rule listing a manifest's
+  `default_tools` entries the platform can prove unexposed, each once. On
+  every source, a name `hidden_tools` lists, a `connect.tool` references, or
+  the upload companion of a hidden `api_call`. Beyond that, a name outside the
+  canonical catalog (`resolveIntegrationToolCatalog`) where it is known: a
+  `none` source carrying no `_meta` key, at any depth, outside the
+  `dev.appstrate/` namespace, a `local` source when `mcpServerTools` (the
+  referenced mcp-server's `tools[]`) is passed, and a `remote` source that
+  declares a `tools_policy`, which bounds the default as it bounds an agent's
+  explicit selection. `integrationManifestSchema` applies the rule to `none`
+  alone. (#1923)
+- **`resolveScopeToolSelection(agentSelection, manifest)`**
+  (`@appstrate/core/integration`): the tool selection an agent's OAuth scopes
+  are inferred from, to pass as `agentTools` to `requiredScopesForAgent` and
+  `missingScopesForConnection`. `"*"` when the effective selection
+  (`resolveEffectiveToolSelection`) is the wildcard, written or inherited from
+  `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
+  names inherited from `default_tools` contribute no scope. (#1923)
 - **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
   gating a call to `/api/credential-proxy/proxy` outside a run, on the
   caller's own connections. `CorePermission` and `SpaceLevelPermission` gain

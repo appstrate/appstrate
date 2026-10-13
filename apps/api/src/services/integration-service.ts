@@ -151,6 +151,20 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
   return parsed.data;
 }
 
+/** An mcp-server's MCPB `tools[]`, a `local` integration's catalog; `undefined` when absent. */
+export function readMcpServerTools(
+  manifest: McpServerManifest,
+): { name: string; description?: string }[] | undefined {
+  const tools = (manifest as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
+  if (!Array.isArray(tools)) return undefined;
+  return tools
+    .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
+    .map((e) => ({
+      name: e.name,
+      description: typeof e.description === "string" ? e.description : undefined,
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Spawn-time package version resolution (single kernel)
 // ---------------------------------------------------------------------------

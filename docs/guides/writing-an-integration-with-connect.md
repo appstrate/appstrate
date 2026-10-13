@@ -782,15 +782,28 @@ origin and strips it otherwise.
 
 ## `tools_policy` — per-tool authorization metadata
 
-`tools_policy` (renamed from 1.x `tools` in AFPS) is an OPTIONAL **sparse policy
-table** keyed by tool name. It carries per-tool authorization metadata for `local`
-and `remote` sources. It is NOT the catalog of "tools this integration exposes" — that
-catalog is canonical to the referenced surface (the `_policy` suffix disambiguates).
+`tools_policy` (renamed from 1.x `tools` in AFPS) is an OPTIONAL table keyed by tool
+name. It carries per-tool authorization metadata for `local` and `remote` sources.
+Whether its keys also bound the names an agent can select, and the names
+`default_tools` may hold, depends on the source:
 
-For `source.kind: "local"`, the canonical catalog is the `tools[]` array of the
-referenced `mcp-server` package; for `remote`, it is obtained via runtime
-introspection of the MCP endpoint; for `api`, there is no MCP-tool catalog and
-`tools_policy` is generally not used.
+- `source.kind: "local"` — the catalog is the `tools[]` array of the referenced
+  `mcp-server` package. `tools_policy` is a **sparse policy overlay** on it: it need
+  not name every tool, and a key adds no tool.
+- `source.kind: "remote"` — the catalog is the endpoint's, read at run time. Once
+  `tools_policy` declares any tool, its keys ARE what an agent can select by name
+  and what `default_tools` may name: another name is refused (`unknown_tool` in an
+  agent's selection, `invalid_manifest` in the default), whatever the endpoint
+  advertises. A tool outside it is reachable only through the `"*"` wildcard, which
+  an agent may use when the integration declares `allow_undeclared_tools: true`. So
+  declare every tool an agent should be able to pick or inherit, with `{}` for one
+  that needs no scope. With no `tools_policy` at all, the manifest names no MCP
+  tool, and a `default_tools` entry is checked only against the names it hides.
+- `source.kind: "none"` — there is no MCP-tool catalog and `tools_policy` is
+  generally not used; the tools are the `api_call` capabilities.
+
+For every source, `api_call` capabilities add their tools to the catalog and
+`hidden_tools` removes names from it.
 
 ```jsonc
 "tools_policy": {
@@ -822,6 +835,39 @@ referenced by a `connect.tool` (run-start primitives) are auto-hidden, so
 ```jsonc
 "hidden_tools": ["internal_debug_dump", "vendor_legacy_endpoint"]
 ```
+
+### `default_tools`
+
+`default_tools` (Appstrate extension, being standardised in AFPS: afps-spec#39) is the
+OPTIONAL tool selection an agent inherits when it declares the integration without
+`integrations_configuration.<id>.tools`: an array of tool names.
+
+```jsonc
+"default_tools": ["list_issues"]
+```
+
+- An integration that declares none has no default, and the platform supplies none:
+  every agent MUST select its tools explicitly. An agent that selects nothing is
+  refused at publish and import (`no_tools_selected`). A draft or inline run of it
+  aborts at boot once it binds a connection to the integration; when no auth of the
+  integration is mandatory (`_meta["dev.appstrate/auth"].required`) and the agent
+  neither marks it `required` nor selects a scope, the dependency is inert and the run
+  starts without the integration.
+- A declared default is what an agent that chooses nothing can call. List what such an
+  agent should have, and keep each tool within the auth's `default_scopes`: a
+  connection made with those scopes cannot serve a default tool that requires more.
+- An entry the platform judges unexposed is refused when the manifest is written
+  (`400 validation_failed`, carrying an `invalid_manifest` error on
+  `manifest.default_tools`): for every source, a name `hidden_tools` lists, a
+  `connect.tool` name or the upload companion of a hidden `api_call`; for a `none`
+  source declaring no `_meta` key outside `dev.appstrate/`, a name outside its
+  catalog; for a `remote` source that declares a `tools_policy`, a name outside its
+  catalog; for a `local` source, a name outside the catalog of the referenced
+  `mcp-server`, on create, save, import and publish, when that package resolves. A
+  `remote` source with no `tools_policy` is judged no further: a name its endpoint
+  does not serve selects nothing at run time.
+- `"*"` is accepted only with `allow_undeclared_tools: true`, and grants whatever the
+  upstream advertises. Prefer names.
 
 ---
 
@@ -1089,7 +1135,7 @@ register a client by hand for an auth whose server each connection names. Declar
 ### Examples
 
 GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by URL
-(`scripts/system-packages/integration-gitlab-mcp-1.0.0/manifest.json`):
+(`scripts/system-packages/integration-gitlab-mcp-1.0.1/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1121,7 +1167,7 @@ GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by U
 ```
 
 Coolify — always self-hosted, so no `default`, and a team token the user pastes
-(`scripts/system-packages/integration-coolify-mcp-1.0.1/manifest.json`):
+(`scripts/system-packages/integration-coolify-mcp-1.0.2/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1245,7 +1291,7 @@ rejects it.
 - New auth type `mtls`; auth type `oauth1` is removed.
 - `tools_policy` (renamed from 1.x `tools`) is the per-tool policy table; `hidden_tools`
   suppresses canonical-catalog entries.
-- New `source` discriminator (`local | remote | api`) decouples the capability surface
+- New `source` discriminator (`local | remote | none`) decouples the capability surface
   from the authentication layer.
 - The `definition.*` namespace (`authMode`, `oauth2`, `credentialTransform`,
   `credentialEncoding`, `uploadProtocols`, `authorizedUris`, `allowAllUris`,

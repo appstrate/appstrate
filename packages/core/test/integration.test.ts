@@ -30,12 +30,14 @@ import {
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
   readDefaultTools,
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
   findCleartextInjectedCredentials,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
   findInvalidScopeTokens,
   scopeTokenSchema,
 } from "../src/integration.ts";
@@ -2429,26 +2431,26 @@ describe("_meta namespace key validation (delegated to upstream 0.1 schema)", ()
   });
 });
 
-describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
-  // An api-only integration (source.kind "none") exposing `api_call` on `key`.
-  // For a "none" source the full tool catalog is knowable from this manifest
-  // alone, so array membership is validated.
-  function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return baseManifest({
-      source: { kind: "none" },
-      auths: {
-        key: {
-          type: "api_key",
-          credentials: { schema: { type: "object", properties: {} } },
-          authorized_uris: ["https://api/**"],
-          delivery: { env: { K: { value: "{$credential.k}" } } },
-        },
+// An api-only integration (source.kind "none") exposing `api_call` on `key`.
+// For a "none" source the full tool catalog is knowable from this manifest
+// alone, so array membership is validated.
+function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "none" },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: {} } },
+        authorized_uris: ["https://api/**"],
+        delivery: { env: { K: { value: "{$credential.k}" } } },
       },
-      _meta: { "dev.appstrate/api": { auths: { key: {} } } },
-      ...overrides,
-    });
-  }
+    },
+    _meta: { "dev.appstrate/api": { auths: { key: {} } } },
+    ...overrides,
+  });
+}
 
+describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
   it("accepts default_tools naming a real exposed tool (api_call) on an api-only source", () => {
     const r = integrationManifestSchema.safeParse(apiManifest({ default_tools: ["api_call"] }));
     expect(r.success).toBe(true);
@@ -2486,6 +2488,198 @@ describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
       baseManifest({ default_tools: ["some_remote_tool"] }),
     );
     expect(r.success).toBe(true);
+  });
+});
+
+describe("findUnexposedDefaultTools — write-path default_tools policy", () => {
+  const REMOTE = baseManifest().source;
+  const LOCAL = { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } };
+  const SERVER_TOOLS = [{ name: "search" }, { name: "send" }];
+  const FOREIGN_META = { "dev.appstrate/api": { auths: { key: {} } }, "com.example/tools": {} };
+  const unexposed = (name: string) => ({
+    path: ["default_tools"],
+    message: `default_tools contains "${name}" which is not a tool this integration exposes`,
+  });
+  /** A remote integration declaring policy for `search` and `send`. */
+  const remote = (overrides: Record<string, unknown> = {}) =>
+    baseManifest({ tools_policy: { search: {}, send: {} }, ...overrides });
+  const local = (overrides: Record<string, unknown> = {}) =>
+    baseManifest({ source: LOCAL, ...overrides });
+  /** The schema reads the manifest and the policy finds nothing in it. */
+  function expectNothing(manifest: Record<string, unknown>, mcpServerTools?: { name: string }[]) {
+    expect(errorPaths(manifest)).toEqual([]);
+    expect(findUnexposedDefaultTools(manifest, mcpServerTools)).toEqual([]);
+  }
+  /** The policy refuses `names` in a manifest the schema still reads. */
+  function expectRefusedOnWrite(
+    manifest: Record<string, unknown>,
+    names: string[],
+    mcpServerTools?: { name: string }[],
+  ) {
+    expect(findUnexposedDefaultTools(manifest, mcpServerTools)).toEqual(names.map(unexposed));
+    expect(errorPaths(manifest)).toEqual([]);
+  }
+  /** The policy and the schema refuse `name` with the same issue. */
+  function expectRefusedBySchema(manifest: Record<string, unknown>, name: string) {
+    expect(findUnexposedDefaultTools(manifest)).toEqual([unexposed(name)]);
+    const r = integrationManifestSchema.safeParse(manifest);
+    expect(r.error?.issues.map(({ path, message }) => ({ path, message }))).toEqual([
+      unexposed(name),
+    ]);
+  }
+
+  describe("remote source", () => {
+    it("refuses a name outside a declared tools_policy, which the schema still reads", () => {
+      expectRefusedOnWrite(remote({ default_tools: ["search", "serach"] }), ["serach"]);
+      expectNothing(remote({ default_tools: ["search", "send"] }));
+    });
+
+    it("leaves a name unjudged when it declares no tools_policy", () => {
+      expectNothing(baseManifest({ default_tools: ["some_remote_tool"] }));
+      expectNothing(apiManifest({ source: REMOTE, default_tools: ["notion-search"] }));
+    });
+
+    it("refuses a name listed in hidden_tools, with and without a tools_policy", () => {
+      const hidden = { default_tools: ["search", "send"], hidden_tools: ["send"] };
+      expectRefusedOnWrite(remote(hidden), ["send"]);
+      expectRefusedOnWrite(baseManifest(hidden), ["send"]);
+    });
+
+    it("refuses every entry of a tools_policy that hidden_tools empties", () => {
+      const manifest = remote({ default_tools: ["search"], hidden_tools: ["search", "send"] });
+      expectRefusedOnWrite(manifest, ["search"]);
+    });
+
+    it("refuses a name a connect.tool references", () => {
+      const session = {
+        type: "custom",
+        credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+        authorized_uris: ["https://api.example.com/**"],
+        connect: { tool: { name: "perform_login" } },
+        delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
+      };
+      expectRefusedOnWrite(
+        baseManifest({ auths: { session }, default_tools: ["search", "perform_login"] }),
+        ["perform_login"],
+      );
+    });
+
+    it("refuses the upload companion of a hidden api_call", () => {
+      const manifest = apiManifest({
+        source: REMOTE,
+        _meta: { "dev.appstrate/api": { auths: { key: { upload_protocols: ["tus"] } } } },
+        default_tools: ["api_upload"],
+      });
+      expectNothing(manifest);
+      expectRefusedOnWrite({ ...manifest, hidden_tools: ["api_call"] }, ["api_upload"]);
+    });
+
+    it("accepts api_call beside a tools_policy only where _meta exposes it", () => {
+      const policed = { tools_policy: { search: {} }, default_tools: ["search", "api_call"] };
+      expectNothing(apiManifest({ source: REMOTE, ...policed }));
+      expectRefusedOnWrite(baseManifest(policed), ["api_call"]);
+    });
+
+    it("ignores mcpServerTools, which are a local source's catalog", () => {
+      expectRefusedOnWrite(remote({ default_tools: ["extra"] }), ["extra"], [{ name: "extra" }]);
+      expectNothing(baseManifest({ default_tools: ["nope"] }), SERVER_TOOLS);
+    });
+  });
+
+  describe("none source", () => {
+    it("refuses a name outside the api tools when every root _meta key is Appstrate's", () => {
+      expectNothing(apiManifest({ default_tools: ["api_call"] }));
+      expectRefusedBySchema(apiManifest({ default_tools: ["api_call", "nope"] }), "nope");
+      expect(
+        findUnexposedDefaultTools(apiManifest({ default_tools: ["nope"] }), [{ name: "nope" }]),
+      ).toEqual([unexposed("nope")]);
+    });
+
+    it("refuses any name when the manifest carries no _meta", () => {
+      expectRefusedBySchema(
+        apiManifest({ _meta: undefined, default_tools: ["api_call"] }),
+        "api_call",
+      );
+    });
+
+    it("leaves a name unjudged when another vendor's root _meta key may supply it", () => {
+      expectNothing(apiManifest({ _meta: FOREIGN_META, default_tools: ["api_call", "nope"] }));
+    });
+
+    it("reads another vendor's key in a _meta at any depth, not at the root alone", () => {
+      const withAuthMeta = (meta: Record<string, unknown>) => {
+        const manifest = apiManifest({ default_tools: ["api_call", "nope"] });
+        const auths = manifest.auths as { key: Record<string, unknown> };
+        return { ...manifest, auths: { key: { ...auths.key, _meta: meta } } };
+      };
+      expectNothing(withAuthMeta({ "com.example/tools": {} }));
+      expectRefusedBySchema(withAuthMeta({ "dev.appstrate/auth": { required: true } }), "nope");
+    });
+
+    it("still refuses a hidden name beside another vendor's root _meta key", () => {
+      expectRefusedBySchema(
+        apiManifest({ _meta: FOREIGN_META, default_tools: ["nope"], hidden_tools: ["nope"] }),
+        "nope",
+      );
+    });
+  });
+
+  describe("local source", () => {
+    it("leaves a name unjudged without the mcp-server's tools", () => {
+      expectNothing(local({ default_tools: ["nope"] }));
+      expectNothing(local({ default_tools: ["nope"], tools_policy: { search: {} } }));
+    });
+
+    it("refuses a name the mcp-server's tools do not hold", () => {
+      expectRefusedOnWrite(local({ default_tools: ["search", "nope"] }), ["nope"], SERVER_TOOLS);
+    });
+
+    it("finds nothing when the mcp-server's tools hold every name", () => {
+      expectNothing(local({ default_tools: ["search", "send"] }), SERVER_TOOLS);
+    });
+
+    it("accepts api_call beside the mcp-server's tools only where _meta exposes it", () => {
+      const defaultTools = ["search", API_CALL_TOOL_NAME];
+      expectNothing(apiManifest({ source: LOCAL, default_tools: defaultTools }), SERVER_TOOLS);
+      expectRefusedOnWrite(
+        local({ default_tools: defaultTools }),
+        [API_CALL_TOOL_NAME],
+        SERVER_TOOLS,
+      );
+    });
+
+    it("refuses a hidden name with and without the mcp-server's tools", () => {
+      const manifest = local({ default_tools: ["search", "send"], hidden_tools: ["send"] });
+      expectRefusedOnWrite(manifest, ["send"]);
+      expectRefusedOnWrite(manifest, ["send"], SERVER_TOOLS);
+    });
+  });
+
+  it("reports a name listed twice once", () => {
+    expectRefusedBySchema(apiManifest({ default_tools: ["nope", "api_call", "nope"] }), "nope");
+    const manifest = local({ default_tools: ["send", "send"], hidden_tools: ["send"] });
+    expectRefusedOnWrite(manifest, ["send"]);
+  });
+
+  it('finds nothing for the wildcard "*", an empty array or an absent default', () => {
+    expectNothing(
+      apiManifest({ default_tools: "*", allow_undeclared_tools: true, hidden_tools: ["api_call"] }),
+    );
+    expectNothing(local({ default_tools: [] }), SERVER_TOOLS);
+    expectNothing(local(), SERVER_TOOLS);
+  });
+
+  it("leaves a non-string entry to the schema", () => {
+    const manifest = local({ default_tools: [42] });
+    expect(findUnexposedDefaultTools(manifest, SERVER_TOOLS)).toEqual([]);
+    expect(errorPaths(manifest)).toContain("default_tools");
+  });
+
+  it("finds nothing in a manifest the structural schema refuses", () => {
+    expect(findUnexposedDefaultTools(null)).toEqual([]);
+    const hidden = { default_tools: ["send"], hidden_tools: ["send"] };
+    expect(findUnexposedDefaultTools(remote(hidden))).toEqual([unexposed("send")]);
+    expect(findUnexposedDefaultTools(remote({ ...hidden, auths: { oauth: null } }))).toEqual([]);
   });
 });
 
@@ -2528,6 +2722,34 @@ describe("resolveEffectiveToolSelection", () => {
   });
   it("an undefined selection with no declared default stays undefined", () => {
     expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
+  });
+});
+
+describe("resolveScopeToolSelection", () => {
+  const withDefault = (d: unknown) => ({ default_tools: d }) as unknown as IntegrationManifest;
+  const noDefault = {} as IntegrationManifest;
+
+  it("a written wildcard is the wildcard", () => {
+    expect(resolveScopeToolSelection("*", noDefault)).toBe("*");
+    expect(resolveScopeToolSelection("*", withDefault(["search"]))).toBe("*");
+  });
+  it("an inherited wildcard is the wildcard too", () => {
+    expect(resolveScopeToolSelection(undefined, withDefault("*"))).toBe("*");
+  });
+  it("an inherited array contributes no tool", () => {
+    expect(resolveScopeToolSelection(undefined, withDefault(["search"]))).toEqual([]);
+  });
+  it("a written array is kept, over a wildcard default as over any other", () => {
+    expect(resolveScopeToolSelection(["search"], withDefault("*"))).toEqual(["search"]);
+    expect(resolveScopeToolSelection(["search"], withDefault(["other"]))).toEqual(["search"]);
+    expect(resolveScopeToolSelection(["search"], noDefault)).toEqual(["search"]);
+  });
+  it("a written empty array stays empty, over a wildcard default too", () => {
+    expect(resolveScopeToolSelection([], withDefault("*"))).toEqual([]);
+    expect(resolveScopeToolSelection([], withDefault(["search"]))).toEqual([]);
+  });
+  it("no selection and no default is empty", () => {
+    expect(resolveScopeToolSelection(undefined, noDefault)).toEqual([]);
   });
 });
 
