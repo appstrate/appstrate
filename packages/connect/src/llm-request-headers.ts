@@ -13,8 +13,9 @@
  *     too): the caller's platform credential, its tenancy and run, the
  *     platform's markers, the network path to the platform and the identity
  *     an auth proxy in front of it asserts;
- *   - vendor credential slots (`x-api-key`, `x-goog-api-key`, `api-key`): each
- *     proxy sets its own upstream auth;
+ *   - vendor credential slots (`x-api-key`, `x-goog-api-key`, `api-key`, a
+ *     Cloudflare Access service-token pair): each proxy sets its own upstream
+ *     auth;
  *   - vendor account scoping: `openai-organization`, `openai-project` (a
  *     stored credential decides whose account is billed, never the caller);
  *   - request rewriting honoured by some gateways (`x-http-method-override`,
