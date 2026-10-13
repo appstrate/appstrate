@@ -185,7 +185,10 @@ async function handlePairRedeem(c: Context<AppEnv>) {
       after: {
         providerId: result.providerId,
         credentialId: result.credentialId,
-        ownerType: consumed.ownerUserId === null ? "org" : "user",
+        // A reconnect changes no owner and does not read the pairing's.
+        ...(consumed.reconnectCredentialId
+          ? {}
+          : { ownerType: consumed.ownerUserId === null ? "org" : "user" }),
         availableModelIds: result.availableModelIds,
         pairingId: consumed.id,
         // No raw token / email — audit log MUST NOT carry secrets
@@ -266,7 +269,7 @@ export function createModelProvidersOAuthRouter() {
       ownerUserId = credential.owner_id;
       reconnectCredentialId = credential.id;
     } else {
-      ownerUserId = resolveCredentialOwner(c, input.owner_type ?? "org");
+      ownerUserId = resolveCredentialOwner(c, credentialOwnerTypeSchema.parse(input.owner_type));
       // The redeem's own guard: a pairing it would refuse is never minted.
       const provider = getModelProvider(input.providerId);
       if (ownerUserId !== null && provider) {

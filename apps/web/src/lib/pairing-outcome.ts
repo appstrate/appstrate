@@ -17,21 +17,15 @@ export type PairingOutcome = "waiting" | "connected" | "failed" | "expired";
 /**
  * What a pairing poll means. The redeem consumes the pairing before it judges and
  * writes: success is the credential, not `consumed`. A consumed pairing with no
- * credential is the redeem in flight, then, past the wait, a refused one.
+ * credential is the redeem in flight, then, once `linkWaitElapsed`
+ * (`PAIRING_LINK_WAIT_MS` spent in that state), a refused one.
  */
 export function pairingOutcome(
   poll: Pick<PairingStatus, "status" | "credentialId"> | undefined,
-  consumedWithoutCredentialMs: number,
+  linkWaitElapsed: boolean,
 ): PairingOutcome {
   if (!poll || poll.status === "pending") return "waiting";
   if (poll.status === "expired") return "expired";
   if (poll.credentialId) return "connected";
-  return consumedWithoutCredentialMs >= PAIRING_LINK_WAIT_MS ? "failed" : "waiting";
-}
-
-/** Whether the poll goes on: an outcome still `waiting` whatever the time elapsed. */
-export function pairingPollContinues(
-  poll: Pick<PairingStatus, "status" | "credentialId"> | undefined,
-): boolean {
-  return pairingOutcome(poll, 0) === "waiting";
+  return linkWaitElapsed ? "failed" : "waiting";
 }

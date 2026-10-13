@@ -10,6 +10,8 @@ import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import settingsFr from "../../locales/fr/settings.json";
+import agentsFr from "../../locales/fr/agents.json";
+import commonFr from "../../locales/fr/common.json";
 import type { ModelProviderCredentialInfo } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
 
@@ -17,7 +19,7 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { ModelsList } = await import("../org-settings/models.tsx");
+const { ModelsList, ModelTestResult } = await import("../org-settings/models.tsx");
 const { CredentialsSection } = await import("../../components/model-credentials-section.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
@@ -248,5 +250,22 @@ describe("the models table, for the credential each model names", () => {
 
   it("says that each member brings their own credential, for an unbound model", () => {
     expect(row(unbound.id)).toContain(settingsFr["models.credentialEachMember"]);
+  });
+});
+
+describe("a model's connection-test result", () => {
+  const line = (error: string) =>
+    render(<ModelTestResult result={{ ok: false, latency: 0, error, message: "server detail" }} />);
+
+  it("words a dead credential as a model's, not as an integration connection", () => {
+    const html = line("NEEDS_RECONNECTION");
+    expect(html).toContain(settingsFr["models.credentialUnavailableHint"]);
+    expect(html).not.toContain(agentsFr["error.needsReconnection"]);
+  });
+
+  it("leaves every other failure to the shared result line", () => {
+    const html = line("AUTH_FAILED");
+    expect(html).toContain(commonFr["apiError.auth_failed"]);
+    expect(html).not.toContain(settingsFr["models.credentialUnavailableHint"]);
   });
 });

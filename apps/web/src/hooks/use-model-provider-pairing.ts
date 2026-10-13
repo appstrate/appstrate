@@ -15,12 +15,7 @@
 import { useEffect, useState } from "react";
 import { $api } from "../api/client";
 import { usePermissions } from "./use-permissions";
-import {
-  PAIRING_LINK_WAIT_MS,
-  pairingOutcome,
-  pairingPollContinues,
-  type PairingOutcome,
-} from "../lib/pairing-outcome";
+import { PAIRING_LINK_WAIT_MS, pairingOutcome, type PairingOutcome } from "../lib/pairing-outcome";
 
 export function useCreateModelProviderPairing() {
   return $api.useMutation("post", "/api/model-providers-oauth/pairing", {
@@ -60,7 +55,8 @@ export function useModelProviderPairingOutcome(id: string | null): {
         // as 404/410, but auth/permission/server failures (401/403/5xx, or a
         // network error with no status) are equally non-recoverable here.
         if (q.state.error) return false;
-        return pairingPollContinues(q.state.data) ? 2500 : false;
+        // The poll goes on while the outcome is still waiting.
+        return pairingOutcome(q.state.data, false) === "waiting" ? 2500 : false;
       },
       // Pairing rows are short-lived ephemera — no point caching beyond the
       // polling window. Always refetch on mount so closing+reopening the
@@ -78,7 +74,7 @@ export function useModelProviderPairingOutcome(id: string | null): {
   }, [unlinked, id]);
 
   return {
-    outcome: pairingOutcome(data, failed ? PAIRING_LINK_WAIT_MS : 0),
+    outcome: pairingOutcome(data, failed),
     credentialId: data?.credentialId ?? null,
   };
 }

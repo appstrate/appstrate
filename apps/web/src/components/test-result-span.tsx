@@ -3,25 +3,21 @@
 import { useTranslation } from "react-i18next";
 import type { TestResult } from "@appstrate/shared-types";
 import { refusalMessage } from "../lib/mutation-error";
-import { testFailureKey } from "../lib/test-result";
 
 /**
  * Inline connection-test result — green latency on success, red message on
  * failure. Shared by every "test this credential/model/proxy" surface so the
  * success/failure rendering never forks. The caller supplies the i18n keys for
- * its own namespace (`{ latency }` / `{ message }` interpolation), and
- * `failureKeys` for the failure codes it words itself.
+ * its own namespace (`{ latency }` / `{ message }` interpolation).
  */
 export function TestResultSpan({
   result,
   successKey,
   failedKey,
-  failureKeys,
 }: {
   result: TestResult;
   successKey: string;
   failedKey: string;
-  failureKeys?: Readonly<Record<string, string>>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   if (result.ok && result.status !== undefined && (result.status < 200 || result.status > 299)) {
@@ -37,12 +33,9 @@ export function TestResultSpan({
   }
   // The outcome is named by its code, as a sentence of its own; a code with no sentence
   // keeps the server's message behind the caller's "Échec :" lead.
-  const ownKey = testFailureKey(result, failureKeys);
-  const failure = ownKey
-    ? t(ownKey)
-    : result.error
-      ? refusalMessage({ code: result.error, message: result.message })
-      : null;
+  const failure = result.error
+    ? refusalMessage({ code: result.error, message: result.message })
+    : null;
   return (
     <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
       {result.ok
