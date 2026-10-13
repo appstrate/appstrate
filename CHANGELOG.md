@@ -199,6 +199,22 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Changed
 
+- **BREAKING (API): the credential proxy sends upstream no header describing
+  the platform's own inbound request.** One rule,
+  `isPlatformRequestHeader` (`@appstrate/connect/platform-request-headers`),
+  read by the credential proxy and by the LLM proxies' forwarding policy,
+  names them: the caller's platform credential (`Authorization`, `Cookie`),
+  its tenancy, run and role preview (`X-Org-Id`, `X-Space-Id`, `X-Run-Id`,
+  `X-View-As`), the platform's markers and versioning (`X-Appstrate-*`,
+  `Appstrate-*`), the network path an edge adds on the way in (`Forwarded`,
+  `Via`, `X-Forwarded-*`, the client-IP headers, `CDN-Loop`, Cloudflare's
+  `CF-*`) and the identity an auth proxy asserts (AWS ALB OIDC, Azure App
+  Service, Google IAP, oauth2-proxy). A Cloudflare Access service-token pair
+  (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) is relayed: it is the
+  caller's credential for its upstream. A caller's own `Cookie` header does
+  not reach the upstream; the cookies an upstream sets are kept and replayed
+  from the server-side jar of the `X-Session-Id` session.
+
 - **BREAKING (API): an undeclared override key has its own code, on both
   maps.** A key naming an id the agent does not declare answers
   `400 validation_failed` with one `errors[]` item, the shape
