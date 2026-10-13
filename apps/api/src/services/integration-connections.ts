@@ -157,7 +157,7 @@ import {
   renderRemoteSource,
   toSupportedTokenEndpointAuthMethod,
 } from "./integration-manifest-helpers.ts";
-import { fetchMcpServerManifest } from "./integration-service.ts";
+import { fetchMcpServerManifest, readMcpServerTools } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   disableSchedules,
@@ -4055,21 +4055,8 @@ export async function getIntegrationAuthStatuses(
   // package is missing the resolver still falls back to the integration's
   // sparse `tools{}` keys.
   const localRef = getLocalServerRef(manifest);
-  let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
-  if (localRef) {
-    const mcpServer = await fetchMcpServerManifest(localRef.name);
-    if (mcpServer) {
-      const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
-      if (Array.isArray(t)) {
-        mcpServerTools = t
-          .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
-          .map((e) => ({
-            name: e.name,
-            description: typeof e.description === "string" ? e.description : undefined,
-          }));
-      }
-    }
-  }
+  const mcpServer = localRef ? await fetchMcpServerManifest(localRef.name) : null;
+  const mcpServerTools = mcpServer ? readMcpServerTools(mcpServer) : undefined;
   // The resolver already emits the snake_case wire shape
   // (`policy.required_scopes`), so the catalog passes through verbatim.
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({

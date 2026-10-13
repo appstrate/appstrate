@@ -49,6 +49,7 @@ import {
   assertContentConforms,
   assertArchiveContentConforms,
   assertManifestConforms,
+  assertNoManifestViolations,
   type PackageTypeConfig,
 } from "../services/package-items/config.ts";
 import { validateManifest, type PackageType } from "@appstrate/core/validation";
@@ -108,7 +109,10 @@ import { asRecord } from "@appstrate/core/safe-json";
 import { forkPackage } from "../services/package-fork.ts";
 import { tryParseSkillOnlyZip } from "../services/skill-zip.ts";
 import { fetchGithubDirectory, GithubImportError } from "../services/github-import.ts";
-import { validateAgentIntegrationSelections } from "../services/integration-scope-validation.ts";
+import {
+  findUnexposedLocalDefaultTools,
+  validateAgentIntegrationSelections,
+} from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { assertSpaceId, isSpaceId } from "../lib/ids.ts";
 import {
@@ -197,10 +201,19 @@ async function assertAgentIntegrationScopesValid(
   }
 }
 
+/** The part of the `default_tools` rule `checkManifest` cannot judge: a `local` source's tools. */
+async function assertLocalDefaultToolsExposed(
+  manifest: Record<string, unknown>,
+  orgId: string,
+): Promise<void> {
+  assertNoManifestViolations(await findUnexposedLocalDefaultTools(manifest, orgId));
+}
+
 /**
  * The manifest gate every package write goes through — schema validation, the
  * route/manifest `type` agreement check, then the integration-scope subset
- * check — returning the VALIDATED (normalized) manifest callers persist.
+ * check and a `local` integration's `default_tools` — returning the VALIDATED
+ * (normalized) manifest callers persist.
  *
  * `direction` says where the manifest came from, and both policies key off it:
  *
@@ -260,6 +273,7 @@ async function validateManifestForRoute(
     await assertPackageDependenciesAccessible(c, validated, opts.previous);
   }
   await assertAgentIntegrationScopesValid(validated, c.get("orgId"), opts.requireCallableTools);
+  await assertLocalDefaultToolsExposed(validated, c.get("orgId"));
   return validated;
 }
 
@@ -2523,6 +2537,7 @@ export function createPackagesRouter() {
       asRecord(existing?.draftManifest),
     );
     await assertAgentIntegrationScopesValid(manifest as Record<string, unknown>, orgId, true);
+    await assertLocalDefaultToolsExposed(manifest as Record<string, unknown>, orgId);
     if (existing) {
       if (existing.orgId !== orgId) {
         throw conflict("name_collision", `A package with identifier '${packageId}' already exists`);

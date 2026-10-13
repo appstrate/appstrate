@@ -23,9 +23,10 @@
  *
  * No source may inject a credential over HTTP (`delivery.http` or the auth-type
  * default) without an allowlist that names its hosts (`findUnboundedInjectedCredentials`),
- * hold an expression the platform does not evaluate (`findUnevaluableExpressions`), nor declare
- * a scope that is not one OAuth scope token (`findInvalidScopeTokens`): three of the
- * `@appstrate/core/integration` rules every manifest write path applies.
+ * hold an expression the platform does not evaluate (`findUnevaluableExpressions`), declare
+ * a scope that is not one OAuth scope token (`findInvalidScopeTokens`), nor default to a tool
+ * it hides or one outside the catalog its manifest declares (`findUnexposedDefaultTools`): four
+ * of the `@appstrate/core/integration` rules every manifest write path applies.
  *
  * Usage:
  *   bun run scripts/build-system-packages.ts           # build archives
@@ -40,6 +41,7 @@ import {
   findInvalidScopeTokens,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
 } from "@appstrate/core/integration";
 
 /**
@@ -143,9 +145,12 @@ async function main() {
   }
 
   const refused = [...manifests].flatMap(([dirName, manifest]) =>
-    [findUnboundedInjectedCredentials, findUnevaluableExpressions, findInvalidScopeTokens].flatMap(
-      (find) => find(manifest).map((v) => ({ dirName, ...v })),
-    ),
+    [
+      findUnboundedInjectedCredentials,
+      findUnevaluableExpressions,
+      findInvalidScopeTokens,
+      findUnexposedDefaultTools,
+    ].flatMap((find) => find(manifest).map((v) => ({ dirName, ...v }))),
   );
   if (refused.length > 0) {
     console.error(`\nMANIFEST POLICY: ${refused.length} write-path violation(s):`);

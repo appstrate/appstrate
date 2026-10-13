@@ -245,6 +245,21 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   Migration `0092` only creates `connection_calls`, the proxy's call journal
   (see Added), and rewrites nothing.
 
+- **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
+  and read its `[default-tools]` lines** (#1923). It writes nothing. Each
+  `[default-tools]` advisory names a stored organization integration, draft
+  or published version, whose `default_tools` holds a tool its manifest does
+  not expose: one `hidden_tools` lists, a connect tool, the upload companion
+  of a hidden `api_call`, one outside the `tools_policy` a `remote`
+  integration declares, or, on a `source.kind: "none"` integration with no
+  `_meta` key outside `dev.appstrate/`, one outside the manifest's catalog. A
+  `remote` or `local` integration so listed keeps loading and running, and
+  its next write is refused until the entry is removed or, for a `remote`
+  one whose endpoint serves the tool, the tool is declared in `tools_policy`
+  (`"<tool>": {}`) (see Changed). A `none` one is a manifest the schema
+  already refuses on read, before this release as after it: nothing becomes
+  unreadable at the deploy. An advisory never changes the script's exit code.
+
 ### Changed
 
 - **BREAKING (API): the credential proxy has one permission per path,
@@ -437,6 +452,77 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   subdomain), else by the masked key of an auth with a single secret
   (ActiveCampaign, Shopify, Firecrawl), else `Connexion N`; a
   `format: "password"` field is never used.
+
+- **Every system integration backed by an MCP server declares its
+  `default_tools`** (#1923). An agent that declares one of them and selects no
+  tool inherits that list, where its selection was empty: publish and import
+  refused it with `no_tools_selected`, and an inline or draft run aborted at
+  container boot once it bound a connection to the integration. github-mcp
+  and github-git have no mandatory auth, so a bare dependency on either was
+  inert and the run started without the integration: it now carries the
+  default (93 tools for github-mcp, 7 for github-git) and is resolved like any
+  selection, bound to a usable connection or reported in the launch's
+  `warnings`. The 14 that declared none move one patch version: browser-use
+  1.0.2, browserless 1.0.2, canva-mcp 1.0.3, clickup-mcp 1.2.4, coolify-mcp
+  1.0.2, expo-mcp 1.0.1, github-git 1.0.4, github-mcp 1.1.5, gitlab-mcp 1.0.1,
+  gmail-mcp 2.3.7, mcpemails 1.0.2, notion-mcp 1.0.3, ssh 1.0.3, twenty-mcp
+  1.0.2. Each list names its tools, never `"*"`, and is built as the
+  integration's exposed surface within the auth's default scopes: every tool
+  that is not hidden, less any whose `required_scopes` the auth's
+  `default_scopes` do not cover. So gmail-mcp, canva-mcp and mcpemails default
+  to the tools their default scopes (identity and read scopes) cover, fewer
+  than their catalog, and an agent that needs another selects it. The other
+  eleven default to their whole exposed surface, write tools included
+  (`ssh_exec`, `push`): narrowing one to what a task needs is the agent
+  author's selection. The platform supplies no fallback: an integration that
+  declares no `default_tools` still requires an explicit selection
+  (`docs/architecture/INTEGRATIONS_RUNTIME.md`, "Least-privilege selection").
+  An inherited `"*"` is the wildcard form for scopes, like a written one: the
+  auth's `default_scopes`, unioned with the agent's `scopes`.
+  The MCP server's instructions and the chat's tell the model to select only
+  the tools an agent needs and to inherit a default only when it needs all of
+  it; the chat's context lists a default of up to 12 tools by name and gives a
+  longer one as a count.
+
+- **BREAKING (API): a write of an integration manifest refuses a
+  `default_tools` entry the platform judges unexposed** (#1923). The
+  refusal is `400` `validation_failed` with one `errors[]` item per entry,
+  `{ field: "manifest.default_tools", code: "invalid_manifest" }`, whose
+  `message` names the tool (`findUnexposedDefaultTools`,
+  `@appstrate/core/integration`). What is refused depends on the source:
+  - every source, on create, draft save, file write, import (of a bundle, its
+    root package only), publish, restore and fork: a name `hidden_tools`
+    lists, the name of a connect tool, or the upload companion of a hidden
+    `api_call`;
+  - `source.kind: "none"`, by the manifest schema, so on read too: a name
+    outside the manifest's catalog (the tools `_meta["dev.appstrate/api"]`
+    supplies, plus any `tools_policy` key), when every `_meta` key of the
+    manifest is in the `dev.appstrate/` namespace (a manifest with no `_meta`
+    counts). This is the schema's existing refusal, with one exemption added:
+    a manifest carrying another vendor's `_meta` key is not judged on
+    membership;
+  - `local`, on create, draft save, import (of a bundle, its root package
+    only, before anything is written) and publish: a name outside the
+    `tools[]` of the referenced mcp-server, at the version a run would spawn
+    (on a bundle import, resolved over the versions the bundle carries and
+    the stored ones), and outside the integration's `api_call` tools. Any
+    save of the integration, even one that does not touch the manifest, is
+    judged against the mcp-server version a run would spawn at that moment.
+    When the mcp-server does not resolve, or declares no `tools[]`, nothing
+    more is judged;
+  - `remote` that declares a `tools_policy`, on the doors of the first item:
+    a name outside the manifest's catalog (the table's keys, plus the
+    `api_call` tools). The table already bounds what an agent can select by
+    name (`unknown_tool`), so a default cannot name a tool no agent could
+    pick. A `remote` source that declares no `tools_policy` is judged no
+    further: its catalog is the endpoint's, a name it does not serve selects
+    nothing at run time, and a run left with no callable tool still aborts.
+
+  A stored `remote` or `local` manifest that names a refused tool still loads;
+  its next write is refused. Remedies: remove the entry from `default_tools`;
+  for `local`, have the mcp-server declare the tool; for `remote`, declare it
+  in `tools_policy` (`{}` for one that needs no scope) when the endpoint
+  serves it.
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
