@@ -2851,7 +2851,7 @@ export interface paths {
         };
         /**
          * Clear session + RP-initiated logout redirect
-         * @description Clears the Better Auth session cookie and, if `post_logout_redirect_uri` matches one registered on the client, redirects there. Otherwise redirects to `/`.
+         * @description Clears the Better Auth session cookie and, if `post_logout_redirect_uri` is one of the client's `postLogoutRedirectUris`, redirects there. Otherwise redirects to `/`: a `redirect_uris` entry is not a post-logout URI, and a client that registered itself (DCR, CIMD) is never redirected to.
          */
         get: operations["oauthLogout"];
         put?: never;
@@ -27752,7 +27752,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Invitation email does not match the authenticated session */
+            /** @description `email_mismatch` — the invitation is for another address than the session's. `not_a_platform_account` — the session's account belongs to a space's application (`end_user:<space>` realm) and cannot join an organization. */
             403: {
                 headers: {
                     [name: string]: unknown;

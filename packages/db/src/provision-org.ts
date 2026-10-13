@@ -24,6 +24,7 @@ import { db } from "./client.ts";
 import { prefixedId } from "./ids.ts";
 import { organizations, organizationMembers } from "./schema/organizations.ts";
 import { spaces } from "./schema/spaces.ts";
+import { user } from "./schema/auth.ts";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -120,6 +121,20 @@ export async function ensurePersonalSpace(
 }
 
 /**
+ * Whether `userId` is an account of the `platform` realm: the only kind that holds an
+ * `organization_members` row. An `end_user:<space>` account is an outsider of some space's
+ * application, whatever address it holds. Asked by both writers of that table.
+ */
+export async function isPlatformAccount(tx: Tx, userId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ realm: user.realm })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  return row?.realm === "platform";
+}
+
+/**
  * Create an organization with everything that makes it usable: the row, its
  * owner's membership, the default space, and the owner's personal space.
  *
@@ -141,6 +156,9 @@ export async function provisionOrg(
   defaultSpace: SpaceRow;
   personalSpace: SpaceRow;
 }> {
+  if (!(await isPlatformAccount(tx, params.ownerUserId))) {
+    throw new Error("provisionOrg: the owner is not an account of the platform realm");
+  }
   const [org] = await tx
     .insert(organizations)
     .values({

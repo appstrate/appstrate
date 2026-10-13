@@ -746,7 +746,7 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     expect(badRes.headers.get("location")).toBe("/");
   });
 
-  it("GET /api/oauth/logout falls back to redirectUris when postLogoutRedirectUris is empty", async () => {
+  it("GET /api/oauth/logout does not redirect to a redirect_uri that is not a post-logout URI", async () => {
     const createRes = await app.request("/api/oauth/clients", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -754,14 +754,35 @@ describe("OAuth clients admin routes (polymorphic)", () => {
     });
     const { clientId } = (await createRes.json()) as { clientId: string };
 
-    // The redirectUri (https://acme.example.com/oauth/callback) should be accepted
-    // as a fallback even though postLogoutRedirectUris is empty.
     const res = await app.request(
       `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://acme.example.com/oauth/callback")}`,
       { redirect: "manual" },
     );
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("https://acme.example.com/oauth/callback");
+    expect(res.headers.get("location")).toBe("/");
+  });
+
+  // Anyone can register such a client: its URIs must not make this public route an open redirect.
+  it("GET /api/oauth/logout never redirects for a client that registered itself", async () => {
+    const createRes = await app.request("/api/oauth/clients", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify(
+        spaceLevelBody(ctx, { postLogoutRedirectUris: ["https://portal.example.com/"] }),
+      ),
+    });
+    const { clientId } = (await createRes.json()) as { clientId: string };
+    await db
+      .update(oauthClient)
+      .set({ selfService: true })
+      .where(eq(oauthClient.clientId, clientId));
+
+    const res = await app.request(
+      `/api/oauth/logout?client_id=${clientId}&post_logout_redirect_uri=${encodeURIComponent("https://portal.example.com/")}`,
+      { redirect: "manual" },
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
   });
 
   it("GET /api/oauth/logout falls back to / when post_logout_redirect_uri sent without client_id", async () => {

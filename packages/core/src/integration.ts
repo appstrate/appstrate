@@ -41,6 +41,7 @@ import {
 } from "@appstrate/afps-shared/credential-template";
 import {
   isHostUnboundedUriPattern,
+  parseAuthorizedUriPattern,
   parseUrlFormPattern,
 } from "@appstrate/afps-shared/authorized-uris";
 import {
@@ -283,6 +284,44 @@ export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifes
         authKey,
         path: ["auths", authKey, "authorized_uris", index],
         message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**), keep a wildcard under a registrable domain (https://*.example.com/**, not https://*.github.io/**), or render the host from the connection (https://{$credential.<field>}/**, "{$credential.<field>}/**")`,
+      });
+    });
+  }
+  return found;
+}
+
+/**
+ * List the `http://` entries of the auths that inject a credential over HTTP: the caller picks
+ * which entry a call matches, so a cleartext one lets it send the credential unencrypted.
+ * `isTrustedHost` exempts a host the operator designated as internal, where plain HTTP is the
+ * deployment's own choice. Write-path only: a published manifest still loads.
+ */
+export function findCleartextInjectedCredentials(
+  manifest: unknown,
+  isTrustedHost: (host: string) => boolean = () => false,
+): AuthManifestIssue[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const auths = (manifest as { auths?: unknown }).auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: AuthManifestIssue[] = [];
+  for (const [authKey, auth] of Object.entries(auths)) {
+    const a = (auth ?? {}) as {
+      type?: unknown;
+      authorized_uris?: unknown;
+      delivery?: { http?: AfpsHttpDelivery };
+    };
+    if (!injectsHttpCredential(typeof a.type === "string" ? a.type : "", a.delivery?.http)) {
+      continue;
+    }
+    const uris: unknown[] = Array.isArray(a.authorized_uris) ? a.authorized_uris : [];
+    uris.forEach((pattern, index) => {
+      if (typeof pattern !== "string") return;
+      const entry = parseAuthorizedUriPattern(pattern);
+      if (entry.kind !== "url" || entry.scheme !== "http://" || isTrustedHost(entry.host)) return;
+      found.push({
+        authKey,
+        path: ["auths", authKey, "authorized_uris", index],
+        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, is plain http; use https://`,
       });
     });
   }

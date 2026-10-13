@@ -41,6 +41,9 @@ export const FIXTURE_UID_ENV = "APPSTRATE_FIXTURE_RUNNER_UID";
 /** Set to `"1"` by the fixture wrapper when it was handed `--workspace`. */
 export const FIXTURE_WORKSPACE_ENV = "APPSTRATE_FIXTURE_RUNNER_WORKSPACE";
 
+/** Colon-joined `--own` paths the fixture wrapper was handed, unset when there were none. */
+export const FIXTURE_OWNED_ENV = "APPSTRATE_FIXTURE_RUNNER_OWNED";
+
 export interface PassthroughRunnerExec {
   /** Absolute path of the wrapper script now on `APPSTRATE_RUNNER_EXEC`. */
   path: string;
@@ -56,6 +59,7 @@ export async function installPassthroughRunnerExec(): Promise<PassthroughRunnerE
     [
       "#!/bin/sh",
       `if [ "$1" = "--workspace" ]; then ${FIXTURE_WORKSPACE_ENV}=1; export ${FIXTURE_WORKSPACE_ENV}; shift; fi`,
+      `while [ "$1" = "--own" ]; do ${FIXTURE_OWNED_ENV}="\${${FIXTURE_OWNED_ENV}:+$${FIXTURE_OWNED_ENV}:}$2"; export ${FIXTURE_OWNED_ENV}; shift 2; done`,
       `${FIXTURE_UID_ENV}="$1"`,
       `export ${FIXTURE_UID_ENV}`,
       "shift",

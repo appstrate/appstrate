@@ -67,6 +67,7 @@
   "error.copyFailed": "Copie impossible : le navigateur a refusé l'accès au presse-papiers.",
   "error.downloadFailed": "Échec du téléchargement.",
   "apiError.invalid_request": "Requête refusée : {{message}}",
+  "apiError.not_a_platform_account": "Ce compte appartient à l'application d'un espace et ne peut pas rejoindre une organisation. Connectez-vous avec un compte de la plateforme.",
   "apiError.validation_failed": "Les données envoyées sont invalides.",
   "apiError.unauthorized": "Authentification refusée : {{message}}",
   "apiError.forbidden": "Action refusée : {{message}}",

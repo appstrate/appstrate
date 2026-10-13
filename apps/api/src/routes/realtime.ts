@@ -32,7 +32,7 @@ import {
   VIEW_AS_QUERY,
 } from "@appstrate/core/permissions";
 import { logger } from "../lib/logger.ts";
-import { getSessionForwardingCookies } from "../lib/auth-cookies.ts";
+import { getSessionForwardingCookies, sessionRealmOf } from "../lib/auth-cookies.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 
 /**
@@ -259,6 +259,8 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   // 2. Fallback: cookie session
   const session = await getSessionForwardingCookies(c);
   if (!session?.user) return null;
+  // This path skips the auth pipeline, so it asks `requirePlatformRealm`'s question itself.
+  if ((await sessionRealmOf(session)) !== "platform") return null;
 
   const orgId = c.req.query("orgId");
   if (!orgId) return null;

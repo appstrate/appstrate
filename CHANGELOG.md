@@ -1440,6 +1440,53 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   used to request the current agent's scopes, which then reached every agent
   bound to the connection.
 
+- **Only a platform-realm account joins an organization or reads it over a
+  cookie** (#1949). An `end_user:<space>` account holding an address could
+  accept an invitation sent to that address, be auto-joined by an org-level
+  OAuth client, open the realtime streams' cookie branch once a member, and
+  reach the OAuth client administration, which the realm guard exempted with
+  every `/api/oauth/` path. The membership door (`provisionMember`) answers
+  `403 not_a_platform_account`, the stream branch `401`, and the guard `403` on
+  `/api/oauth/clients*` and `/api/oauth/scopes`; the hosted OIDC pages are
+  public paths and unchanged. A social sign-in callback neither signs in nor
+  links an identity to an account outside its transaction's realm.
+
+- **An agent's tool call cannot name a login input's placeholder** (#1949).
+  While a `connect.tool` login runs, the runner's proxy substitutes `{{key}}`
+  with the login secret in every request the runner sends to the auth's
+  authorized URIs, a parallel tool call's included. The sidecar refuses a call
+  whose arguments name a `{{key}}` of the connection's login inputs, at any
+  time in the run. On such a connection an argument that legitimately
+  contains that text (a mail-merge `{{email}}`) is refused too.
+
+- **Under `RUN_ADAPTER=firecracker`, a `delivery.files` credential belongs to
+  its runner** (#1949). The sidecar wrote it on its own uid with the
+  manifest's mode: `0600` locked the runner out (the SSH integration did not
+  start), `0644` opened it to the agent sharing the guest. The file is written
+  owner-only and the guest's exec wrapper gives it to the runner's uid
+  (`--own`). The fix is in the guest rootfs: it ships with this release's
+  Firecracker artifacts.
+
+- **Hardening** (#1949).
+  - **BREAKING (OIDC): `GET /api/oauth/logout` redirects only to a
+    `postLogoutRedirectUris` entry of an enabled client.** A `redirect_uris`
+    entry is no longer accepted as a fallback, and a client that registered
+    itself (DCR, CIMD) is never redirected to. Before the deploy, list the
+    clients whose logout relied on the fallback
+    (`SELECT client_id, name FROM oauth_clients WHERE post_logout_redirect_uris IS NULL OR post_logout_redirect_uris = '{}'`,
+    column names as in `packages/db/src/schema/oidc.ts`) and register their
+    post-logout URI; until then their logout lands on `/`.
+  - The magic-link confirmation page names no account: it knew the address
+    only from the link's query string.
+  - A remote MCP credential that is not an HTTP header value is refused
+    without quoting it in the boot report.
+  - An integration manifest is refused on write when an `authorized_uris`
+    entry of an auth that injects a credential is plain `http://`, unless its
+    host is listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. Published versions still
+    load.
+  - The transparent egress plane refuses a plain-HTTP request naming two
+    hosts (a repeated `Host`, an absolute-form target for another one).
+
 ## [1.0.0-beta.66] - 2026-10-08
 
 ### Operators

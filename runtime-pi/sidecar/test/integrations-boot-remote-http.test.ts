@@ -340,6 +340,36 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(fetchCalls).toBe(0);
   });
 
+  // The runtime's own `Headers` TypeError quotes the value, and the boot report is agent-readable.
+  it("refuses a credential that is not a header value without quoting it", async () => {
+    const secret = "TOKEN\r\nX-Injected: 1";
+    const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
+      oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: secret },
+    });
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let fetchCalls = 0;
+    let message = "";
+    await withGlobalFetch(
+      (async () => {
+        fetchCalls += 1;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+      async () => {
+        try {
+          await getFetch()(SERVER_URL, { method: "POST" });
+        } catch (err) {
+          message = String(err);
+        }
+      },
+    );
+    expect(fetchCalls).toBe(0);
+    expect(message).toContain('Header "Authorization" is not a valid HTTP field value');
+    expect(message).not.toContain("TOKEN");
+    expect(message).not.toContain("X-Injected");
+  });
+
   it("never follows a same-origin redirect off the authorized URIs with the credential", async () => {
     const initial = wire(
       [{ authKey: "oauth", authType: "oauth2" }],

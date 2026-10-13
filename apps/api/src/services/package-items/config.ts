@@ -7,6 +7,7 @@ import {
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
 import {
+  findCleartextInjectedCredentials,
   findInvalidScopeTokens,
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
@@ -15,6 +16,7 @@ import {
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { asRecord } from "@appstrate/core/safe-json";
+import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import { validationFailed } from "../../lib/errors.ts";
 import { getLocalServerRef } from "../integration-manifest-helpers.ts";
 
@@ -96,6 +98,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
       ...findInvalidScopeTokens(manifest),
       ...findUnboundedInjectedCredentials(manifest),
+      ...findCleartextInjectedCredentials(manifest, isAllowedInternalIdpHost),
       ...findUnevaluableExpressions(manifest),
     ],
     manifestIsStoredFile: true,
