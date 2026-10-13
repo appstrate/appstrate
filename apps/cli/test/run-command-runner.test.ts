@@ -636,28 +636,33 @@ describe("appstrate run … -- <command> (src/cli.ts)", () => {
   );
 
   // A flag exists for the CLI's process only: an `appstrate` the command runs
-  // must resolve the same instance and identity.
-  it(
-    "hands the command the profile and the API key its flags named",
-    async () => {
+  // must resolve the same instance and identity. Without the flags nothing is
+  // added: the environment's own key is inherited as it is.
+  it.each([
+    [
+      "the profile and the API key its flags named",
+      ["--profile", "staging", "--api-key", "apst_flag"],
+      "staging apst_flag",
+    ],
+    ["no profile and the environment's own key, without those flags", [], "unset apst_test"],
+  ] as const)(
+    "hands the command %s",
+    async (_label, flags, seen) => {
       const { APPSTRATE_API_KEY: _key, ...withoutKey } = headless();
       const out = await cli(
-        withoutKey,
-        "--profile",
-        "staging",
-        "--api-key",
-        "apst_flag",
+        flags.length > 0 ? withoutKey : headless(),
+        ...flags,
         "@acme/sync",
         "--",
         "sh",
         "-c",
-        'echo "$APPSTRATE_PROFILE $APPSTRATE_API_KEY"',
+        'echo "${APPSTRATE_PROFILE-unset} $APPSTRATE_API_KEY"',
       );
 
-      expect(out.stdout).toBe("staging apst_flag\n");
+      expect(out.stdout).toBe(`${seen}\n`);
       expect(out.exitCode).toBe(0);
       expect(platform.on("/api/runs/remote")[0]!.headers.get("authorization")).toBe(
-        "Bearer apst_flag",
+        `Bearer ${seen.split(" ")[1]}`,
       );
     },
     CLI_TIMEOUT_MS,
