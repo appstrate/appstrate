@@ -192,12 +192,14 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
     seedRow(door.authKey, spaceId, door.authKey === "google" ? SYSTEM_ID : undefined);
 
   /** The fields door writes the new secret; the other two mint a URL and write nothing yet. */
-  const renewedBy = async (
+  const expectRenewal = async (
     door: (typeof doors)[number],
     row: { id: string; credentialsEncrypted: string },
   ) =>
-    ((await ciphertextOf(row.id)) !== row.credentialsEncrypted) ===
-    (door.path === "api/connect/fields");
+    expect([door.path, (await ciphertextOf(row.id)) !== row.credentialsEncrypted]).toEqual([
+      door.path,
+      door.path === "api/connect/fields",
+    ]);
 
   const delegates: Record<
     string,
@@ -235,7 +237,7 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
           through,
         );
         expect([door.path, renewed.status]).toEqual([door.path, 200]);
-        expect(await renewedBy(door, spaceRow)).toBe(true);
+        await expectRenewal(door, spaceRow);
       }
     });
   }
@@ -248,7 +250,7 @@ describe("a delegated credential reconnects rows scoped to its space only", () =
         connection_id: orgRow.id,
       });
       expect([door.path, res.status]).toEqual([door.path, 200]);
-      expect(await renewedBy(door, orgRow)).toBe(true);
+      await expectRenewal(door, orgRow);
     }
   });
 

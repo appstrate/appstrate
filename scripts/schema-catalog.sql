@@ -60,8 +60,9 @@ SELECT line FROM (
   WHERE n.nspname = 'public'
   GROUP BY t.typname
   UNION ALL
-  -- The function is fingerprinted by its body modulo whitespace: a trigger that calls a rewritten
-  -- one differs, one that calls a re-indented one does not.
+  -- The function is fingerprinted by its body modulo whitespace: a trigger
+  -- that calls a rewritten one differs, one that calls a re-indented one does
+  -- not.
   SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' enabled ' || t.tgenabled::text
          || ' body md5 ' || md5(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g')))
   FROM pg_trigger t
