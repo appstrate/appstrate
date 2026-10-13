@@ -1322,7 +1322,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 ### Security
 
 - **A connect reads the integration's published version, not its draft**
-  (#PRNUM). Every connect flow (OAuth kickoff and callback, the hosted form,
+  (#1947). Every connect flow (OAuth kickoff and callback, the hosted form,
   the fields and login flows) took the `auth` declaration from the draft, so
   an edit nobody had published changed where an authorization code, a PKCE
   verifier and the OAuth client secret were sent. They are read from the
@@ -1333,7 +1333,7 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   the auth key against the draft.
 
 - **BREAKING (API): a schedule running as an end user is written by an org
-  owner or admin, or by an API key** (#PRNUM). `schedules:write` alone let a
+  owner or admin, or by an API key** (#1947). `schedules:write` alone let a
   member (the `builder` preset, a custom role) name any end user of the space
   as `actor`, and each fire then ran with that end user's own connections.
   Naming an end user other than the caller, and any `PATCH` or `DELETE` of a
