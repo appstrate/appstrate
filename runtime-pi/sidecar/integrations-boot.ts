@@ -50,7 +50,10 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
+import {
+  planHttpDeliveryInjection,
+  unresolvedPlaceholders,
+} from "@appstrate/afps-runtime/resolvers";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
@@ -1073,6 +1076,44 @@ async function registerLocalIntegration(
 }
 
 /**
+ * Refuse an agent's tool call whose arguments carry a `{{key}}` placeholder of the connection's
+ * login inputs.
+ *
+ * While a login runs, the runner's MITM listener replaces `{{key}}` with the login secret in every
+ * request the runner sends to the auth's authorized URIs: it cannot tell the login tool's requests
+ * from a parallel tool call's. The login tool is called by the sidecar with no arguments, so its
+ * placeholders are its own code's; an agent call that names one would have the secret substituted
+ * into a request of its choosing and read it back from the response. Refused whether or not a
+ * login is running, so a call already in flight when one starts is covered.
+ */
+export function refuseLoginPlaceholders(
+  client: AppstrateMcpClient,
+  loginInputKeys: readonly string[],
+): AppstrateMcpClient {
+  const keys = new Set(loginInputKeys);
+  return {
+    ...client,
+    async callTool(args, options) {
+      const named = unresolvedPlaceholders(JSON.stringify(args.arguments ?? {}), {}).find((key) =>
+        keys.has(key),
+      );
+      if (named !== undefined) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Refused: the arguments contain the placeholder '{{${named}}}', reserved for this connection's login.`,
+            },
+          ],
+        };
+      }
+      return client.callTool(args, options);
+    },
+  };
+}
+
+/**
  * Fire `onRejected` on a credential-rejected tool result: servers whose
  * credential never crosses the MITM (SSH, env keys) have no 401 to observe.
  * The result is returned untouched.
@@ -1748,7 +1789,10 @@ export async function bootIntegrations(
       const { allocatedNs, toolCount: added } = await registerLocalIntegration(
         host,
         spec,
-        runnerClient,
+        // The login itself (below) keeps the unwrapped client: it passes no arguments.
+        spec.connectLogin
+          ? refuseLoginPlaceholders(runnerClient, Object.keys(spec.connectLogin.inputs))
+          : runnerClient,
         {
           allowedTools: spec.toolAllowlist,
           // R8a — propagate `hidden_tools` so the host filters them out at
