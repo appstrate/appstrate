@@ -139,11 +139,11 @@ export const namingLayerRemovalSchema = {
 
 /** The schedules a pin or org default removal disables, closing each removal's description. */
 export const namingLayerRemovalEffect =
-  "In the same transaction, every enabled schedule whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards — no `connection_overrides` key, admin pin, pin of its actor or org default — is disabled (`disabled_reason: connection_set_unnamed`, jobs removed), however many connections its actor holds.";
+  "The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.";
 
 /** What a connection delete does to the schedules of a member pin it empties. */
 export const droppedPinEffect =
-  "A member pin the delete empties is removed, which disables its owner's enabled schedules whose fired version uses the integration and whose set nothing else names (`disabled_reason: connection_deleted`, jobs removed).";
+  "A member pin the delete empties is removed in the delete's transaction, which disables (`disabled_reason: connection_deleted`) its owner's enabled schedules on that pin's agent, in its space, whose fired version uses the integration and whose set nothing else names; their jobs are removed once it commits.";
 
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
 export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;

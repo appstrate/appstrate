@@ -17,6 +17,7 @@ import {
   integrationOauthClients,
   integrationOrgDefaults,
   integrationPins,
+  packages,
   schedules,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
@@ -278,6 +279,45 @@ describe("removing the layer that names a schedule's connection set", () => {
       });
     }
 
+    it("judges a schedule whose connection_overrides names only another integration", async () => {
+      await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)]);
+      const schedule = await armedSchedule({
+        connectionOverrides: { "@unnamed/other-svc": [crypto.randomUUID()] },
+      });
+
+      expect(await remove(memberPinPath())).toBe(1);
+      expect(await unnamed()).toEqual([schedule.id]);
+    });
+
+    it("spares a schedule whose version does not resolve: its fire fails on its own", async () => {
+      await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)]);
+      const schedule = await armedSchedule({ versionOverride: "9.9.9" });
+
+      expect(await remove(memberPinPath())).toBe(0);
+      expect((await rowOf(schedule.id)).enabled).toBe(true);
+    });
+
+    // The agent selects no tool: only the integration's draft, with a default one, makes it run.
+    it("judges each schedule under its own dependency_overrides", async () => {
+      const DEFAULTED = "@unnamed/defaulted";
+      await seedAgent(DEFAULTED, {});
+      const [integration] = await db.select().from(packages).where(eq(packages.id, INTEGRATION));
+      await db
+        .update(packages)
+        .set({ draftManifest: { ...integration!.draftManifest, default_tools: ["search"] } })
+        .where(eq(packages.id, INTEGRATION));
+      await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)], DEFAULTED);
+      const published = await armedSchedule({ packageId: DEFAULTED });
+      const draft = await armedSchedule({
+        packageId: DEFAULTED,
+        dependencyOverrides: { [INTEGRATION]: "draft" },
+      });
+
+      expect(await remove(memberPinPath(DEFAULTED))).toBe(1);
+      expect(await unnamed()).toEqual([draft.id]);
+      expect((await rowOf(published.id)).enabled).toBe(true);
+    });
+
     // Off in the space, the fire starts without the integration; back on, it would take the fallback.
     it("disables the schedule while the space has the integration switched off", async () => {
       await ownPin([await seedIntegrationConnection(ctx, INTEGRATION)]);
@@ -510,6 +550,20 @@ describe("removing the layer that names a schedule's connection set", () => {
       expect(await removePinWith(read)).toEqual([left.id]);
       expect(await unnamed()).toEqual([left.id]);
       expect(await rowOf(paused.id)).toMatchObject({ enabled: false, disabledReason: null });
+    });
+
+    it("disables a schedule holding a key for the integration at the read, dropped before the removal", async () => {
+      const pinned = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([pinned]);
+      const schedule = await armedSchedule({ connectionOverrides: { [INTEGRATION]: [pinned] } });
+      const read = await schedulesLayerMayName(pinLayer());
+
+      await db
+        .update(schedules)
+        .set({ connectionOverrides: null })
+        .where(eq(schedules.id, schedule.id));
+
+      expect(await removePinWith(read)).toEqual([schedule.id]);
     });
 
     it("disables a schedule paused at the read and enabled before the removal", async () => {

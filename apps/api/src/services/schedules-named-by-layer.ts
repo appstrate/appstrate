@@ -4,9 +4,9 @@
  * Schedules a cascade layer names an integration's connection set for, and the disable that
  * removing the layer applies to the ones it leaves unnamed: an unattended run never falls back to
  * another account, however many connections its actor holds. Re-enabling goes through the schedule
- * write rule (`schedule-connections.ts`). Whether a fired version uses the integration is the
- * resolver's answer, read before the removal's transaction opens (the resolver reads outside any);
- * what names the set is read from rows, inside it.
+ * write rule (`schedule-connections.ts`). Which fired versions resolve a set for the integration
+ * is the resolver's answer, read before the removal's transaction opens (the resolver reads outside
+ * any); every layer fact is read from rows, inside it.
  */
 
 import { and, asc, eq, exists, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
@@ -17,12 +17,11 @@ import {
   schedules,
   type ScheduleDisabledReason,
 } from "@appstrate/db/schema";
-import { actorFromIds } from "../lib/actor.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
-import { resolveConnectionsForRun, toLaunchOverrides } from "./integration-connection-resolver.ts";
+import { integrationsResolvedForRun } from "./integration-connection-resolver.ts";
 import { getPackage } from "./package-catalog.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
 import { disableSchedules } from "./schedules-naming-connection.ts";
@@ -148,33 +147,20 @@ async function firedDefinition(schedule: ScheduleRow): Promise<LoadedPackage | n
   }
 }
 
-/** Whether the resolver, called as `schedule`'s fire calls it, judges `integrationId`. */
-async function fireUses(
-  schedule: ScheduleRow,
-  agent: LoadedPackage,
-  integrationId: string,
-): Promise<boolean> {
-  const { resolved, errors } = await resolveConnectionsForRun({
-    agentManifest: agent.manifest as Record<string, unknown>,
-    packageId: agent.id,
-    // `package_schedules_exactly_one_actor` guarantees exactly one of the two ids.
-    actor: actorFromIds(schedule.userId, schedule.endUserId)!,
-    scope: { orgId: schedule.orgId, spaceId: schedule.spaceId },
-    launchOverrides: toLaunchOverrides(schedule.connectionOverrides, "schedule_override"),
-    manifestCache: await seedPinnedIntegrationManifests({
-      agent,
-      orgId: schedule.orgId,
-      dependencyOverrides: schedule.dependencyOverrides,
-    }),
-  });
-  // A warning's integration is in `resolved`, bound to none.
-  return integrationId in resolved || errors.some((e) => e.integrationId === integrationId);
+/** The integrations `schedule`'s fire resolves a set for, under its `dependency_overrides`. */
+async function integrationsFired(schedule: ScheduleRow): Promise<string[]> {
+  const agent = await firedDefinition(schedule);
+  if (!agent) return [];
+  const { orgId, dependencyOverrides } = schedule;
+  return integrationsResolvedForRun(
+    agent.manifest as Record<string, unknown>,
+    await seedPinnedIntegrationManifests({ agent, orgId, dependencyOverrides }),
+  );
 }
 
 /**
- * The schedules `layer` may name its integration's set for, enabled or not: those of its scope
- * with no key in `connection_overrides` whose fired version uses the integration (declared, not
- * inert). None when the layer has no row, or when the version or a manifest does not load.
+ * The schedules of `layer`'s scope, enabled or not, whose fire resolves a set for its integration
+ * ({@link integrationsFired}). None when the layer has no row: removing nothing reads no version.
  */
 export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[]> {
   const candidates = await db
@@ -185,17 +171,16 @@ export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[
         eq(schedules.spaceId, layer.spaceId),
         layer.kind === "org_default" ? undefined : eq(schedules.packageId, layer.agentPackageId),
         layer.kind === "member_pin" ? eq(schedules.userId, layer.userId) : undefined,
-        noOverrideKey(layer.integrationId),
         exists(layerRow(layer)),
       ),
     );
-  const definitions = new Map<string, LoadedPackage | null>();
+  const fired = new Map<string, string[]>();
   const using: string[] = [];
   for (const schedule of candidates) {
-    const version = `${schedule.packageId}@${schedule.versionOverride ?? ""}`;
-    if (!definitions.has(version)) definitions.set(version, await firedDefinition(schedule));
-    const agent = definitions.get(version);
-    if (agent && (await fireUses(schedule, agent, layer.integrationId))) using.push(schedule.id);
+    const { packageId, versionOverride, dependencyOverrides } = schedule;
+    const fire = JSON.stringify([packageId, versionOverride, dependencyOverrides]);
+    if (!fired.has(fire)) fired.set(fire, await integrationsFired(schedule));
+    if (fired.get(fire)!.includes(layer.integrationId)) using.push(schedule.id);
   }
   return using;
 }
