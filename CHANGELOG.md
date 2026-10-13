@@ -212,8 +212,10 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   Service, Google IAP, oauth2-proxy). A Cloudflare Access service-token pair
   (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) is relayed: it is the
   caller's credential for its upstream. A caller's own `Cookie` header does
-  not reach the upstream; the cookies an upstream sets are kept and replayed
-  from the server-side jar of the `X-Session-Id` session.
+  not reach the upstream, the one an agent sets on an `api_call` of a remote
+  run included (the sidecar still sends it on a run the platform executes);
+  the cookies an upstream sets are kept and replayed from the server-side jar
+  of the `X-Session-Id` session.
 
 - **BREAKING (API): an undeclared override key has its own code, on both
   maps.** A key naming an id the agent does not declare answers
