@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import i18n from "../i18n";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
@@ -94,6 +96,15 @@ export function useSchedules(packageId: string | undefined) {
 export function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
+}
+
+/**
+ * Says how many schedules removing a pin or a space default disabled (it alone named their
+ * connections for the integration) and refetches their views, cached as enabled.
+ */
+export function warnSchedulesDisabled(qc: ReturnType<typeof useQueryClient>, count: number) {
+  toast.warning(i18n.t("agents:schedule.disabledUnnamed", { count }));
+  invalidateSchedules(qc);
 }
 
 type CreateScheduleBody =

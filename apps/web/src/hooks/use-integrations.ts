@@ -44,7 +44,7 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
-import { invalidateSchedules } from "./use-schedules";
+import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 
 // Re-export wire types for component consumers — canonical definitions
 // live in `@appstrate/shared-types/integrations.ts`.
@@ -564,12 +564,14 @@ export function useDeleteIntegrationPin() {
     mutationFn: async (vars: {
       params: { path: { packageId: string; agentPackageId: string } };
     }) => {
-      await client.DELETE("/api/integrations/{packageId}/pins/{agentPackageId}", {
+      const { data } = await client.DELETE("/api/integrations/{packageId}/pins/{agentPackageId}", {
         ...vars,
       });
+      return data!;
     },
-    onSuccess: () => {
-      toast.success(t("integration.admin.pin.deleted"));
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
+      else toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -622,12 +624,14 @@ export function useDeleteIntegrationOrgDefault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/default", {
+      const { data } = await client.DELETE("/api/integrations/{packageId}/default", {
         ...vars,
       });
+      return data!;
     },
-    onSuccess: () => {
-      toast.success(t("integration.admin.orgDefault.deleted"));
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
+      else toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });

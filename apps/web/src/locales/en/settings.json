@@ -437,6 +437,8 @@
   "connections.pinImpact.shrinks_one": "it goes from {{from}} to {{count}} connection",
   "connections.pinImpact.shrinks_other": "it goes from {{from}} to {{count}} connections",
   "connections.pinImpact.resets": "no connection left chosen: it goes back to the space default or your single own connection; otherwise one must be chosen or connected (its runs fail until then)",
+  "connections.pinImpact.disablesSchedules_one": "one of your schedules relies on this selection: it will be disabled",
+  "connections.pinImpact.disablesSchedules_other": "{{count}} of your schedules rely on this selection: they will be disabled",
   "connections.scheduleImpact.intro_one": "This connection will be removed from the selection of your schedule:",
   "connections.scheduleImpact.intro_other": "This connection will be removed from the selection of your {{count}} schedules:",
   "connections.scheduleImpact.shrinks_one": "it goes from {{from}} to {{count}} connection",

@@ -11,13 +11,14 @@
  *
  * These are write-only mutations: the picker reads pin state off the
  * server-authoritative agent-resolution verdict (`member_pinned_connection_ids`)
- * and refetches it itself after a pick, so nothing is invalidated here. Member
- * pins are private per actor — the API endpoint filters by the caller's
- * user_id, so we never see other users' pins client-side.
+ * and refetches it itself after a pick, so no integration read is invalidated
+ * here. Member pins are private per actor — the API endpoint filters by the
+ * caller's user_id, so we never see other users' pins client-side.
  */
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
+import { warnSchedulesDisabled } from "./use-schedules";
 
 const MEMBER_PIN_PATH =
   "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}";
@@ -51,9 +52,10 @@ interface DeleteMemberPinInput {
 }
 
 export function useDeleteMemberIntegrationPin() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: DeleteMemberPinInput) => {
-      await client.DELETE(MEMBER_PIN_PATH, {
+      const { data } = await client.DELETE(MEMBER_PIN_PATH, {
         params: {
           path: {
             agentPackageId: input.agentPackageId,
@@ -61,6 +63,10 @@ export function useDeleteMemberIntegrationPin() {
           },
         },
       });
+      return data!;
+    },
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
     },
   });
 }
