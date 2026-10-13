@@ -10,10 +10,11 @@
  */
 
 import { z } from "zod";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePlatformApiUrl } from "./platform-url.ts";
 
-const runnerEnvSchema = z.object({
+export const runnerEnvSchema = z.object({
   // Shared bearer secret between the platform's firecracker backend (its
   // HTTP client) and this daemon. REQUIRED — there is deliberately no
   // default and no
@@ -64,6 +65,18 @@ const runnerEnvSchema = z.object({
       return z.NEVER;
     }
   }),
+  // Internal-host SSRF allowlist forwarded to every guest sidecar, read from
+  // THIS process's environment by `buildBaseSidecarEnv`. Same parser as the
+  // platform schema and the sidecar, so a refused entry stops the daemon at
+  // boot with one issue per entry.
+  EGRESS_ALLOW_INTERNAL_HOSTS: z
+    .string()
+    .optional()
+    .superRefine((raw, ctx) => {
+      for (const message of parseEgressAllowInternalHosts(raw).invalid) {
+        ctx.addIssue({ code: "custom", message });
+      }
+    }),
 });
 
 type RunnerEnv = z.infer<typeof runnerEnvSchema>;
