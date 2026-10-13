@@ -42,7 +42,7 @@ import {
   assertCredentialEditable,
   credentialActions,
   mayProbeCredential,
-  checkReconnect,
+  reconnectVerdict,
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
@@ -1129,7 +1129,7 @@ describe("model-provider-credentials service — membership lock on creation", (
  * produce (admin: all four; member: `connect` alone), plus a reader and a
  * delegate (an API key: org grants, no payer, so it owns nothing).
  */
-describe("model-provider-credentials service — credentialActions and checkReconnect", () => {
+describe("model-provider-credentials service — credentialActions and reconnectVerdict", () => {
   const none = {
     orgId: "org",
     userId: "caller",
@@ -1192,24 +1192,25 @@ describe("model-provider-credentials service — credentialActions and checkReco
     });
   }
 
-  it("checkReconnect: the pairing's provider only, never a built-in one, and a 403 where the policy alone refuses", () => {
+  it("reconnectVerdict: absent off the pairing's provider or on a built-in one, policy_off only where the policy alone refuses", () => {
     const subscription = {
       source: "custom",
       ownerUserId: null,
       authMode: "oauth2",
       providerId: "test-oauth",
     } as const;
-    expect(checkReconnect(callers.admin, subscription, "test-oauth", true)).toBe(true);
-    expect(checkReconnect(callers.admin, subscription, "test-oauth-hooks", true)).toBe(false);
-    expect(
-      checkReconnect(callers.admin, { ...subscription, source: "built-in" }, "test-oauth", true),
-    ).toBe(false);
-
     const own = { ...subscription, ownerUserId: "caller" } as const;
     const others = { ...subscription, ownerUserId: "someone-else" } as const;
-    expect(checkReconnect(callers.member, own, "test-oauth", true)).toBe(true);
-    expect(() => checkReconnect(callers.member, own, "test-oauth", false)).toThrow(ApiError);
-    expect(checkReconnect(callers.admin, others, "test-oauth", false)).toBe(false);
+
+    expect(reconnectVerdict(callers.admin, subscription, "test-oauth", false)).toBe("ok");
+    expect(reconnectVerdict(callers.admin, subscription, "test-oauth-hooks", true)).toBe("absent");
+    expect(
+      reconnectVerdict(callers.admin, { ...subscription, source: "built-in" }, "test-oauth", true),
+    ).toBe("absent");
+    expect(reconnectVerdict(callers.member, own, "test-oauth", true)).toBe("ok");
+    expect(reconnectVerdict(callers.member, own, "test-oauth", false)).toBe("policy_off");
+    expect(reconnectVerdict(callers.admin, others, "test-oauth", false)).toBe("absent");
+    expect(reconnectVerdict(callers.member, subscription, "test-oauth", false)).toBe("absent");
   });
 
   it("a reader gets only test on a built-in credential, a member nothing", () => {

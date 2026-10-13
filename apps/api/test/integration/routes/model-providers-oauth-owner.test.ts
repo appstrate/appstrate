@@ -220,6 +220,18 @@ describe("subscription pairings — owner_type", () => {
       }
     });
 
+    it("refuses at the mint a personal pairing the redeem would refuse: a provider whose endpoint the organization chooses", async () => {
+      // The harness registers module providers with an overridable endpoint.
+      const res = await mint(admin, { providerId: "claude-code", owner_type: "user" });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "personal_credential_custom_endpoint",
+      );
+      expect((await mint(admin, { providerId: "claude-code", owner_type: "org" })).status).toBe(
+        200,
+      );
+    });
+
     it("is refused with 403 while the organization has personal credentials off, an admin included", async () => {
       await updateOrgSettings(admin.orgId, { personal_model_credentials: false });
       for (const ctx of [admin, member]) {
@@ -333,7 +345,7 @@ describe("subscription pairings — owner_type", () => {
       expect((await storedCredential(orgSubscription.id)).accessToken).toBe("org-access");
     });
 
-    it("refuses a pairing with no owner whose minter holds connect alone, as one in flight when the column appeared", async () => {
+    it("a pairing with no recorded owner is an organization pairing: its minter needs write", async () => {
       const { token } = await createPairing({
         userId: member.user.id,
         orgId: admin.orgId,
@@ -345,6 +357,32 @@ describe("subscription pairings — owner_type", () => {
 
       expect((await redeem(token)).status).toBe(403);
       expect(await credentialCount(admin.orgId)).toBe(0);
+    });
+
+    it("refuses a personal creation recorded for another user than its minter", async () => {
+      const { token } = await createPairing({
+        userId: member.user.id,
+        orgId: admin.orgId,
+        providerId: TEST_OAUTH_PROVIDER_ID,
+        ownerUserId: secondAdmin.user.id,
+        platformUrl: "http://localhost:3000",
+        ttlSeconds: 300,
+      });
+
+      expect((await redeem(token)).status).toBe(403);
+      expect(await credentialCount(admin.orgId)).toBe(0);
+    });
+
+    it("a refused redeem burns the pairing: it reads consumed with no credential, and a retry is 410", async () => {
+      const minted = await mint(secondAdmin, { owner_type: "org" });
+      const { id, token } = (await minted.json()) as { id: string; token: string };
+      await setOrgRole(secondAdmin, "guest");
+      expect((await redeem(token)).status).toBe(403);
+
+      const read = await app.request(`${PAIRINGS}/${id}`, { headers: authHeaders(secondAdmin) });
+      expect(read.status).toBe(200);
+      expect(await read.json()).toMatchObject({ status: "consumed", credentialId: null });
+      expect((await redeem(token)).status).toBe(410);
     });
 
     it("refuses every redeem of a minter who is no longer a member", async () => {

@@ -49,7 +49,7 @@ import { lockOrgMember } from "../space-members.ts";
 import { orgPermissions } from "../../lib/permissions.ts";
 import type { DbOrTx } from "../../lib/db-helpers.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { assertPermission } from "../../middleware/require-permission.ts";
+import { permissionDenied } from "../../middleware/require-permission.ts";
 import {
   isBindableCredential,
   providerAllowsPersonalCredentials,
@@ -109,11 +109,9 @@ async function lockMinter(
   tx: DbOrTx,
   orgId: string,
   userId: string,
-): Promise<{ permissions: ReadonlySet<string>; caller: ModelCredentialCaller } | null> {
+): Promise<ModelCredentialCaller | null> {
   const member = await lockOrgMember(tx, orgId, userId);
-  if (!member) return null;
-  const permissions = orgPermissions(member.role);
-  return { permissions, caller: modelCredentialCaller(orgId, userId, permissions) };
+  return member ? modelCredentialCaller(orgId, userId, orgPermissions(member.role)) : null;
 }
 
 /** Create, rotate or reconnect: an org manager, or a member for its own (`connect`). */
@@ -128,26 +126,25 @@ export const MANAGE_CREDENTIALS = [
  */
 export const credentialOwnerTypeSchema = z.enum(["org", "user"]).default("org");
 
-/** What creating a credential takes: `write` for the organization's (`null`), `connect` for one's own. */
-function creationAction(ownerUserId: string | null): "write" | "connect" {
-  return ownerUserId === null ? "write" : "connect";
-}
-
 /**
- * The owner a creation door writes for `ownerType`, after its permission. A
- * delegate owns nothing: its personal creation is refused.
+ * The owner a creation door writes for `ownerType`, once {@link mayCreateCredential}
+ * admits the caller. A delegate owns nothing: its personal creation is refused.
  */
 export function resolveCredentialOwner(
   c: Context<AppEnv>,
   ownerType: z.infer<typeof credentialOwnerTypeSchema>,
 ): string | null {
-  if (ownerType === "org") {
-    assertPermission(c, "model-provider-credentials", creationAction(null));
-    return null;
+  const caller = requestModelCredentialCaller(c);
+  const ownerUserId = ownerType === "org" ? null : caller.userId;
+  if (ownerType === "user" && ownerUserId === null) {
+    throw forbidden("A personal credential belongs to a user");
   }
-  const ownerUserId = requestPayerUserId(c);
-  if (ownerUserId === null) throw forbidden("A personal credential belongs to a user");
-  assertPermission(c, "model-provider-credentials", creationAction(ownerUserId));
+  if (!mayCreateCredential(caller, ownerUserId)) {
+    throw permissionDenied(
+      c,
+      `model-provider-credentials:${ownerType === "org" ? "write" : "connect"}`,
+    );
+  }
   return ownerUserId;
 }
 
@@ -390,7 +387,7 @@ async function assertPersonalModelCredentialsAllowed(orgId: string): Promise<voi
  * organization allows them, and the credential picks no endpoint (its traffic
  * would leave the org's own host list, which the org cannot audit).
  */
-async function assertPersonalCredentialCreatable(
+export async function assertPersonalCredentialCreatable(
   orgId: string,
   cfg: ModelProviderDefinition,
   baseUrlOverride: string | null | undefined,
@@ -484,7 +481,7 @@ export interface CreateOAuthCredentialInput {
 
 /**
  * The pairing redeem's creation door. The minter is judged as the mint judged
- * them ({@link resolveCredentialOwner}), on what the organization grants them
+ * them ({@link mayCreateCredential}), on what the organization grants them
  * at this moment: anything less is the 403.
  */
 export async function createOAuthCredential(input: CreateOAuthCredentialInput): Promise<string> {
@@ -526,10 +523,8 @@ export async function createOAuthCredential(input: CreateOAuthCredentialInput): 
     async (tx) => {
       const minter = await lockMinter(tx, input.orgId, input.userId);
       if (!minter) throw forbidden("Not a member of this organization");
-      const required = `model-provider-credentials:${creationAction(ownerUserId)}`;
-      const own = ownerUserId === null || ownerUserId === input.userId;
-      if (!own || !minter.permissions.has(required)) {
-        throw forbidden(`Insufficient permissions: ${required} required`);
+      if (!mayCreateCredential(minter, ownerUserId)) {
+        throw forbidden("The member who minted this pairing may not create this credential");
       }
     },
   );
@@ -556,7 +551,7 @@ interface ReconnectOAuthCredentialInput {
  * design — reconnect is the user-facing repair path for that state too.
  *
  * The pairing redeem's reconnect door. The minter is judged as the mint judged
- * them ({@link checkReconnect}), on what the organization grants them at this
+ * them ({@link reconnectVerdict}), on what the organization grants them at this
  * moment and on the row as it is, read under lock: `false` is the route's 404.
  */
 export async function reconnectOAuthCredential(
@@ -589,7 +584,9 @@ export async function reconnectOAuthCredential(
       authMode: getModelProvider(input.providerId)?.authMode ?? "api_key",
       providerId: input.providerId,
     };
-    if (!checkReconnect(minter.caller, facts, input.providerId, personalAllowed)) return false;
+    const verdict = reconnectVerdict(minter, facts, input.providerId, personalAllowed);
+    if (verdict === "policy_off") throw personalModelCredentialsDisabled();
+    if (verdict === "absent") return false;
 
     // Only the old identity is read: an unreadable blob, or one under a missing key, is absent.
     const existing = decryptForDisplay(
@@ -757,6 +754,15 @@ function mayManageCredential(
     : caller.deletesOrg || (own && caller.connects);
 }
 
+/**
+ * The creation rule, shared by the request doors and the pairing redeem: an
+ * organization credential (`null`) needs `writesOrg`, a personal one is the
+ * caller's own and needs `connects`.
+ */
+function mayCreateCredential(caller: ModelCredentialCaller, ownerUserId: string | null): boolean {
+  return ownerUserId === null ? caller.writesOrg : ownerUserId === caller.userId && caller.connects;
+}
+
 /** A credential as the action rules read it. */
 interface CredentialFacts {
   source: "built-in" | "custom";
@@ -766,41 +772,24 @@ interface CredentialFacts {
 }
 
 /**
- * The reconnect rule, shared by the list's `reconnect` action and the pairing
- * doors: an OAuth credential of `providerId` the caller may edit, a personal one
- * only while `personalAllowed` (the organization's policy).
+ * The reconnect rule, shared by the list's `reconnect` action, the pairing mint
+ * and its redeem. `ok`: an OAuth credential of `providerId` the caller may edit.
+ * `policy_off`: such a personal one while the organization has personal
+ * credentials off (`personalAllowed` false). `absent`: anything else.
  */
-function mayReconnectCredential(
+export function reconnectVerdict(
   caller: ModelCredentialCaller,
   credential: CredentialFacts,
   providerId: string,
   personalAllowed: boolean,
-): boolean {
-  return (
+): "ok" | "absent" | "policy_off" {
+  const reconnectable =
     credential.source === "custom" &&
     credential.authMode === "oauth2" &&
     credential.providerId === providerId &&
-    mayManageCredential(caller, credential.ownerUserId, "edit") &&
-    (credential.ownerUserId === null || personalAllowed)
-  );
-}
-
-/**
- * {@link mayReconnectCredential} as the two reconnect doors answer it, the pairing
- * mint and its redeem: `false` reads as absent, and the one case the organization's
- * policy alone refuses is told so (403).
- */
-export function checkReconnect(
-  caller: ModelCredentialCaller,
-  credential: CredentialFacts,
-  providerId: string,
-  personalAllowed: boolean,
-): boolean {
-  if (mayReconnectCredential(caller, credential, providerId, personalAllowed)) return true;
-  if (mayReconnectCredential(caller, credential, providerId, true)) {
-    throw personalModelCredentialsDisabled();
-  }
-  return false;
+    mayManageCredential(caller, credential.ownerUserId, "edit");
+  if (!reconnectable) return "absent";
+  return credential.ownerUserId === null || personalAllowed ? "ok" : "policy_off";
 }
 
 /**
@@ -822,7 +811,7 @@ export function credentialActions(
   }
   if (
     credential.providerId &&
-    mayReconnectCredential(caller, credential, credential.providerId, personalAllowed)
+    reconnectVerdict(caller, credential, credential.providerId, personalAllowed) === "ok"
   ) {
     actions.push("reconnect");
   }

@@ -8,7 +8,7 @@ import type { AppEnv } from "../types/index.ts";
 import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
-import { isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import {
   cancelPairing,
   consumePairing,
@@ -24,9 +24,10 @@ import {
   credentialOwnerTypeSchema,
   getOrgModelProviderCredential,
   MANAGE_CREDENTIALS,
-  checkReconnect,
+  assertPersonalCredentialCreatable,
   personalModelCredentialsAllowed,
   personalModelCredentialsDisabled,
+  reconnectVerdict,
   requestModelCredentialCaller,
   resolveCredentialOwner,
 } from "../services/model-providers/credentials.ts";
@@ -240,34 +241,37 @@ export function createModelProvidersOAuthRouter() {
     const user = c.get("user");
     const caller = requestModelCredentialCaller(c);
     const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
-    const personalAllowed = await personalModelCredentialsAllowed(orgId);
 
     let ownerUserId: string | null;
     let reconnectCredentialId: string | null = null;
     if (input.credentialId !== undefined) {
-      // A credential the caller may not reconnect reads as absent.
       const credential = await getOrgModelProviderCredential(caller, input.credentialId);
-      if (
-        !credential ||
-        !checkReconnect(
-          caller,
-          {
-            source: credential.source,
-            ownerUserId: credential.owner_id,
-            authMode: credential.authMode,
-            providerId: credential.providerId,
-          },
-          input.providerId,
-          personalAllowed,
-        )
-      ) {
+      const verdict = credential
+        ? reconnectVerdict(
+            caller,
+            {
+              source: credential.source,
+              ownerUserId: credential.owner_id,
+              authMode: credential.authMode,
+              providerId: credential.providerId,
+            },
+            input.providerId,
+            await personalModelCredentialsAllowed(orgId),
+          )
+        : "absent";
+      if (verdict === "policy_off") throw personalModelCredentialsDisabled();
+      if (!credential || verdict === "absent") {
         throw notFound("Model provider credential not found");
       }
       ownerUserId = credential.owner_id;
       reconnectCredentialId = credential.id;
     } else {
       ownerUserId = resolveCredentialOwner(c, input.owner_type ?? "org");
-      if (ownerUserId !== null && !personalAllowed) throw personalModelCredentialsDisabled();
+      // The redeem's own guard: a pairing it would refuse is never minted.
+      const provider = getModelProvider(input.providerId);
+      if (ownerUserId !== null && provider) {
+        await assertPersonalCredentialCreatable(orgId, provider, null);
+      }
     }
 
     const platformUrl = getEnv().APP_URL;
