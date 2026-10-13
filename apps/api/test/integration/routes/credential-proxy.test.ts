@@ -61,6 +61,7 @@ import {
   seedProxyConnection,
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
 
 const app = getTestApp();
 
@@ -785,6 +786,36 @@ describe("POST /api/credential-proxy/proxy — boolean control headers take 1/0"
       expect(sent!.get(name)).toBeNull();
     }
     expect(sent!.get("x-custom")).toBe("kept");
+  });
+
+  it("never sends the platform's own request headers upstream: bearer, cookie, markers, version", async () => {
+    let sent: Headers | null = null;
+    mockUpstream(async (_input, init) => {
+      sent = new Headers(init?.headers);
+      return new Response("{}", { status: 200 });
+    });
+    const res = await proxyPost(
+      {
+        Cookie: "better-auth.session_token=platform-session",
+        "X-Appstrate-Internal-Dispatch": "not-the-process-secret",
+        "X-Appstrate-Trace": "t-1",
+        "Appstrate-Version": CURRENT_API_VERSION,
+        "Accept-Language": "fr",
+      },
+      "{}",
+    );
+    expect(res.status).toBe(200);
+    for (const name of [
+      "cookie",
+      "x-appstrate-internal-dispatch",
+      "x-appstrate-trace",
+      "appstrate-version",
+    ]) {
+      expect([name, sent!.get(name)]).toEqual([name, null]);
+    }
+    // The connection's credential, never the caller's platform bearer.
+    expect(sent!.get("authorization")).toBe("Bearer ya29.live-token");
+    expect(sent!.get("accept-language")).toBe("fr");
   });
 
   for (const [name, value] of [

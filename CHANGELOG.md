@@ -220,6 +220,24 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 
 ### Changed
 
+- **BREAKING (API): the credential proxy sends upstream no header describing
+  the platform's own inbound request.** One rule,
+  `isPlatformRequestHeader` (`@appstrate/connect/platform-request-headers`),
+  read by the credential proxy and by the LLM proxies' forwarding policy,
+  names them: the caller's platform credential (`Authorization`, `Cookie`),
+  its tenancy, run and role preview (`X-Org-Id`, `X-Space-Id`, `X-Run-Id`,
+  `X-View-As`), the platform's markers and versioning (`X-Appstrate-*`,
+  `Appstrate-*`), the network path an edge adds on the way in (`Forwarded`,
+  `Via`, `X-Forwarded-*`, the client-IP headers, `CDN-Loop`, Cloudflare's
+  `CF-*`) and the identity an auth proxy asserts (AWS ALB OIDC, Azure App
+  Service, Google IAP, oauth2-proxy). A Cloudflare Access service-token pair
+  (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) is relayed: it is the
+  caller's credential for its upstream. A caller's own `Cookie` header does
+  not reach the upstream, the one an agent sets on an `api_call` of a remote
+  run included (the sidecar still sends it on a run the platform executes);
+  the cookies an upstream sets are kept and replayed from the server-side jar
+  of the `X-Session-Id` session.
+
 - **BREAKING (API): an undeclared override key has its own code, on both
   maps.** A key naming an id the agent does not declare answers
   `400 validation_failed` with one `errors[]` item, the shape
@@ -1016,6 +1034,11 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   lists**, and `space_id: null` is a `missing_argument`. The
   `/oauth2/authorize` gate attempts no write when the space's resource row
   exists. (#1925)
+- **An `Idempotency-Key` sent to the credential proxy reaches the upstream.**
+  On `/api/credential-proxy/proxy` the header is the upstream's
+  (Stripe's, for one): it is relayed with the caller's other headers,
+  whatever the verb, where a mutating call carrying one was refused
+  `400 idempotency_not_supported`. The platform de-duplicates nothing on it.
 
 - **A session is refused for a user with no user row.** The session hook throws
   instead of creating a session without a realm.
