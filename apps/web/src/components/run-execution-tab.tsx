@@ -194,9 +194,8 @@ export function RunExecutionTab({ run, logs, turns }: RunExecutionTabProps) {
     run.runOrigin === "remote" ? t("run.infoRunnerRemote") : t("run.infoRunnerPlatform");
   // Append the runner name when present so the dashboard shows
   // "Distant · pierres-mbp" or "Distant · acme/web #42" instead of the
-  // bare origin word. A command runner is named between the two ("Distant ·
-  // commande · pierres-mbp"): its run executed a command, not the agent. On a
-  // platform run the kind only labels the client that triggered it.
+  // bare origin word.
+  // Remote only: on a platform run the kind labels the client that triggered it.
   const isCommandRunner = run.runOrigin === "remote" && run.runner_kind === "command";
   const runnerLabel = [
     runnerOriginLabel,

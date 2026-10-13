@@ -391,8 +391,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   } else if (
     status === "success" &&
     effective.manifest.output?.schema &&
-    // A command run that emits no output is not judged by the agent's output
-    // contract; one that does emit an output is validated like any other run.
     !(isCommandRun(run) && (result.output === null || result.output === undefined))
   ) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
@@ -974,15 +972,9 @@ function runHadZeroTokens(usage: TokenUsage): boolean {
 }
 
 /**
- * Is the run's runner a command? No agent executed then, so neither verdict on
- * an agent's execution judges the run: not the LLM-liveness check (zero tokens
- * is a command's normal outcome), not the ABSENCE of the output the agent's
- * contract requires (nothing called `output`) — an output the runner does send
- * is validated like any other. Both halves are needed. `runner_kind` is a
- * header the caller sets at run creation: on a platform-executed run it labels
- * the client that triggered the run, and the runner is the platform's own
- * agent runtime, which both verdicts hold for. Only on a remote run is the
- * caller the runner.
+ * No agent executed, so neither agent verdict judges the run: zero tokens is
+ * its normal outcome and it owes no output (one it sends is still validated).
+ * Remote only: on a platform run `runner_kind` labels the triggering client.
  */
 function isCommandRun(run: Pick<RunSinkContext, "runOrigin" | "runnerKind">): boolean {
   return run.runOrigin === "remote" && run.runnerKind === COMMAND_RUNNER_KIND;

@@ -35,26 +35,14 @@ import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./lau
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
 
-/**
- * What a registration sends. Whether to report at all ({@link ReportMode}) and
- * what a refused registration means ({@link ReportFallback}) are decided by
- * the caller, around this call.
- */
 interface ReportOptions {
   /** Requested sink TTL in seconds. Clamped by the server. */
   ttlSeconds?: number;
   /** `--connection` picks, sent as the body's `connection_overrides`. */
   connectionOverrides?: ConnectionOverrides | undefined;
-  /**
-   * The caller's input, which the server resolves and validates against the
-   * agent's schema. A command run sends it; a locally executed agent resolves
-   * its own and registers `{}`.
-   */
+  /** Validated server-side against the agent's schema. A locally executed agent registers `{}`. */
   input?: Record<string, unknown> | undefined;
-  /**
-   * What kind of runner this is, sent as `X-Appstrate-Runner-Kind` and kept on
-   * `runs.runner_kind`. Unset, the platform infers it from the credential.
-   */
+  /** Sent as `X-Appstrate-Runner-Kind`. Unset, the platform infers it from the credential. */
   runnerKind?: string | undefined;
 }
 
@@ -102,7 +90,6 @@ interface ReportContextSnapshot {
   os: string;
   cliVersion: string;
   gitSha?: string;
-  /** The bundle the runner loaded; absent when it loaded none. */
   bundle?: { name: string; version: string };
 }
 
@@ -134,8 +121,7 @@ export function shouldReport(mode: ReportMode, ctx: ReportContext | null): boole
  *                  or a runner whose package isn't in the catalog).
  *   - `registry` — declare the package by id and let the server load
  *                  its own copy. Deterministic attribution, no shadow
- *                  row, no "Inline" badge in the UI. Needs no bundle on
- *                  the runner's side.
+ *                  row, no "Inline" badge in the UI.
  */
 export type ReportSource =
   | { kind: "inline"; bundle: Bundle }
@@ -152,7 +138,7 @@ export type ReportSource =
  * Register a remote run against the instance and return a configured
  * HttpSink. The caller composes it with its local console sink. On
  * registration failure, the caller's fallback policy decides whether
- * to abort the run or continue console-only (see {@link ReportOptions}).
+ * to abort the run or continue console-only (see {@link ReportFallback}).
  */
 export async function startReportSession(
   reportSource: ReportSource,
@@ -244,7 +230,6 @@ export async function startReportSession(
   };
 }
 
-/** The host half of a run's `contextSnapshot`: where the runner executes, and which CLI. */
 export function hostSnapshot(): { os: string; cliVersion: string } {
   return {
     os: `${process.platform} ${process.arch}`,
@@ -252,12 +237,7 @@ export function hostSnapshot(): { os: string; cliVersion: string } {
   };
 }
 
-/**
- * Start the run's liveness keep-alive: a signed POST to `<sink>/heartbeat`,
- * the column the platform's stall watchdog reads. Same helper as the
- * runtime-pi container. `onClosed` is told once when the instance answers that
- * the run's sink is closed; `intervalMs` overrides the helper's cadence (tests).
- */
+/** The run's liveness keep-alive, which the platform's stall watchdog reads. */
 export function startReportHeartbeat(
   session: ReportSession,
   onError: (err: unknown) => void,

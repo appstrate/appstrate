@@ -14,14 +14,11 @@
  *   shell, FS, and env. Best for the dev-loop on a bundle you authored:
  *   sub-second feedback, `--snapshot` replays, planting in your debugger.
  *
- * - `command` — `appstrate run @scope/agent -- <command> [args…]`: no agent
- *   executes. The CLI registers an ordinary remote run of the agent and is
- *   its runner, and what runs under it is the command, which reaches the
- *   connections the run bound through the credential proxy (`X-Run-Id`).
- *   Resolved by the presence of a command, never by a flag.
+ * - `command` — `appstrate run @scope/agent -- <command>`: no agent
+ *   executes, the CLI runs the command as the runner of a remote run.
+ *   Selected by the presence of a command, never by a flag.
  *
- * Default rule (no flag, no command): `target.kind === "id"` → remote,
- * `path` → local.
+ * Default rule (no flag): `target.kind === "id"` → remote, `path` → local.
  * Rationale: `./bundle.afps` is "this file I just built" (local makes
  * sense). `@scope/agent` is "the published agent the platform knows
  * about" (remote matches dashboard parity and isolates third-party code
@@ -35,8 +32,7 @@
  *   does not upload local bundles to inline runs — would be silently
  *   different execution; explicit refusal is clearer than half-magic).
  *
- * `--local` and `--remote` are mutually exclusive, and both are refused
- * with a command.
+ * `--local` and `--remote` are mutually exclusive.
  */
 
 import type { parseRunTarget } from "./package-spec.ts";
@@ -49,7 +45,6 @@ type RunTarget = ReturnType<typeof parseRunTarget>;
 interface ModeResolutionOpts {
   local?: boolean;
   remote?: boolean;
-  /** Everything after the first `--`; undefined when the invocation has none. */
   command?: readonly string[] | undefined;
   // Local-only flags — flagged at validation time when in remote mode.
   snapshot?: string;
@@ -83,27 +78,7 @@ export class ExecutionModeError extends Error {
   }
 }
 
-/**
- * The flags of the first option that was given `--` as its value, if any.
- * Commander hands an option that takes a value the next argument whatever it
- * is, so `run @a/b -p -- cmd` reads `--` as the profile. `--` is the value of
- * no option of `run`, nor of a global one: with it refused, the first literal
- * `--` of the arguments is the separator {@link commandFromArgv} takes it for.
- */
-export function optionGivenSeparator(
-  options: Iterable<readonly [flags: string, value: unknown]>,
-): string | undefined {
-  for (const [flags, value] of options) {
-    if (value === "--" || (Array.isArray(value) && value.includes("--"))) return flags;
-  }
-  return undefined;
-}
-
-/**
- * More operands than `appstrate run` takes. `run` declares a variadic argument,
- * so commander raises nothing for them itself; this is worded as commander 15
- * words the error it raises for a command that declares none (`_excessArguments`).
- */
+/** Worded as commander's own excess-argument error, which `run`'s variadic argument disables. */
 export class ExcessArgumentsError extends Error {
   override readonly name = "ExcessArgumentsError";
   constructor(received: readonly string[]) {
@@ -114,20 +89,10 @@ export class ExcessArgumentsError extends Error {
 }
 
 /**
- * The command of `appstrate run <bundle> -- <command> [args…]`, or undefined
- * for an invocation that has none.
- *
- * `argv` is the raw argument tail and `operands` what commander parsed out of
- * it, `<bundle>` first. Both are needed: commander drops the `--` before the
- * `run` action sees its operands, leaving `run @a/b x` and `run @a/b -- x`
- * alike.
- *
- * The command is what follows the first `--`, and only when `<bundle>`
- * precedes that `--`. Ahead of the bundle a `--` merely ends option parsing:
- * `run -- @a/b` is a plain run of `@a/b`. Operands that are neither the
- * bundle nor the command raise {@link ExcessArgumentsError}.
- *
- * Assumes no option took a `--` as its value ({@link optionGivenSeparator}).
+ * The command of `run <bundle> -- <command> [args…]`, or undefined. Commander
+ * drops the `--` from the operands it hands the action, hence the raw `argv`.
+ * Only a `--` after `<bundle>` introduces a command: ahead of it, it merely
+ * ends option parsing (`run -- @a/b` is a plain run of `@a/b`).
  */
 export function commandFromArgv(
   argv: readonly string[],
@@ -179,7 +144,6 @@ export function resolveExecutionMode(target: RunTarget, opts: ModeResolutionOpts
   return target.kind === "id" ? "remote" : "local";
 }
 
-/** Command mode: the target is an agent of the instance, and no flag picks where an agent executes. */
 function resolveCommandMode(target: RunTarget, opts: ModeResolutionOpts): ExecutionMode {
   if (opts.command?.length === 0) {
     throw new ExecutionModeError(
@@ -207,10 +171,7 @@ const NO_AGENT_EXECUTES = "no agent executes, so no model is called";
 const PROXY_ONLY = "the command reaches connections through the instance's credential proxy only";
 const NOTHING_TO_RENDER = "the CLI renders no agent event: the output is the command's own";
 
-/**
- * Flags a command run has nothing to act on, by the option that carries each.
- * `--cancel-on-exit` is told apart from its negation in `commandModeOffenders`.
- */
+/** Flags a command run has nothing to act on. Tri-state `--cancel-on-exit` is handled apart. */
 const COMMAND_MODE_REFUSALS: ReadonlyArray<{
   option: keyof ModeResolutionOpts;
   flag: string;
@@ -280,8 +241,7 @@ function commandModeOffenders(opts: ModeResolutionOpts): { flag: string; reason:
  * Validate that the user-supplied flags are compatible with the resolved
  * execution mode. Local-only flags are rejected in remote mode with a
  * clear hint pointing at `--local` as the opt-in, and symmetrically for
- * remote-only flags in local mode. Command mode refuses every flag that
- * configures an agent's execution or its rendering.
+ * remote-only flags in local mode.
  *
  * Kept separate from `resolveExecutionMode` so the dispatch can branch
  * on mode FIRST.
@@ -381,7 +341,6 @@ export function validateOptsForMode(mode: ExecutionMode, opts: ModeResolutionOpt
   );
 }
 
-/** One line per offender, so the user fixes them in one pass; silent when there is none. */
 function throwOffenders(
   offenders: readonly { flag: string; reason: string }[],
   mode: ExecutionMode,

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Resolve once `ms` have passed or `signal` aborts, whichever comes first.
- * Never rejects: the caller reads `signal.aborted` to tell the two apart. An
- * already-aborted signal resolves at once.
- */
+/** Resolves after `ms` or when `signal` aborts, whichever comes first. Never rejects. */
 export function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => {

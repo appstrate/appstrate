@@ -461,8 +461,6 @@ export async function runRemote(
     tick++;
 
     // Wait for the next tick — abortable so cancellation kicks in fast.
-    // An abort ends the wait early, normal once the user hits Ctrl-C: the
-    // next loop iteration fetches the cancelled status.
     await sleepUnlessAborted(pollIntervalMs, signal);
 
     // Detach is checked here rather than at the top of the loop so the

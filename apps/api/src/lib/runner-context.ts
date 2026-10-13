@@ -37,12 +37,7 @@ const RUNNER_KIND_MAX_LENGTH = 32;
  */
 const RUNNER_KIND_RE = SLUG_REGEX;
 
-/**
- * The kind of a runner that executes a command and no agent
- * (`appstrate run @scope/agent -- <command>`). The one kind the platform reads:
- * on a remote run of this kind `finalizeRun` applies neither the zero-token
- * liveness check nor, when the run emits no output, the agent's output schema.
- */
+/** Runner kind of `appstrate run @scope/agent -- <command>`, read by `isCommandRun`. */
 export const COMMAND_RUNNER_KIND = "command";
 
 interface ResolvedRunnerContext {

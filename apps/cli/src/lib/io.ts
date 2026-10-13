@@ -98,11 +98,7 @@ export const DEFAULT_IO: CommandIO = {
   },
 };
 
-/**
- * `DEFAULT_IO` with the terminal error on stderr, same rendering. For an
- * invocation whose stdout is not the CLI's to write: `appstrate run … --
- * <command>` leaves it to the command.
- */
+/** `DEFAULT_IO` with the terminal error on stderr: for when stdout is not the CLI's to write. */
 export const STDERR_ERROR_IO: CommandIO = {
   ...DEFAULT_IO,
   cancel: (message) => {

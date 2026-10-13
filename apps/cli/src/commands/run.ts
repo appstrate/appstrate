@@ -109,11 +109,7 @@ import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts
 export interface RunCommandOptions {
   profile?: string;
   bundle: string;
-  /**
-   * Everything after the first `--`: a command the CLI runs as the runner of a
-   * remote run of the agent, with no model. Undefined when the invocation has
-   * no `--`; its presence alone selects command mode (see `run/mode.ts`).
-   */
+  /** Everything after the first `--`. Its presence alone selects command mode (`run/mode.ts`). */
   command?: readonly string[] | undefined;
   input?: string;
   inputFile?: string;
@@ -221,11 +217,7 @@ export async function runCommand(opts: RunCommandOptions): Promise<void> {
   }
 }
 
-/**
- * End `appstrate run` on `err`. With a command, stdout belongs to the command
- * in every outcome — `x=$(appstrate run @a -- cmd)` must never capture an error
- * of the CLI — so the same rendering goes to stderr.
- */
+/** With a command, stdout is the command's in every outcome: a CLI error renders on stderr. */
 export function exitRunWithError(err: unknown, command: readonly string[] | undefined): never {
   exitWithError(err, command === undefined ? DEFAULT_IO : STDERR_ERROR_IO);
 }
@@ -754,14 +746,8 @@ async function runCommandRemote(
 // ---------------------------------------------------------------------------
 
 /**
- * `appstrate run @scope/agent -- <command>`: register a remote run of the
- * agent and run the command as its runner (`run/command-runner.ts`). Same
- * credentials as a local run that reaches its integrations through the
- * instance: a headless API key or the profile's session, with a named space.
- *
- * The agent's bundle is never fetched: the run is registered by id, so a role
- * that may run the agent and call the proxy for a run needs no read access to
- * the agent's content.
+ * The run is registered by id and the bundle never fetched: a role that may
+ * run the agent needs no read access to its content.
  */
 async function runCommandUnderRun(
   opts: RunCommandOptions,
@@ -774,9 +760,7 @@ async function runCommandUnderRun(
     !resolverInputs ||
     !("bearerToken" in resolverInputs)
   ) {
-    // Unreachable from the CLI: `resolveExecutionMode` refuses the first two,
-    // and `buildResolverInputs("remote", …)` returns remote inputs or throws.
-    // A typed early exit narrows the rest of the function without casts.
+    // Unreachable (refused by `resolveExecutionMode` and `buildResolverInputs`): narrows the types.
     throw new ExecutionModeError("command mode requires an `@scope/agent` id and a command");
   }
 
@@ -786,8 +770,6 @@ async function runCommandUnderRun(
       packageId: target.packageId,
       spec: target.spec,
       context: reportContextOf(resolverInputs),
-      // Sent verbatim: the server resolves it over the agent's defaults and
-      // validates it against the agent's input schema.
       input: await resolveInput(opts),
       ttlSeconds: opts.sinkTtl,
       connectionOverrides: opts.connectionOverrides,
@@ -796,19 +778,13 @@ async function runCommandUnderRun(
     { signal: shutdownSignal, onShutdown },
   );
 
-  // On a signal the coordinator owns the exit, with the signal's own code;
-  // same backstop as the two other paths.
   if (shutdownSignal.aborted) process.exit(shutdownExitCode());
   if (exitCode !== 0) process.exitCode = exitCode;
 }
 
 /**
- * What the command's environment adds so that an `appstrate` it runs reaches
- * the instance, and the identity, its run is registered with. A profile or a
- * key named by a FLAG exists for this process only: the command's own
- * `appstrate api` would otherwise resolve the default profile, and name the
- * run to an instance or a principal that does not know it. Named by the
- * environment already, either is inherited as it is.
+ * A profile or key named by a FLAG exists for this process only: passed on so
+ * an `appstrate` the command runs reaches the run's instance and identity.
  */
 function commandEnv(opts: RunCommandOptions): Record<string, string> {
   return {
@@ -990,11 +966,9 @@ async function buildHeadlessRemoteInputs(
 type SpacedRemoteResolverInputs = RemoteResolverInputs & { spaceId: string };
 
 /**
- * Remote inputs that name their space, or a refusal. A run this CLI is the runner of — an
- * agent executed locally, or a command — registers its run record and calls the credential
- * proxy, and the former also reads the space's run-config: all of which name the space. An
- * API key leaves it unset unless `APPSTRATE_SPACE_ID` spells it out; a run the instance
- * executes needs no id (the key pins it).
+ * A run the CLI is the runner of (local agent, or command) registers its run record and calls the
+ * credential proxy, all of which name the space. An API key leaves it unset unless
+ * `APPSTRATE_SPACE_ID` spells it out; a run the instance executes needs no id (the key pins it).
  */
 function requireSpaceId(
   inputs: RemoteResolverInputs | LocalResolverInputs | null,
@@ -1153,7 +1127,6 @@ async function registerReportSession(
   );
 }
 
-/** The instance and credentials a run is registered with. */
 function reportContextOf(inputs: SpacedRemoteResolverInputs): ReportContext {
   return {
     instance: inputs.instance,
@@ -1323,10 +1296,10 @@ export function _resolveReportSessionForTesting(
 }
 
 /**
- * Test-only access to the finalize tracker. Exercised by
- * `apps/cli/test/run-finalize-tracker.test.ts` to assert the cancel-path
- * safety net (detect runner cancellation immediately rather than waiting for
- * the heartbeat watchdog).
+ * Test-only access to the finalize tracker.
+ * Exercised by `apps/cli/test/run-finalize-tracker.test.ts` to assert
+ * the cancel-path safety net (detect runner cancellation immediately
+ * rather than waiting for the heartbeat watchdog).
  */
 export function _attachFinalizeTrackerForTesting(sink: HttpSink): () => Promise<void> | null {
   return attachFinalizeTracker(sink);
