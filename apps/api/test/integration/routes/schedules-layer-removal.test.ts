@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { asc, eq, inArray } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
+import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import {
   auditEvents,
   integrationConnections,
@@ -37,6 +38,8 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { deactivatePackage } from "../../../src/services/space-packages.ts";
+import { deleteOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
+import { deletePin } from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
   schedulesLayerMayName,
@@ -601,6 +604,67 @@ describe("removing the layer that names a schedule's connection set", () => {
 
       expect(disabled).toEqual([schedule.id]);
       expect(await unnamed()).toEqual([schedule.id]);
+    });
+  });
+
+  // Each has deleted its own layer and neither has committed: a verdict read by either now still
+  // finds the other's layer, and both would spare the schedule.
+  describe("the removals of a schedule's two layers in flight at once", () => {
+    it.skipIf(isEmbeddedDb)("disables the schedule once", async () => {
+      const shared = await sharedConnection();
+      await ownPin([shared]);
+      await orgDefault([shared]);
+      const schedule = await armedSchedule();
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const holder = (await reservePgConnection())!;
+      const removals: Promise<unknown>[] = [];
+      try {
+        // Held on the schedule's row: both removals stop at their lock, their delete behind them.
+        await holder.sql`BEGIN`;
+        await holder.sql`SELECT id FROM package_schedules WHERE id = ${schedule.id} FOR UPDATE`;
+        const pinRemoval = deletePin(scope, AGENT, INTEGRATION, ctx.user.id);
+        const defaultRemoval = deleteOrgDefault(scope, INTEGRATION);
+        removals.push(pinRemoval, defaultRemoval);
+
+        // The second waits on the first's tuple lock, not on the holder: follow the queue. Read
+        // from pg_locks, live: pg_stat_activity is frozen at this transaction's first read of it.
+        const bothQueued = async () => {
+          const until = Date.now() + 3_000;
+          while (Date.now() < until) {
+            const [row] = await holder.sql<{ queued: number }[]>`
+              WITH RECURSIVE waiting AS (
+                SELECT pid FROM pg_locks
+                WHERE NOT granted AND pg_backend_pid() = ANY (pg_blocking_pids(pid))
+                UNION
+                SELECT l.pid FROM pg_locks l
+                JOIN waiting w ON w.pid = ANY (pg_blocking_pids(l.pid))
+                WHERE NOT l.granted
+              )
+              SELECT count(*)::int AS queued FROM waiting`;
+            if (row?.queued === 2) return true;
+            await Bun.sleep(10);
+          }
+          return false;
+        };
+        expect(await bothQueued()).toBe(true);
+        await holder.sql`COMMIT`;
+
+        const [byPin, byDefault] = await Promise.all([pinRemoval, defaultRemoval]);
+        expect(byPin.previous).toEqual([shared]);
+        expect(byDefault.previous).not.toBeNull();
+        // The first through the lock spares it; the second reads its verdict after that commit.
+        expect([...byPin.disabledScheduleIds, ...byDefault.disabledScheduleIds]).toEqual([
+          schedule.id,
+        ]);
+        expect(await rowOf(schedule.id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_set_unnamed",
+        });
+      } finally {
+        await holder.sql`ROLLBACK`;
+        holder.release();
+        await Promise.allSettled(removals);
+      }
     });
   });
 });
