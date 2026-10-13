@@ -22,6 +22,7 @@ import { describeResolution } from "./integration-run-readiness";
 import { scopeLabels } from "./scope-labels";
 import {
   requiredScopesForAgent,
+  resolveEffectiveToolSelection,
   MAX_CONNECTIONS_PER_INTEGRATION,
 } from "@appstrate/core/integration";
 import {
@@ -149,8 +150,11 @@ export function useConnectionPicker(
   const authKeys = Object.keys(auths).filter(
     (k) => connectable.has(k) && (requiredAuthKey === null || k === requiredAuthKey),
   );
+  // The server's scope selection: a `"*"` is the wildcard form whether the agent writes it or
+  // inherits it from `default_tools`; inherited tool names contribute no scope.
+  const scopeTools = resolveEffectiveToolSelection(agentTools, manifest) === "*" ? "*" : agentTools;
   const requiredScopesFor = (authKey: string) =>
-    requiredScopesForAgent({ manifest, authKey, agentTools, agentScopes });
+    requiredScopesForAgent({ manifest, authKey, agentTools: scopeTools, agentScopes });
 
   // No picker until the entry is in: `required` is unknown before, and "no connection" must not
   // be offered for an integration the agent requires.
