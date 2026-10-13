@@ -2,8 +2,8 @@
 
 /**
  * `Idempotency-Key` on `/api/credential-proxy/proxy` is the upstream's: the proxy relays it with
- * the caller's other headers and the platform makes no promise about it. Everywhere else the
- * honesty guard still refuses the header on a mutating route that does not de-duplicate.
+ * the caller's other headers and the platform makes no promise about it. The mount opens that
+ * one route: a sibling route of the same router keeps the guard's refusal.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import {
   seedProxyConnection,
@@ -95,21 +95,6 @@ describe("Idempotency-Key through the credential proxy", () => {
     expect(sent!.get("idempotency-key")).toBe("charge-42");
     // The platform de-duplicated nothing: no replay marker of its own.
     expect(res.headers.get("Idempotent-Replayed")).toBeNull();
-  });
-
-  it("still refuses the header on a platform route that does not de-duplicate", async () => {
-    const res = await app.request("/api/api-keys", {
-      method: "POST",
-      headers: {
-        ...authHeaders(ctx),
-        "Content-Type": "application/json",
-        "Idempotency-Key": "key-1",
-      },
-      body: JSON.stringify({ name: "never created" }),
-    });
-
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { code: string }).code).toBe("idempotency_not_supported");
   });
 });
 
