@@ -44,8 +44,9 @@ APPSTRATE_VERSION=pr-482 docker compose pull
 With the images already local, the Coolify deploy only has to restart
 containers and finishes well inside the timeout.
 
-On staging the variable does not stay where you put it: the next merge to `main`
-sets it back to `main-<sha>` and redeploys ([STAGING.md](./STAGING.md)).
+Staging itself tracks `main` and redeploys on every merge
+([STAGING.md](./STAGING.md)): a preview tag set there holds until you set
+`APPSTRATE_VERSION` back to `main`, and staging stops following `main` meanwhile.
 
 ## 3. Roll back
 

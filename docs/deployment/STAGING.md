@@ -6,18 +6,31 @@ Staging runs the head of `main`. Nobody deploys it: every push to `main` does.
 
 `.github/workflows/preview.yml`, on a push to `main`:
 
-1. builds the 8-image stack (amd64) and publishes it under `main` and `main-<sha>`;
-2. once every image is pushed, the `deploy-staging` job sets `APPSTRATE_VERSION=main-<sha>` on the
-   staging Coolify resource and starts a deployment;
-3. waits for Coolify to report it `finished`, then reads `/health` until the platform answers with
-   that commit. A deployment that fails, or a platform that never reports the commit, fails the job.
+1. builds the 8-image stack (amd64) and pushes each image under `main-<sha>`;
+2. once every image is pushed, moves the `main` tag onto all 8 (`promote`);
+3. calls the staging **deploy hook** (`deploy-staging`);
+4. reads `/health` until the platform answers with that commit. A platform that never reports it
+   within 20 minutes fails the job.
 
 A merge landing while a run is in flight cancels it: staging converges on the newest commit, it does
 not replay every one.
 
-Staging is pointed at `main-<sha>`, never at `main`. A cancelled run leaves `main` moved on some of
-the 8 images and not the others, and the platform, `PI_IMAGE` and `SIDECAR_IMAGE` are one version
-contract (`AGENTS.md`).
+`main` only ever moves as a whole, after the build. Staging tracks that tag, and the platform,
+`PI_IMAGE` and `SIDECAR_IMAGE` are one version contract (`AGENTS.md`): a tag moved image by image
+would be a trio that disagrees for as long as the build runs, and for good when it fails.
+
+### The deploy hook
+
+The workflow knows nothing about what hosts staging. It sends one request:
+
+```
+POST <DEPLOY_HOOK_URL>
+Authorization: Bearer <DEPLOY_HOOK_TOKEN>
+```
+
+and expects a 2xx meaning "a deployment was accepted". What the hook must do is redeploy the stack
+with a fresh pull, so that `main` resolves to the images just promoted. Whether that deployment
+succeeded is not read off the hook's answer: step 4 is the verdict.
 
 A deployment restarts the whole stack, so a run in flight on staging is interrupted by the next
 merge.
@@ -25,7 +38,7 @@ merge.
 ## The same compose as production
 
 Staging deploys `deploy/docker-compose.yml`, the file production runs. There is no staging compose
-and nothing staging-specific in the tree: what differs is the Coolify resource (its domains, its
+and nothing staging-specific in the tree: what differs is where it runs (its domains, its
 environment, its volumes) and the tag.
 
 ## Schema and data
@@ -45,48 +58,50 @@ not replace it.
 
 ### Resetting staging
 
-1. Stop the resource in Coolify.
-2. On the host, remove its volumes: `docker volume rm <uuid>_pgdata <uuid>_redisdata <uuid>_miniodata`
-   (the UUID is the resource's — `deploy/README.md`, "Production").
-3. Re-run the latest `Preview Images` run on `main`, or redeploy from Coolify.
+1. Stop the stack.
+2. Remove its three volumes (`pgdata`, `redisdata`, `miniodata`, under the project name the host
+   gives them — `deploy/README.md`, "Production", for Coolify).
+3. Call the deploy hook, or re-run the latest `Preview Images` run on `main`.
 
 ## Rollback
 
 Revert the commit on `main`. Re-running an older workflow run is not a rollback: it shares the
-concurrency group of the newest one and cancels it.
+concurrency group of the newest one and cancels it, and it would move `main` back for every consumer
+of the tag.
 
 ## Setup
 
-### The Coolify resource
+### The staging stack
 
-One `dockercompose` application resource:
+Whatever hosts it, staging is `deploy/docker-compose.yml` run with:
 
-|                           |                                                                        |
-| ------------------------- | ---------------------------------------------------------------------- |
-| repository, branch        | `appstrate/appstrate`, `main`                                          |
-| `docker_compose_location` | `/deploy/docker-compose.yml`                                           |
-| automatic deployment      | **off**                                                                |
-| domains                   | one for the `appstrate` service, one for `appstrate-minio`             |
-| environment               | `deploy/.env.example`, with secrets and third-party keys of its own    |
-| `APPSTRATE_VERSION`       | created once with any published tag; the workflow owns it from then on |
+|                     |                                                                     |
+| ------------------- | ------------------------------------------------------------------- |
+| `APPSTRATE_VERSION` | `main`                                                              |
+| environment         | `deploy/.env.example`, with secrets and third-party keys of its own |
+| deployment trigger  | the deploy hook, and nothing else                                   |
 
-Automatic deployment is off because the workflow is the only trigger. A deployment started by the
-push itself would run before the images of that commit exist, and restart the stack on the previous
-tag for nothing.
+A deployment started by the push itself (a git webhook, a branch watcher) would run before the
+images of that commit exist, and restart the stack on the previous build for nothing. Turn it off.
 
-Nothing of production's goes on this resource: no secret, no Stripe live key, no OAuth client, no
-data.
+Nothing of production's goes on this stack: no secret, no Stripe key, no OAuth client, no data. Its
+Stripe webhook endpoint is created at the API version `STRIPE_API_VERSION` pins
+(`packages/module-ee/src/stripe/client.ts`), since a webhook payload is rendered at the endpoint's
+version, not the client's.
+
+Under Coolify, which is what `deploy/README.md` documents, the hook is the application's deploy
+endpoint, `<coolify>/api/v1/deploy?uuid=<resource uuid>`, called with an API token holding the
+`deploy` ability alone, and the resource's auto-deploy is set to manual.
 
 ### The `staging` GitHub environment
 
-|          |                    |                                                                |
-| -------- | ------------------ | -------------------------------------------------------------- |
-| variable | `COOLIFY_APP_UUID` | UUID of the resource                                           |
-| secret   | `COOLIFY_URL`      | origin of the Coolify instance, no trailing slash              |
-| secret   | `STAGING_URL`      | public origin of staging, no trailing slash                    |
-| secret   | `COOLIFY_TOKEN`    | Coolify API token with the `read`, `write`, `deploy` abilities |
+|        |                     |                                             |
+| ------ | ------------------- | ------------------------------------------- |
+| secret | `DEPLOY_HOOK_URL`   | the hook, query string included             |
+| secret | `DEPLOY_HOOK_TOKEN` | its bearer token                            |
+| secret | `STAGING_URL`       | public origin of staging, no trailing slash |
 
-The two origins are secrets, not variables, so that Actions masks them in this repository's public
+The two URLs are secrets, not variables, so that Actions masks them in this repository's public
 logs.
 
 Restrict the environment's deployment branches to `main`. That restriction, not the job's `if:`, is
