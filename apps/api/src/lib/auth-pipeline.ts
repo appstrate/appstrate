@@ -20,16 +20,18 @@ import type { Context, Hono } from "hono";
 import type { AuthStrategy } from "@appstrate/core/module";
 import { PRINCIPAL_KINDS } from "@appstrate/core/module";
 import { parseBearer } from "@appstrate/core/bearer";
-import { eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { user as userTable } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
 import { isEndUserInSpace } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
-import { appendSetCookies, clearStaleAuthCookies, readSessionWithCookies } from "./auth-cookies.ts";
+import {
+  appendSetCookies,
+  clearStaleAuthCookies,
+  readSessionWithCookies,
+  sessionRealmOf,
+} from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
 import { enforceResourceAudience } from "./protected-resources.ts";
 import { adoptViewAs, orgHalfFor, resolveViewAs, viewAsTransportGuard } from "./view-as.ts";
@@ -344,17 +346,8 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // when the field is absent (sessions created before the
     // denormalization shipped, or a BA version stripping undeclared
     // output fields) so audience enforcement never silently degrades.
-    const sessionRealm = (session.session as { realm?: unknown }).realm;
-    if (typeof sessionRealm === "string") {
-      c.set("sessionRealm", sessionRealm);
-    } else {
-      const [userRow] = await db
-        .select({ realm: userTable.realm })
-        .from(userTable)
-        .where(eq(userTable.id, session.user.id))
-        .limit(1);
-      if (userRow) c.set("sessionRealm", userRow.realm);
-    }
+    const sessionRealm = await sessionRealmOf(session);
+    if (sessionRealm !== undefined) c.set("sessionRealm", sessionRealm);
 
     // After `next()`, so the cookie also lands on a hand-built response.
     try {
