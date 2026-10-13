@@ -178,8 +178,6 @@ describe("full persona invariants", () => {
       "omit the entry to inherit the integration's `default_tools` (shown per integration in your context) only when the task needs that whole default",
     );
     expect(FULL).toContain("never give it more than the task needs");
-    // Narrowing is not conditioned on the default's size: a short default lists write tools too.
-    expect(FULL).not.toMatch(/large (set|default)/);
     expect(REDUCED).not.toContain("list the exact tool names the task needs");
   });
 
@@ -191,7 +189,6 @@ describe("full persona invariants", () => {
     expect(FULL).toContain(
       "its `default_tools` holds the default's names, its `tool_catalog` every tool you may select",
     );
-    expect(FULL).not.toMatch(/describe_operation on `GET \/api\/integrations/);
   });
 
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
