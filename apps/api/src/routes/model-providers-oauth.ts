@@ -24,7 +24,7 @@ import {
   credentialOwnerTypeSchema,
   getOrgModelProviderCredential,
   MANAGE_CREDENTIALS,
-  mayReconnectCredential,
+  checkReconnect,
   personalModelCredentialsAllowed,
   personalModelCredentialsDisabled,
   requestModelCredentialCaller,
@@ -99,11 +99,17 @@ export const createPairingBody = z
       (id) => isOAuthModelProvider(id),
       "providerId must be a registered OAuth model provider",
     ),
+    /** Reconnect this credential in place; absent for a new connection. */
     credentialId: z.uuid().optional(),
-    /** Owner of the credential the pairing creates, or of the one `credentialId` reconnects. */
-    owner_type: credentialOwnerTypeSchema,
+    /** Owner of a new connection (default `org`). */
+    owner_type: credentialOwnerTypeSchema.unwrap().optional(),
   })
-  .strict();
+  .strict()
+  // A reconnect takes its owner from the credential: a restated one is never silently dropped.
+  .refine((body) => body.credentialId === undefined || body.owner_type === undefined, {
+    path: ["owner_type"],
+    message: "owner_type applies to a new connection only; omit it with credentialId",
+  });
 
 /**
  * Pair-redeem handler for the canonical
@@ -145,10 +151,8 @@ async function handlePairRedeem(c: Context<AppEnv>) {
     );
   }
 
-  // The pairing is the authorization, minted under RBAC: no role is read again.
-  // Membership is: a personal creation locks its owner, a reconnect (either owner)
-  // the member who minted the pairing; an organization creation locks nobody, as
-  // an organization API key's does not.
+  // The redeem holds no principal: it judges the member who minted the pairing
+  // again, on their grants at this moment.
   const result = await importOAuthModelProviderConnection({
     providerId: input.providerId,
     accessToken: input.access_token,
@@ -236,19 +240,16 @@ export function createModelProvidersOAuthRouter() {
     const user = c.get("user");
     const caller = requestModelCredentialCaller(c);
     const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
-    const ownerUserId = resolveCredentialOwner(c, input.owner_type);
-
     const personalAllowed = await personalModelCredentialsAllowed(orgId);
-    if (ownerUserId !== null && !personalAllowed) throw personalModelCredentialsDisabled();
 
-    if (input.credentialId) {
-      // The target is a credential of the owner `owner_type` names that the caller
-      // may reconnect; anything else reads as absent.
+    let ownerUserId: string | null;
+    let reconnectCredentialId: string | null = null;
+    if (input.credentialId !== undefined) {
+      // A credential the caller may not reconnect reads as absent.
       const credential = await getOrgModelProviderCredential(caller, input.credentialId);
       if (
         !credential ||
-        credential.owner_id !== ownerUserId ||
-        !mayReconnectCredential(
+        !checkReconnect(
           caller,
           {
             source: credential.source,
@@ -262,6 +263,11 @@ export function createModelProvidersOAuthRouter() {
       ) {
         throw notFound("Model provider credential not found");
       }
+      ownerUserId = credential.owner_id;
+      reconnectCredentialId = credential.id;
+    } else {
+      ownerUserId = resolveCredentialOwner(c, input.owner_type ?? "org");
+      if (ownerUserId !== null && !personalAllowed) throw personalModelCredentialsDisabled();
     }
 
     const platformUrl = getEnv().APP_URL;
@@ -270,7 +276,7 @@ export function createModelProvidersOAuthRouter() {
       orgId,
       providerId: input.providerId,
       ownerUserId,
-      ...(input.credentialId ? { reconnectCredentialId: input.credentialId } : {}),
+      ...(reconnectCredentialId ? { reconnectCredentialId } : {}),
       platformUrl,
       ttlSeconds: PAIRING_TTL_SECONDS,
     });
@@ -283,8 +289,8 @@ export function createModelProvidersOAuthRouter() {
       resourceId: id,
       after: {
         providerId: input.providerId,
-        ownerType: input.owner_type,
-        reconnectCredentialId: input.credentialId ?? null,
+        ownerType: ownerUserId === null ? "org" : "user",
+        reconnectCredentialId,
         expiresAt: expiresAt.toISOString(),
         // No raw token in audit — leaks the bearer secret otherwise.
       },

@@ -19,7 +19,12 @@ import { chatSessions, llmUsage, modelProviderCredentials, orgModels } from "@ap
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
@@ -229,9 +234,9 @@ describe("resolveChatModel", () => {
       credentialId: orgSubscription.id,
       providerId: TEST_OAUTH_PROVIDER_ID,
     });
-    const member = await createTestUser({ email: `member-${crypto.randomUUID()}@example.test` });
+    const member = await memberContext(ctx, "member");
 
-    expect(await resolveChatModel(ctx.orgId, presetId, member.id)).toMatchObject({
+    expect(await resolveChatModel(ctx.orgId, presetId, member.user.id)).toMatchObject({
       subscription: true,
       model: { credentialId: orgSubscription.id, accessToken: "org-token" },
     });

@@ -112,7 +112,6 @@ export async function importOAuthModelProviderConnection(
     const reconnected = await reconnectOAuthCredential({
       orgId: input.orgId,
       userId: input.userId,
-      ownerUserId: input.ownerUserId,
       id: reconnectCredentialId,
       providerId: input.providerId,
       accessToken: input.accessToken,

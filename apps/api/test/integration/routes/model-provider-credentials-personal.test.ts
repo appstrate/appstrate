@@ -645,7 +645,6 @@ describe("personal model credentials — routes", () => {
         headers: jsonHeaders(member),
         body: JSON.stringify({
           providerId: OAUTH_PROVIDER,
-          owner_type: "user",
           credentialId: subscriptionId,
         }),
       });
@@ -665,7 +664,6 @@ describe("personal model credentials — routes", () => {
         headers: jsonHeaders(member),
         body: JSON.stringify({
           providerId: OAUTH_PROVIDER,
-          owner_type: "user",
           credentialId: ownId,
         }),
       });

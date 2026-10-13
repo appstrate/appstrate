@@ -857,7 +857,7 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  *      read ANY credential, so it is rejected outright — a leaked run token
  *      from such a run must not be able to enumerate the org's credentials.
  *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
- *   3. Holder: a personal credential (`owner_user_id` set) serves only the run
+ *   3. Owner: a personal credential (`owner_user_id` set) serves only the run
  *      whose recorded payer (`runs.payer_user_id`) is its owner, and nothing
  *      while the organization has personal credentials off. An organization
  *      credential serves every run of the organization.

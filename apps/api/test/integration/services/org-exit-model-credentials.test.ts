@@ -12,6 +12,7 @@ import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, modelProviderPairings } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
+import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { registerModelProvider } from "../../../src/services/model-providers/registry.ts";
 import {
@@ -104,14 +105,11 @@ describe("leaving an organization — model provider credentials and pairings", 
       ttlSeconds: 300,
     });
     // An organization subscription the leaver connected, and their pending pairing for another.
-    const orgSubscriptionId = await createOAuthCredential({
+    const { id: orgSubscriptionId } = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
-      userId: leaver,
-      ownerUserId: null,
-      label: "Org subscription",
       providerId: OAUTH_PROVIDER,
-      accessToken: "at-org",
-      refreshToken: "rt-org",
+      label: "Org subscription",
+      createdBy: leaver,
     });
     await createPairing({
       userId: leaver,

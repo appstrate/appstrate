@@ -1357,8 +1357,9 @@ async function resolvePersonalModel(
 /**
  * Resolve a model for `payerUserId`, whose personal credentials serve an unbound
  * model (`null`: none applies). A bound or built-in model is the organization's or
- * the platform's whoever calls. `viaProxy` skips subscriptions, which the LLM proxy
- * never serves. `null` when the model is missing or disabled.
+ * the platform's whoever calls. `viaProxy` leaves subscriptions out of the payer's
+ * personal chain (the LLM proxy refuses one, a bound one included, at its own door).
+ * `null` when the model is missing or disabled.
  */
 export async function loadModel(
   orgId: string,

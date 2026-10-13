@@ -83,10 +83,6 @@ export const createSchema = z
      * and then refused by every call made against it.
      */
     base_url_override: endpointUrlSchema.optional().nullable(),
-    /**
-     * `org` (default) makes an organization credential, needing `write`;
-     * `user` makes the caller's personal credential, needing `connect`.
-     */
     owner_type: credentialOwnerTypeSchema,
   })
   .strict();

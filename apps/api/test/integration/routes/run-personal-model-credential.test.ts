@@ -30,6 +30,7 @@ import {
 import {
   seedAgent,
   seedApiKey,
+  seedEndUser,
   seedOrgModelProviderKey,
   seedOrgModelProviderOAuth,
   seedRun,
@@ -40,6 +41,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
+import { activatePackage } from "../../../src/services/space-packages.ts";
 import { createOrgModel, loadModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { updateOrgSettings } from "../../../src/services/organizations.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
@@ -328,6 +330,69 @@ describe("run payer — personal model credentials", () => {
       expect((await read(unattended)).status).toBe(200);
     } finally {
       await db.update(runs).set({ status: "success" }).where(eq(runs.modelCredentialId, oauth.id));
+    }
+  });
+
+  it("pins a run an API key launches, for itself or for an end user, to the organization subscription of its model, and the door serves it", async () => {
+    const agentId = `@${ctx.org.slug}/subscribed-agent`;
+    await seedAgent({
+      id: agentId,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: { name: agentId, version: "0.1.0", type: "agent", description: "Subscribed" },
+      draftContent: "Say hello.",
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    const oauth = await seedOrgModelProviderOAuth({ orgId: ctx.orgId, createdBy: ctx.user.id });
+    const modelDbId = await createOrgModel(
+      ctx.orgId,
+      "Team plan",
+      TEST_OAUTH_MODEL_ID,
+      ctx.user.id,
+      {
+        credentialId: oauth.id,
+      },
+    );
+    await setDefaultModel(ctx.orgId, modelDbId);
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["agents:write", "agents:run"],
+    });
+    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+
+    const actors: Record<string, string>[] = [{}, { "Appstrate-User": endUser.id }];
+    for (const actor of actors) {
+      const res = await app.request(`/api/agents/${agentId}/run?version=draft`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key.rawKey}`,
+          "Content-Type": "application/json",
+          ...actor,
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status, await res.clone().text()).toBe(201);
+      const { id } = (await res.json()) as { id: string };
+      await waitForRunPipelineSettled();
+
+      const [row] = await db.select().from(runs).where(eq(runs.id, id));
+      expect(row).toMatchObject({
+        modelCredentialId: oauth.id,
+        modelSource: "org",
+        payerUserId: null,
+        inferenceRoute: "sidecar",
+      });
+      // Without an isolating orchestrator an OAuth run ends at boot; the door
+      // serves a run still running, so it is asked as one.
+      await db.update(runs).set({ status: "running" }).where(eq(runs.id, id));
+      const door = await app.request(`/internal/oauth-token/${oauth.id}`, {
+        headers: { Authorization: `Bearer ${await signRunToken(id)}` },
+      });
+      await db.update(runs).set({ status: "failed" }).where(eq(runs.id, id));
+      expect(door.status).toBe(200);
     }
   });
 

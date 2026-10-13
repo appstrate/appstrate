@@ -42,7 +42,7 @@ import {
   assertCredentialEditable,
   credentialActions,
   mayProbeCredential,
-  mayReconnectCredential,
+  checkReconnect,
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
@@ -1129,7 +1129,7 @@ describe("model-provider-credentials service — membership lock on creation", (
  * produce (admin: all four; member: `connect` alone), plus a reader and a
  * delegate (an API key: org grants, no payer, so it owns nothing).
  */
-describe("model-provider-credentials service — credentialActions and mayReconnectCredential", () => {
+describe("model-provider-credentials service — credentialActions and checkReconnect", () => {
   const none = {
     orgId: "org",
     userId: "caller",
@@ -1189,32 +1189,27 @@ describe("model-provider-credentials service — credentialActions and mayReconn
         providerId: providers[authMode],
       } as const;
       expect(credentialActions(callers[caller], credential, personalAllowed)).toEqual(expected);
-      // `reconnect` is the pairing route's own predicate, never a second rule.
-      expect(
-        mayReconnectCredential(callers[caller], credential, credential.providerId, personalAllowed),
-      ).toBe(expected.includes("reconnect"));
     });
   }
 
-  it("reconnects a credential of the pairing's provider only, and never a built-in one", () => {
+  it("checkReconnect: the pairing's provider only, never a built-in one, and a 403 where the policy alone refuses", () => {
     const subscription = {
       source: "custom",
       ownerUserId: null,
       authMode: "oauth2",
       providerId: "test-oauth",
     } as const;
-    expect(mayReconnectCredential(callers.admin, subscription, "test-oauth", true)).toBe(true);
-    expect(mayReconnectCredential(callers.admin, subscription, "test-oauth-hooks", true)).toBe(
-      false,
-    );
+    expect(checkReconnect(callers.admin, subscription, "test-oauth", true)).toBe(true);
+    expect(checkReconnect(callers.admin, subscription, "test-oauth-hooks", true)).toBe(false);
     expect(
-      mayReconnectCredential(
-        callers.admin,
-        { ...subscription, source: "built-in" },
-        "test-oauth",
-        true,
-      ),
+      checkReconnect(callers.admin, { ...subscription, source: "built-in" }, "test-oauth", true),
     ).toBe(false);
+
+    const own = { ...subscription, ownerUserId: "caller" } as const;
+    const others = { ...subscription, ownerUserId: "someone-else" } as const;
+    expect(checkReconnect(callers.member, own, "test-oauth", true)).toBe(true);
+    expect(() => checkReconnect(callers.member, own, "test-oauth", false)).toThrow(ApiError);
+    expect(checkReconnect(callers.admin, others, "test-oauth", false)).toBe(false);
   });
 
   it("a reader gets only test on a built-in credential, a member nothing", () => {
