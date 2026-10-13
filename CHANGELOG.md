@@ -248,14 +248,17 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
 - **Before the deploy, run `scripts/migration/0035-verify-manifest-expressions.ts`
   and read its `[default-tools]` lines** (#1923). It writes nothing. Each
   `[default-tools]` advisory names a stored organization integration, draft
-  or published version, whose `default_tools` holds a tool its manifest proves
-  unexposed: one `hidden_tools` lists, a connect tool, or, on a
-  `source.kind: "none"` integration with no root `_meta` key outside
-  `dev.appstrate/`, one outside the manifest's catalog. A `remote` or `local`
-  integration so listed keeps loading and running, and its next write is
-  refused until the entry is removed; on a `none` one the manifest schema
-  refuses the entry on read too, so remove it before the deploy (see
-  Changed). An advisory never changes the script's exit code.
+  or published version, whose `default_tools` holds a tool its manifest does
+  not expose: one `hidden_tools` lists, a connect tool, the upload companion
+  of a hidden `api_call`, one outside the `tools_policy` a `remote`
+  integration declares, or, on a `source.kind: "none"` integration with no
+  `_meta` key outside `dev.appstrate/`, one outside the manifest's catalog. A
+  `remote` or `local` integration so listed keeps loading and running, and
+  its next write is refused until the entry is removed or, for a `remote`
+  one whose endpoint serves the tool, the tool is declared in `tools_policy`
+  (`"<tool>": {}`) (see Changed). A `none` one is a manifest the schema
+  already refuses on read, before this release as after it: nothing becomes
+  unreadable at the deploy. An advisory never changes the script's exit code.
 
 ### Changed
 
@@ -482,35 +485,44 @@ pin` or `no pin: name the set`: the latter answers `must_choose_connection`
   longer one as a count.
 
 - **BREAKING (API): a write of an integration manifest refuses a
-  `default_tools` entry the platform can prove unexposed** (#1923). The
+  `default_tools` entry the platform judges unexposed** (#1923). The
   refusal is `400` `validation_failed` with one `errors[]` item per entry,
   `{ field: "manifest.default_tools", code: "invalid_manifest" }`, whose
   `message` names the tool (`findUnexposedDefaultTools`,
   `@appstrate/core/integration`). What is refused depends on the source:
   - every source, on create, draft save, file write, import (of a bundle, its
     root package only), publish, restore and fork: a name `hidden_tools`
-    lists, or the name of a connect tool;
+    lists, the name of a connect tool, or the upload companion of a hidden
+    `api_call`;
   - `source.kind: "none"`, by the manifest schema, so on read too: a name
     outside the manifest's catalog (the tools `_meta["dev.appstrate/api"]`
-    supplies, plus any `tools_policy` key), when every root `_meta` key of the
+    supplies, plus any `tools_policy` key), when every `_meta` key of the
     manifest is in the `dev.appstrate/` namespace (a manifest with no `_meta`
-    counts);
+    counts). This is the schema's existing refusal, with one exemption added:
+    a manifest carrying another vendor's `_meta` key is not judged on
+    membership;
   - `local`, on create, draft save, import (of a bundle, its root package
     only, before anything is written) and publish: a name outside the
     `tools[]` of the referenced mcp-server, at the version a run would spawn
-    (the one a bundle carries, when it satisfies `source.server.version`),
-    and outside the integration's `api_call` tools. When the mcp-server does
-    not resolve, nothing more is judged;
-  - `remote`: nothing else. `tools_policy` is a policy table, not a catalog,
-    so a default naming a tool absent from it is accepted; at run time a name
-    the endpoint does not serve selects nothing, and a run left with no
-    callable tool still aborts.
+    (on a bundle import, resolved over the versions the bundle carries and
+    the stored ones), and outside the integration's `api_call` tools. Any
+    save of the integration, even one that does not touch the manifest, is
+    judged against the mcp-server version a run would spawn at that moment.
+    When the mcp-server does not resolve, or declares no `tools[]`, nothing
+    more is judged;
+  - `remote` that declares a `tools_policy`, on the doors of the first item:
+    a name outside the manifest's catalog (the table's keys, plus the
+    `api_call` tools). The table already bounds what an agent can select by
+    name (`unknown_tool`), so a default cannot name a tool no agent could
+    pick. A `remote` source that declares no `tools_policy` is judged no
+    further: its catalog is the endpoint's, a name it does not serve selects
+    nothing at run time, and a run left with no callable tool still aborts.
 
   A stored `remote` or `local` manifest that names a refused tool still loads;
-  its next write is refused. Two remedies: remove the entry from
-  `default_tools`, or, for `local`, have the mcp-server declare the tool. An
-  agent's own `tools` are judged as before: against a `remote` integration
-  that declares a `tools_policy` they name its keys (`unknown_tool`).
+  its next write is refused. Remedies: remove the entry from `default_tools`;
+  for `local`, have the mcp-server declare the tool; for `remote`, declare it
+  in `tools_policy` (`{}` for one that needs no scope) when the endpoint
+  serves it.
 
 - **BREAKING (API): MCP refusals, space identity and per-space audience**
   (#1911).
