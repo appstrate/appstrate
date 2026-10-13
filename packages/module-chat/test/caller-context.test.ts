@@ -169,8 +169,10 @@ describe("formatCallerContext", () => {
       BASE_OPTS,
     );
     expect(out).toContain(`(own; default: ${names(12).join(", ")})`);
-    // Past the cap the names are one detail read away, not in every turn's prompt.
-    expect(out).toContain("(shared; default: 13 tools (names: tool_catalog))");
+    // Past the cap the names are one detail read away, in the field that holds the default.
+    expect(out).toContain(
+      "(shared; default: 13 tools (names: `default_tools` of `getIntegration`))",
+    );
     expect(out).not.toContain("tool_13");
   });
 

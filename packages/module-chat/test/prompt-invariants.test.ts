@@ -170,16 +170,28 @@ describe("full persona invariants", () => {
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
 
-  // #1923: an inherited default can be a whole MCP surface, and a run loads every schema it is given.
-  it("tells an inline composer to narrow a large default to the tools the task needs", () => {
+  // #1923: a default can be an integration's whole surface, write tools included, and a run can
+  // call every tool it is given. Selecting is the rule; inheriting is for a task that needs it all.
+  it("tells an inline composer to select the tools the task needs, whatever the default's size", () => {
+    expect(FULL).toContain("list the exact tool names the task needs");
     expect(FULL).toContain(
-      "when the default is a large set, list only the exact tools the task needs",
+      "omit the entry to inherit the integration's `default_tools` (shown per integration in your context) only when the task needs that whole default",
     );
-    // The context renders a long default as a count, so its names come from the detail read too.
-    expect(FULL).toMatch(
-      /beyond the default, or the default is shown as a count, first inspect .* `tool_catalog`/,
+    expect(FULL).toContain("never give it more than the task needs");
+    // Narrowing is not conditioned on the default's size: a short default lists write tools too.
+    expect(FULL).not.toMatch(/large (set|default)/);
+    expect(REDUCED).not.toContain("list the exact tool names the task needs");
+  });
+
+  // `describe_operation` answers with the operation's definition; the integration comes from the call.
+  it("reads an integration's tool names with invoke_operation, naming the field that holds each", () => {
+    expect(FULL).toContain(
+      'read the integration with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
     );
-    expect(REDUCED).not.toContain("when the default is a large set");
+    expect(FULL).toContain(
+      "its `default_tools` holds the default's names, its `tool_catalog` every tool you may select",
+    );
+    expect(FULL).not.toMatch(/describe_operation on `GET \/api\/integrations/);
   });
 
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
