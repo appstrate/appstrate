@@ -132,10 +132,12 @@ describe("runCommandAsRunner", () => {
   let exitCodes: number[];
   let shutdown: ShutdownCoordinator;
   let children: number[];
+  let stderrWaiters: { text: string; resolve: () => void }[];
 
   beforeEach(() => {
     platform = startPlatform();
     stderr = "";
+    stderrWaiters = [];
     exitCodes = [];
     children = [];
     shutdown = new ShutdownCoordinator({ exit: (code) => void exitCodes.push(code) });
@@ -162,11 +164,23 @@ describe("runCommandAsRunner", () => {
           orgId: "org_1",
         },
         input: {},
-        writeStderr: (chunk) => (stderr += chunk),
+        writeStderr: (chunk) => {
+          stderr += chunk;
+          for (const waiter of stderrWaiters.splice(0)) {
+            if (stderr.includes(waiter.text)) waiter.resolve();
+            else stderrWaiters.push(waiter);
+          }
+        },
         ...over,
       },
       shutdown,
     );
+  }
+
+  /** Resolves once the runner has written `text` on stderr. */
+  function stderrSays(text: string): Promise<void> {
+    if (stderr.includes(text)) return Promise.resolve();
+    return new Promise((resolve) => stderrWaiters.push({ text, resolve }));
   }
 
   /** The pid a child reported through its probe; killed after the test if it survived. */
@@ -325,10 +339,14 @@ describe("runCommandAsRunner", () => {
 
   it("keeps the run alive with signed heartbeats while the command runs", async () => {
     // An interval whose per-attempt deadline (half of it) is far above a local
-    // round-trip, and a command that outlives two of them.
-    await run(bun(`${probe(platform.origin)} await Bun.sleep(700);`), {
+    // round-trip. The command runs until the test has seen a heartbeat land.
+    const running = run(bun(`${probe(platform.origin)} await Bun.sleep(60_000);`), {
       heartbeatIntervalMs: 200,
     });
+    const pid = await childPid();
+    await platform.next(HEARTBEAT);
+    process.kill(pid, "SIGKILL");
+    await running;
 
     const beats = platform.on(HEARTBEAT);
     expect(beats.length).toBeGreaterThanOrEqual(1);
@@ -347,12 +365,20 @@ describe("runCommandAsRunner", () => {
       answer: { [HEARTBEAT]: () => new Response("gone", { status: 410 }) },
     });
 
-    const code = await run(
-      bun(`${probe(platform.origin)} await Bun.sleep(900); process.exit(5);`),
+    // The command ends, with a code of its own, when the test asks it to: once
+    // the runner has read the instance's answer and said so.
+    const running = run(
+      bun(
+        `process.on("SIGTERM", () => process.exit(5)); ` +
+          `${probe(platform.origin)} await Bun.sleep(60_000);`,
+      ),
       { heartbeatIntervalMs: 200 },
     );
+    const pid = await childPid();
+    await stderrSays("is closed on the instance");
+    process.kill(pid, "SIGTERM");
 
-    expect(code).toBe(5);
+    expect(await running).toBe(5);
     // Once is the point: the loop stops on the first 410.
     expect(stderr.match(/is closed on the instance/g)).toHaveLength(1);
     expect(stderr).toContain(
@@ -544,10 +570,16 @@ describe("runCommandAsRunner", () => {
       },
     };
     const armed = process.listeners("exit");
-    const running = run(["anything"], { spawn: () => double });
-    await platform.next(EVENTS);
-    // The spawn follows the first event's answer by a few microtasks.
-    await Bun.sleep(10);
+    const spawned = Promise.withResolvers<void>();
+    const running = run(["anything"], {
+      spawn: () => {
+        spawned.resolve();
+        return double;
+      },
+    });
+    // Resolved from inside the spawn, this resumes once the runner's synchronous
+    // stretch from the spawn to its next await is over: the listener is armed.
+    await spawned.promise;
     const [atExit] = process.listeners("exit").filter((listener) => !armed.includes(listener));
 
     expect(() => (atExit as () => void)()).not.toThrow();
@@ -564,10 +596,11 @@ describe("runCommandAsRunner", () => {
 
   it("listens for the process's exit only while the command is alive", async () => {
     const baseline = process.listenerCount("exit");
-    const running = run(bun(`${probe(platform.origin)} await Bun.sleep(150);`));
-    await childPid();
+    const running = run(bun(`${probe(platform.origin)} await Bun.sleep(60_000);`));
+    const pid = await childPid();
     expect(process.listenerCount("exit")).toBe(baseline + 1);
 
+    process.kill(pid, "SIGKILL");
     await running;
     expect(process.listenerCount("exit")).toBe(baseline);
   });
