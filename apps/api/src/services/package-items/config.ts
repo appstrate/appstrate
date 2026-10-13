@@ -136,7 +136,14 @@ export function assertContentConforms(
 
 /** 400 naming each offending manifest field. */
 export function assertManifestConforms(type: PackageType, manifest: unknown, prefix = ""): void {
-  const violations = CONFIG_BY_TYPE[type].checkManifest?.(manifest) ?? [];
+  assertNoManifestViolations(CONFIG_BY_TYPE[type].checkManifest?.(manifest) ?? [], prefix);
+}
+
+/** The 400 of {@link assertManifestConforms}, for violations a caller found by other means. */
+export function assertNoManifestViolations(
+  violations: { path: (string | number)[]; message: string }[],
+  prefix = "",
+): void {
   if (violations.length === 0) return;
   throw validationFailed(
     violations.map((v) => ({

@@ -6,7 +6,7 @@
  * report lists the expressions the platform does not evaluate, the `{{field}}` placeholders a
  * delivery template leaves as literal text and the injected credentials a run refuses as
  * `exfiltration`, plus three advisories (a scope that is not one token, a `default_tools` entry
- * the integration does not expose, a secret-named credential field the connect form shows in
+ * the integration hides, a secret-named credential field the connect form shows in
  * clear), and nothing for a clean manifest. Every version is gated — a range resolves
  * older ones too — and a system package is not read at all.
  */
@@ -150,18 +150,19 @@ describe("0035 — stored manifests the release refuses", () => {
     expect(report).toMatchObject({ expressions: 0, exfiltration: 0, advisories: 2 });
   });
 
-  it("lists a default_tools entry the integration does not expose", () => {
+  it("lists a default_tools entry the integration hides, and none its tools_policy leaves out", () => {
     const manifest = JSON.stringify({
       ...remoteIntegrationManifest({
         name: CLEAN,
         auths: { k: { type: "oauth2" } },
         tools_policy: { search: {} },
       }),
-      default_tools: ["search", "serach"],
+      hidden_tools: ["send"],
+      default_tools: ["search", "serach", "send"],
     });
     expect(manifestIssues([{ id: CLEAN, version: "draft", manifest }])).toEqual({
       lines: [
-        `${CLEAN}@draft [default-tools] default_tools: default_tools contains "serach" which is not a tool this integration exposes`,
+        `${CLEAN}@draft [default-tools] default_tools: default_tools contains "send" which is not a tool this integration exposes`,
       ],
       expressions: 0,
       exfiltration: 0,

@@ -24,12 +24,16 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`./integration`): the `http://` `authorized_uris` entries of the auths
   that inject a credential over HTTP, as write-path issues. `isTrustedHost`
   exempts a host the operator designated as internal.
-- **`findUnexposedDefaultTools`** (`@appstrate/core/integration`): the
-  write-path rule listing a manifest's `default_tools` entries that the
-  integration does not expose (`resolveIntegrationToolCatalog`). It judges a
-  `none` source always, a `local` one never, and any other only when it
-  declares a `tools_policy`; `integrationManifestSchema` keeps applying it to
-  `none` alone. (#1923)
+- **`findUnexposedDefaultTools(manifest, mcpServerTools?)`**
+  (`@appstrate/core/integration`): the write-path rule listing a manifest's
+  `default_tools` entries the platform can prove unexposed. On every source,
+  a name `hidden_tools` lists, a `connect.tool` references, or the upload
+  companion of a hidden `api_call`. Beyond that, a name outside the canonical
+  catalog (`resolveIntegrationToolCatalog`) where it is known: a `none` source
+  whose root `_meta` keys are all in the `dev.appstrate/` namespace, and a
+  `local` source when `mcpServerTools` (the referenced mcp-server's `tools[]`)
+  is passed. A `remote` source's `tools_policy` is not its catalog.
+  `integrationManifestSchema` applies the rule to `none` alone. (#1923)
 - **`credential-proxy:call-own`** (`@appstrate/core/permissions`): the action
   gating a call to `/api/credential-proxy/proxy` outside a run, on the
   caller's own connections. `CorePermission` and `SpaceLevelPermission` gain

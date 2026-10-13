@@ -46,11 +46,15 @@ import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
+  findUnexposedLocalDefaultTools,
   validateAgentIntegrationSelections,
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
-import { assertArchiveContentConforms } from "./package-items/config.ts";
+import {
+  assertArchiveContentConforms,
+  assertNoManifestViolations,
+} from "./package-items/config.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import { postInstallPackage } from "./post-install-package.ts";
 import { lockPackageVersions } from "./package-locks.ts";
@@ -638,6 +642,35 @@ export async function importBundle(
 }
 
 /**
+ * Every manifest the bundle carries, for the post-import catalog its gates judge against.
+ *
+ * Built for the whole bundle: a manifest may reference a package that appears
+ * anywhere in the package set, not only before it in iteration order.
+ *
+ * Grouped by package id but keeping EVERY version, because a bundle may carry
+ * several versions of one package and the referencing range picks one. Flattening
+ * to one manifest per id let an agent pinning `^1` be judged against a carried
+ * `2.0.0` — a verdict about a version the run would never resolve.
+ */
+function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
+  const carried = new Map<string, CarriedVersion[]>();
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are authoritative platform inputs. The importer ignores
+    // carried copies below, so letting one participate in validation would
+    // judge a manifest the runtime will never import.
+    if (!parsed || isSystemPackage(parsed.packageId)) continue;
+    const versions = carried.get(parsed.packageId) ?? [];
+    versions.push({
+      version: parsed.version,
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+    });
+    carried.set(parsed.packageId, versions);
+  }
+  return carried;
+}
+
+/**
  * Refuse a bundle carrying an agent whose declared integration selects no
  * callable tool — the SAME gate `/import` and the publish route apply
  * (`requireCallableTools`). Without it `/import-bundle` was a verbatim bypass,
@@ -658,27 +691,7 @@ export async function importBundle(
  * dist-tags. Same map covers the mcp-servers a local integration references.
  */
 async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
-  // Built once for the whole bundle: an agent may reference an integration that
-  // appears anywhere in the package set, not only before it in iteration order.
-  //
-  // Grouped by package id but keeping EVERY version, because a bundle may carry
-  // several versions of one package and the agent's range picks one. Flattening
-  // to one manifest per id let an agent pinning `^1` be judged against a carried
-  // `2.0.0` — a verdict about a version the run would never resolve.
-  const carried = new Map<string, CarriedVersion[]>();
-  for (const [identity, pkg] of bundle.packages) {
-    const parsed = parsePackageIdentity(identity);
-    // System packages are authoritative platform inputs. The importer ignores
-    // carried copies below, so letting one participate in validation would
-    // judge a manifest the runtime will never import.
-    if (!parsed || isSystemPackage(parsed.packageId)) continue;
-    const versions = carried.get(parsed.packageId) ?? [];
-    versions.push({
-      version: parsed.version,
-      manifest: pkg.manifest as unknown as Record<string, unknown>,
-    });
-    carried.set(parsed.packageId, versions);
-  }
+  const carried = carriedVersionsById(bundle);
 
   const errors: ValidationFieldError[] = [];
   for (const [identity, pkg] of bundle.packages) {
@@ -716,6 +729,24 @@ function assertBundleRootConforms(bundle: Bundle): void {
 }
 
 /**
+ * The part of the root's `default_tools` rule {@link assertBundleRootConforms} cannot judge: a
+ * `local` integration's names against the mcp-server its run spawns once the bundle is imported.
+ */
+async function assertBundleRootDefaultToolsExposed(bundle: Bundle, orgId: string): Promise<void> {
+  const root = bundle.packages.get(bundle.root);
+  const parsed = parsePackageIdentity(bundle.root);
+  if (!root || (parsed && isSystemPackage(parsed.packageId))) return;
+  assertNoManifestViolations(
+    await findUnexposedLocalDefaultTools(
+      root.manifest as unknown as Record<string, unknown>,
+      orgId,
+      carriedVersionsById(bundle),
+    ),
+    `${bundle.root}: `,
+  );
+}
+
+/**
  * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
@@ -729,6 +760,7 @@ export async function preflightBundleImport(
   assertBundleRootConforms(bundle);
   await authorize(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
+  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }

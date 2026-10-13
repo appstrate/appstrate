@@ -25,7 +25,7 @@
  * default) without an allowlist that names its hosts (`findUnboundedInjectedCredentials`),
  * hold an expression the platform does not evaluate (`findUnevaluableExpressions`), declare
  * a scope that is not one OAuth scope token (`findInvalidScopeTokens`), nor default to a tool
- * its declared catalog does not hold (`findUnexposedDefaultTools`): four of the
+ * the manifest proves it does not expose (`findUnexposedDefaultTools`): four of the
  * `@appstrate/core/integration` rules every manifest write path applies.
  *
  * Usage:

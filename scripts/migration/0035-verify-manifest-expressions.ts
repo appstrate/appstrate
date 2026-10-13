@@ -13,9 +13,10 @@
  * `credentialUrlPolicy` refuses). Exits 1 while any of them has one: a range (`^1.0.0`, the agent
  * editor's default) resolves older versions too. Three advisories are listed and never fail the
  * run: `[scope]`, a scope the manifest write paths refuse (`findInvalidScopeTokens`: the manifest
- * still loads, its next save is refused), `[default-tools]`, a `default_tools` entry the manifest
- * write paths refuse (`findUnexposedDefaultTools`: the manifest still loads, its next save is
- * refused), and `[clear-secret]`, a credential field named like a secret that the schema does not
+ * still loads, its next save is refused), `[default-tools]`, a `default_tools` entry naming a tool
+ * the manifest hides (`findUnexposedDefaultTools` on the manifest alone, so a `local` source is not
+ * judged against its mcp-server: the manifest still loads, its next save is refused), and
+ * `[clear-secret]`, a credential field named like a secret that the schema does not
  * mark `writeOnly` or `format: "password"` (the connect form shows its input in clear). System
  * packages are skipped: the image ships them (today's `system-packages/` has no issue) and an
  * operator cannot edit one. What it means and how to fix one: `scripts/migration/README.md`.
