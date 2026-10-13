@@ -2519,7 +2519,12 @@ describe("findUnexposedDefaultTools — write-path default_tools membership", ()
 
   it('finds nothing for the wildcard "*"', () => {
     expectNothing(
-      apiManifest({ source: REMOTE, default_tools: "*", allow_undeclared_tools: true }),
+      apiManifest({
+        source: REMOTE,
+        tools_policy: { search: {} },
+        default_tools: "*",
+        allow_undeclared_tools: true,
+      }),
     );
   });
 

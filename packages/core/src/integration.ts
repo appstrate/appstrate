@@ -636,16 +636,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
   //     wildcard selection — a default cannot grant the passthrough surface the
   //     integration author did not opt into).
-  //   - an array MUST contain strings, and every entry MUST be a tool the
-  //     integration exposes (catches typos like `["api_calll"]`), judged where
-  //     the catalog is known:
-  //       · `source.kind: "none"` (api-only — this manifest is the whole
-  //         catalog): here, so no such manifest parses;
-  //       · any other non-local source that declares a `tools_policy`: the
-  //         write paths only (`findUnexposedDefaultTools`), so a stored
-  //         manifest stays readable;
-  //       · `local`: the catalog is the referenced mcp-server's, resolved at
-  //         the agent freeze points.
+  //   - an array MUST contain strings; a `none` source's entries are also
+  //     judged here (`unexposedDefaultTools`, which states what is judged where).
   const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
   if (defaultTools !== undefined) {
     if (isToolsWildcard(defaultTools)) {
@@ -808,9 +800,10 @@ export function apiUploadToolNameFor(apiCallToolName: string): string {
 /**
  * Names of MCP tools the integration declares POLICY for in its top-level
  * `tools_policy` record. Empty when the integration didn't opt into per-tool
- * metadata. This is NOT the catalog of exposed tools — `tools_policy` is a
- * sparse policy table. The catalog comes from
- * {@link resolveIntegrationToolCatalog}.
+ * metadata. For a `local` source this is NOT the catalog of exposed tools —
+ * that is the mcp-server's, and `tools_policy` a sparse policy table over it.
+ * For any other source these names are the base of the catalog
+ * {@link resolveIntegrationToolCatalog} resolves.
  */
 export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
   return manifest.tools_policy ? Object.keys(manifest.tools_policy) : [];
@@ -1109,13 +1102,9 @@ export function readDefaultTools(
 }
 
 /**
- * The `default_tools` entries the integration does not expose: a default is a
- * selection an agent could make explicitly. A `none` source is always judged,
- * its manifest being its whole catalog. A `local` source is never judged, its
- * catalog being the referenced mcp-server's. Any other source is judged only
- * when it declares a `tools_policy`: without one its tools are discovered at
- * connect time. Entries are judged against {@link resolveIntegrationToolCatalog},
- * which holds the `api_call` tools `_meta` exposes and none of `hidden_tools`.
+ * The `default_tools` entries absent from {@link resolveIntegrationToolCatalog}. A `none` source
+ * is always judged, a `remote` one only when it declares a `tools_policy`, a `local` one never:
+ * its default exposing nothing callable is refused at the agent freeze points and at boot.
  */
 function unexposedDefaultTools(
   manifest: IntegrationManifest,
@@ -1136,9 +1125,8 @@ function unexposedDefaultTools(
 }
 
 /**
- * {@link unexposedDefaultTools} as a WRITE-path policy: {@link integrationManifestSchema}
- * applies that rule to a `none` source only, so a stored manifest of any other
- * source stays readable. A manifest the structural schema refuses yields nothing.
+ * {@link unexposedDefaultTools} as a WRITE-path policy: {@link integrationManifestSchema} applies
+ * it to a `none` source only. A manifest the structural schema refuses yields nothing.
  */
 export function findUnexposedDefaultTools(
   manifest: unknown,
