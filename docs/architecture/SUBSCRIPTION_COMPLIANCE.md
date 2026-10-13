@@ -74,8 +74,8 @@ sidecar `/llm` path). There is no per-provider engine or handler anywhere.
 Both subscription providers share **one** delivery mechanism. The agent
 container is handed a **placeholder** bearer; the real subscription token never
 crosses the isolation boundary. Pi in the container calls the sidecar's `/llm`
-endpoint, and the sidecar's OAuth branch resolves the user's **own** real
-subscription token **server-side** and swaps it onto the outbound request
+endpoint, and the sidecar's OAuth branch resolves the real token of the
+subscription pinned to the run **server-side** and swaps it onto the outbound request
 (`applyOauthBearerSwap` from `@appstrate/core/oauth-bearer-swap`): it forces the
 real bearer onto `authorization`, drops any stray `x-api-key`, and forwards
 **every other header Pi signed verbatim** (`runtime-pi/sidecar/app.ts`, oauth
@@ -93,9 +93,11 @@ mode does the alias↔real body swap.
 
 The one honest narrowing: the upstream TLS request is made by the **sidecar's
 `fetch`** carrying Pi's forwarded headers, not by a vendor binary — so we do not
-claim transport-level client identity. The token is genuine and belongs to one
-user (never pooled across tenants); no impersonation of another client, no
-forging.
+claim transport-level client identity. The token is genuine: it is the vendor
+account of the one person who connected it. It is never shared across
+organizations (tenants). Inside its organization, who spends it follows §1.5:
+its holder alone for a personal subscription, every caller of a bound model for
+an organization one. No impersonation of another client, no forging.
 
 Subscription runs require an isolating orchestrator (docker / firecracker): the
 plain `process` adapter runs the agent and its sidecar as host processes of one
@@ -155,26 +157,64 @@ true for the test/discovery paths, not just the run path. The earlier hand-built
 platform process) have been **deleted**, along with the now-unused
 `buildInferenceProbe` / `InferenceProbeRequest` / `runInferenceProbe` machinery.
 
-### 1.5 Subscription credentials are personal, by construction
+### 1.5 A subscription follows the ownership rule of every model credential
 
-For any credential whose provider has `authMode: "oauth2"` (a subscription):
+One rule decides whom a model credential serves, API key or subscription
+(`model_provider_credentials.owner_user_id`):
 
-- it is **always personal**: owned by the user who connected it
-  (`model_provider_credentials.owner_user_id`), never an organization credential;
-- it is **never bound to an organization model**: an `org_models` row can only
-  reference an organization credential;
-- it serves **only its owner's** runs and chat (a schedule never spends a
-  personal credential). For any other run the
-  sidecar token door refuses to hand it out (`assertOAuthModelCredential`,
-  `apps/api/src/routes/internal.ts`), as defence in depth behind the resolution step.
+- **NULL: an organization credential.** It can be bound to an organization model
+  (`org_models.credential_id`), and it then serves every caller of that model:
+  members, schedules, API keys, end users.
+- **Set: that member's personal credential.** It is never bound to a model
+  (`400 personal_credential_not_bindable`). It serves only its owner's own runs
+  and chat, on the models the organization leaves unbound, and only while the
+  organization allows personal credentials
+  (`org_settings.personal_model_credentials`). A schedule, an API key and an end
+  user never spend it. In a member's personal chain a subscription ranks before
+  an API key.
 
-Subscriptions connected before this rule are made personal by
-`scripts/migration/0042-personal-model-subscriptions.ts`; until it is applied
-they stay organization credentials and keep serving every member.
+The auth mode decides the transport, not the owner. What stays specific to a
+subscription, organization or personal:
 
-Holder-only use removes the aggravation of several people
-sharing one subscription. It does **not** make the `claude-code` path compliant
-(§2.1).
+- inference goes through the sidecar bearer-swap (§1.3), never through the
+  platform LLM proxy;
+- no model alias (§1.3);
+- an isolating orchestrator is required (§1.3);
+- validation is offline (§1.4);
+- its token is refreshed by the platform, and a refresh the vendor refuses flags
+  it for reconnection;
+- it is created through a pairing (`connect-helper`), never by pasting a secret.
+
+Who decides the owner: `POST /api/model-providers-oauth/pairing` takes
+`owner_type` (`org` | `user`, default `org`), under the permissions of an API
+key: `model-provider-credentials:write` for `org`, `connect` for `user`. The
+pairing records the owner and the redeem writes it. Reconnecting follows the
+edit rule of any credential: an organization subscription by a
+`model-provider-credentials:write` holder, a personal one by its owner.
+
+The sidecar token door (`assertOAuthModelCredential`,
+`apps/api/src/routes/internal.ts`) hands a subscription's token only to a
+platform run pinned to it. For a personal subscription the run's recorded payer
+must also be its owner. For an organization subscription there is no such
+check: any run of the organization whose model is bound to it gets the token.
+
+A member who leaves the organization takes their personal credentials with
+them. An organization subscription they connected stays and keeps serving. The
+vendor account behind it is still theirs: they end its use by revoking the
+access at the vendor, which flags the credential for reconnection.
+
+**What an organization subscription is.** It is one person's vendor account
+(Claude Pro/Max, ChatGPT Plus/Pro/Business), signed in once by that person and
+then spent by every member of the organization and by calls with no user at
+all: schedules, API keys, end users. The vendor sees one account. The code
+places no per-person limit on it. This is several people and unattended
+automation sharing one subscription, the use the vendors' terms are furthest
+from (§2). It aggravates the grey zone this document describes; it does not
+narrow it. An administrator who binds a model to a subscription makes that
+choice for the whole organization.
+
+A personal subscription, spent by its holder alone, removes that aggravation.
+It does **not** make the `claude-code` path compliant (§2.1).
 
 ---
 
@@ -205,8 +245,17 @@ page, read 2026-10-09:
 Appstrate does what that text excludes. `connect-helper` POSTs the subscription
 token, the platform stores it, and Pi — not Claude Code — presents it on the run
 path through the sidecar bearer-swap (§1.3). The module is therefore outside the
-admitted path. Holder-only use (§1.5) removes the aggravation of several people
-sharing one subscription; it does not make the path compliant.
+admitted path, whoever owns the credential:
+
+- A personal subscription (§1.5) is spent by its holder alone. That removes the
+  aggravation of several people sharing one subscription; it does not make the
+  path compliant.
+- An organization subscription (§1.5) is one person's sign-in spent by other
+  members, schedules, API keys and end users. The admitted path has each end
+  user sign in with their own subscription; here the others never sign in, and
+  some calls have no user. This is routing requests through one person's
+  credentials on behalf of others, the case the page names, and team automation
+  on a subscription, for which Anthropic recommends API-key billing.
 
 - 2026 timeline: **Feb 20** banned subscription-OAuth in third-party tools →
   **Apr 4** billing enforcement → **May 13** reversal explicitly re-allowing
@@ -223,8 +272,9 @@ sharing one subscription; it does not make the path compliant.
 > on the Claude Agent SDK. Please use the API key authentication methods described
 > in this document instead."
 
-This is the crux: an operator pointing Appstrate's chat/runner at a **personal**
-Claude subscription is doing what the page excludes. Appstrate forges no client
+This is the crux: an operator pointing Appstrate's chat/runner at a Claude
+subscription, as a personal or an organization credential, is doing what the
+page excludes. Appstrate forges no client
 identity (Pi's SDK emits the subscription fingerprint, same as any Pi CLI user),
 but that confers no approval. Treat `claude-code` as a risk a self-hoster may
 take by enabling the module, not as a sanctioned integration, and never enable it
@@ -256,6 +306,11 @@ in production. Re-verify the live page (§4) before relying on this reading.
   time, as Anthropic did.
 - This grey-zone status is self-documented in `packages/module-codex/src/index.ts`.
 - For headless/automated work, OpenAI's clean contract is **API-key billing**.
+- An organization subscription (§1.5) is headless, automated and multi-person
+  use of one user's plan: other members, schedules, API keys and end users
+  spend it. The pages above describe a user opting their own plan into an app
+  they connected; this path has no endorsement, and it sits further from that
+  description than a personal subscription spent by its holder.
 
 ---
 
@@ -266,7 +321,10 @@ unambiguous option is an **API-key** model provider (OpenAI Platform / Anthropic
 API), billed pay-as-you-go. The subscription providers (`claude-code`, `codex`)
 are a convenience/grey-zone option chosen per-operator; they are not the
 recommended substrate for production automation, and they are **not enabled** on
-the production deployment. Holder-only (§1.5) is necessary, not sufficient.
+the production deployment. A personal subscription spent by its holder alone
+(§1.5) is the narrowest use of this path, and it is still not the clean one. An
+organization subscription is team and automated use of one person's account:
+the workload this section sends to an API key.
 
 ---
 
