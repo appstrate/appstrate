@@ -232,8 +232,11 @@ describe("realtime SSE routes (integration)", () => {
       const malformed = await stream("not-a-uuid");
       expect(unknown.status).toBe(401);
       expect(malformed.status).toBe(401);
-      const detail = async (res: Response) => ((await res.json()) as { detail: string }).detail;
-      expect(await detail(malformed)).toBe(await detail(unknown));
+      const problem = async (res: Response) => {
+        const { code, detail, title } = (await res.json()) as Record<string, unknown>;
+        return { code, detail, title };
+      };
+      expect(await problem(malformed)).toEqual(await problem(unknown));
     });
 
     it("returns 401 without spaceId query param", async () => {

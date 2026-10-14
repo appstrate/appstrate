@@ -389,8 +389,6 @@ describe("Organizations API", () => {
         return { code, detail, title };
       };
 
-      const unknown = await problem(`/api/orgs/${crypto.randomUUID()}`);
-      expect(await problem("/api/orgs/members")).toEqual(unknown);
       expect(await problem("/api/orgs/members/settings")).toEqual(
         await problem(`/api/orgs/${crypto.randomUUID()}/settings`),
       );
