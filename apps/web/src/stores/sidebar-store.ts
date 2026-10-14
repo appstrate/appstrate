@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { create } from "zustand";
-import { persistedValue } from "./local-storage";
-
-interface SidebarState {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-}
+import { persistedScalar } from "./persisted-scalar-store";
 
 /**
  * Whether a shell sidebar is open, remembered across reloads.
@@ -16,14 +11,7 @@ interface SidebarState {
  * shared flag would have the chat quietly re-fold Studio's navigation.
  */
 function createSidebarStore(storageKey: string) {
-  const stored = persistedValue(storageKey, (raw) => raw !== "false");
-  return create<SidebarState>()((set) => ({
-    open: stored.read(),
-    setOpen: (open) => {
-      stored.write(open);
-      set({ open });
-    },
-  }));
+  return create(persistedScalar(storageKey, (raw) => raw !== "false", "open", "setOpen"));
 }
 
 export const useSidebarStore = createSidebarStore("appstrate-sidebar");

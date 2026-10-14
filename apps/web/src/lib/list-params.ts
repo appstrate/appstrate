@@ -46,7 +46,17 @@ export function readList<T extends string>(raw: string | null, allowed: readonly
 
 export function useListParams(filterKeys: readonly string[]) {
   const [params, setParams] = useSearchParams();
+  return urlListParams(params, setParams, filterKeys);
+}
 
+type SetParams = ReturnType<typeof useSearchParams>[1];
+
+/** {@link useListParams} over the router's search params, apart for its test. */
+export function urlListParams(
+  params: URLSearchParams,
+  setParams: SetParams,
+  filterKeys: readonly string[],
+) {
   return {
     params,
     /** The chosen values of one dimension, narrowed to what the screen allows. */

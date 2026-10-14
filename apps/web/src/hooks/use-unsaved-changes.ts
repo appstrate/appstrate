@@ -28,6 +28,23 @@ function originalHistory() {
 }
 
 /**
+ * A Back/Forward has already moved the address to `href`. When that leaves the
+ * editor, push the entry it left back — with its history state — and answer
+ * the path the user asked for; otherwise `null`.
+ */
+export function undoLeavingPop(
+  entry: { path: string; state: unknown },
+  href: string,
+  place: EditorPlace,
+  push: History["pushState"],
+): string | null {
+  const to = new URL(href);
+  if (!leavesEditor(new URL(entry.path, to), to, place)) return null;
+  push(entry.state, "", entry.path);
+  return `${to.pathname}${to.search}${to.hash}`;
+}
+
+/**
  * Blocks in-app navigation (Link, navigate(), pushState, popstate, tab close)
  * that would unmount the editor while `isDirty` is true: a new pathname, tab
  * (hash) or `EditorPlaceContext` place. Works with BrowserRouter — no data
@@ -46,6 +63,12 @@ export function useUnsavedChanges(isDirty: boolean) {
   const pending = useRef<{ to: string; replace: boolean; state: unknown } | null>(null);
   const place = useContext(EditorPlaceContext);
   const current = `${location.pathname}${location.search}${location.hash}`;
+  // The router's own state for the entry on screen (`idx`, `key`, `usr`): an
+  // undone Back must restore it, or the overlays that read it lose their place.
+  const entryState = useRef<unknown>(null);
+  useEffect(() => {
+    entryState.current = history.state;
+  }, [current]);
 
   // Keep isDirty and the place in refs so the patched pushState reads the
   // latest values without needing to re-patch on every change.
@@ -103,11 +126,14 @@ export function useUnsavedChanges(isDirty: boolean) {
 
     const handler = () => {
       if (skipRef.current) return;
-      const to = new URL(window.location.href);
-      if (!leavesEditor(new URL(current, to), to, placeRef.current)) return;
-      // The browser already changed the URL — push the current one back to undo.
-      pending.current = { to: `${to.pathname}${to.search}${to.hash}`, replace: false, state: null };
-      originalHistory().push(null, "", current);
+      const to = undoLeavingPop(
+        { path: current, state: entryState.current },
+        window.location.href,
+        placeRef.current,
+        originalHistory().push,
+      );
+      if (to === null) return;
+      pending.current = { to, replace: false, state: null };
       setBlocked(true);
     };
 
