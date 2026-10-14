@@ -1293,6 +1293,99 @@ describe("handlePiMessagesRequest", () => {
     // terminated it with an `error` frame above.
     expect(Date.now() - started).toBeGreaterThan(idleTimeoutMs);
   });
+
+  // --- client cancel ---
+  //
+  // A body cancel closes the controller and does NOT abort `request.signal`:
+  // the stream must stop writing without warning and release the backing at once.
+
+  it("stops quietly and releases the backing when the client cancels mid-stream", async () => {
+    let signal: AbortSignal | undefined;
+    let resume!: () => void;
+    const resumed = new Promise<void>((r) => (resume = r));
+    let finish!: () => void;
+    const finished = new Promise<void>((r) => (finish = r));
+    const backing: BackingStreamFn = (_model, _context, options) => {
+      signal = options.signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          try {
+            yield { type: "start", partial: partialMessage([]) } as AssistantMessageEvent;
+            await resumed;
+            // Already in flight when the client left: the next write would hit
+            // the closed controller.
+            yield {
+              type: "text_delta",
+              contentIndex: 0,
+              delta: "hi",
+              partial: partialMessage([{ type: "text", text: "hi" }]),
+            } as AssistantMessageEvent;
+          } finally {
+            finish();
+          }
+        },
+      } as unknown as ReturnType<BackingStreamFn>;
+    };
+
+    const warnings = await captureWarnings(async () => {
+      const res = handlePiMessagesRequest(
+        depsFor(BACKINGS[0]!, backing),
+        new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+        CLIENT_BODY,
+      );
+      const reader = res.body!.getReader();
+      await reader.read();
+      await reader.cancel();
+      // Released by the cancel itself, not by the loop's next wake-up.
+      expect(signal?.aborted).toBe(true);
+      resume();
+      await finished;
+    });
+
+    expect(warnings).toEqual([]);
+  });
+
+  it("releases a silent backing on cancel instead of waiting out the idle bound", async () => {
+    let signal: AbortSignal | undefined;
+    let finish!: () => void;
+    const finished = new Promise<void>((r) => (finish = r));
+    const backing: BackingStreamFn = (_model, _context, options) => {
+      signal = options.signal;
+      return {
+        async *[Symbol.asyncIterator]() {
+          try {
+            yield { type: "start", partial: partialMessage([]) } as AssistantMessageEvent;
+            // Silent until aborted, then the error event pi-ai yields on abort.
+            await new Promise((r) => signal!.addEventListener("abort", r, { once: true }));
+            yield {
+              type: "error",
+              reason: "aborted",
+              error: { ...partialMessage([]), stopReason: "aborted", errorMessage: "aborted" },
+            } as AssistantMessageEvent;
+          } finally {
+            finish();
+          }
+        },
+      } as unknown as ReturnType<BackingStreamFn>;
+    };
+
+    const warnings = await captureWarnings(async () => {
+      const res = handlePiMessagesRequest(
+        // Far above the test's span: only the cancel can end this stream in time.
+        { ...depsFor(BACKINGS[0]!, backing), llmStreamIdleTimeoutMs: 5_000 },
+        new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+        CLIENT_BODY,
+      );
+      const reader = res.body!.getReader();
+      await reader.read();
+      await reader.cancel();
+      expect(signal?.aborted).toBe(true);
+      await finished;
+    });
+
+    // Neither "went silent" nor "threw": the client left, the backing did not fail.
+    expect(warnings).toEqual([]);
+  });
 });
 
 /**
