@@ -13,7 +13,7 @@
  * same tick: a modal whose act takes the user elsewhere (the copy a fork made)
  * leaves for it (`leave`) instead of closing and then navigating.
  */
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   resolvePath,
   useLocation,
@@ -73,6 +73,31 @@ export function modalParamStep(
   };
 }
 
+/**
+ * Lets each history entry issue one close. Going back is a popstate that lands
+ * after the render that asked for it, so that render still reads the entry the
+ * modal was open on: a second close from it (an Apply that renames its target,
+ * then the unknown-target drop of the old name) would go back one entry too far.
+ * `release` runs once the location moves, so an entry reached again (Forward)
+ * closes again.
+ */
+export function closeOncePerEntry(): {
+  take: (entryKey: string) => boolean;
+  release: () => void;
+} {
+  let closedFrom: string | null = null;
+  return {
+    take: (entryKey) => {
+      if (entryKey === closedFrom) return false;
+      closedFrom = entryKey;
+      return true;
+    },
+    release: () => {
+      closedFrom = null;
+    },
+  };
+}
+
 function withoutParam(search: string, name: string): string {
   const params = new URLSearchParams(search);
   params.delete(name);
@@ -120,12 +145,15 @@ export function useModalParam(name: string) {
   const location = useLocation();
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const [closeGuard] = useState(closeOncePerEntry);
+  useEffect(() => closeGuard.release(), [closeGuard, location.key]);
   // `setSearchParams` drops the hash, and a detail page's tab lives in it
   // (`#settings`): a modal opened from a tab would close the tab under it.
   // The callbacks change only with the location, so they can ride in memoized
   // props.
   const set = useCallback(
     (next: string | null, closing?: string) => {
+      if (next === null && !closeGuard.take(location.key)) return;
       const step = modalParamStep(location, name, next, closing);
       if (step.back) {
         navigate(-1);
@@ -136,7 +164,7 @@ export function useModalParam(name: string) {
         { replace: step.replace, state: step.state },
       );
     },
-    [location, name, navigate],
+    [location, closeGuard, name, navigate],
   );
   const open = useCallback((value = "1", closing?: string) => set(value, closing), [set]);
   const close = useCallback(() => set(null), [set]);

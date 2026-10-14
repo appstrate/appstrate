@@ -44,26 +44,37 @@ export function DraftInput({
 
 /** A value editable as text, or its JSON read-only when it cannot round-trip through text. */
 export function KeywordInput({
+  id,
   value,
   onCommit,
 }: {
+  id?: string;
   value: TextValue;
   onCommit: (text: string) => void;
 }) {
   const { t } = useTranslation("agents");
   if (value.locked) {
     return (
-      <Input type="text" value={value.text} disabled readOnly title={t("editor.fieldLockedJson")} />
+      <Input
+        id={id}
+        type="text"
+        value={value.text}
+        disabled
+        readOnly
+        title={t("editor.fieldLockedJson")}
+      />
     );
   }
-  return <DraftInput text={value.text} onCommit={onCommit} />;
+  return <DraftInput id={id} text={value.text} onCommit={onCommit} />;
 }
 
 export function NumberKeywordInput({
+  id,
   prop,
   keyword,
   onChange,
 }: {
+  id?: string;
   prop: JSONSchema7;
   keyword: NumericKeyword;
   onChange: (prop: JSONSchema7) => void;
@@ -71,6 +82,7 @@ export function NumberKeywordInput({
   const current = prop[keyword];
   return (
     <DraftInput
+      id={id}
       text={typeof current === "number" ? String(current) : ""}
       onCommit={(text) => onChange(setKeyword(prop, keyword, toKeywordNumber(keyword, text)))}
     />

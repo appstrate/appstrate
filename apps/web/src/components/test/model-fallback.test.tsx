@@ -113,7 +113,6 @@ describe("the agent's overview when its model is no longer accessible", () => {
       status: "warning",
       blocking_count: 0,
       warning_count: 1,
-      can_launch: true,
       diagnostics: [
         {
           code: "pinned_model_unavailable",
@@ -126,7 +125,6 @@ describe("the agent's overview when its model is no longer accessible", () => {
             section: "model",
             params: { default_model: "Mistral Medium" },
           },
-          recoverable_on_launch: false,
         },
       ],
     });

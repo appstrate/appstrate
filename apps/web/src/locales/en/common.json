@@ -315,6 +315,7 @@
   "apiError.reasoning_level_unsupported": "The selected model does not support this reasoning level: {{message}}",
   "apiError.temperature_with_reasoning_unsupported": "The selected model cannot combine a custom temperature with reasoning.",
   "loading": "Loading...",
+  "renameField": "Rename “{{name}}”",
   "admin": "admin",
   "status.success": "success",
   "status.failed": "failed",

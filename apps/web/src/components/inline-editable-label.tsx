@@ -101,6 +101,8 @@ export function InlineEditableLabel({
         ref={inputRef}
         // Read by the dialogs: Escape here cancels the rename, not the overlay.
         data-inline-editing=""
+        // The field has no visible label: it is named by the name it renames.
+        aria-label={t("renameField", { name: value })}
         value={draft}
         disabled={saving}
         placeholder={placeholder}

@@ -132,12 +132,10 @@ interface DiagnosticsBody {
   status: "healthy" | "warning" | "blocking";
   blocking_count: number;
   warning_count: number;
-  can_launch: boolean;
   diagnostics: Array<{
     code: string;
     severity: "blocking" | "warning";
     correction: { destination: string; section: string | null };
-    recoverable_on_launch: boolean;
   }>;
 }
 
@@ -271,7 +269,6 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       status: "healthy",
       blocking_count: 0,
       warning_count: 0,
-      can_launch: true,
       diagnostics: [],
     });
   });
@@ -286,12 +283,10 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     const body = (await res.json()) as DiagnosticsBody;
     expect(body.status).toBe("blocking");
     expect(body.blocking_count).toBe(1);
-    expect(body.can_launch).toBe(true);
     expect(body.diagnostics[0]).toMatchObject({
       code: "not_connected",
       severity: "blocking",
       correction: { destination: "configuration", section: "connections" },
-      recoverable_on_launch: true,
     });
   });
 

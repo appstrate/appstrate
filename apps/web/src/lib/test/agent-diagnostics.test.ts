@@ -15,7 +15,6 @@ function diagnostic(overrides: Partial<AgentDiagnostic> = {}): AgentDiagnostic {
     explanation: "A value is required.",
     field: "config.period",
     correction: { destination: "configuration", section: "inputs", params: {} },
-    recoverable_on_launch: false,
     ...overrides,
   };
 }

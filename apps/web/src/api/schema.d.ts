@@ -5598,8 +5598,6 @@ export interface components {
             status: "healthy" | "warning" | "blocking";
             blocking_count: number;
             warning_count: number;
-            /** @description False when at least one blocker cannot be resolved by the launch recovery flow. */
-            can_launch: boolean;
             diagnostics: {
                 code: string;
                 /** @enum {string} */
@@ -5616,7 +5614,6 @@ export interface components {
                         [key: string]: string;
                     };
                 };
-                recoverable_on_launch: boolean;
             }[];
         };
         /** @description The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged. */

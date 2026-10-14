@@ -42,7 +42,6 @@ const DEFAULT_LABEL = "Org Default";
 interface DiagnosticsBody {
   status: "healthy" | "warning" | "blocking";
   warning_count: number;
-  can_launch: boolean;
   diagnostics: Array<{
     code: string;
     severity: "blocking" | "warning";
@@ -125,7 +124,6 @@ describe("GET /api/agents/:scope/:name/diagnostics — pinned model unavailable"
 
     const body = await getDiagnostics();
     expect(body.status).toBe("warning");
-    expect(body.can_launch).toBe(true);
     expect(body.diagnostics).toHaveLength(1);
     expect(body.diagnostics[0]).toMatchObject({
       code: "pinned_model_unavailable",
@@ -197,7 +195,6 @@ describe("GET /api/agents/:scope/:name/diagnostics — model no credential serve
     expect(res.status).toBe(200);
     const body = (await res.json()) as DiagnosticsBody;
     expect(body.status).toBe("blocking");
-    expect(body.can_launch).toBe(false);
     expect(body.diagnostics).toEqual([
       expect.objectContaining({
         code: "model_credential_required",
@@ -258,7 +255,6 @@ describe("GET /api/agents/:scope/:name/diagnostics — model credential without 
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as DiagnosticsBody;
-    expect(body.can_launch).toBe(false);
     expect(body.diagnostics).toEqual([
       expect.objectContaining({
         code: "model_credential_missing",

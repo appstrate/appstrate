@@ -51,3 +51,17 @@ export function mergeSpaceLibraries(
     ) as LibraryResponse["packages"],
   };
 }
+
+/**
+ * The spaces whose library the caller can read: those they may enter (a
+ * `closed` space lists them without letting them in) and in which their role
+ * holds `spaces:read`, the route's own guard. A space read for nothing would
+ * fail and, with it, the whole merged catalogue.
+ */
+export function readableLibrarySpaces<T extends { access: string; permissions: string[] }>(
+  spaces: readonly T[],
+): T[] {
+  return spaces.filter(
+    (space) => space.access === "member" && space.permissions.includes("spaces:read"),
+  );
+}

@@ -34,7 +34,7 @@ const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
 /**
  * `chat:read` opens the page, not the runs and files two tabs list. A stored
- * tab the caller can no longer see resolves to the preview, which always stays.
+ * tab the caller can no longer see resolves to Info, which always stays.
  */
 function useConversationTabs(selected: ConversationSidebarTab) {
   const { t } = useTranslation("chat");
@@ -55,8 +55,10 @@ function useConversationTabs(selected: ConversationSidebarTab) {
       label: string;
     }[]
   ).filter(({ id }) => readable[id]);
-  // Info is always readable, so the list is never empty.
-  return { tabs, activeTab: tabs.find(({ id }) => id === selected) ?? tabs[0]! };
+  return {
+    tabs,
+    activeTab: tabs.find(({ id }) => id === selected) ?? tabs.find(({ id }) => id === "info")!,
+  };
 }
 
 export function ConversationContextActions({

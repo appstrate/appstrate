@@ -48,16 +48,12 @@ export interface AgentDiagnostic {
     section: string | null;
     params: Record<string, string>;
   };
-  /** A launch can open the existing connection recovery flow for this issue. */
-  recoverable_on_launch: boolean;
 }
 
 export interface AgentDiagnosticsResult {
   status: "healthy" | "warning" | "blocking";
   blocking_count: number;
   warning_count: number;
-  /** False only when a blocker cannot be resolved by the launch recovery flow. */
-  can_launch: boolean;
   diagnostics: AgentDiagnostic[];
 }
 
@@ -83,7 +79,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       explanation: error.message,
       field: error.field,
       correction: { destination: "bundle", section: "prompt", params: {} },
-      recoverable_on_launch: false,
     };
   }
   if (skillId) {
@@ -93,7 +88,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       explanation: error.message,
       field: error.field,
       correction: { destination: "bundle", section: "skills", params: { skill: skillId } },
-      recoverable_on_launch: false,
     };
   }
   if (integrationId) {
@@ -109,7 +103,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
         section,
         params: { integration: integrationId },
       },
-      recoverable_on_launch: connectionIssue,
     };
   }
   if (error.field === "agent") {
@@ -119,7 +112,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       explanation: error.message,
       field: error.field,
       correction: { destination: "configuration", section: "activation", params: {} },
-      recoverable_on_launch: false,
     };
   }
   return {
@@ -128,7 +120,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
     explanation: error.message,
     field: error.field,
     correction: { destination: "configuration", section: null, params: {} },
-    recoverable_on_launch: false,
   };
 }
 
@@ -235,7 +226,6 @@ export async function getAgentDiagnostics(args: {
         section: "model",
         params: modelCascade ? { model: modelCascade.model.label } : {},
       },
-      recoverable_on_launch: false,
     });
   }
 
@@ -257,7 +247,6 @@ export async function getAgentDiagnostics(args: {
         section: "model",
         params: { default_model: fallback },
       },
-      recoverable_on_launch: false,
     });
   }
 
@@ -289,7 +278,6 @@ export async function getAgentDiagnostics(args: {
           inspected_version: inspectedRef,
         },
       },
-      recoverable_on_launch: false,
     });
   }
 
@@ -298,7 +286,6 @@ export async function getAgentDiagnostics(args: {
     status: blocking.length > 0 ? "blocking" : warnings.length > 0 ? "warning" : "healthy",
     blocking_count: blocking.length,
     warning_count: warnings.length,
-    can_launch: blocking.every((diagnostic) => diagnostic.recoverable_on_launch),
     diagnostics,
   };
 }

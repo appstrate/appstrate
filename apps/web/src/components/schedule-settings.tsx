@@ -62,17 +62,15 @@ import {
   refusedScheduleWrite,
   scheduleConnectionChoices,
 } from "../lib/connection-choice";
-import {
-  type ConnectionSet,
-  withConnectionOverride,
-  withDeclaredConnections,
-} from "../lib/connection-set";
+import { type ConnectionSet, withConnectionOverride } from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
+  type ScheduleOverridesState,
   armedScheduleWrite,
   sameActor,
   savedScheduleOverrides,
+  scheduleConnectionPickPayload,
   scheduleMovePayload,
 } from "../lib/schedule-payload";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
@@ -85,8 +83,16 @@ import {
 
 type Schedule = ScheduleWireDto;
 type UpdateMutation = ReturnType<typeof useUpdateSchedule>;
-/** The schedule's one write path; its `isError` leaves out a refusal over connections. */
-type Save = Omit<UpdateMutation, "isError"> & { isError: boolean };
+/**
+ * The schedule's one write path; its `isError` leaves out a refusal over connections. `ready`
+ * once the facts every write names its connections from have settled ({@link useFiredFacts}):
+ * a write sent before would name none and be refused over them. `fired` is those facts.
+ */
+type Save = Omit<UpdateMutation, "isError"> & {
+  isError: boolean;
+  ready: boolean;
+  fired: Omit<ScheduleOverridesState, "overrides">;
+};
 type Deps = NonNullable<ReturnType<typeof useScheduleFormDeps>["deps"]>;
 
 /** Who the schedule runs as, as stored. */
@@ -127,23 +133,22 @@ function useFiredFacts(packageId: string, version: string, runsAsViewer: boolean
 function useScheduleWrite(schedule: Schedule): Save {
   const update = useUpdateSchedule();
   const runsAsViewer = useIsViewer(storedActor(schedule));
-  const { integrations, viewerReadiness } = useFiredFacts(
+  const { integrations, viewerReadiness, ready } = useFiredFacts(
     schedule.packageId,
     firedVersion(schedule.version_override),
     runsAsViewer,
   );
+  const fired = { runsAsViewer, viewerReadiness, declared: integrations?.map((i) => i.id) };
   const { connection_overrides: named } = savedScheduleOverrides({
+    ...fired,
     overrides: schedule.connection_overrides
       ? { connection_overrides: schedule.connection_overrides }
       : {},
-    runsAsViewer,
-    viewerReadiness,
-    declared: integrations?.map((i) => i.id),
   });
   const mutate: UpdateMutation["mutate"] = (variables, options) =>
     update.mutate(armedScheduleWrite(variables, { enabled: schedule.enabled, named }), options);
   const refused = scheduleConnectionChoices(update.error).length > 0;
-  return { ...update, mutate, isError: update.isError && !refused };
+  return { ...update, mutate, isError: update.isError && !refused, ready, fired };
 }
 
 /**
@@ -171,7 +176,7 @@ export function ScheduleActionsMenu({
             { onError: toastScheduleConnectionChoice },
           )
         }
-        disabled={toggle.isPending}
+        disabled={toggle.isPending || !toggle.ready}
       >
         {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
         {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
@@ -360,12 +365,18 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
                 <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
               </>
             )}
-            <SectionBody
-              section={active.id}
-              schedule={schedule}
-              update={update}
-              moveWrite={moveWrite}
-            />
+            {/* Every control writes: none is offered before its write can name the
+                connections the server re-checks. */}
+            {update.ready ? (
+              <SectionBody
+                section={active.id}
+                schedule={schedule}
+                update={update}
+                moveWrite={moveWrite}
+              />
+            ) : (
+              <LoadingState />
+            )}
           </>
         )}
       </section>
@@ -651,6 +662,7 @@ function ExecutionSection({ schedule, deps, update, moveWrite }: SectionWrites &
           type="agent"
           packageId={schedule.packageId}
           value={version}
+          disabled={move.pending}
           // Only a real change is sent: naming the working copy is an author's
           // act the route judges (403 `draft_not_writable`), and echoing the
           // stored value back would claim it for whoever touched the select.
@@ -711,13 +723,17 @@ function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
   const actorIsViewer = useIsViewer(actor);
 
   const pick = (integrationId: string, connectionIds: ConnectionSet) => {
-    const next = withDeclaredConnections(
-      withConnectionOverride({ connection_overrides: picks }, integrationId, connectionIds),
-      integrations?.map((i) => i.id),
-    ).connection_overrides;
     // The pick answers the refusal, whichever write it came from.
     moveWrite.reset();
-    update.mutate({ id: schedule.id, connection_overrides: next ?? null });
+    update.mutate({
+      id: schedule.id,
+      ...scheduleConnectionPickPayload({
+        ...update.fired,
+        picks: schedule.connection_overrides ?? null,
+        integrationId,
+        connectionIds,
+      }),
+    });
   };
 
   if (fired.error) return <ErrorState error={fired.error} />;

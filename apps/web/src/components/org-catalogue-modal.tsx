@@ -442,7 +442,10 @@ export function OrgCatalogueModal({
   const activatable = offered.filter(canActivate).map((item) => item.id);
   const allSelected = activatable.length > 0 && activatable.every((id) => selected.has(id));
   const picked = offered.filter((item) => selected.has(item.id));
-  const previewed = preview.value ? rows.find((item) => item.id === preview.value) : undefined;
+  // Looked up in the whole kind, not the rows the filters leave: a link to a
+  // package (a share notification) opens its sheet whatever the list shows,
+  // the other execution's integrations included.
+  const previewed = preview.value ? ofKind.find((item) => item.id === preview.value) : undefined;
   const previewedItem: CardItem | undefined = previewed
     ? {
         id: previewed.id,
@@ -730,11 +733,17 @@ export function OrgCatalogueModal({
                 item={previewedItem}
                 deeds={catalogueDeeds(previewed)}
                 spaceNameOf={spaceNameOf}
-                open={{
-                  label: t("catalogue.openFullPage"),
-                  icon: ExternalLink,
-                  onSelect: () => navigate(packageDetailPath(active, previewed.id)),
-                }}
+                // The page lives in the current space: a package placed only
+                // elsewhere would open a 404 there, so the sheet offers none.
+                open={
+                  previewed.source === "system" || placementOf(previewed).here !== null
+                    ? {
+                        label: t("catalogue.openFullPage"),
+                        icon: ExternalLink,
+                        onSelect: () => navigate(packageDetailPath(active, previewed.id)),
+                      }
+                    : undefined
+                }
                 onMoveHome={(item) => moveHome.open(item.id)}
                 onShare={(item) => share.open(item.id)}
                 onRevoke={revokeFrom}

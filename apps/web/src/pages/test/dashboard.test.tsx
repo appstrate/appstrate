@@ -24,8 +24,11 @@ await i18n.changeLanguage("fr");
 
 const READER = ["runs:read", "agents:read", "schedules:read"];
 
-function asOrgMember(permissions: string[], node: ReactElement): string {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
+function asOrgMember(
+  permissions: string[],
+  node: ReactElement,
+  queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } }),
+): string {
   const org: components["schemas"]["Organization"] = {
     id: "org_dash",
     name: "Dash",
@@ -81,6 +84,27 @@ describe("the dashboard", () => {
     expect(html).toContain("Rapporteur");
     expect(html).not.toContain("Planifications à venir");
     expect(html).not.toContain("Agents récents");
+  });
+
+  it("renders the runs it is handed, trimmed, without a query of its own for them", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
+    const runs = Array.from({ length: 8 }, (_, i) =>
+      makeRun({ id: `run_${i}`, packageId: null, agent_name: `Agent ${i}` }),
+    );
+    const html = asOrgMember(
+      READER,
+      <DashboardContent {...content({ runs, runTotal: runs.length })} />,
+      queryClient,
+    );
+    for (let i = 0; i < 7; i++) expect(html).toContain(`Agent ${i}`);
+    expect(html).not.toContain("Agent 7");
+    // A fetching list mounted under the page would register its own run query here.
+    const runQueries = queryClient
+      .getQueryCache()
+      .findAll()
+      .map((query) => JSON.stringify(query.queryKey))
+      .filter((key) => key.includes("runs"));
+    expect(runQueries).toEqual([]);
   });
 
   it("says on an agent's card how many of its runs are unread", () => {

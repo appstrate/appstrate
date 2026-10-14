@@ -11,6 +11,7 @@ import {
   armedScheduleWrite,
   sameActor,
   savedScheduleOverrides,
+  scheduleConnectionPickPayload,
   scheduleCreatePayload,
   scheduleMovePayload,
 } from "../schedule-payload.ts";
@@ -152,6 +153,49 @@ describe("scheduleMovePayload", () => {
       viewerReadiness,
     });
     expect(viewer.connection_overrides).toEqual({ [GMAIL]: ["conn_own"] });
+  });
+});
+
+describe("scheduleConnectionPickPayload", () => {
+  it("names the viewer's fallback for the integrations the pick leaves unpicked", () => {
+    // Running as the viewer, Gmail required and bound only by the fallback: picking Slack
+    // alone would be re-checked without Gmail and refused over it.
+    expect(
+      scheduleConnectionPickPayload({
+        picks: null,
+        integrationId: SLACK,
+        connectionIds: ["conn_slack"],
+        runsAsViewer: true,
+        viewerReadiness,
+        declared,
+      }),
+    ).toEqual({ connection_overrides: { [GMAIL]: ["conn_own"], [SLACK]: ["conn_slack"] } });
+  });
+
+  it("names nothing for another actor, and keeps only the declared integrations", () => {
+    expect(
+      scheduleConnectionPickPayload({
+        picks: { ...PICKS, "@acme/gone": ["conn_x"] },
+        integrationId: SLACK,
+        connectionIds: ["conn_slack"],
+        runsAsViewer: false,
+        viewerReadiness,
+        declared,
+      }),
+    ).toEqual({ connection_overrides: { ...PICKS, [SLACK]: ["conn_slack"] } });
+  });
+
+  it("sends null once the last pick is removed and nothing is named", () => {
+    expect(
+      scheduleConnectionPickPayload({
+        picks: PICKS,
+        integrationId: GMAIL,
+        connectionIds: null,
+        runsAsViewer: false,
+        viewerReadiness,
+        declared,
+      }),
+    ).toEqual({ connection_overrides: null });
   });
 });
 

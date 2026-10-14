@@ -2407,29 +2407,16 @@ export const schemas = {
     type: "object",
     description:
       "Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result.",
-    required: ["status", "blocking_count", "warning_count", "can_launch", "diagnostics"],
+    required: ["status", "blocking_count", "warning_count", "diagnostics"],
     properties: {
       status: { type: "string", enum: ["healthy", "warning", "blocking"] },
       blocking_count: { type: "integer", minimum: 0 },
       warning_count: { type: "integer", minimum: 0 },
-      can_launch: {
-        type: "boolean",
-        description:
-          "False when at least one blocker cannot be resolved by the launch recovery flow.",
-      },
       diagnostics: {
         type: "array",
         items: {
           type: "object",
-          required: [
-            "code",
-            "severity",
-            "title",
-            "explanation",
-            "field",
-            "correction",
-            "recoverable_on_launch",
-          ],
+          required: ["code", "severity", "title", "explanation", "field", "correction"],
           properties: {
             code: { type: "string" },
             severity: { type: "string", enum: ["blocking", "warning"] },
@@ -2453,7 +2440,6 @@ export const schemas = {
                 },
               },
             },
-            recoverable_on_launch: { type: "boolean" },
           },
         },
       },

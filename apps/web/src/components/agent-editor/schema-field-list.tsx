@@ -15,7 +15,7 @@
  * shadcn's own `dashboard-01` block drags them, and the row's deeds behind the
  * standard "…" menu — the row itself is not a button.
  */
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Braces, ChevronDown, GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 import {
@@ -334,46 +334,56 @@ function FieldModal({
       <div className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Row label={t("editor.fieldKeyLabel")} error={draft.key ? keyError : null}>
-            <Input
-              value={draft.key}
-              onChange={(e) => set({ key: toLiveSlug(e.target.value) })}
-              className="font-mono"
-              autoFocus
-            />
+            {(id) => (
+              <Input
+                id={id}
+                value={draft.key}
+                onChange={(e) => set({ key: toLiveSlug(e.target.value) })}
+                className="font-mono"
+                autoFocus
+              />
+            )}
           </Row>
           <Row label={t("editor.fieldTypeLabel")}>
-            <Select
-              value={isFile ? "file" : type}
-              onValueChange={(v) => {
-                if (v === "file") {
-                  if (!isFile) setProp(setFileKind(prop, "single"));
-                  return;
-                }
-                const next = TYPE_OPTIONS.find((o) => o === v);
-                if (next && (isFile || next !== type)) setProp(changeType(prop, next));
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TYPE_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-                {mode === "input" && (
-                  <SelectItem value="file">{t("editor.fieldTypeFile")}</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
+            {(id) => (
+              <Select
+                value={isFile ? "file" : type}
+                onValueChange={(v) => {
+                  if (v === "file") {
+                    if (!isFile) setProp(setFileKind(prop, "single"));
+                    return;
+                  }
+                  const next = TYPE_OPTIONS.find((o) => o === v);
+                  if (next && (isFile || next !== type)) setProp(changeType(prop, next));
+                }}
+              >
+                <SelectTrigger id={id}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                  {mode === "input" && (
+                    <SelectItem value="file">{t("editor.fieldTypeFile")}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            )}
           </Row>
         </div>
         <Row label={t("editor.fieldDescLabel")}>
-          <Input
-            value={prop.description ?? ""}
-            onChange={(e) => setProp(setKeyword(prop, "description", e.target.value || undefined))}
-          />
+          {(id) => (
+            <Input
+              id={id}
+              value={prop.description ?? ""}
+              onChange={(e) =>
+                setProp(setKeyword(prop, "description", e.target.value || undefined))
+              }
+            />
+          )}
         </Row>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox
@@ -399,16 +409,22 @@ function FieldModal({
                 {isFile ? (
                   <>
                     <Row label={t("editor.fieldAcceptLabel")}>
-                      <Input
-                        value={draft.accept ?? ""}
-                        onChange={(e) => set({ accept: e.target.value })}
-                      />
+                      {(id) => (
+                        <Input
+                          id={id}
+                          value={draft.accept ?? ""}
+                          onChange={(e) => set({ accept: e.target.value })}
+                        />
+                      )}
                     </Row>
                     <Row label={t("editor.fieldMaxSizeLabel")}>
-                      <DraftInput
-                        text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
-                        onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
-                      />
+                      {(id) => (
+                        <DraftInput
+                          id={id}
+                          text={draft.maxSize !== undefined ? String(draft.maxSize) : ""}
+                          onCommit={(text) => set({ maxSize: toKeywordNumber("maxSize", text) })} // canonical-casing-exempt: SchemaField TS-internal; written as `max_size`
+                        />
+                      )}
                     </Row>
                     <label className="flex items-center gap-2 text-sm">
                       <Checkbox
@@ -421,7 +437,14 @@ function FieldModal({
                     </label>
                     {kind === "multiple" && (
                       <Row label={t("editor.fieldMaxFilesLabel")}>
-                        <NumberKeywordInput prop={prop} keyword="maxItems" onChange={setProp} />
+                        {(id) => (
+                          <NumberKeywordInput
+                            id={id}
+                            prop={prop}
+                            keyword="maxItems"
+                            onChange={setProp}
+                          />
+                        )}
                       </Row>
                     )}
                   </>
@@ -429,92 +452,148 @@ function FieldModal({
                   <>
                     {(isTextType(type) || prop.default !== undefined) && (
                       <Row label={t("editor.fieldDefaultLabel")}>
-                        <KeywordInput
-                          value={valueToText(prop.default, type)}
-                          onCommit={(text) =>
-                            setProp(setKeyword(prop, "default", textToValue(text, type)))
-                          }
-                        />
+                        {(id) => (
+                          <KeywordInput
+                            id={id}
+                            value={valueToText(prop.default, type)}
+                            onCommit={(text) =>
+                              setProp(setKeyword(prop, "default", textToValue(text, type)))
+                            }
+                          />
+                        )}
                       </Row>
                     )}
                     <Row label={t("editor.fieldPlaceholderLabel")}>
-                      <Input
-                        value={draft.placeholder ?? ""}
-                        onChange={(e) => set({ placeholder: e.target.value })}
-                      />
+                      {(id) => (
+                        <Input
+                          id={id}
+                          value={draft.placeholder ?? ""}
+                          onChange={(e) => set({ placeholder: e.target.value })}
+                        />
+                      )}
                     </Row>
                     {isArray
                       ? (isTextType(itemType(prop)) || itemsEnum.locked) && (
                           <Row label={t("editor.fieldEnumLabel")}>
-                            <KeywordInput
-                              value={itemsEnum}
-                              onCommit={(text) =>
-                                setProp(setItemsEnum(prop, textToList(text, itemType(prop))))
-                              }
-                            />
+                            {(id) => (
+                              <KeywordInput
+                                id={id}
+                                value={itemsEnum}
+                                onCommit={(text) =>
+                                  setProp(setItemsEnum(prop, textToList(text, itemType(prop))))
+                                }
+                              />
+                            )}
                           </Row>
                         )
                       : (isTextType(type) || prop.enum !== undefined) && (
                           <Row label={t("editor.fieldEnumLabel")}>
-                            <KeywordInput
-                              value={listToText(prop.enum, type)}
-                              onCommit={(text) => {
-                                const values = textToList(text, type);
-                                setProp(
-                                  setKeyword(prop, "enum", values.length > 0 ? values : undefined),
-                                );
-                              }}
-                            />
+                            {(id) => (
+                              <KeywordInput
+                                id={id}
+                                value={listToText(prop.enum, type)}
+                                onCommit={(text) => {
+                                  const values = textToList(text, type);
+                                  setProp(
+                                    setKeyword(
+                                      prop,
+                                      "enum",
+                                      values.length > 0 ? values : undefined,
+                                    ),
+                                  );
+                                }}
+                              />
+                            )}
                           </Row>
                         )}
                     {isString && (
                       <>
                         <Row label={t("editor.fieldFormat")}>
-                          <Select
-                            value={prop.format || "__none"}
-                            onValueChange={(v) =>
-                              setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {STRING_FORMATS.map((format) => (
-                                <SelectItem key={format || "__none"} value={format || "__none"}>
-                                  {format || "—"}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {(id) => (
+                            <Select
+                              value={prop.format || "__none"}
+                              onValueChange={(v) =>
+                                setProp(setKeyword(prop, "format", v === "__none" ? undefined : v))
+                              }
+                            >
+                              <SelectTrigger id={id}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {STRING_FORMATS.map((format) => (
+                                  <SelectItem key={format || "__none"} value={format || "__none"}>
+                                    {format || "—"}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </Row>
                         <Row label={t("editor.fieldMinLength")}>
-                          <NumberKeywordInput prop={prop} keyword="minLength" onChange={setProp} />
+                          {(id) => (
+                            <NumberKeywordInput
+                              id={id}
+                              prop={prop}
+                              keyword="minLength"
+                              onChange={setProp}
+                            />
+                          )}
                         </Row>
                         <Row label={t("editor.fieldMaxLength")}>
-                          <NumberKeywordInput prop={prop} keyword="maxLength" onChange={setProp} />
+                          {(id) => (
+                            <NumberKeywordInput
+                              id={id}
+                              prop={prop}
+                              keyword="maxLength"
+                              onChange={setProp}
+                            />
+                          )}
                         </Row>
                         <Row label={t("editor.fieldPattern")}>
-                          <Input
-                            value={prop.pattern ?? ""}
-                            onChange={(e) =>
-                              setProp(setKeyword(prop, "pattern", e.target.value || undefined))
-                            }
-                            className="font-mono"
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              value={prop.pattern ?? ""}
+                              onChange={(e) =>
+                                setProp(setKeyword(prop, "pattern", e.target.value || undefined))
+                              }
+                              className="font-mono"
+                            />
+                          )}
                         </Row>
                       </>
                     )}
                     {isNumeric && (
                       <>
                         <Row label={t("editor.fieldMin")}>
-                          <NumberKeywordInput prop={prop} keyword="minimum" onChange={setProp} />
+                          {(id) => (
+                            <NumberKeywordInput
+                              id={id}
+                              prop={prop}
+                              keyword="minimum"
+                              onChange={setProp}
+                            />
+                          )}
                         </Row>
                         <Row label={t("editor.fieldMax")}>
-                          <NumberKeywordInput prop={prop} keyword="maximum" onChange={setProp} />
+                          {(id) => (
+                            <NumberKeywordInput
+                              id={id}
+                              prop={prop}
+                              keyword="maximum"
+                              onChange={setProp}
+                            />
+                          )}
                         </Row>
                         <Row label={t("editor.fieldStep")}>
-                          <NumberKeywordInput prop={prop} keyword="multipleOf" onChange={setProp} />
+                          {(id) => (
+                            <NumberKeywordInput
+                              id={id}
+                              prop={prop}
+                              keyword="multipleOf"
+                              onChange={setProp}
+                            />
+                          )}
                         </Row>
                       </>
                     )}
@@ -536,12 +615,14 @@ function Row({
 }: {
   label: string;
   error?: string | null;
-  children: React.ReactNode;
+  /** Renders the control, given the id its label names. */
+  children: (id: string) => React.ReactNode;
 }) {
+  const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {children}
+      <Label htmlFor={id}>{label}</Label>
+      {children(id)}
       {error && <p className="text-destructive text-xs">{error}</p>}
     </div>
   );

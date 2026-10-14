@@ -12,7 +12,7 @@ import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { useSpaces } from "./use-spaces";
-import { mergeSpaceLibraries } from "../lib/merge-space-libraries";
+import { mergeSpaceLibraries, readableLibrarySpaces } from "../lib/merge-space-libraries";
 import { hasFullOrgAccess } from "../lib/org-role";
 
 /**
@@ -65,16 +65,12 @@ export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = 
   const org = useLibrary({ enabled: enabled && isOrgAdmin });
   const { data: spaces } = useSpaces(enabled && !isOrgAdmin);
   const perSpace = useQueries({
-    queries: (isOrgAdmin ? [] : (spaces ?? []))
-      // A space the caller is listed in but cannot enter (`closed`) has no
-      // library to read for them.
-      .filter((space) => space.access === "member")
-      .map((space) => ({
-        ...$api.queryOptions("get", "/api/spaces/{spaceId}/library", {
-          params: { path: { spaceId: space.id }, header: scope.header },
-        }),
-        enabled: enabled && scope.enabled,
-      })),
+    queries: readableLibrarySpaces(isOrgAdmin ? [] : (spaces ?? [])).map((space) => ({
+      ...$api.queryOptions("get", "/api/spaces/{spaceId}/library", {
+        params: { path: { spaceId: space.id }, header: scope.header },
+      }),
+      enabled: enabled && scope.enabled,
+    })),
   });
   // Merged on every render rather than memoised: a handful of spaces, a few
   // hundred rows, and no dependency list that could fall out of step.

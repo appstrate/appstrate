@@ -27,6 +27,7 @@ import {
   seedRun,
   seedSchedule,
   seedSpaceMember,
+  seedUnreachableSpace,
 } from "../../helpers/seed.ts";
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import {
@@ -59,6 +60,20 @@ describe("agent overview reads — access", () => {
   const diagnostics = (headers: Record<string, string>, query = "", agent = AGENT) =>
     app.request(`/api/agents/${agent}/diagnostics${query}`, { headers });
 
+  const runActivity = (headers: Record<string, string>, agent = AGENT) =>
+    app.request(`/api/agents/${agent}/run-activity`, { headers });
+
+  /** An agent homed in a space nobody here reaches, and offered nowhere. */
+  async function unreadableAgent() {
+    const agent = "@diagaccess/elsewhere";
+    await seedAgent({
+      id: agent,
+      orgId: ctx.orgId,
+      homeSpaceId: await seedUnreachableSpace(ctx.orgId),
+    });
+    return agent;
+  }
+
   const codes = async (headers: Record<string, string>, agent = AGENT) => {
     const res = await diagnostics(headers, "", agent);
     expect(res.status, await res.clone().text()).toBe(200);
@@ -84,6 +99,19 @@ describe("agent overview reads — access", () => {
   });
 
   describe("GET /api/agents/:scope/:name/diagnostics", () => {
+    it("refuses a caller without agents:read", async () => {
+      const res = await diagnostics(await keyHolding(["runs:read"]));
+      expect(res.status, await res.clone().text()).toBe(403);
+      // The discriminating control: the same grant plus agents:read is answered.
+      expect((await diagnostics(await keyHolding(["runs:read", "agents:read"]))).status).toBe(200);
+    });
+
+    it("answers 404 for an agent this space cannot read", async () => {
+      const res = await diagnostics(authHeaders(ctx), "", await unreadableAgent());
+      expect(res.status, await res.clone().text()).toBe(404);
+      expect(((await res.json()) as { code: string }).code).toBe("agent_not_found");
+    });
+
     it("refuses an explicit ?version=draft to a reader who cannot write the agent", async () => {
       const { headers } = await operator();
       const named = await diagnostics(headers, "?version=draft");
@@ -149,8 +177,7 @@ describe("agent overview reads — access", () => {
       await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
       const res = await diagnostics(await keyHolding(["agents:read"]));
       expect(res.status, await res.clone().text()).toBe(200);
-      const body = (await res.json()) as DiagnosticsBody & { can_launch: boolean };
-      expect(body.can_launch).toBe(false);
+      const body = (await res.json()) as DiagnosticsBody;
       expect(body.diagnostics[0]).toMatchObject({
         code: "agent_not_active",
         field: "agent",
@@ -213,6 +240,19 @@ describe("agent overview reads — access", () => {
   });
 
   describe("GET /api/agents/:scope/:name/run-activity", () => {
+    it("refuses a caller without runs:read", async () => {
+      const res = await runActivity(await keyHolding(["agents:read"]));
+      expect(res.status, await res.clone().text()).toBe(403);
+      // The discriminating control: the same grant plus runs:read is answered.
+      expect((await runActivity(await keyHolding(["agents:read", "runs:read"]))).status).toBe(200);
+    });
+
+    it("answers 404 for an agent this space cannot read", async () => {
+      const res = await runActivity(authHeaders(ctx), await unreadableAgent());
+      expect(res.status, await res.clone().text()).toBe(404);
+      expect(((await res.json()) as { code: string }).code).toBe("agent_not_found");
+    });
+
     it("counts only the runs the caller may read", async () => {
       const member = await operator();
       const seed = (userId: string, status: "success" | "failed") =>
@@ -229,7 +269,7 @@ describe("agent overview reads — access", () => {
       await seed(member.userId, "success");
 
       const activity = async (headers: Record<string, string>) => {
-        const res = await app.request(`/api/agents/${AGENT}/run-activity`, { headers });
+        const res = await runActivity(headers);
         expect(res.status, await res.clone().text()).toBe(200);
         return (await res.json()) as { total: number; success: number; failed: number };
       };

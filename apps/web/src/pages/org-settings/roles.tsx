@@ -69,7 +69,9 @@ export function OrgSettingsRolesPage() {
   const deleteRole = useDeleteRole();
   const canPreview = useCanPreviewRole();
   // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
+  // `?role=<key>` is only ever an existing role: `new` is a valid role key.
   const roleParam = useModalParam("role");
+  const newRole = useModalParam("newRole");
   const viewAsParam = useModalParam("view-as");
   // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
   // and Back undoes a switch. Each defaults to its first option, which is
@@ -162,8 +164,7 @@ export function OrgSettingsRolesPage() {
     return `?${params.toString()}`;
   };
   const requested = roleParam.value;
-  const target =
-    requested && requested !== "new" ? roles?.find((role) => role.key === requested) : undefined;
+  const target = requested ? roles?.find((role) => role.key === requested) : undefined;
   const editable = !!target && target.kind === "custom" && canWrite;
   const tableState = {
     isLoading,
@@ -180,7 +181,7 @@ export function OrgSettingsRolesPage() {
               <DropdownMenuItem
                 data-page-action="create"
                 data-testid="create-role-button"
-                onSelect={() => roleParam.open("new")}
+                onSelect={() => newRole.open()}
               >
                 <Plus />
                 {t("roles.create")}
@@ -266,7 +267,7 @@ export function OrgSettingsRolesPage() {
                       {deeds.includes("create") && (
                         <EmptyStateAction
                           label={t("roles.create")}
-                          onClick={() => roleParam.open("new")}
+                          onClick={() => newRole.open()}
                         />
                       )}
                     </EmptyState>
@@ -278,8 +279,8 @@ export function OrgSettingsRolesPage() {
         </>
       )}
 
-      {requested === "new" && canWrite && (
-        <RoleFormModal key="new" role={null} onClose={roleParam.close} />
+      {newRole.value !== null && canWrite && (
+        <RoleFormModal key="new" role={null} onClose={newRole.close} />
       )}
       {target && editable && (
         <RoleFormModal key={target.key} role={target} onClose={roleParam.close} />

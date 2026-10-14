@@ -315,6 +315,7 @@
   "apiError.reasoning_level_unsupported": "Le modèle sélectionné n'accepte pas ce niveau de raisonnement : {{message}}",
   "apiError.temperature_with_reasoning_unsupported": "Le modèle sélectionné ne peut pas combiner une température personnalisée et le raisonnement.",
   "loading": "Chargement...",
+  "renameField": "Renommer « {{name}} »",
   "admin": "admin",
   "status.success": "succès",
   "status.failed": "échoué",

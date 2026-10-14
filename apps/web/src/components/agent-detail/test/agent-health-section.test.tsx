@@ -34,7 +34,6 @@ function diagnostic(code: string, field: string, section = "inputs"): AgentDiagn
     explanation: code,
     field,
     correction: { destination: "configuration", section, params: {} },
-    recoverable_on_launch: false,
   };
 }
 
@@ -51,7 +50,6 @@ function renderSection(diagnostics: AgentDiagnostic[]): string {
       status: "blocking",
       blocking_count: diagnostics.length,
       warning_count: 0,
-      can_launch: false,
       diagnostics,
     },
   );

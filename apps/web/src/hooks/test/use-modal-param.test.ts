@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { createMemoryRouter, resolvePath } from "react-router-dom";
-import { modalLeaveSteps, modalParamStep } from "../use-modal-param.ts";
+import { closeOncePerEntry, modalLeaveSteps, modalParamStep } from "../use-modal-param.ts";
 
 const at = (search: string, state: unknown = null) => ({ search, state });
 
@@ -171,5 +171,63 @@ describe("leaving a modal, in a router's history", () => {
     expect(where(router)).toBe("/integrations/@acme/slack");
     await router.navigate(-1);
     expect(where(router)).toBe("/integrations/@appstrate/slack");
+  });
+});
+
+describe("closing a modal twice from one entry", () => {
+  type Router = ReturnType<typeof createMemoryRouter>;
+  const where = (router: Router) => router.state.location.pathname + router.state.location.search;
+
+  /**
+   * Closes the way `useModalParam` does, from the location a render read: going
+   * back is not awaited, as the hook's `navigate(-1)` is not.
+   */
+  function close(
+    router: Router,
+    location: Router["state"]["location"],
+    guard: ReturnType<typeof closeOncePerEntry>,
+  ) {
+    if (!guard.take(location.key)) return Promise.resolve();
+    const step = modalParamStep(location, "field-input", null);
+    if (step.back) return router.navigate(-1);
+    return router.navigate(
+      { pathname: location.pathname, search: step.search },
+      { replace: step.replace, state: step.state },
+    );
+  }
+
+  it("goes back once when an Apply renames the target and the old name then drops", async () => {
+    const router = createMemoryRouter([{ path: "*" }], {
+      initialEntries: ["/agents", "/agents/@acme/a/edit"],
+      initialIndex: 1,
+    });
+    const opening = modalParamStep(router.state.location, "field-input", "old_key");
+    if (opening.back) throw new Error("an opening never goes back");
+    await router.navigate(
+      { pathname: router.state.location.pathname, search: opening.search },
+      { replace: opening.replace, state: opening.state },
+    );
+    expect(where(router)).toBe("/agents/@acme/a/edit?field-input=old_key");
+
+    // Apply closes, and the same render, still on `old_key`, finds no field by
+    // that name and closes again.
+    const guard = closeOncePerEntry();
+    const rendered = router.state.location;
+    await Promise.all([close(router, rendered, guard), close(router, rendered, guard)]);
+    expect(where(router)).toBe("/agents/@acme/a/edit");
+  });
+
+  it("still closes from the next entry", () => {
+    const guard = closeOncePerEntry();
+    expect(guard.take("a")).toBe(true);
+    expect(guard.take("a")).toBe(false);
+    expect(guard.take("b")).toBe(true);
+  });
+
+  it("closes again from an entry reached anew once the location has moved", () => {
+    const guard = closeOncePerEntry();
+    expect(guard.take("a")).toBe(true);
+    guard.release();
+    expect(guard.take("a")).toBe(true);
   });
 });

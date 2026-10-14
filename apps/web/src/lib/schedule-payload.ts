@@ -3,9 +3,11 @@
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { paths } from "../api/schema";
 import {
+  type ConnectionSet,
+  type FallbackBindingEntry,
+  withConnectionOverride,
   withDeclaredConnections,
   withFallbackConnections,
-  type FallbackBindingEntry,
 } from "./connection-set";
 
 /**
@@ -38,7 +40,7 @@ export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined):
 }
 
 /** The overrides a schedule is written with, and what a write derives the stored ones from. */
-interface ScheduleOverridesState {
+export interface ScheduleOverridesState {
   overrides: RunOverridesValue;
   runsAsViewer: boolean;
   /** The viewer's readiness entries for the fired version. */
@@ -136,6 +138,30 @@ export function scheduleMovePayload(
     ...(versionMoves ? { version_override: next.versionOverride } : {}),
     connection_overrides: connection_overrides ?? null,
   };
+}
+
+/**
+ * The PATCH of one connection pick: the stored picks with `integrationId`'s set replaced (`null`
+ * removes it), written like every other save ({@link savedScheduleOverrides}) — for a schedule
+ * running as the viewer, each integration no pick covers is named with the set their fallback
+ * binds, since the server re-checks the written set and takes no fallback.
+ */
+export function scheduleConnectionPickPayload(
+  args: Omit<ScheduleOverridesState, "overrides"> & {
+    picks: Record<string, string[]> | null;
+    integrationId: string;
+    connectionIds: ConnectionSet;
+  },
+): Pick<ScheduleUpdateBody, "connection_overrides"> {
+  const { connection_overrides } = savedScheduleOverrides({
+    ...args,
+    overrides: withConnectionOverride(
+      args.picks ? { connection_overrides: args.picks } : {},
+      args.integrationId,
+      args.connectionIds,
+    ),
+  });
+  return { connection_overrides: connection_overrides ?? null };
 }
 
 /**

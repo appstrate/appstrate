@@ -77,10 +77,10 @@ const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
   it("renders the rows it already holds, not a second fetching list", () => {
-    // The page hands its own rows down and the presentation layer trims them;
-    // what must never appear on either side is the FETCHING list, which would
-    // issue a second query for rows the page is already holding.
-    expect(DASHBOARD).toContain("runs,");
+    // The page hands its own rows down and the presentation layer trims them
+    // (rendered in `pages/test/dashboard.test.tsx`); what must never appear on
+    // either side is the FETCHING list, which would issue a second query for
+    // rows the page is already holding.
     expect(code(DASHBOARD)).not.toMatch(/<RunList[\s/>]/);
     expect(code(DASHBOARD_CONTENT)).not.toMatch(/<RunList[\s/>]/);
     expect(DASHBOARD_CONTENT).toContain("runs.slice(0, limit)");

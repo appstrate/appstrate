@@ -37,16 +37,18 @@ export function PackageVersionSelect({
   value,
   onChange,
   leadingOptions,
+  disabled,
 }: {
   type: PackageType;
   packageId: string;
   value: string;
   onChange: (next: string) => void;
   leadingOptions: VersionLeadingOption[];
+  disabled?: boolean;
 }) {
   const { data: versions } = usePackageVersions(type, packageId);
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger>
         <SelectValue />
       </SelectTrigger>

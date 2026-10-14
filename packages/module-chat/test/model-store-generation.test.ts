@@ -149,6 +149,8 @@ describe("a pre-selection is always a live model", () => {
     { id: "default-model", is_default: true },
     { id: "dead-model", needs_reconnection: true },
   ];
+  /** A member-key model the caller has no key for (the store reads no payer). */
+  const unpaid = { id: "unpaid-model", billed_to: null };
 
   it("never pre-selects a model the catalog no longer lists", () => {
     // Deleted or disabled since the conversation last ran: `/api/models` drops
@@ -166,11 +168,29 @@ describe("a pre-selection is always a live model", () => {
     expect(getSelectedModel()).toBe("default-model");
   });
 
-  it("never pre-selects a model nothing pays for, the caller having no key of their own", () => {
-    setModelCatalog([...catalog, { id: "unpaid-model", billed_to: null }]);
+  it("keeps a model nothing pays for yet: the server refuses its turn, the selection never moves", () => {
+    // `billed_to: null`: a member-key model the caller has no key for. Moving
+    // off it would send another model, possibly one the organization pays for.
+    setModelCatalog([...catalog, unpaid]);
     attachConversation("chs_a", "unpaid-model");
 
-    expect(getSelectedModel()).toBe("default-model");
+    expect(getSelectedModel()).toBe("unpaid-model");
+  });
+
+  it("keeps the organization's default when nothing pays for it yet", () => {
+    const unpaidDefault = { id: "unpaid-default", is_default: true, billed_to: null };
+    const orgPaid = { id: "org-paid", billed_to: "org" };
+    setModelCatalog([unpaidDefault, orgPaid]);
+
+    expect(getSelectedModel()).toBe("unpaid-default");
+  });
+
+  it("keeps a stored pick nothing pays for yet across catalog refreshes", () => {
+    setModelCatalog([...catalog, unpaid]);
+    setSelectedModel("unpaid-model");
+
+    setModelCatalog([...catalog, unpaid]);
+    expect(getSelectedModel()).toBe("unpaid-model");
   });
 
   it("drops a pre-selection the next catalog no longer serves live", () => {

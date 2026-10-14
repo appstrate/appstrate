@@ -33,22 +33,27 @@ export function CatalogueMenuItems({
   onShare,
   onRevoke,
 }: CatalogueMenuProps & {
-  /** The first item: the sheet from a row, the package's own page from the sheet. */
-  open: { label: string; icon: LucideIcon; onSelect: () => void };
+  /**
+   * The first item: the sheet from a row, the package's own page from the
+   * sheet — absent when that page is not one the reader can open here.
+   */
+  open?: { label: string; icon: LucideIcon; onSelect: () => void };
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const OpenIcon = open.icon;
+  const OpenIcon = open?.icon;
   return (
     <>
-      <DropdownMenuItem onSelect={open.onSelect}>
-        <OpenIcon />
-        {open.label}
-      </DropdownMenuItem>
+      {open && OpenIcon && (
+        <DropdownMenuItem onSelect={open.onSelect}>
+          <OpenIcon />
+          {open.label}
+        </DropdownMenuItem>
+      )}
       {/* Activating is not here: it is a switch that says WHICH space it acts
           on — a column in the matrix, "Actif ici" on the sheet. A menu item
           could only ever mean the space the app happens to be in. What remains
           are the deeds that act on the package itself. */}
-      {(deeds.moveHome || deeds.share) && <DropdownMenuSeparator />}
+      {open && (deeds.moveHome || deeds.share) && <DropdownMenuSeparator />}
       {deeds.moveHome && (
         <DropdownMenuItem onSelect={() => onMoveHome(item)}>
           <FolderInput />

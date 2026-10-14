@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { mergeSpaceLibraries } from "../merge-space-libraries.ts";
+import { mergeSpaceLibraries, readableLibrarySpaces } from "../merge-space-libraries.ts";
 import type { LibraryPackageItem } from "../../hooks/use-library.ts";
 
 function row(id: string, placements: LibraryPackageItem["placements"]): LibraryPackageItem {
@@ -86,5 +86,23 @@ describe("mergeSpaceLibraries", () => {
       { spaces: [{ id: "spc_a", name: "A", isDefault: true }], packages: empty },
     ]);
     expect(merged.spaces[0]!.id).toBe("spc_a");
+  });
+});
+
+describe("the spaces a member's catalogue reads", () => {
+  it("reads only the spaces the caller enters with spaces:read", () => {
+    const space = (id: string, access: "member" | "none", permissions: string[]) => ({
+      id,
+      access,
+      permissions,
+    });
+    const spaces = [
+      space("spc_member", "member", ["spaces:read", "agents:read"]),
+      // A custom role without `spaces:read`: its library route is a 403.
+      space("spc_custom", "member", ["agents:read"]),
+      // Listed, not enterable.
+      space("spc_closed", "none", []),
+    ];
+    expect(readableLibrarySpaces(spaces).map((s) => s.id)).toEqual(["spc_member"]);
   });
 });
