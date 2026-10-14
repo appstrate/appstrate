@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { toggleValue } from "../../lib/toggle-value";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
@@ -66,10 +67,7 @@ export function ConnectScopesForm({
   const { t } = useTranslation("settings");
   const [ticked, setTicked] = useState<string[]>([]);
   const { choice } = target;
-  const toggle = (value: string) =>
-    setTicked((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
+  const toggle = (value: string) => setTicked((prev) => toggleValue(prev, value));
 
   return (
     <form

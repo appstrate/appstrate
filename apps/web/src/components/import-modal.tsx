@@ -41,7 +41,7 @@ export function ImportModal({ onClose, onLeave, onImported }: ImportModalProps) 
   } | null>(null);
   const [confirmIntegrity, setConfirmIntegrity] = useState<{ version: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const importPackage = useImportPackage();
+  const importPackage = useImportPackage({ errorHandledByCaller: true });
   const importGithub = useImportFromGithub();
 
   const {

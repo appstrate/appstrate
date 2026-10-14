@@ -11,6 +11,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
 import { deriveLabel } from "../../lib/cli-sessions";
+import { invalidatePaths } from "../../lib/query-keys";
 import {
   cliSessionUserLabel,
   useCliSessionColumns,
@@ -37,9 +38,7 @@ export function OrgSettingsCliSessionsPage() {
 
   const revoke = $api.useMutation("delete", "/api/orgs/{orgId}/cli-sessions/{familyId}", {
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
-      });
+      void invalidatePaths(queryClient, ["/api/orgs/{orgId}/cli-sessions"]);
     },
   });
 

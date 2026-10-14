@@ -10,6 +10,7 @@ import { SaveFeedback } from "./save-feedback";
 import { useOrg } from "../../hooks/use-org";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { usePermissions } from "../../hooks/use-permissions";
+import { invalidateCredentialsAndModels } from "../../hooks/use-model-provider-credentials";
 
 /**
  * « Members can use their personal key or subscription »: the organization's
@@ -48,7 +49,7 @@ export function PersonalCredentialsSetting() {
         <Switch
           id="personal-model-credentials"
           checked={orgSettings?.personal_model_credentials ?? false}
-          disabled={!can("org:settings") || update.isPending || !orgSettings}
+          disabled={!can("org:settings") || !orgSettings || update.isPending}
           onCheckedChange={(checked) =>
             update.mutate(
               {
@@ -58,12 +59,7 @@ export function PersonalCredentialsSetting() {
               {
                 // The flag changes which models each person can use and which credentials
                 // serve a call: refresh both lists.
-                onSuccess: () => {
-                  void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
-                  void queryClient.invalidateQueries({
-                    queryKey: ["get", "/api/model-provider-credentials"],
-                  });
-                },
+                onSuccess: () => void invalidateCredentialsAndModels(queryClient),
               },
             )
           }

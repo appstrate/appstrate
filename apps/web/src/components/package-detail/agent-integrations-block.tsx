@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, Puzzle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -20,6 +19,7 @@ import { usePackageActivation } from "../../hooks/use-library";
 import { ApiError } from "../../api/errors";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ConnectionSet } from "../../lib/connection-set";
+import { useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
@@ -90,8 +90,8 @@ export function AgentIntegrationsBlock({
   scheduleOverrides,
 }: AgentIntegrationsBlockProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const [search, setSearch] = useState("");
-  const [states, setStates] = useState<string[]>([]);
+  const list = useLocalListParams();
+  const states = list.values("activation", ["active", "inactive"] as const);
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
 
   const rows = entries
@@ -113,7 +113,7 @@ export function AgentIntegrationsBlock({
     .filter((row) => {
       const state = row.spaceActive ? "active" : "inactive";
       const matchesState = states.length === 0 || states.includes(state);
-      return matchesState && matchesSearch(search, [row.entry.id, row.displayName]);
+      return matchesState && matchesSearch(list.search, [row.entry.id, row.displayName]);
     });
   type Row = (typeof rows)[number];
   const columns: DataColumn<Row>[] = [
@@ -176,7 +176,7 @@ export function AgentIntegrationsBlock({
         { value: "active", label: t("detail.connectionsTable.active") },
         { value: "inactive", label: t("detail.connectionsTable.inactive") },
       ],
-      onChange: setStates,
+      onChange: list.setValues("activation"),
     },
   ];
 
@@ -185,15 +185,12 @@ export function AgentIntegrationsBlock({
       <ListToolbar
         placement="panel"
         search={{
-          value: search,
-          onChange: setSearch,
+          value: list.search,
+          onChange: list.setSearch,
           placeholder: t("detail.connectionsTable.search"),
         }}
         filters={filters}
-        onReset={() => {
-          setSearch("");
-          setStates([]);
-        }}
+        onReset={list.reset}
       />
       <DataTable
         tableId="agent-connections"

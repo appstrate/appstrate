@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Eye, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -21,8 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { $api, ApiError } from "../../api/client";
-import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import { ApiError } from "../../api/client";
+import { useInviteMember, useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useModalParam } from "../../hooks/use-modal-param";
@@ -55,7 +54,7 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
-import { spaceMemberLabel, useSpaceMemberColumns } from "./space-member-columns";
+import { useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
@@ -116,10 +115,10 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           toast.success(
             result.access_after === "implicit"
               ? t("spaceMembers.removedImplicit", {
-                  name: spaceMemberLabel(member),
+                  name: memberLabel(member),
                   role: t(`roles.preset.${space?.default_role}`),
                 })
-              : t("spaceMembers.removedNone", { name: spaceMemberLabel(member) }),
+              : t("spaceMembers.removedNone", { name: memberLabel(member) }),
           );
         },
       },
@@ -140,7 +139,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     roleOptions,
     isChangingRole: assignRole.isPending,
     onChangeRole: (member, value) =>
-      assignRole.assign({ spaceId, member, name: spaceMemberLabel(member) }, value),
+      assignRole.assign({ spaceId, member, name: memberLabel(member) }, value),
     removal: (member) => spaceMemberRemoval(member, { canRemove, visibility: space?.visibility }),
     isRemoving: removeMember.isPending,
     removeDisabled: removeMember.isPending || !space || !!spaceError,
@@ -246,7 +245,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
             ? t(
                 removalRestoresDefault ? "spaceMembers.resetConfirm" : "spaceMembers.removeConfirm",
                 {
-                  name: spaceMemberLabel(memberToRemove),
+                  name: memberLabel(memberToRemove),
                   role: t(`roles.preset.${space?.default_role}`),
                 },
               )
@@ -298,7 +297,6 @@ function AddSpaceMemberModal({
   } = useSpaceRoleOptions(spaceId);
   const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const { can } = usePermissions();
-  const queryClient = useQueryClient();
   const canInviteExternal = can("members:invite");
   const canReadDirectory = can("members:read");
   const [mode, setMode] = useState("existing");
@@ -312,22 +310,7 @@ function AddSpaceMemberModal({
   // The address already holds a pending invitation: the fix is to EDIT that
   // one (add this space), never a second token — the server refuses with 409.
   const [pendingConflict, setPendingConflict] = useState(false);
-  const inviteGuest = $api.useMutation("post", "/api/orgs/{orgId}/members", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: (invitation) => {
-      setInvitationToken(invitation.token);
-      void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-      toast.success(t("spaceMembers.invited", { email: email.trim() }));
-    },
-    onError: (err) => {
-      if (err instanceof ApiError && err.code === "invitation_already_pending") {
-        setPendingConflict(true);
-        setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
-        return;
-      }
-      setFormError(errorMessage(err));
-    },
-  });
+  const inviteGuest = useInviteMember();
   const isPending = addMember.isPending || inviteGuest.isPending;
 
   const {
@@ -365,14 +348,30 @@ function AddSpaceMemberModal({
     setPendingConflict(false);
     if (invitingExternal) {
       if (!orgId) return;
-      inviteGuest.mutate({
-        params: { path: { orgId } },
-        body: {
-          email: email.trim(),
-          role: "guest",
-          space_assignments: [{ spaceId, ...spaceRoleAssignment(effectiveRole) }],
+      inviteGuest.mutate(
+        {
+          params: { path: { orgId } },
+          body: {
+            email: email.trim(),
+            role: "guest",
+            space_assignments: [{ spaceId, ...spaceRoleAssignment(effectiveRole) }],
+          },
         },
-      });
+        {
+          onSuccess: (invitation) => {
+            setInvitationToken(invitation.token);
+            toast.success(t("spaceMembers.invited", { email: email.trim() }));
+          },
+          onError: (err) => {
+            if (err instanceof ApiError && err.code === "invitation_already_pending") {
+              setPendingConflict(true);
+              setFormError(t("spaceMembers.invitationPending", { email: email.trim() }));
+              return;
+            }
+            setFormError(errorMessage(err));
+          },
+        },
+      );
       return;
     }
     addMember.mutate(

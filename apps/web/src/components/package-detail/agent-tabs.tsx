@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { useSchedules } from "../../hooks/use-schedules";
@@ -17,32 +15,11 @@ import { EmptyState, EmptyStateAction } from "../page-states";
 import { TextSkeleton } from "../loading-skeletons";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
-import { readList } from "../../lib/list-params";
+import { readList, useLocalListParams } from "../../lib/list-params";
 import { matchesSearch } from "../../lib/strings";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
-import { searchOf } from "../../lib/url-search";
-
-/**
- * A deep link's one-shot filter (`?agentRunStatus=`, `?agentMemory=`): read at
- * mount, then dropped from the address so it does not stick to the tab.
- */
-function useConsumedSearchParam(name: string): string | null {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const urlValue = new URLSearchParams(location.search).get(name);
-  const [value] = useState(urlValue);
-  useEffect(() => {
-    if (urlValue === null) return;
-    const params = new URLSearchParams(location.search);
-    params.delete(name);
-    void navigate(
-      { search: searchOf(params), hash: location.hash },
-      { replace: true, state: location.state },
-    );
-  }, [name, urlValue, location.search, location.hash, location.state, navigate]);
-  return value;
-}
+import { useConsumedSearchParam } from "../../hooks/use-consumed-search-param";
 
 export function AgentRunsTab({
   packageId,
@@ -74,8 +51,8 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { data: detail } = usePackageDetail("agent", packageId);
   const schedulesQuery = useSchedules(packageId);
   const schedules = schedulesQuery.data;
-  const [search, setSearch] = useState("");
-  const [states, setStates] = useState<string[]>([]);
+  const list = useLocalListParams();
+  const states = list.values("state", ["active", "disabled"] as const);
   const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
   const { can } = usePermissions();
   const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
@@ -91,7 +68,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
     const matchesState = states.length === 0 || states.includes(state);
     return (
       matchesState &&
-      matchesSearch(search, [schedule.name ?? schedule.id, schedule.cron_expression])
+      matchesSearch(list.search, [schedule.name ?? schedule.id, schedule.cron_expression])
     );
   });
   const filters: FilterSpec[] = [
@@ -103,7 +80,7 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
         { value: "active", label: t("schedule.statusActive") },
         { value: "disabled", label: t("schedule.statusDisabled") },
       ],
-      onChange: setStates,
+      onChange: list.setValues("state"),
     },
   ];
 
@@ -114,15 +91,12 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
       <ListToolbar
         placement="panel"
         search={{
-          value: search,
-          onChange: setSearch,
+          value: list.search,
+          onChange: list.setSearch,
           placeholder: t("detail.schedulesTable.search"),
         }}
         filters={filters}
-        onReset={() => {
-          setSearch("");
-          setStates([]);
-        }}
+        onReset={list.reset}
       />
       <SchedulesTable
         schedules={filteredSchedules}

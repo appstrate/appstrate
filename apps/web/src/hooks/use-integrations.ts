@@ -27,6 +27,7 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
 import { splitPackageRef } from "../lib/package-paths";
 
 // Spec-pinned narrowing for the integration list and detail endpoints. It takes
@@ -611,7 +612,7 @@ export function useUpdateIntegrationSettings() {
     },
     onSuccess: () => {
       toast.success(t("integration.admin.blockUserConnections.updated"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
     },
   });
 }

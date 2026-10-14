@@ -19,7 +19,6 @@ import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
 import { ResourceErrorState } from "../components/page-states";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
-import { invalidateOrgStorage } from "../hooks/use-files";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
@@ -28,7 +27,13 @@ import { isPublishedFileLogEvent } from "../lib/files";
 import { searchOf } from "../lib/url-search";
 import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
-import { agentsKeys, runKeys, invalidateRunLogs } from "../lib/query-keys";
+import {
+  agentsKeys,
+  runKeys,
+  invalidateOrgDetail,
+  invalidatePaths,
+  invalidateRunLogs,
+} from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
@@ -194,9 +199,9 @@ export function RunDetailPage() {
         // channel. `isPublishedFileLogEvent` tests membership of the set the
         // sink's own tag is built from — it carries no legacy spelling.
         if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+          void invalidatePaths(qc, ["/api/files"]);
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, spaceId, runId) });
-          invalidateOrgStorage(qc);
+          void invalidateOrgDetail(qc);
         }
       },
       [qc, orgId, spaceId, runId],

@@ -65,20 +65,20 @@ const CALLERS = [
   {
     file: "../package-files/use-package-file.ts",
     from: '"../../lib/blob-download"',
-    calls: ["triggerBlobDownload(data, baseName(path))"],
+    calls: ['parseAs: "blob", }), baseName(path)'],
   },
   {
     file: "../../hooks/use-packages.ts",
     from: '"../lib/blob-download"',
     calls: [
-      "triggerBlobDownload(data, `${stripScope(scope)}-${name}-${version}.afps`)",
-      "triggerBlobDownload(data, `${stripScope(scope)}-${name}.afps-bundle`)",
+      'parseAs: "blob", }), `${stripScope(scope)}-${name}-${version}.afps`',
+      'parseAs: "blob", }), `${stripScope(scope)}-${name}.afps-bundle`',
     ],
   },
   {
     file: "../../hooks/use-files.ts",
     from: '"../lib/blob-download"',
-    calls: ["triggerBlobDownload(data, name)"],
+    calls: ['parseAs: "blob" }), name'],
     /**
      * `useFileImageSrc` builds ONE object URL of its own, for an
      * `<img src>` thumbnail — a preview, not a download, and no `<a download>`
@@ -89,6 +89,11 @@ const CALLERS = [
     allowedObjectUrls: ["objectUrl = URL.createObjectURL(data)"],
   },
 ] as const;
+
+/** The primitive's two entry points: `downloadOrToast` wraps `triggerBlobDownload` with the failure toast. */
+const ENTRY_POINTS = ["downloadOrToast", "triggerBlobDownload"];
+const callsOf = (source: string) =>
+  ENTRY_POINTS.reduce((total, name) => total + occurrences(source, `${name}(`), 0);
 
 const callerSources = await Promise.all(CALLERS.map(async (c) => code(await read(c.file))));
 
@@ -110,13 +115,15 @@ describe("package file preview security", () => {
   it.each(CALLERS.map((c, i) => [c.file, c, callerSources[i]!] as const))(
     "%s hands its bytes to the shared primitive and to nothing else",
     (file, caller, source) => {
-      expect(source).toContain(`import { triggerBlobDownload } from ${caller.from}`);
+      expect(source).toMatch(
+        new RegExp(`import \\{ (${ENTRY_POINTS.join("|")}) \\} from ${caller.from}`),
+      );
       for (const call of caller.calls) {
         expect(dense(source)).toContain(dense(call));
       }
       // Every call site is accounted for — a new download added to a file
       // already on this list would otherwise ride in unexamined.
-      expect(occurrences(source, "triggerBlobDownload(")).toBe(caller.calls.length);
+      expect(callsOf(source)).toBe(caller.calls.length);
 
       // The delegation is only worth anything if it is the ONLY route those
       // bytes have to the DOM: no hand-rolled anchor and no navigation to the
@@ -154,7 +161,8 @@ describe("package file preview security", () => {
       // The primitive itself, and the tests that import it to EXERCISE it —
       // the opposite of a sink.
       if (relative.includes("/test/") || relative === "lib/blob-download.ts") continue;
-      if ((await Bun.file(`${srcRoot}${relative}`).text()).includes("triggerBlobDownload")) {
+      const text = await Bun.file(`${srcRoot}${relative}`).text();
+      if (ENTRY_POINTS.some((name) => text.includes(name))) {
         importers.push(relative);
       }
     }

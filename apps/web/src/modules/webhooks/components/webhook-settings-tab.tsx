@@ -9,7 +9,7 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { Spinner } from "@/components/spinner";
 import { WebhookFormFields } from "./webhook-form-fields";
-import { toggleEvent } from "../hooks/use-webhooks";
+import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { toast } from "sonner";
 import {
@@ -109,7 +109,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
 
       <WebhookFormFields
         selectedEvents={selectedEvents}
-        onToggleEvent={(e) => toggleEvent(e, setSelectedEvents)}
+        onToggleEvent={(e) => setSelectedEvents((prev) => toggleValue(prev, e))}
         payloadMode={payloadMode}
         onPayloadModeChange={setPayloadMode}
         idPrefix="edit-"

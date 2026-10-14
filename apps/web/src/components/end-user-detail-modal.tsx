@@ -12,6 +12,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { usePermissions } from "../hooks/use-permissions";
+import { endUserLabel } from "../lib/members";
 import { formatDateField } from "../lib/format-date";
 import { EndUserFields, type EndUserFormValues } from "./end-user-fields";
 import { entriesToMetadata, metadataToEntries } from "../lib/end-user-metadata";
@@ -25,7 +26,6 @@ interface Props {
   onEdit: () => void;
   /** Leaves the edition for the detail it was entered from. */
   onShowDetail: () => void;
-  onDeleted?: (id: string) => void;
 }
 
 function formValues(endUser: EndUserInfo | null): EndUserFormValues {
@@ -59,14 +59,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string | null |
   );
 }
 
-export function EndUserDetailModal({
-  onClose,
-  endUser,
-  editing,
-  onEdit,
-  onShowDetail,
-  onDeleted,
-}: Props) {
+export function EndUserDetailModal({ onClose, endUser, editing, onEdit, onShowDetail }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const deleteMutation = useDeleteEndUser();
@@ -138,7 +131,7 @@ export function EndUserDetailModal({
       <Modal
         open
         onClose={onClose}
-        title={endUser.name || endUser.email || t("spaces.endUserDetail")}
+        title={endUserLabel(endUser, t("spaces.endUserDetail"))}
         actions={
           can("end-users:delete") || can("end-users:write") ? (
             <>
@@ -196,7 +189,6 @@ export function EndUserDetailModal({
             await deleteMutation.mutateAsync({ params: { path: { id: endUser.id } } });
             if (!mounted.current) return;
             setConfirmOpen(false);
-            onDeleted?.(endUser.id);
             onClose();
           } catch {
             // The mutation cache toasts the refusal and the dialog closes on it.

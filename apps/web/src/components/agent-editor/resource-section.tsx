@@ -7,12 +7,8 @@ import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import { matchesSearch } from "../../lib/strings";
-import {
-  usePackageList,
-  useUploadPackage,
-  usePackageVersions,
-  type PackageType,
-} from "../../hooks/use-packages";
+import { usePackageList, usePackageVersions, type PackageType } from "../../hooks/use-packages";
+import { useImportPackage } from "../../hooks/use-mutations";
 import {
   Select,
   SelectContent,
@@ -173,7 +169,7 @@ export function ResourceSection({
   // entries are then all this section knows, listed by id.
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
   const canReach = useCanReach();
-  const upload = useUploadPackage(type);
+  const upload = useImportPackage();
 
   const selectedMap = new Map(selectedEntries.map((e) => [e.id, e]));
 
@@ -231,8 +227,8 @@ export function ResourceSection({
     if (!file) return;
 
     try {
-      const result = await upload.mutateAsync(file);
-      const newId = result.id;
+      const result = await upload.mutateAsync({ file });
+      const newId = result.packageId;
       const newVersion = result.version;
       if (!newVersion) return;
 

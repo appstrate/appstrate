@@ -22,6 +22,7 @@ import {
   agentsKeys,
   scheduleKeys,
   persistenceKeys,
+  invalidatePaths,
 } from "../lib/query-keys";
 import {
   type EnrichedRun,
@@ -67,7 +68,8 @@ function handleConnectionUpdate(qc: QueryClient) {
  *    whose path id is this session.
  *  - the typed file list, `["get","/api/files",init]` with
  *    `init.params.query.context_chat_session_id` — only the page filtered on
- *    this session. A run's file tab (`runId` filter), the gallery (no
+ *    this session. The gallery's paged key (`["get","/api/files","paged",…]`)
+ *    carries no such id, so it never matches. A run's file tab (`runId` filter), the gallery (no
  *    filter) or another conversation's sidebar must not refetch on every
  *    frame of a turn that is not theirs (≥5 frames per turn).
  *
@@ -326,13 +328,11 @@ function handleSSEMessage(
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has completed its output sweep; refresh every scoped
     // file collection, including conversation-context filters.
-    qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
+    void invalidatePaths(qc, ["/api/files"]);
     // So has its memory: the pinned slots and notes it wrote count on the run
     // page and list in the agent's Mémoire tab.
     qc.invalidateQueries({ queryKey: persistenceKeys.all });
-    // openapi-react-query keys are [method, path, init] — invalidating the
-    // literal spec path reaches the entry whatever org rides in its init.
-    qc.invalidateQueries({ queryKey: ["get", "/api/billing"] });
+    void invalidatePaths(qc, ["/api/billing"]);
   }
 }
 

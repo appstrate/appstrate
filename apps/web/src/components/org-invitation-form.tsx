@@ -7,13 +7,13 @@ import { spaceRoleValue } from "../hooks/use-roles";
 import { z } from "zod";
 import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
-import { useQueryClient } from "@tanstack/react-query";
 import { ORG_ROLES } from "@appstrate/core/permissions";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
 import { FieldError, FieldGroup, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { $api, type components } from "../api/client";
+import type { components } from "../api/client";
+import { useInviteMember, useUpdateInvitation } from "../hooks/use-org";
 import { OrgRoleOptions } from "./org-role-options";
 import {
   hasUnavailableAssignments,
@@ -63,7 +63,6 @@ export function OrgInvitationForm({
   ref?: Ref<OrgInvitationFormHandle>;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const queryClient = useQueryClient();
   const catalog = useAssignmentCatalog();
   const form = useForm<InviteFormValues>({
     defaultValues: {
@@ -77,27 +76,16 @@ export function OrgInvitationForm({
     },
   });
   const role = useWatch({ control: form.control, name: "role" });
-  const complete = () => {
-    void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
+  const onError = (error: unknown) => form.setError("root", { message: errorMessage(error) });
+  const complete = (message: string) => {
+    toast.success(message);
     form.reset();
     onSuccess?.();
   };
-  const onError = (error: unknown) => form.setError("root", { message: errorMessage(error) });
-  const invite = $api.useMutation("post", "/api/orgs/{orgId}/members", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: (_result, request) => {
-      toast.success(t("orgSettings.inviteSuccess", { email: request.body.email }));
-      complete();
-    },
-    onError,
-  });
-
-  const update = $api.useMutation("patch", "/api/orgs/{orgId}/invitations/{invitationId}", {
-    meta: { errorHandledByCaller: true },
-    onSuccess: () => {
-      toast.success(t("orgSettings.inviteUpdated"));
-      complete();
-    },
+  const invite = useInviteMember();
+  const update = useUpdateInvitation();
+  const inviteOutcome = (email: string) => ({
+    onSuccess: () => complete(t("orgSettings.inviteSuccess", { email })),
     onError,
   });
   const isPending = invite.isPending || update.isPending;
@@ -117,7 +105,8 @@ export function OrgInvitationForm({
       if (!form.getValues("email").trim()) return true;
       if (!(await form.trigger())) return false;
       // The hook's `onError` already shows a refusal on the form.
-      return invite.mutateAsync(inviteRequest(form.getValues())).then(
+      const request = inviteRequest(form.getValues());
+      return invite.mutateAsync(request, inviteOutcome(request.body.email)).then(
         () => true,
         () => false,
       );
@@ -129,12 +118,16 @@ export function OrgInvitationForm({
       noValidate
       onSubmit={form.handleSubmit((data) => {
         if (invitation) {
-          update.mutate({
-            params: { path: { orgId, invitationId: invitation.id } },
-            body: bodyOf(data),
-          });
+          update.mutate(
+            {
+              params: { path: { orgId, invitationId: invitation.id } },
+              body: bodyOf(data),
+            },
+            { onSuccess: () => complete(t("orgSettings.inviteUpdated")), onError },
+          );
         } else {
-          invite.mutate(inviteRequest(data));
+          const request = inviteRequest(data);
+          invite.mutate(request, inviteOutcome(request.body.email));
         }
       })}
       className="flex flex-col gap-4"

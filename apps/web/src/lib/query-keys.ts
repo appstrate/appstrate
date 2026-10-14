@@ -12,16 +12,47 @@
  * every key from one typed module makes that drift a compile error instead of
  * a runtime no-op.
  *
- * The openapi-react-query hooks use their own `[method, path, init]` keys and
- * are NOT covered here — only the hand-rolled legacy keys live in this file.
- *
- * Each builder returns a readonly tuple; the shapes are byte-for-byte the same
- * arrays these caches have always used (a pure refactor).
+ * The openapi-react-query hooks use their own `[method, path, init]` keys; the
+ * hand-rolled legacy keys live in this file, and `invalidatePaths` is the typed
+ * way to invalidate the others.
  */
 
 import type { QueryClient } from "@tanstack/react-query";
+import type { paths } from "../api/schema";
 
 type Id = string | null | undefined;
+
+/** A spec path that has a GET operation: the only paths a query key can name. */
+export type GetPath = {
+  [P in keyof paths]: paths[P] extends { get: object } ? P : never;
+}[keyof paths];
+
+/**
+ * Invalidate typed-client queries by spec path. openapi-react-query keys are
+ * `[method, path, init]` with the literal spec path, so the path alone is a
+ * prefix of every entry under it; typing it against the generated spec turns a
+ * typo into a compile error instead of an invalidation that matches nothing.
+ * `refetchType: "none"` marks the entries stale without refetching them.
+ */
+export function invalidatePaths(
+  qc: QueryClient,
+  paths: readonly GetPath[],
+  refetchType?: "none",
+): Promise<unknown> {
+  return Promise.all(
+    paths.map((path) => qc.invalidateQueries({ queryKey: ["get", path], refetchType })),
+  );
+}
+
+/**
+ * The current org's detail: members, invitations and `storage.used_bytes`, the
+ * number behind every storage gauge and the "quota reached" alert. Any write
+ * that changes how many bytes the org holds (delete, keep, upload) MUST call
+ * this, or the gauge and the alert stay frozen on the old value.
+ */
+export function invalidateOrgDetail(qc: QueryClient): Promise<unknown> {
+  return invalidatePaths(qc, ["/api/orgs/{orgId}"]);
+}
 
 /** Single run detail + its log list. Patched live by the run SSE stream. */
 export const runKeys = {
@@ -34,6 +65,8 @@ export const runKeys = {
    * {@link invalidateRunLogs}.
    */
   all: ["run"] as const,
+  /** Prefix — every run-logs entry. */
+  logsAll: ["run-logs"] as const,
   detail: (orgId: Id, spaceId: Id, runId: Id) => ["run", orgId, spaceId, runId] as const,
   logs: (orgId: Id, spaceId: Id, runId: Id) => ["run-logs", orgId, spaceId, runId] as const,
 };
@@ -128,9 +161,24 @@ export const packageKeys = {
  * itself when the query goes stale, which is what makes it hard to report.
  */
 export function invalidatePackageFiles(qc: QueryClient) {
-  void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
-  void qc.invalidateQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files/content"] });
+  void invalidatePaths(qc, [
+    "/api/packages/{scope}/{name}/files",
+    "/api/packages/{scope}/{name}/files/content",
+  ]);
 }
+
+/** Package versions: the published list, one version's detail, and the latest/active summary. */
+export const versionKeys = {
+  detailAll: ["version-detail"] as const,
+  listAll: ["package-versions"] as const,
+  infoAll: ["version-info"] as const,
+  detail: (orgId: Id, spaceId: Id, type: string, packageId: Id, version: string | undefined) =>
+    ["version-detail", orgId, spaceId, type, packageId, version] as const,
+  list: (orgId: Id, spaceId: Id, type: string, packageId: Id) =>
+    ["package-versions", orgId, spaceId, type, packageId] as const,
+  info: (orgId: Id, spaceId: Id, type: string, packageId: Id) =>
+    ["version-info", orgId, spaceId, type, packageId] as const,
+};
 
 /** Agent catalog list (sidebar, agent list page). */
 export const agentsKeys = {
@@ -141,12 +189,29 @@ export const agentsKeys = {
   list: (orgId: Id, spaceId: Id) => ["agents", orgId, spaceId] as const,
 };
 
+/** A package write: every package family, the agent catalog and the file explorer's caches. */
+export function invalidatePackageCaches(qc: QueryClient) {
+  void qc.invalidateQueries({ queryKey: agentsKeys.all });
+  void qc.invalidateQueries({ queryKey: packageKeys.all });
+  invalidatePackageFiles(qc);
+}
+
+/** A version appeared or vanished: the version caches, and a pinned Files tab or dist-tag read with them. */
+export function invalidateVersionCaches(qc: QueryClient) {
+  for (const queryKey of [versionKeys.listAll, versionKeys.detailAll, versionKeys.infoAll]) {
+    void qc.invalidateQueries({ queryKey });
+  }
+  invalidatePackageCaches(qc);
+}
+
 /** Schedule caches. Patched by the run SSE stream when a run carries a scheduleId. */
 export const scheduleKeys = {
   /** Prefix — every schedule-list query. */
   listAll: ["schedules"] as const,
   /** Prefix — every single-schedule query. */
   detailAll: ["schedule"] as const,
+  /** Prefix — every schedule-runs query. */
+  runsAll: ["schedule-runs"] as const,
   list: (orgId: Id, spaceId: Id) => ["schedules", orgId, spaceId] as const,
   listForAgent: (orgId: Id, spaceId: Id, packageId: Id) =>
     ["schedules", orgId, spaceId, packageId] as const,
@@ -156,19 +221,18 @@ export const scheduleKeys = {
     ["schedule-runs", orgId, spaceId, scheduleId] as const,
 };
 
+function agentSettingKeys<K extends string>(kind: K) {
+  return {
+    all: [kind] as const,
+    detail: (orgId: Id, spaceId: Id, packageId: Id) => [kind, orgId, spaceId, packageId] as const,
+  };
+}
+
 /** Per-agent effective model resolution. */
-export const agentModelKeys = {
-  all: ["agent-model"] as const,
-  detail: (orgId: Id, spaceId: Id, packageId: Id) =>
-    ["agent-model", orgId, spaceId, packageId] as const,
-};
+export const agentModelKeys = agentSettingKeys("agent-model");
 
 /** Per-agent effective proxy resolution. */
-export const agentProxyKeys = {
-  all: ["agent-proxy"] as const,
-  detail: (orgId: Id, spaceId: Id, packageId: Id) =>
-    ["agent-proxy", orgId, spaceId, packageId] as const,
-};
+export const agentProxyKeys = agentSettingKeys("agent-proxy");
 
 /** Organization list (preserved across org switch). */
 export const orgKeys = {

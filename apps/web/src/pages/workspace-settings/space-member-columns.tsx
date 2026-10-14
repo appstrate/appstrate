@@ -21,11 +21,8 @@ import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellEmpty, CellText } from "../../components/table-cells";
 import { useSpaceSeatColumns } from "../../components/space-seat-columns";
 import type { RoleObject, SpaceRoleOption } from "../../hooks/use-roles";
+import { memberLabel } from "../../lib/members";
 import type { SpaceMemberObject } from "../../hooks/use-space-members";
-
-export function spaceMemberLabel(member: SpaceMemberObject): string {
-  return member.name || member.email || member.userId;
-}
 
 export function useSpaceMemberColumns({
   editable,
@@ -53,7 +50,7 @@ export function useSpaceMemberColumns({
   const { t } = useTranslation(["settings", "common"]);
   const seatColumns = useSpaceSeatColumns<SpaceMemberObject>({
     seat: (member) => member,
-    seatName: spaceMemberLabel,
+    seatName: memberLabel,
     editable,
     roles,
     roleOptions,
@@ -67,8 +64,8 @@ export function useSpaceMemberColumns({
       header: t("spaceMembers.colMember"),
       width: "minmax(100px,1.4fr)",
       cell: (member) => (
-        <CellText strong title={spaceMemberLabel(member)}>
-          {spaceMemberLabel(member)}
+        <CellText strong title={memberLabel(member)}>
+          {memberLabel(member)}
         </CellText>
       ),
     },
@@ -86,7 +83,7 @@ export function useSpaceMemberColumns({
       if (!kind) return null;
       return (
         <TableRowActions
-          menuLabel={t("spaceMembers.moreActions", { name: spaceMemberLabel(member) })}
+          menuLabel={t("spaceMembers.moreActions", { name: memberLabel(member) })}
           isPending={isRemoving}
           actions={[
             {

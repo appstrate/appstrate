@@ -8,7 +8,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import type { PackageType } from "@appstrate/core/validation";
 import { $api, client, type paths } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
-import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { agentsKeys, invalidatePaths, packageKeys } from "../lib/query-keys";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { useCurrentSpaceGrant, usePermissions } from "./use-permissions";
@@ -253,10 +253,7 @@ export function activationStateOf(
  * leaves the other's reader on a stale list.
  */
 export function invalidateLibraries(qc: QueryClient) {
-  return Promise.all([
-    qc.invalidateQueries({ queryKey: ["get", "/api/library"] }),
-    qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/library"] }),
-  ]);
+  return invalidatePaths(qc, ["/api/library", "/api/spaces/{spaceId}/library"]);
 }
 
 /** Activation changes affect the library and every space's package/agent cache. */

@@ -24,9 +24,11 @@ import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRoles } from "../hooks/use-roles";
 import { useSpaceMembers } from "../hooks/use-space-members";
+import { endUserLabel, memberLabel } from "../lib/members";
+import { matchesSearch } from "../lib/strings";
 import { mayGovernScheduleActor } from "../lib/schedule-governance";
 import type { ActorValue } from "../lib/schedule-payload";
-import { primaryLabel, useActorName } from "../hooks/use-actor-name";
+import { useActorName } from "../hooks/use-actor-name";
 import { isQueryInFlight } from "../lib/query-state";
 
 interface ActorSelectProps {
@@ -115,7 +117,6 @@ export function ActorSelect({
 
   const memberOptions = useMemo<Option[]>(() => {
     if (membersPending) return [];
-    const q = debouncedQuery.toLowerCase();
     return members
       .filter(
         (m) =>
@@ -123,15 +124,10 @@ export function ActorSelect({
           (mayGovernScheduleActor({ userId: m.userId }, caller) &&
             (mayRunIds === null || mayRunIds.has(m.userId))),
       )
-      .filter(
-        (m) =>
-          !q ||
-          (m.displayName ?? "").toLowerCase().includes(q) ||
-          (m.email ?? "").toLowerCase().includes(q),
-      )
+      .filter((m) => matchesSearch(debouncedQuery, [m.displayName, m.email]))
       .map((m) => ({
         actor: { userId: m.userId },
-        name: primaryLabel(m.displayName, m.email ?? null, m.userId),
+        name: memberLabel(m),
         email: m.email ?? null,
       }));
   }, [members, membersPending, debouncedQuery, caller, initialUserId, mayRunIds]);
@@ -140,7 +136,7 @@ export function ActorSelect({
     () =>
       endUsers.map((eu) => ({
         actor: { endUserId: eu.id },
-        name: primaryLabel(eu.name, eu.email, eu.externalId || eu.id),
+        name: endUserLabel(eu, eu.id),
         email: eu.email,
       })),
     [endUsers],

@@ -14,6 +14,7 @@ import { OrgRoleOptions } from "./org-role-options";
 import { RoleCatalogState } from "./role-catalog-state";
 import { fetchOrgsAs, useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
+import { spaceLabel } from "../lib/space-label";
 import { useSpaces } from "../hooks/use-spaces";
 import { useSpaceRoleOptions } from "../hooks/use-roles";
 import { useCloseOverlay } from "../lib/modal-route";
@@ -193,7 +194,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
               }}
               className={CHOSEN_VALUE}
               leading={<SelectItem value={VIEW_AS_NO_SPACE}>{t("viewAs.noSpace")}</SelectItem>}
-              options={(spaces ?? []).map((s) => ({ value: s.id, label: s.name }))}
+              options={(spaces ?? []).map((s) => ({ value: s.id, label: spaceLabel(s, t) }))}
             />
           </FormItem>
 

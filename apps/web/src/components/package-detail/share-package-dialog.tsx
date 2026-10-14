@@ -41,6 +41,7 @@ import {
   useRevokePackageShare,
   useSharePackage,
 } from "../../hooks/use-package-shares";
+import { memberLabel } from "../../lib/members";
 import { toastError } from "../../lib/mutation-error";
 import { TextSkeleton } from "../loading-skeletons";
 
@@ -253,7 +254,7 @@ export function SharePackageDialog({
                         key={member.userId}
                         value={targetValue({ kind: "user", userId: member.userId })}
                       >
-                        {member.displayName || member.email || member.userId}
+                        {memberLabel(member)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -495,7 +496,7 @@ function CoeditTab({
           className="w-full"
           options={candidates.map((candidate) => ({
             value: candidate.userId,
-            label: candidate.displayName || candidate.email || candidate.userId,
+            label: memberLabel(candidate),
           }))}
         />
         <SpaceRoleSelect

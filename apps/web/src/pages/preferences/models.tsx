@@ -34,6 +34,7 @@ import {
   ownPersonalCredentials,
   personalApiKeyBody,
 } from "../../lib/personal-model-credentials";
+import { invalidatePaths } from "../../lib/query-keys";
 import { providerRows } from "../../lib/model-providers";
 import { authStore } from "../../stores/auth-store";
 import { EmptyStateAction } from "../../components/page-states";
@@ -72,7 +73,7 @@ export function PreferencesModelsPage() {
 
   // A credential's add, rename, delete or pairing changes which models the caller can use.
   const refreshModels = () => {
-    void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+    void invalidatePaths(queryClient, ["/api/models"]);
   };
 
   const closeForm = () => {

@@ -2,9 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { $api, type components } from "../../api/client";
-import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import type { components } from "../../api/client";
+import { useChangeMemberRole, useOrg, useOrgDetail, useRemoveMember } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
@@ -22,7 +21,6 @@ import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
 import { hasFullOrgAccess } from "../../lib/org-role";
 import { memberLabel } from "../../lib/members";
-import { invalidateMemberWrite } from "../../lib/member-write";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -32,7 +30,6 @@ export function OrgSettingsMembersPage() {
   const { currentOrg } = useOrg();
   const { user } = useAuth();
   const { can, orgRole } = usePermissions();
-  const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
 
@@ -55,13 +52,8 @@ export function OrgSettingsMembersPage() {
   const memberParam = useModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
 
-  const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: () => invalidateMemberWrite(queryClient),
-  });
-
-  const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: () => invalidateMemberWrite(queryClient),
-  });
+  const removeMemberMutation = useRemoveMember();
+  const changeRoleMutation = useChangeMemberRole();
 
   const handleRemove = (member: OrgMember) => {
     const label = memberLabel(member);

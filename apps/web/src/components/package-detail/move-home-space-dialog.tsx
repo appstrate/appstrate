@@ -10,6 +10,7 @@ import { FormItem } from "@appstrate/ui/components/field";
 import type { PackageType } from "@appstrate/core/validation";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
+import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
@@ -110,11 +111,11 @@ export function MoveHomeSpaceDialog({
         <CheckboxField
           id="move-home-keep"
           className="mt-4"
-          label={t("packages.moveHomeKeep", { space: previousHome.name })}
+          label={t("packages.moveHomeKeep", { space: spaceLabel(previousHome, t) })}
           description={
             keepInPreviousHome
-              ? t("packages.moveHomeKeepHint", { space: previousHome.name })
-              : t("packages.moveHomeReleaseHint", { space: previousHome.name })
+              ? t("packages.moveHomeKeepHint", { space: spaceLabel(previousHome, t) })
+              : t("packages.moveHomeReleaseHint", { space: spaceLabel(previousHome, t) })
           }
           checked={keepInPreviousHome}
           onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}

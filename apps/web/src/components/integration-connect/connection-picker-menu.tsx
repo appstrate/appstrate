@@ -13,7 +13,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
-import { useSpaces } from "../../hooks/use-spaces";
+import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import type { IntegrationCandidate } from "../../hooks/use-integrations";
 import { AMBER_TEXT } from "./connection-picker-states";
 import { ConnectionChoiceMenu, type ChoiceRow } from "./connection-choice-menu";
@@ -59,7 +59,7 @@ export function PickerMenu({
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const navigate = useNavigate();
-  const { data: spaces } = useSpaces();
+  const spaceLabelOf = useSpaceLabelOf();
   const {
     gatesRun,
     candidates,
@@ -103,10 +103,7 @@ export function PickerMenu({
   };
   // The owner of an org-scoped row reads where it was connected from; anyone else, who owns it.
   const provenance = (c: IntegrationCandidate): string => {
-    const origin =
-      c.is_own && c.scope === "org"
-        ? spaces?.find((s) => s.id === c.origin_space_id)?.name
-        : undefined;
+    const origin = c.is_own && c.scope === "org" ? spaceLabelOf(c.origin_space_id) : undefined;
     return origin
       ? t("detail.integrationMemberPicker.connectedFrom", { space: origin })
       : t("detail.integrationMemberPicker.connectedBy", { owner: ownerLabel(c) });
