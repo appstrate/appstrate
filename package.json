@@ -150,10 +150,17 @@
     "@electric-sql/pglite": "^0.5.8"
   },
   "overrides": {
-    "zod": "4.6.5",
+    "zod": "4.6.6",
     "jose": "6.2.12",
-    "ai": "^7.0.127",
-    "@ai-sdk/react": "^4.0.130",
-    "@ai-sdk/provider-utils": "^5.0.56"
+    "ai": "^7.0.137",
+    "@ai-sdk/react": "^4.0.140",
+    "@ai-sdk/provider-utils": "^5.0.56",
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-codemode": "1.1.0",
+    "@earendil-works/pi-mcp": "1.1.0",
+    "@earendil-works/pi-telemetry": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0"
   }
 }
