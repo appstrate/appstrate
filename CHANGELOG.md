@@ -16,6 +16,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the previous file as `/etc/appstrate-runner/env.previous`
   (`docs/architecture/FIRECRACKER.md` → Env vars).
 
+### Changed
+
+- **BREAKING (CLI): the Claude Code plugin reaches every space, and its agent
+  commands come from every synced space** (#1972). `appstrate code sync` writes
+  the plugin's `.mcp.json` with the organization's URL, `/api/mcp/o/<org>`, not
+  the pinned space's `/s/<space>`: the plugin reaches every space you hold a
+  role in, as the claude.ai connector does. Claude Code keys an MCP login on
+  the URL, so the first sync after the upgrade asks for one more `/mcp` login.
+  A free-form request in Claude Code has no implicit space any more: the model
+  takes `space_id` from the request or asks. Agent commands come from the same
+  selection of spaces as skills (`--space` and `syncSpaces` narrow both): a
+  selected space supplies skills where your role holds `skills:read`, and
+  agents where it holds `agents:run`, `runs:read` and `mcp:invoke`, as the
+  `runner` role does without `skills:read`; one stderr line names the spaces
+  that supply no agent. Each command names its space in every
+  call. The same agent active in two spaces is two commands: the first keeps
+  `run-<name>`, the next is `run-<space name>-<name>`, and from the second sync
+  on, a command keeps its name when its agent is activated in another space or
+  when the space holding `run-<name>` leaves the selection.
+  `code sync` no longer reads the pinned space and no longer requires one. The
+  pin set by `appstrate space switch` is now only the default space of the
+  CLI's REST commands (`appstrate api`, `run --integrations=remote`,
+  `packages`) and changes nothing in Claude Code. The first sync after the
+  upgrade rewrites every installed agent command once. On that sync an
+  installed command does not yet hold its name: an agent active in several
+  synced spaces gets `run-<name>` in the first space in selection order, which
+  may not be the space it was pinned to, and an agent whose read fails loses
+  its command until the next sync. Both settle on the following sync.
+
 ### Fixed
 
 - **A non-UUID organization id is refused like an unknown org, not with a

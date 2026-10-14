@@ -13,7 +13,7 @@ import {
   unzipArtifact,
   zipArtifact,
 } from "@appstrate/core/zip";
-import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
+import { checkSkillMarkdown, isValidSkillName } from "@appstrate/afps-shared/companion-files";
 import {
   AGENT_CONTRACT_ENTRY,
   SkillMaterializeError,
@@ -23,6 +23,7 @@ import {
   materializeSkill,
   normalizeSkillMd,
   skillSlug,
+  spaceCollisionSlug,
   treeIntegrity,
   type AgentLaunchView,
 } from "../src/lib/skills-sync/materialize.ts";
@@ -313,6 +314,20 @@ describe("agentSlug", () => {
   });
 });
 
+describe("spaceCollisionSlug", () => {
+  it("drops the space, never the agent's name, when the name leaves it no room", () => {
+    const name = "n".repeat(59); // `run-` + 59 = 63: no room for `<space>-`
+    const preferred = `run-${name}`;
+
+    const slug = spaceCollisionSlug(name, "Lab", new Set([preferred]));
+
+    expect(isValidSkillName(slug)).toBe(true);
+    expect(slug.length).toBeLessThanOrEqual(64);
+    expect(slug.startsWith(`run-${"n".repeat(57)}`)).toBe(true);
+    expect(slug.endsWith("-2")).toBe(true);
+  });
+});
+
 describe("collisionSlug with the run- prefix", () => {
   it("keeps the prefix and the counter inside the 64-character ceiling", () => {
     const long = `@${"a".repeat(40)}/${"b".repeat(40)}`;
@@ -335,6 +350,7 @@ function agentView(overrides: Partial<AgentLaunchView> = {}): AgentLaunchView {
   return {
     packageId: "@acme/weekly-report",
     spaceId: SPACE_ID,
+    spaceName: "Sales",
     version: "1.2.0",
     title: "Weekly report",
     description: "Summarize the week.",
@@ -419,7 +435,7 @@ describe("materializeAgent", () => {
   });
 
   it("writes only generator text and validated identifiers into the body", () => {
-    const { body } = renderAgent(agentView());
+    const { skillMd, body } = renderAgent(agentView());
     expect(body).toContain(`\`${pluginTool("run_and_wait")}\``);
     expect(body).toContain(`\`${CONTRACT_REF}\``);
     const skeleton = /```json\n([\s\S]*?)\n\s*```/.exec(body);
@@ -429,10 +445,10 @@ describe("materializeAgent", () => {
       name: "weekly-report",
       version: "1.2.0",
       input: {},
+      space_id: SPACE_ID,
     });
     expect(dollarSequences(body).sort()).toEqual(["$ARGUMENTS", "$" + "{CLAUDE_SKILL_DIR}"]);
     expect(body).not.toContain("!`");
-    expect(body).not.toContain(SPACE_ID);
     expect(body).toContain("Ask only for missing fields in `schema.required`");
     expect(body).toContain("`no_published_version`");
     expect(body).toContain(`never call \`${pluginTool("run_and_wait")}\` again`);
@@ -451,6 +467,8 @@ describe("materializeAgent", () => {
     expect(waitRule).toBeLessThan(body.indexOf("Anything else"));
     expect(body).not.toContain("Weekly report");
     expect(body).not.toContain("Summarize the week.");
+    // The space name only names a fallback slug; the id is what the calls carry.
+    expect(skillMd).not.toContain("Sales");
     expect(body).not.toContain("topic");
   });
 
@@ -557,6 +575,21 @@ describe("materializeAgent", () => {
     expect(checkSkillMarkdown(skillMd)).toBeNull();
   });
 
+  // The plugin's MCP URL is the organization's: every space-acting call must name its space.
+  it("names the agent's space in every call it prescribes", () => {
+    const space = `"space_id": "${SPACE_ID}"`;
+    const { body } = renderAgent(agentView());
+    expect(body).toContain(
+      `\`{ "operation_id": "getRun", "path_params": { "id": "<id>" }, "query": { "wait": true }, ${space} }\``,
+    );
+    expect(body).toContain(`\`{ "runId": "<id>", ${space} }\``);
+    const upload = renderAgent(fileSchemaView([])).body;
+    expect(upload).toContain(`both with \`${space}\``);
+    expect(body).toContain(
+      `\`initiateIntegrationConnect\` through \`${pluginTool("invoke_operation")}\` and \`${space}\``,
+    );
+  });
+
   it("includes the upload recipe only when an unlocked file field exists", () => {
     const withFile = renderAgent(fileSchemaView([])).body;
     for (const tool of ["run_and_wait", "invoke_operation", "describe_operation", "list_files"]) {
@@ -586,7 +619,12 @@ describe("materializeAgent", () => {
 
   it("renders a run_and_wait call that core's launcher accepts", async () => {
     const { body } = renderAgent(agentView());
-    const call = JSON.parse(/```json\n([\s\S]*?)\n\s*```/.exec(body)![1]!) as unknown;
+    const parsed = JSON.parse(/```json\n([\s\S]*?)\n\s*```/.exec(body)![1]!) as {
+      space_id: unknown;
+    };
+    // The org-wide server consumes `space_id` before `run_and_wait` sees its arguments.
+    const { space_id: spaceId, ...call } = parsed;
+    expect(spaceId).toBe(SPACE_ID);
     const requested: string[] = [];
     const fakeFetch = (async (url: string | URL | Request) => {
       requested.push(String(url));
@@ -622,6 +660,12 @@ describe("materializeAgent", () => {
       { version: "1.2" },
       { version: "latest" },
       { version: "$" + "{HOME}" },
+      { spaceId: "" },
+      { spaceId: "spc_" },
+      { spaceId: "app_0f8fad5b" },
+      { spaceId: `${SPACE_ID}"` },
+      { spaceId: `${SPACE_ID}\n!\`id\`` },
+      { spaceId: "spc_$" + "{HOME}" },
     ];
     for (const overrides of bad) {
       expect(() => materializeAgent("run-weekly-report", agentView(overrides))).toThrow(
