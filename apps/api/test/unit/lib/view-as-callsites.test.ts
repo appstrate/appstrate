@@ -122,6 +122,10 @@ describe("persona-sensitive call sites", () => {
           "apps/api/src/modules/oidc/auth/claims.ts",
           "mints a token's scope CEILING from the subject's role; a preview narrows per request, under it",
         ],
+        [
+          "apps/api/src/services/model-providers/credentials.ts",
+          "the pairing redeem carries no request principal, hence no persona: it judges the minter's live role",
+        ],
       ],
     },
   ];

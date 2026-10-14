@@ -229,8 +229,10 @@ column model_provider_pairings.consumed_at timestamp with time zone
 column model_provider_pairings.created_at timestamp with time zone not null default now()
 column model_provider_pairings.credential_id uuid
 column model_provider_pairings.expires_at timestamp with time zone not null
+column model_provider_pairings.failed_at timestamp with time zone
 column model_provider_pairings.id text not null
 column model_provider_pairings.org_id uuid not null
+column model_provider_pairings.owner_user_id text
 column model_provider_pairings.provider_id text not null
 column model_provider_pairings.reconnect_credential_id uuid
 column model_provider_pairings.token_hash text not null
@@ -771,6 +773,7 @@ constraint model_provider_credentials model_provider_credentials_owner_user_id_u
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_credential_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
 constraint model_provider_pairings model_provider_pairings_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_provider_pairings model_provider_pairings_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_pairings model_provider_pairings_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_token_hash_unique UNIQUE (token_hash)
 constraint model_provider_pairings model_provider_pairings_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE

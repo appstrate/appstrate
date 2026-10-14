@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Onboarding-only helper that seeds `org_models` rows right after a fresh
- * OAuth pairing succeeds. Wired into the onboarding quick-connect cards —
- * NOT into the generic credential form modal flow, because users launching
- * OAuth from the model picker explicitly want a single model.
+ * Onboarding-only helper that seeds `org_models` rows right after an
+ * organization subscription is paired. Wired into the onboarding quick-connect
+ * cards — NOT into the generic credential form modal flow, because users
+ * launching OAuth from the model picker explicitly want a single model.
  *
- * Delegates to the platform's `POST /api/models/seed` endpoint, which:
+ * Delegates to the platform's `POST /api/models/seed` endpoint, which binds
+ * organization credentials only and:
  *   1. Skips entirely if any model already binds to this credential.
  *   2. Seeds every featured model from the registry.
  *   3. Promotes the first inserted row to default if the org has none.
- *
- * One round-trip, atomic — the previous N-POST-per-model dance was
- * superseded by phase 1.3 of the optimization plan.
  */
 
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
+import { toastError } from "../lib/mutation-error";
 import { useProvidersRegistry, type ProviderRegistryEntry } from "./use-model-provider-credentials";
 
 interface SeedResult {
@@ -52,8 +51,10 @@ export function useAutoSeedFeaturedModels() {
       if (!data) return { created: 0, promotedDefault: false };
       qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
       return { created: data.created, promotedDefault: data.promoted_default };
-    } catch {
-      // Seed is best-effort — onboarding can still continue if seeding fails.
+    } catch (err) {
+      // The subscription is connected either way: the step continues, and the
+      // models can still be added by hand.
+      toastError(err);
       return { created: 0, promotedDefault: false };
     }
   };

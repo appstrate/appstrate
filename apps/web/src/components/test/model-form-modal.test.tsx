@@ -186,7 +186,7 @@ const ANTHROPIC_KEY: ModelProviderCredentialInfo = {
   providerId: "anthropic",
 };
 
-/** A subscription is always personal: no organization model can bind it. */
+/** A member's personal subscription: no organization model can bind it. */
 const CONNECTION: ModelProviderCredentialInfo = {
   ...ANTHROPIC_KEY,
   id: "cred_cc",
@@ -199,6 +199,18 @@ const CONNECTION: ModelProviderCredentialInfo = {
   owner_name: "Alice",
   allowed_actions: ["edit", "delete", "reconnect"],
   bindable: false,
+};
+
+/** A subscription the organization connected: bindable like an organization key. */
+const ORG_CONNECTION: ModelProviderCredentialInfo = {
+  ...CONNECTION,
+  id: "cred_cc_org",
+  label: "Abonnement de l'équipe",
+  oauth_email: "team@example.com",
+  owner_type: "org",
+  owner_id: null,
+  owner_name: null,
+  bindable: true,
 };
 
 function form(
@@ -392,13 +404,13 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
   });
 
   it("offers no personal connection of a member, and asks for no key", () => {
-    // A subscription is personal: the org model cannot bind it, so it is not offered.
+    // A member's own subscription serves only their calls: the org model cannot bind it.
     expect(html).not.toContain(CONNECTION.oauth_email!);
     expect(html).not.toContain('placeholder="sk-..."');
     expect(html).not.toContain('id="mdl-apiKey"');
   });
 
-  it("offers no pairing from here: a personal connection cannot serve the org model", () => {
+  it("offers no pairing from here: a subscription is connected on the credentials page", () => {
     expect(html).not.toContain("Connecter Claude Code");
   });
 
@@ -406,6 +418,34 @@ describe("ModelFormBody — editing a subscription row the org left to each memb
     expect(html).not.toContain(settingsFr["models.form.discoverButton"]);
     expect(html).not.toContain(settingsFr["models.form.manualButton"]);
     expect(html).not.toContain(settingsFr["models.form.pickFromList"]);
+  });
+});
+
+describe("ModelFormBody — editing a row bound to an organization subscription", () => {
+  const bound = catalogued({
+    providerId: "claude-code",
+    provider_name: "Claude Code",
+    credentialId: ORG_CONNECTION.id,
+  });
+  const html = form(bound, [CONNECTION, ORG_CONNECTION]);
+
+  it("shows the organization subscription as the bound identifier, not each member", () => {
+    expect(html).toContain(settingsFr["models.form.identityLabel"]);
+    expect(html).toContain(ORG_CONNECTION.label);
+    expect(html).not.toContain(settingsFr["models.form.eachMember"]);
+    expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
+  });
+
+  it("opens the model step on it, and asks for no key", () => {
+    expect(html).toContain('id="mdl-modelId"');
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("binds nothing to a member's personal subscription, whatever the row names", () => {
+    // The server lists it as not bindable: the form falls back to the picker.
+    const personal = form({ ...bound, credentialId: CONNECTION.id }, [CONNECTION]);
+    expect(personal).toContain(settingsFr["models.form.chooseIdentity"]);
+    expect(personal).not.toContain('id="mdl-modelId"');
   });
 });
 

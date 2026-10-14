@@ -36,13 +36,18 @@ import { updateOrgSettings } from "../../../src/services/organizations.ts";
 
 const app = getTestApp();
 
-async function mintPairing(ctx: TestContext, providerId = "test-oauth", credentialId?: string) {
+async function mintPairing(
+  ctx: TestContext,
+  providerId = "test-oauth",
+  options: { credentialId?: string; ownerType?: "org" | "user" } = {},
+) {
   const res = await app.request("/api/model-providers-oauth/pairing", {
     method: "POST",
     headers: authHeaders(ctx, { "Content-Type": "application/json" }),
     body: JSON.stringify({
       providerId,
-      ...(credentialId ? { credentialId } : {}),
+      ...(options.credentialId ? { credentialId: options.credentialId } : {}),
+      ...(options.ownerType ? { owner_type: options.ownerType } : {}),
     }),
   });
   expect(res.status).toBe(200);
@@ -79,7 +84,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
   });
 
   it("redeems credentials when authenticated by a fresh pairing token", async () => {
-    const pairing = await mintPairing(ctx, "test-oauth");
+    const pairing = await mintPairing(ctx, "test-oauth", { ownerType: "user" });
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
@@ -93,7 +98,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     for (const other of ["provider_id", "credential_id", "availableModelIds"]) {
       expect(body).not.toHaveProperty(other);
     }
-    // The redeemed subscription belongs to the account that paired it, not to the org.
+    // A `user` pairing: the redeemed subscription is the minting member's own.
     const [row] = await db
       .select({ ownerUserId: modelProviderCredentials.ownerUserId })
       .from(modelProviderCredentials)
@@ -105,6 +110,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     const originalCredentialId = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       providerId: "test-oauth",
       label: "Target connection",
       accessToken: "expired-access",
@@ -114,7 +120,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     });
     await markCredentialNeedsReconnection(ctx.orgId, originalCredentialId);
 
-    const pairing = await mintPairing(ctx, "test-oauth", originalCredentialId);
+    const pairing = await mintPairing(ctx, "test-oauth", { credentialId: originalCredentialId });
     const reconnect = await app.request("/api/model-providers-oauth/pair/redeem", {
       method: "POST",
       headers: bearerHeaders(pairing.token),
@@ -153,8 +159,8 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     );
   });
 
-  it("refuses the redeem with 403 when the org turned personal credentials off after the mint", async () => {
-    const pairing = await mintPairing(ctx, "test-oauth");
+  it("refuses a personal redeem with 403 when the org turned personal credentials off after the mint", async () => {
+    const pairing = await mintPairing(ctx, "test-oauth", { ownerType: "user" });
     await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
 
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {
@@ -173,11 +179,12 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     expect(rows).toHaveLength(0);
   });
 
-  it("a reconnect pairing redeemed by anyone but the subscription's holder changes nothing", async () => {
+  it("a reconnect pairing never updates a credential its minter may not reconnect", async () => {
     const holder = await memberContext(ctx, "member");
     const subscription = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: holder.user.id,
+      ownerUserId: holder.user.id,
       providerId: "test-oauth",
       label: "Holder's",
       accessToken: "holder-access",
@@ -187,23 +194,26 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
       .select({ ciphertext: modelProviderCredentials.credentialsEncrypted })
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, subscription));
-    // A pairing the admin opened on that row, as one minted before it became personal.
-    const pairing = await createPairing({
-      userId: ctx.user.id,
-      orgId: ctx.orgId,
-      providerId: "test-oauth",
-      platformUrl: "http://localhost:3000",
-      ttlSeconds: 300,
-      reconnectCredentialId: subscription,
-    });
+    // The mint route refuses these pairings; the redeem holds on its own.
+    for (const ownerUserId of [ctx.user.id, null]) {
+      const pairing = await createPairing({
+        userId: ctx.user.id,
+        ownerUserId,
+        orgId: ctx.orgId,
+        providerId: "test-oauth",
+        platformUrl: "http://localhost:3000",
+        ttlSeconds: 300,
+        reconnectCredentialId: subscription,
+      });
 
-    const res = await app.request("/api/model-providers-oauth/pair/redeem", {
-      method: "POST",
-      headers: bearerHeaders(pairing.token),
-      body: JSON.stringify({ ...VALID_BODY("test-oauth"), access_token: "admin-access" }),
-    });
+      const res = await app.request("/api/model-providers-oauth/pair/redeem", {
+        method: "POST",
+        headers: bearerHeaders(pairing.token),
+        body: JSON.stringify({ ...VALID_BODY("test-oauth"), access_token: "admin-access" }),
+      });
+      expect(res.status).toBe(404);
+    }
 
-    expect(res.status).toBe(404);
     const [after] = await db
       .select({
         ciphertext: modelProviderCredentials.credentialsEncrypted,
@@ -215,11 +225,12 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     expect(after!.ownerUserId).toBe(holder.user.id);
   });
 
-  it("refuses to mint a reconnect pairing on a subscription the caller does not hold", async () => {
+  it("refuses to mint a reconnect pairing on another member's personal subscription", async () => {
     const holder = await memberContext(ctx, "member");
     const subscription = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: holder.user.id,
+      ownerUserId: holder.user.id,
       providerId: "test-oauth",
       label: "Holder's",
       accessToken: "holder-access",
@@ -233,16 +244,17 @@ describe("POST /api/model-providers-oauth/pair/redeem — canonical route", () =
     expect(res.status).toBe(404);
   });
 
-  it("refuses a holder's reconnect once the organization turned personal credentials off", async () => {
+  it("refuses an owner's personal reconnect once the organization turned personal credentials off", async () => {
     const subscription = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       providerId: "test-oauth",
       label: "Mine",
       accessToken: "old-access",
       refreshToken: "old-refresh",
     });
-    const pairing = await mintPairing(ctx, "test-oauth", subscription);
+    const pairing = await mintPairing(ctx, "test-oauth", { credentialId: subscription });
     await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
 
     const res = await app.request("/api/model-providers-oauth/pair/redeem", {

@@ -74,11 +74,20 @@ const DIRECT_PROVIDER: ProviderRegistryEntry = {
   personal_allowed: true,
 };
 
-/** A subscription: personal, so a model on it is left to each member. */
+/** A subscription: picked among the organization's, or left to each member. */
 const SUBSCRIPTION_PROVIDER: ProviderRegistryEntry = {
   ...DIRECT_PROVIDER,
   providerId: "claude-code",
   displayName: "Claude Code",
+  authMode: "oauth2",
+};
+
+/** A subscription the organization connected: a model may bind it. */
+const ORG_SUBSCRIPTION: ModelProviderCredentialInfo = {
+  ...LOCAL_KEY,
+  id: "cred_org_sub",
+  label: "Abonnement de l'équipe",
+  providerId: "claude-code",
   authMode: "oauth2",
 };
 
@@ -162,10 +171,11 @@ describe("EndpointFields", () => {
     expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
   });
 
-  it("offers a subscription only to each member, under the identifier label", () => {
+  it("offers each member for a subscription with none connected, under the identifier label", () => {
     const html = fields({
       provider: SUBSCRIPTION_PROVIDER,
       providers: [],
+      existingKeys: { items: [], selected: null, onSelect: () => {}, onClear: () => {} },
       eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
     });
     expect(html).toContain(settingsFr["models.form.identityLabel"]);
@@ -174,8 +184,46 @@ describe("EndpointFields", () => {
     expect(html).not.toContain('placeholder="sk-..."');
   });
 
-  it("offers nothing to pick for a subscription where each member is not offered", () => {
-    const html = fields({ provider: SUBSCRIPTION_PROVIDER, providers: [] });
+  it("offers the organization's subscriptions to pick, with no key to type", () => {
+    const html = fields({
+      provider: SUBSCRIPTION_PROVIDER,
+      providers: [],
+      existingKeys: {
+        items: [ORG_SUBSCRIPTION],
+        selected: null,
+        onSelect: () => {},
+        onClear: () => {},
+      },
+    });
+    expect(html).toContain('role="combobox"');
+    expect(html).toContain(settingsFr["models.form.chooseIdentity"]);
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("shows the picked organization subscription as the bound identifier", () => {
+    const html = fields({
+      provider: SUBSCRIPTION_PROVIDER,
+      providers: [],
+      existingKeys: {
+        items: [ORG_SUBSCRIPTION],
+        selected: ORG_SUBSCRIPTION,
+        onSelect: () => {},
+        onClear: () => {},
+      },
+      eachMember: { selected: false, onSelect: () => {}, onClear: () => {} },
+    });
+    expect(html).toContain(ORG_SUBSCRIPTION.label);
+    expect(html).not.toContain('role="combobox"');
+    expect(html).not.toContain(settingsFr["models.form.eachMemberHint"]);
+    expect(html).not.toContain('placeholder="sk-..."');
+  });
+
+  it("offers nothing to pick for a subscription with none connected and each member not offered", () => {
+    const html = fields({
+      provider: SUBSCRIPTION_PROVIDER,
+      providers: [],
+      existingKeys: { items: [], selected: null, onSelect: () => {}, onClear: () => {} },
+    });
     expect(html).not.toContain('role="combobox"');
     expect(html).not.toContain('placeholder="sk-..."');
   });

@@ -532,6 +532,7 @@ describe("runner preset", () => {
     const credentialId = await createApiKeyCredential({
       orgId: owner.orgId,
       userId: owner.user.id,
+      ownerUserId: null,
       label: "runner credential",
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",
