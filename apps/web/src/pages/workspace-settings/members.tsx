@@ -56,7 +56,7 @@ import { ViewAsDialog } from "../../components/view-as-dialog";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { spaceMemberLabel, useSpaceMemberColumns } from "./space-member-columns";
-import { memberLabel } from "../../lib/billing-managers";
+import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
 

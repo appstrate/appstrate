@@ -24,7 +24,7 @@ import { memberRoleValue, spaceRoleAssignment, useSpaceRoleOptions } from "../..
 import { useAddSpaceMember, useUpdateSpaceMember } from "../../hooks/use-space-members";
 import type { SpaceMembership } from "../../hooks/use-space-memberships";
 import { formatDateField } from "../../lib/format-date";
-import { memberLabel } from "../../lib/billing-managers";
+import { memberLabel } from "../../lib/members";
 import { useUserSpaceColumns } from "./user-space-columns";
 
 type OrgMember = components["schemas"]["OrgMember"];

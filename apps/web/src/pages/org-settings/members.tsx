@@ -22,7 +22,7 @@ import { useMemberColumns } from "./member-columns";
 import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
 import { hasFullOrgAccess } from "../../lib/org-role";
-import { memberLabel } from "../../lib/billing-managers";
+import { memberLabel } from "../../lib/members";
 import { invalidateMemberWrite } from "../../lib/member-write";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 

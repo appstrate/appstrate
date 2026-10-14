@@ -27,10 +27,10 @@ import {
   billingManagerRows,
   billingManagersBody,
   eligibleBillingManagers,
-  memberLabel,
   sameBillingManagers,
   type BillingManagerStatus,
 } from "../lib/billing-managers";
+import { memberLabel } from "../lib/members";
 import { ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";

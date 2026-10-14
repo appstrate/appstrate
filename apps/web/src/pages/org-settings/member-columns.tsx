@@ -23,7 +23,7 @@ import { OptionSelect } from "@appstrate/ui/components/select";
 import type { components } from "../../api/schema";
 import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { memberLabel } from "../../lib/billing-managers";
+import { memberLabel } from "../../lib/members";
 import type { OrgRole } from "@appstrate/shared-types";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
