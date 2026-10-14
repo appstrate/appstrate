@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation, type To } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, Brain, ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
-import { cn } from "@appstrate/ui/cn";
+import { ChartNoAxesCombined, Database, PlayCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { useSchedules } from "../../hooks/use-schedules";
@@ -16,6 +15,7 @@ import { runDetailPath } from "../../lib/package-paths";
 import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
+import { DetailSectionCard } from "../detail-section-card";
 import { AgentHealthSection } from "./agent-health-section";
 
 export function AgentOverviewTab({
@@ -93,113 +93,65 @@ function OperationalSummary({
     if (key && value) search.set(key, value);
     return { pathname: location.pathname, search: searchOf(search), hash };
   };
+  const memoryTo =
+    (pinned?.length ?? 0) + (memories?.length ?? 0) > 0 ? destination("#memory") : undefined;
 
   return (
     <div className="space-y-8" data-agent-operational-overview>
       <AgentHealthSection packageId={packageId} version={version} />
 
       <div className="grid gap-6 xl:grid-cols-3">
-        <section
-          className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
-          aria-labelledby="agent-runs-heading"
-        >
-          <OverviewSectionHeading
-            id="agent-runs-heading"
-            icon={PlayCircle}
-            title={t("detail.overview.runs")}
-          />
-          <div
-            className={cn(
-              "border-border bg-card grid h-full divide-y overflow-hidden rounded-lg border",
-              "rounded-t-lg border-x-0 border-b-0",
-            )}
-          >
-            <div className="flex min-w-0 flex-col">
-              {detail.last_run ? (
-                <Link
-                  to={runDetailPath(packageId, detail.last_run.id)}
-                  className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-muted-foreground text-xs font-medium">
-                        {t("detail.overview.lastRun")}
-                      </p>
-                      <Badge status={detail.last_run.status} compact />
-                    </div>
-                    <p className="text-foreground mt-3 text-sm">
-                      {formatDateField(detail.last_run.started_at, "datetime")}
-                    </p>
-                  </div>
-                  <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
-                </Link>
-              ) : (
-                <div className="p-4">
-                  <p className="text-muted-foreground text-xs font-medium">
-                    {t("detail.overview.lastRun")}
-                  </p>
-                  <p className="text-muted-foreground mt-3 text-sm">
-                    {t("detail.overview.noRuns")}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="flex min-w-0 flex-col">
-              {nextSchedule?.next_run_at ? (
-                <Link
-                  to={agentSettingsHref(location.pathname, "schedules")}
-                  className="group hover:bg-muted/20 focus-visible:ring-ring relative flex min-w-0 flex-1 flex-col justify-center p-4 pr-10 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset"
-                >
-                  <div className="min-w-0">
-                    <p className="text-muted-foreground text-xs font-medium">
-                      {t("schedule.paramNextRun")}
-                    </p>
-                    <p className="text-foreground mt-3 truncate text-sm">
-                      {formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)}
-                    </p>
-                  </div>
-                  <ArrowRight className="text-muted-foreground/45 group-hover:text-primary group-focus-visible:text-primary absolute top-1/2 right-4 size-4 -translate-y-1/2 opacity-70 transition-all group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:translate-x-0.5 group-focus-visible:opacity-100" />
-                </Link>
-              ) : (
-                <div className="p-4">
-                  <p className="text-muted-foreground text-xs font-medium">
-                    {t("schedule.paramNextRun")}
-                  </p>
-                  {schedulesError ? (
-                    <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>
-                  ) : (
-                    <p className="text-muted-foreground mt-3 text-sm">
-                      {t("detail.overview.noSchedule")}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
+        <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
+          <dl className="grid h-full divide-y">
+            <OperationalStat
+              size="sm"
+              label={
+                <span className="flex flex-wrap items-center gap-2">
+                  {t("detail.overview.lastRun")}
+                  {detail.last_run && <Badge status={detail.last_run.status} compact />}
+                </span>
+              }
+              value={
+                detail.last_run ? (
+                  formatDateField(detail.last_run.started_at, "datetime")
+                ) : (
+                  <span className="text-muted-foreground">{t("detail.overview.noRuns")}</span>
+                )
+              }
+              to={detail.last_run ? runDetailPath(packageId, detail.last_run.id) : undefined}
+            />
+            <OperationalStat
+              size="sm"
+              label={t("schedule.paramNextRun")}
+              value={
+                nextSchedule?.next_run_at ? (
+                  formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
+                ) : (
+                  <span className="text-muted-foreground">
+                    {schedulesError ? unknown : t("detail.overview.noSchedule")}
+                  </span>
+                )
+              }
+              to={
+                nextSchedule?.next_run_at
+                  ? agentSettingsHref(location.pathname, "schedules")
+                  : undefined
+              }
+            />
+          </dl>
+        </DetailSectionCard>
 
-        <section
-          className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
-          aria-labelledby="agent-activity-heading"
+        <DetailSectionCard
+          title={`${t("detail.overview.activity")} · ${t("detail.overview.lastThirtyDays")}`}
+          icon={ChartNoAxesCombined}
+          bodyClassName="p-0"
+          headerAction={
+            activity && activity.total > 0
+              ? { label: t("detail.overview.openRuns"), to: destination("#runs") }
+              : undefined
+          }
         >
-          <OverviewSectionHeading
-            id="agent-activity-heading"
-            icon={ChartNoAxesCombined}
-            title={t("detail.overview.activity")}
-            trailing={
-              <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[11px] font-medium">
-                {t("detail.overview.lastThirtyDays")}
-              </span>
-            }
-            to={activity && activity.total > 0 ? destination("#runs") : undefined}
-            actionLabel={t("detail.overview.openRuns")}
-          />
-          <dl
-            className={cn(
-              "border-border bg-card grid h-full grid-cols-2 divide-x overflow-hidden rounded-lg border md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0",
-              "rounded-t-lg border-x-0 border-b-0",
-            )}
-          >
+          <dl className="grid h-full grid-cols-2 divide-x md:grid-cols-5 xl:grid-cols-2 xl:divide-x-0">
             <OperationalStat
               className="xl:border-border xl:border-r xl:border-b"
               label={t("detail.overview.totalRuns")}
@@ -278,29 +230,17 @@ function OperationalSummary({
               }
             />
           </dl>
-        </section>
+        </DetailSectionCard>
 
-        <section
-          className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
-          aria-labelledby="agent-memory-heading"
+        <DetailSectionCard
+          title={t("detail.overview.memoryActivity")}
+          icon={Database}
+          bodyClassName="p-0"
+          headerAction={
+            memoryTo ? { label: t("detail.overview.openMemory"), to: memoryTo } : undefined
+          }
         >
-          <OverviewSectionHeading
-            id="agent-memory-heading"
-            icon={Database}
-            title={t("detail.overview.memoryActivity")}
-            to={
-              (pinned?.length ?? 0) + (memories?.length ?? 0) > 0
-                ? destination("#memory")
-                : undefined
-            }
-            actionLabel={t("detail.overview.openMemory")}
-          />
-          <dl
-            className={cn(
-              "border-border bg-card grid h-full grid-cols-1 divide-y overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y",
-              "rounded-t-lg border-x-0 border-b-0",
-            )}
-          >
+          <dl className="grid h-full grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
             <OperationalStat
               label={t("detail.overview.pinnedItems")}
               value={pinnedLoading ? "…" : pinnedError ? unknown : String(pinned?.length ?? 0)}
@@ -334,55 +274,8 @@ function OperationalSummary({
               }
             />
           </dl>
-        </section>
+        </DetailSectionCard>
       </div>
     </div>
   );
-}
-
-function OverviewSectionHeading({
-  id,
-  icon: Icon,
-  title,
-  trailing,
-  to,
-  actionLabel,
-}: {
-  id: string;
-  icon: typeof Brain;
-  title: string;
-  trailing?: React.ReactNode;
-  to?: To;
-  actionLabel?: string;
-}) {
-  const content = (
-    <>
-      <Icon className="text-muted-foreground size-4 shrink-0" aria-hidden />
-      <h2 id={id} className="text-sm font-semibold">
-        {title}
-      </h2>
-      {trailing}
-      {to && (
-        <ArrowRight className="text-muted-foreground group-hover:text-primary group-focus-visible:text-primary ml-auto size-4 shrink-0 transition-all group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5" />
-      )}
-    </>
-  );
-
-  if (to) {
-    return (
-      <Link
-        to={to}
-        aria-label={actionLabel}
-        title={actionLabel}
-        className={cn(
-          "group focus-visible:ring-ring flex min-h-5 items-center gap-2 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset",
-          "bg-muted/35 hover:bg-muted px-4 py-3",
-        )}
-      >
-        {content}
-      </Link>
-    );
-  }
-
-  return <div className="bg-muted/35 flex min-h-5 items-center gap-2 px-4 py-3">{content}</div>;
 }

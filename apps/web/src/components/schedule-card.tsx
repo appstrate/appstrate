@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
 import { Badge } from "./status-badge";
-import { ScheduleStatusBadge, ScheduleUnreadBadge } from "./schedule-status-badge";
+import { ScheduleStatusBadge } from "./schedule-status-badge";
+import { CountBadge } from "./count-badge";
 import { ActorLabel } from "./actor-label";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/format-date";
@@ -40,7 +41,10 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
           <ScheduleStatusBadge schedule={schedule} />
-          <ScheduleUnreadBadge count={schedule.unread_count} />
+          <CountBadge
+            count={schedule.unread_count}
+            label={t("dashboard.unreadRuns", { ns: "agents", count: schedule.unread_count })}
+          />
           {runningRuns > 0 && <Badge status="running" />}
         </div>
       </div>

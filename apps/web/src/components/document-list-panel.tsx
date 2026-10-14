@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
-import { ErrorState, EmptyState } from "./page-states";
+import { EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
 import { ItemList } from "./item-list";
 import { DataTable } from "./data-table";
@@ -162,8 +162,7 @@ export function DocumentListPanel({
             items={documents}
             itemKey={(doc) => doc.id}
             isLoading={isLoading}
-            isError={Boolean(error)}
-            error={<ErrorState error={error} compact />}
+            failure={error}
             empty={emptyState}
             renderItem={(doc) => (
               <div className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-1.5">
@@ -196,8 +195,7 @@ export function DocumentListPanel({
             }
             rowLabel={(doc) => doc.name}
             isLoading={isLoading}
-            isError={Boolean(error)}
-            error={<ErrorState error={error} compact />}
+            failure={error}
             empty={emptyState}
           />
         ) : (
@@ -207,8 +205,7 @@ export function DocumentListPanel({
             min="10rem"
             itemKey={(doc) => doc.id}
             isLoading={isLoading}
-            isError={Boolean(error)}
-            error={<ErrorState error={error} compact />}
+            failure={error}
             empty={emptyState}
             renderCard={(doc) => (
               <FileTile

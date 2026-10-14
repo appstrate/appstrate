@@ -13,8 +13,8 @@
  * better than a segment carrying a made-up name. `ShellBreadcrumb` draws the
  * separator with the segment, so nothing is left dangling either way.
  *
- * A component rather than a hook call inside `ChatShell` because it must sit
- * BELOW the chat's context providers, and `ChatShell` is what puts them up.
+ * A component rather than a hook call inside `ChatSidebar` because it must sit
+ * BELOW the chat's context providers, and `ChatSidebar` is what puts them up.
  */
 
 import { useMemo } from "react";

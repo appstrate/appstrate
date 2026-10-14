@@ -19,21 +19,15 @@
 
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect } from "@appstrate/ui/components/select";
 import type { components } from "../../api/schema";
 import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
-import { formatDateField } from "../../lib/format-date";
 import { memberLabel } from "../../lib/billing-managers";
 import type { OrgRole } from "@appstrate/shared-types";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
+import { CellDate, CellEmpty, CellList, CellText } from "../../components/table-cells";
 
 /** Widest reach first, the order every org-role list uses. Only an owner is offered `owner`. */
 const ORG_ROLE_DISPLAY_ORDER: readonly OrgRole[] = ["owner", "admin", "member", "guest"];
@@ -69,9 +63,9 @@ export function useMemberColumns({
       cell: (member) => {
         const name = memberLabel(member);
         return (
-          <span className="block truncate text-sm font-medium" title={name}>
+          <CellText strong title={name}>
             {name}
-          </span>
+          </CellText>
         );
       },
     },
@@ -80,14 +74,8 @@ export function useMemberColumns({
       header: t("orgSettings.emailColumn"),
       width: "minmax(150px,1.3fr)",
       tier: 2,
-      cell: (member) => (
-        <span
-          className="text-muted-foreground block truncate text-xs"
-          title={member.email ?? undefined}
-        >
-          {member.email ?? "—"}
-        </span>
-      ),
+      cell: (member) =>
+        member.email ? <CellText title={member.email}>{member.email}</CellText> : <CellEmpty />,
     },
     {
       id: "role",
@@ -98,35 +86,23 @@ export function useMemberColumns({
       cell: (member) => {
         const roles = assignableRoles(member);
         if (roles.length === 0) {
-          return (
-            <span className="text-muted-foreground block truncate text-xs">
-              {t(roleI18nKey(member.role))}
-            </span>
-          );
+          return <CellText>{t(roleI18nKey(member.role))}</CellText>;
         }
         return (
           // The row's stretched link paints over its cells: a control has to
           // raise itself to stay clickable.
           <span className="relative z-10 block">
-            <Select
+            <OptionSelect
               value={member.role}
               onValueChange={(v) => onChangeRole(member, v as OrgRole)}
               disabled={isChangingRole}
-            >
-              <SelectTrigger
-                className="h-7 w-full text-xs"
-                aria-label={t("orgSettings.memberRoleAriaLabel", { name: memberLabel(member) })}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ORG_ROLE_DISPLAY_ORDER.filter((r) => roles.includes(r)).map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {t(roleI18nKey(r))}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              className="h-7 w-full text-xs"
+              aria-label={t("orgSettings.memberRoleAriaLabel", { name: memberLabel(member) })}
+              options={ORG_ROLE_DISPLAY_ORDER.filter((r) => roles.includes(r)).map((r) => ({
+                value: r,
+                label: t(roleI18nKey(r)),
+              }))}
+            />
           </span>
         );
       },
@@ -138,20 +114,7 @@ export function useMemberColumns({
             header: t("orgSettings.spacesColumn"),
             width: "minmax(100px,1.2fr)" as const,
             tier: 3 as const,
-            cell: (member: OrgMember) => {
-              const names = spaces(member);
-              if (names.length === 0)
-                return <span className="text-muted-foreground text-xs">—</span>;
-              const text = names.join(", ");
-              return (
-                <span
-                  className="text-muted-foreground relative z-10 block truncate text-xs"
-                  title={text}
-                >
-                  {text}
-                </span>
-              );
-            },
+            cell: (member: OrgMember) => <CellList items={spaces(member)} />,
           },
         ]
       : []),
@@ -161,35 +124,27 @@ export function useMemberColumns({
       width: "92px",
       align: "end",
       tier: 3,
-      cell: (member) => (
-        <span className="text-muted-foreground text-xs">
-          {formatDateField(member.joinedAt, "date")}
-        </span>
-      ),
+      cell: (member) => <CellDate value={member.joinedAt} granularity="date" />,
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (member) =>
-        canRemove(member) ? (
-          <TableRowActions
-            menuLabel={t("orgSettings.moreMemberActions", {
-              name: memberLabel(member),
-            })}
-            isPending={isRemoving}
-          >
-            <DropdownMenuItem
-              onSelect={() => onRemove(member)}
-              disabled={isRemoving}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 />
-              {t("btn.remove")}
-            </DropdownMenuItem>
-          </TableRowActions>
-        ) : null,
-    },
+    rowActionsColumn((member: OrgMember) =>
+      canRemove(member) ? (
+        <TableRowActions
+          menuLabel={t("orgSettings.moreMemberActions", {
+            name: memberLabel(member),
+          })}
+          isPending={isRemoving}
+          actions={[
+            {
+              id: "remove",
+              label: t("btn.remove"),
+              icon: Trash2,
+              onSelect: () => onRemove(member),
+              disabled: isRemoving,
+              destructive: true,
+            },
+          ]}
+        />
+      ) : null,
+    ),
   ];
 }

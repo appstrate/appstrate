@@ -5,14 +5,14 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { usePackageVersions, useRestoreVersion, useDeleteVersion } from "../hooks/use-packages";
-import { formatDateField } from "../lib/format-date";
 import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
-import { EmptyState, EmptyStateAction, ErrorState } from "./page-states";
+import { EmptyState, EmptyStateAction } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
 import { matchesSearch } from "../lib/strings";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "./table-row-actions";
+import { rowActionsColumn } from "./row-actions-column";
+import { CellDate } from "./table-cells";
 import { ConfirmModal } from "./confirm-modal";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Trash2, RotateCcw, History, GitCompareArrows } from "lucide-react";
@@ -88,8 +88,7 @@ export function VersionHistory({
         surface="integrated"
         columnMode="scroll"
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState
             icon={History}
@@ -122,7 +121,8 @@ export function VersionHistory({
             id: "date",
             header: t("version.created"),
             width: "minmax(120px,1fr)",
-            cell: (version) => (version.createdAt ? formatDateField(version.createdAt) : "–"),
+            align: "end",
+            cell: (version) => <CellDate value={version.createdAt} />,
           },
           {
             id: "status",
@@ -136,49 +136,39 @@ export function VersionHistory({
           },
           ...(onCompare || canRestore || canDelete
             ? [
-                {
-                  id: "actions",
-                  header: "",
-                  width: "48px" as const,
-                  cell: (version: NonNullable<typeof versions>[number]) => (
-                    <TableRowActions
-                      menuLabel={t("version.actionsFor", { version: version.version })}
-                    >
-                      {onCompare && (
-                        <DropdownMenuItem onSelect={() => onCompare(version.version)}>
-                          <GitCompareArrows />
-                          {t("version.compareWithDraft")}
-                        </DropdownMenuItem>
-                      )}
-                      {canRestore && (
-                        <DropdownMenuItem
-                          disabled={restoreVersion.isPending || deleteVersion.isPending}
-                          onSelect={() =>
-                            setConfirmState({ type: "restore", version: version.version })
-                          }
-                        >
-                          <RotateCcw />
-                          {t("version.restore")}
-                        </DropdownMenuItem>
-                      )}
-                      {canDelete && (
-                        <>
-                          {(onCompare || canRestore) && <DropdownMenuSeparator />}
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            disabled={deleteVersion.isPending || restoreVersion.isPending}
-                            onSelect={() =>
-                              setConfirmState({ type: "delete", version: version.version })
-                            }
-                          >
-                            <Trash2 />
-                            {t("btn.delete", { ns: "common" })}
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </TableRowActions>
-                  ),
-                },
+                rowActionsColumn((version: NonNullable<typeof versions>[number]) => (
+                  <TableRowActions
+                    menuLabel={t("version.actionsFor", { version: version.version })}
+                    actions={[
+                      {
+                        id: "compare",
+                        label: t("version.compareWithDraft"),
+                        icon: GitCompareArrows,
+                        onSelect: () => onCompare?.(version.version),
+                        hidden: !onCompare,
+                      },
+                      {
+                        id: "restore",
+                        label: t("version.restore"),
+                        icon: RotateCcw,
+                        disabled: restoreVersion.isPending || deleteVersion.isPending,
+                        onSelect: () =>
+                          setConfirmState({ type: "restore", version: version.version }),
+                        hidden: !canRestore,
+                      },
+                      {
+                        id: "delete",
+                        label: t("btn.delete", { ns: "common" }),
+                        icon: Trash2,
+                        destructive: true,
+                        disabled: deleteVersion.isPending || restoreVersion.isPending,
+                        onSelect: () =>
+                          setConfirmState({ type: "delete", version: version.version }),
+                        hidden: !canDelete,
+                      },
+                    ]}
+                  />
+                )),
               ]
             : []),
         ]}

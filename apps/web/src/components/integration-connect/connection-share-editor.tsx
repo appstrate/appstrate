@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
 import type { ConnectionScope } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import {
   Command,
@@ -65,13 +66,12 @@ export function ConnectionShareEditor({
         className="flex items-center gap-1.5 text-xs"
         title={t("integration.connection.share.thisSpaceHelp")}
       >
-        <input
-          type="checkbox"
+        <Checkbox
           checked={!!rowSpaceId && sharedSpaceIds.includes(rowSpaceId)}
           disabled={pending || !rowSpaceId}
-          onChange={(e) => {
+          onCheckedChange={(checked) => {
             if (!rowSpaceId) return;
-            if (e.target.checked) onShare(rowSpaceId);
+            if (checked === true) onShare(rowSpaceId);
             else onUnshare(rowSpaceId);
           }}
           data-testid={`share-toggle-${connectionId}`}

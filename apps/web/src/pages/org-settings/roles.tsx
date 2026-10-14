@@ -11,7 +11,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { cn } from "@appstrate/ui/cn";
+import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { ApiError } from "../../api/client";
 import {
   dependentsLabel,
@@ -168,8 +168,7 @@ export function OrgSettingsRolesPage() {
   const editable = !!target && target.kind === "custom" && canWrite;
   const tableState = {
     isLoading,
-    isError: Boolean(error),
-    error: <ErrorState error={error} compact />,
+    failure: error,
   };
 
   return (
@@ -469,60 +468,36 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
         onChange={() => setFormError(null)}
         className="space-y-4"
       >
-        <div className="space-y-2">
-          <Label htmlFor="role-name">{t("roles.nameLabel")}</Label>
+        <FormItem id="role-name" label={t("roles.nameLabel")} error={errors.name?.message}>
           <Input
-            id="role-name"
             maxLength={100}
             disabled={isPending}
             autoFocus
-            aria-invalid={!!errors.name}
-            aria-describedby={errors.name ? "role-name-error" : undefined}
-            className={cn(errors.name && "border-destructive")}
             {...register("name", {
               required: t("common:validation.required"),
               setValueAs: (value: string) => value.trim(),
             })}
           />
-          {errors.name && (
-            <div id="role-name-error" role="alert" className="text-destructive text-sm">
-              {errors.name.message}
-            </div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="role-key">{t("roles.keyLabel")}</Label>
+        </FormItem>
+        <FormItem
+          id="role-key"
+          label={t("roles.keyLabel")}
+          hint={t("roles.keyHint")}
+          error={errors.key?.message}
+        >
           <Input
-            id="role-key"
             maxLength={64}
             disabled={isPending}
             placeholder="support-lead"
-            aria-invalid={!!errors.key}
-            aria-describedby="role-key-hint role-key-error"
-            className={cn(errors.key && "border-destructive")}
             {...register("key", {
               required: t("common:validation.required"),
               setValueAs: (value: string) => value.trim(),
             })}
           />
-          <div id="role-key-hint" className="text-muted-foreground text-sm">
-            {t("roles.keyHint")}
-          </div>
-          {errors.key && (
-            <div id="role-key-error" role="alert" className="text-destructive text-sm">
-              {errors.key.message}
-            </div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="role-description">{t("roles.descriptionLabel")}</Label>
-          <Input
-            id="role-description"
-            maxLength={500}
-            disabled={isPending}
-            {...register("description")}
-          />
-        </div>
+        </FormItem>
+        <FormItem id="role-description" label={t("roles.descriptionLabel")}>
+          <Input maxLength={500} disabled={isPending} {...register("description")} />
+        </FormItem>
         <div className="space-y-2">
           <Label>{t("roles.permissionsLabel")}</Label>
           {isLoading ? (
@@ -569,11 +544,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
           )}
           <UnavailablePermissions permissions={unavailable} />
         </div>
-        {formError && (
-          <p role="alert" className="text-destructive text-sm">
-            {formError}
-          </p>
-        )}
+        {formError && <FieldError>{formError}</FieldError>}
       </form>
     </Modal>
   );

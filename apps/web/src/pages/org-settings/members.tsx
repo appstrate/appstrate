@@ -12,7 +12,7 @@ import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { PageActionsMenu } from "../../components/page-actions-menu";
@@ -175,8 +175,7 @@ export function OrgSettingsMembersPage() {
         rowHref={(member) => `?user=${encodeURIComponent(member.userId)}`}
         rowLabel={memberLabel}
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
       />
 
       {openedUser && (

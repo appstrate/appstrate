@@ -15,6 +15,7 @@
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Upload } from "lucide-react";
 import { matchVersion } from "@appstrate/core/semver";
+import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import {
@@ -111,23 +112,23 @@ export function LocalServerField({
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="int-source-server-version">
-          {t("integrationEditor.source.serverVersion")}
-        </Label>
-        <Input
+        <FormItem
           id="int-source-server-version"
-          value={version}
-          onChange={(event) => onChange({ serverVersion: event.target.value })}
-          placeholder="^1.0.0"
-          aria-describedby="hint-int-source-server-version"
-        />
-        {known && versions.isSuccess && (
-          <p id="hint-int-source-server-version" className="text-muted-foreground text-sm">
-            {published.length > 0
-              ? t("integrationEditor.source.serverVersions", { versions: published.join(", ") })
-              : t("integrationEditor.source.serverNoVersion")}
-          </p>
-        )}
+          label={t("integrationEditor.source.serverVersion")}
+          hint={
+            known && versions.isSuccess
+              ? published.length > 0
+                ? t("integrationEditor.source.serverVersions", { versions: published.join(", ") })
+                : t("integrationEditor.source.serverNoVersion")
+              : undefined
+          }
+        >
+          <Input
+            value={version}
+            onChange={(event) => onChange({ serverVersion: event.target.value })}
+            placeholder="^1.0.0"
+          />
+        </FormItem>
         {unsatisfied && published.length > 0 && (
           <Warning>
             {t("integrationEditor.source.serverVersionUnmatched", { range: version || "*" })}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The single row shape the manifest view uses: a label above its value.
+ * The manifest view's facts, drawn through the shared `Fact` shape.
  *
  * The value becomes an `<a>` only when the reader already proved it is an
  * http(s) URL (`normalizeHttpUrl`) — this component never decides that itself, so
@@ -16,32 +16,30 @@
 
 import { useTranslation } from "react-i18next";
 import type { ManifestLink } from "../../lib/package-manifest";
+import { Fact, FactGrid } from "../fact-grid";
 
-export function FactGrid({ facts }: { facts: ManifestLink[] }) {
+export function ManifestFacts({ facts }: { facts: ManifestLink[] }) {
   const { t } = useTranslation("agents");
   if (facts.length === 0) return null;
 
   return (
-    <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+    <FactGrid>
       {facts.map((entry, index) => (
-        <div key={`${index}:${entry.labelKey}:${entry.value}`} className="min-w-0">
-          <dt className="text-muted-foreground text-xs">{t(entry.labelKey)}</dt>
-          <dd className="text-foreground mt-1 text-sm break-words">
-            {entry.href ? (
-              <a
-                href={entry.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-primary hover:underline"
-              >
-                {entry.value}
-              </a>
-            ) : (
-              entry.value
-            )}
-          </dd>
-        </div>
+        <Fact key={`${index}:${entry.labelKey}:${entry.value}`} label={t(entry.labelKey)}>
+          {entry.href ? (
+            <a
+              href={entry.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              {entry.value}
+            </a>
+          ) : (
+            entry.value
+          )}
+        </Fact>
       ))}
-    </dl>
+    </FactGrid>
   );
 }

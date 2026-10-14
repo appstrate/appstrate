@@ -24,7 +24,7 @@ import { useConvertSpaceToTeam, useSpaces, useSweepPersonalSpace } from "../../h
 import { usePermissions } from "../../hooks/use-permissions";
 import { isSpaceEnterable, useSpaceSwitcher } from "../../hooks/use-current-space";
 import { spaceLabel } from "../../lib/space-label";
-import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { EmptyState, EmptyStateAction } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
@@ -111,8 +111,7 @@ export function OrgSettingsSpacesPage() {
         rowActionable={(space) => !space.orphaned_at && isSpaceEnterable(space)}
         rowLabel={(space) => spaceLabel(space, t)}
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
             {can("spaces:write") && (

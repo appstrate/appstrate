@@ -4,13 +4,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { CopyBlock } from "../copy-block";
 import { buildMcpClientConfig } from "../../lib/mcp-client-config";
@@ -72,19 +66,14 @@ export function McpClientConnect({ orgId, orgSlug }: McpClientConnectProps) {
         <p className="text-muted-foreground mb-1 text-xs font-medium">
           {t("orgSettings.mcpScopeLabel")}
         </p>
-        <Select value={space ? space.id : ALL_SPACES} onValueChange={setScope}>
-          <SelectTrigger className="w-full sm:w-72" data-testid="mcp-scope-select">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_SPACES}>{t("orgSettings.mcpScopeAll")}</SelectItem>
-            {enterable.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {spaceLabel(s, t)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          value={space ? space.id : ALL_SPACES}
+          onValueChange={setScope}
+          className="w-full sm:w-72"
+          data-testid="mcp-scope-select"
+          leading={<SelectItem value={ALL_SPACES}>{t("orgSettings.mcpScopeAll")}</SelectItem>}
+          options={enterable.map((s) => ({ value: s.id, label: spaceLabel(s, t) }))}
+        />
         <p className="text-muted-foreground mt-1 text-xs">
           {space ? t("orgSettings.mcpScopeSpaceHint") : t("orgSettings.mcpScopeAllHint")}
         </p>

@@ -11,11 +11,9 @@
  * here opens its file there.
  */
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { FolderOpen } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { formatBytes } from "../../lib/format-bytes";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -108,14 +106,17 @@ export function PackageFilesSection({
                     {formatBytes(entry.size)}
                   </TableCell>
                   <TableCell>
-                    <TableRowActions menuLabel={t("editor.rowActions", { name: entry.path })}>
-                      <DropdownMenuItem asChild>
-                        <Link to={filesHref(entry.path)}>
-                          <FolderOpen />
-                          {t("editor.viewInExplorer")}
-                        </Link>
-                      </DropdownMenuItem>
-                    </TableRowActions>
+                    <TableRowActions
+                      menuLabel={t("editor.rowActions", { name: entry.path })}
+                      actions={[
+                        {
+                          id: "view-in-explorer",
+                          label: t("editor.viewInExplorer"),
+                          icon: FolderOpen,
+                          href: filesHref(entry.path),
+                        },
+                      ]}
+                    />
                   </TableCell>
                 </TableRow>
               ))}

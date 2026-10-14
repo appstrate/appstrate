@@ -22,9 +22,13 @@ export function CollectionStates({
   state: CollectionState;
   skeleton: ReactNode;
 }) {
-  // `isError` always draws something, whether or not the caller wrote the sentence.
+  // A failure (`isError` or `failure`) always draws something, written by the caller or not.
   if (verdict === "error") {
-    return <CollectionFrame>{state.error ?? <ErrorState compact />}</CollectionFrame>;
+    return (
+      <CollectionFrame>
+        {state.error ?? <ErrorState error={state.failure} compact />}
+      </CollectionFrame>
+    );
   }
   if (verdict === "loading") return skeleton;
   return <CollectionFrame>{state.empty}</CollectionFrame>;

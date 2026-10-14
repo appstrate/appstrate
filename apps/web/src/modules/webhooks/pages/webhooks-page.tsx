@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useWebhooks } from "../hooks/use-webhooks";
-import { ErrorState, EmptyState, EmptyStateAction } from "@/components/page-states";
+import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { PageActionsMenu } from "@/components/page-actions-menu";
@@ -51,8 +51,7 @@ export function WebhooksPage() {
         rowHref={(wh) => `/workspace-settings/webhooks/${wh.id}`}
         rowLabel={(wh) => wh.url}
         isLoading={isLoading}
-        isError={Boolean(error)}
-        error={<ErrorState error={error} compact />}
+        failure={error}
         empty={
           <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
             {canCreate && (

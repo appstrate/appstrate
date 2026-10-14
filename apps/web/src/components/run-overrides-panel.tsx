@@ -3,13 +3,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
+import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
 import { useModels } from "../hooks/use-models";
 import { isModelSelectable } from "../lib/model-selectability";
 import { ModelSelect } from "./model-select";
@@ -294,11 +288,10 @@ export function RunOverridesPanel({
           label={t("detail.configSectionProxy", { ns: "agents" })}
           description={t("schedule.settings.proxyHint", { ns: "agents" })}
         >
-          <Select value={proxySelectValue} onValueChange={setProxy}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
+          <OptionSelect
+            value={proxySelectValue}
+            onValueChange={setProxy}
+            leading={
               <SelectItem value={INHERIT}>
                 {persistedProxyId === NONE
                   ? t("run.overrides.proxyInheritWithDefault", {
@@ -312,19 +305,21 @@ export function RunOverridesPanel({
                       })
                     : t("run.overrides.proxyInherit", { ns: "agents" })}
               </SelectItem>
-              <SelectItem value={NONE}>{t("run.overrides.proxyNone", { ns: "agents" })}</SelectItem>
-              {goneProxyOverride && (
-                <SelectItem value={goneProxyOverride} disabled>
-                  {t("run.overrides.proxyGone", { ns: "agents" })}
-                </SelectItem>
-              )}
-              {orgProxies.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            }
+            options={[
+              { value: NONE, label: t("run.overrides.proxyNone", { ns: "agents" }) },
+              ...(goneProxyOverride
+                ? [
+                    {
+                      value: goneProxyOverride,
+                      label: t("run.overrides.proxyGone", { ns: "agents" }),
+                      disabled: true,
+                    },
+                  ]
+                : []),
+              ...orgProxies.map((p) => ({ value: p.id, label: p.label })),
+            ]}
+          />
         </OverrideRow>
       )}
 

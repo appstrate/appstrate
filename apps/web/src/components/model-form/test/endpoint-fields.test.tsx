@@ -141,8 +141,8 @@ describe("EndpointFields", () => {
         onClear: () => {},
       },
     });
-    const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
-    expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
+    const at = html.indexOf('id="mdl-baseUrl"');
+    expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
     expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
     expect(html).toContain(LOCAL_KEY.label);
     // The key is selected, so there is nothing to type into.

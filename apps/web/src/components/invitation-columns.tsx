@@ -14,12 +14,12 @@
  */
 import { useTranslation } from "react-i18next";
 import { Link2, Pencil, Trash2 } from "lucide-react";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { components } from "../api/schema";
 import type { DataColumn } from "./data-table";
+import { rowActionsColumn } from "./row-actions-column";
 import { TableRowActions } from "./table-row-actions";
+import { CellDate, CellList, CellText } from "./table-cells";
 import { roleI18nKey } from "../hooks/use-permissions";
-import { formatDateField } from "../lib/format-date";
 
 type Invitation = components["schemas"]["OrgInvitationInfo"];
 
@@ -46,36 +46,21 @@ export function useInvitationColumns({
       id: "email",
       header: t("orgSettings.emailColumn"),
       width: "minmax(120px,1.4fr)",
-      cell: (invitation) => (
-        <span className="block truncate text-sm font-medium">{invitation.email}</span>
-      ),
+      cell: (invitation) => <CellText strong>{invitation.email}</CellText>,
     },
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
       width: "minmax(100px,1fr)",
       tier: 2,
-      cell: (invitation) => (
-        <span className="text-muted-foreground block truncate text-xs">
-          {t(roleI18nKey(invitation.role))}
-        </span>
-      ),
+      cell: (invitation) => <CellText>{t(roleI18nKey(invitation.role))}</CellText>,
     },
     {
       id: "spaces",
       header: t("orgSettings.inviteSpacesLabel"),
       width: "minmax(80px,1.3fr)",
       tier: 2,
-      cell: (invitation) => {
-        const list = assignments(invitation);
-        if (list.length === 0) return <span className="text-muted-foreground text-xs">—</span>;
-        const text = list.join(", ");
-        return (
-          <span className="text-muted-foreground relative z-10 block truncate text-xs" title={text}>
-            {text}
-          </span>
-        );
-      },
+      cell: (invitation) => <CellList items={assignments(invitation)} />,
     },
     {
       id: "expires",
@@ -83,42 +68,35 @@ export function useInvitationColumns({
       width: "92px",
       align: "end",
       tier: 2,
-      cell: (invitation) => (
-        <span className="text-muted-foreground text-xs">
-          {formatDateField(invitation.expiresAt, "date")}
-        </span>
-      ),
+      cell: (invitation) => <CellDate value={invitation.expiresAt} granularity="date" />,
     },
-    {
-      id: "actions",
-      header: "",
-      width: "80px",
-      align: "end",
-      cell: (invitation) => (
-        <TableRowActions
-          menuLabel={t("orgSettings.moreInvitationActions", { email: invitation.email })}
-          isPending={isCanceling}
-        >
-          {canEdit && (
-            <DropdownMenuItem onSelect={() => onEdit(invitation)}>
-              <Pencil />
-              {t("orgSettings.editInvitation")}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem onSelect={() => onCopyLink(invitation)}>
-            <Link2 />
-            {t("common:btn.copyLink")}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => onCancel(invitation)}
-            className="text-destructive focus:text-destructive"
-          >
-            <Trash2 />
-            {t("orgSettings.cancelInvitation")}
-          </DropdownMenuItem>
-        </TableRowActions>
-      ),
-    },
+    rowActionsColumn((invitation) => (
+      <TableRowActions
+        menuLabel={t("orgSettings.moreInvitationActions", { email: invitation.email })}
+        isPending={isCanceling}
+        actions={[
+          {
+            id: "edit",
+            label: t("orgSettings.editInvitation"),
+            icon: Pencil,
+            onSelect: () => onEdit(invitation),
+            hidden: !canEdit,
+          },
+          {
+            id: "copy-link",
+            label: t("common:btn.copyLink"),
+            icon: Link2,
+            onSelect: () => onCopyLink(invitation),
+          },
+          {
+            id: "cancel",
+            label: t("orgSettings.cancelInvitation"),
+            icon: Trash2,
+            onSelect: () => onCancel(invitation),
+            destructive: true,
+          },
+        ]}
+      />
+    )),
   ];
 }

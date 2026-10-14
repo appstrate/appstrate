@@ -21,6 +21,8 @@ import {
 } from "../lib/catalogue-gates";
 import type { DataColumn } from "./data-table";
 import { CatalogueRowMenu } from "./catalogue-row";
+import { rowActionsColumn } from "./row-actions-column";
+import { CellEmpty, CellText } from "./table-cells";
 import { MetaBadge } from "./status-badge";
 import type { CardItem } from "../pages/package-list";
 import type { IntegrationProtocol } from "../lib/integration-collection";
@@ -108,9 +110,7 @@ export function useCatalogueOriginColumn<
       const home = item.source === "system" ? null : homeNameOf?.(item);
       return (
         <span className="flex min-w-0 flex-col items-start">
-          <span className="text-muted-foreground truncate text-xs">
-            {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
-          </span>
+          <CellText>{item.source === "system" ? t("catalogue.sourceSystem") : orgName}</CellText>
           {item.autoInstalled && <MetaBadge label={t("agents:list.badgeAutoInstalled")} />}
           {home && (
             <span
@@ -151,27 +151,20 @@ export function useCatalogueActionsColumn({
   onShare: (item: CardItem) => void;
   onRevoke: (item: CardItem, spaceId: string) => void;
 }): DataColumn<CardItem> {
-  return {
-    id: "actions",
-    header: "",
-    width: "48px",
-    align: "end",
-    control: true,
-    cell: (item) => (
-      <CatalogueRowMenu
-        item={item}
-        // A system package has no home to move and no audience to offer: the
-        // server answers `false` for both, so the menu offers neither.
-        deeds={deedsOf(item) ?? NO_DEEDS}
-        spaceNameOf={spaceNameOf}
-        isPending={isPending}
-        onOpen={onOpen}
-        onMoveHome={onMoveHome}
-        onShare={onShare}
-        onRevoke={onRevoke}
-      />
-    ),
-  };
+  return rowActionsColumn((item) => (
+    <CatalogueRowMenu
+      item={item}
+      // A system package has no home to move and no audience to offer: the
+      // server answers `false` for both, so the menu offers neither.
+      deeds={deedsOf(item) ?? NO_DEEDS}
+      spaceNameOf={spaceNameOf}
+      isPending={isPending}
+      onOpen={onOpen}
+      onMoveHome={onMoveHome}
+      onShare={onShare}
+      onRevoke={onRevoke}
+    />
+  ));
 }
 
 /** API or MCP, for a remote integration — a local one is always MCP. */
@@ -186,10 +179,10 @@ export function useCatalogueProtocolColumn<T = CardItem>(
     tier: 2,
     cell: (item) => {
       const protocol = protocolOf(item);
-      return (
-        <span className="text-muted-foreground text-xs">
-          {protocol ? t(`integrations.protocol.${protocol}`) : "—"}
-        </span>
+      return protocol ? (
+        <CellText>{t(`integrations.protocol.${protocol}`)}</CellText>
+      ) : (
+        <CellEmpty />
       );
     },
   };
@@ -260,7 +253,7 @@ export function useCatalogueSpaceColumns({
     width: index === 0 ? "minmax(140px,1fr)" : "minmax(104px,1fr)",
     cell: (item) => {
       const placement = placementOf(item);
-      if (!placement) return <span className="text-muted-foreground/50">—</span>;
+      if (!placement) return <CellEmpty />;
       const state = placementIn(placement, space.id);
       const gate = gateOf(item, space.id, state !== "active");
       return (

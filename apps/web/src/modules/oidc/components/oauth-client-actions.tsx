@@ -4,10 +4,9 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Pencil, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { SecretRevealModal } from "../../../components/secret-reveal-modal";
-import { TableRowActions } from "../../../components/table-row-actions";
+import { TableRowActions, type RowAction } from "../../../components/table-row-actions";
 import { usePermissions } from "../../../hooks/use-permissions";
 import {
   useDeleteOAuthClient,
@@ -73,75 +72,70 @@ export function OAuthClientActions({
   // delete has no menu at all.
   if (!canWrite && !canDelete) return null;
 
+  const actions: RowAction[] = [
+    {
+      id: "edit",
+      label: t("common:btn.edit"),
+      icon: Pencil,
+      onSelect: onEdit,
+      hidden: !canWrite,
+    },
+    {
+      id: "first-party",
+      label: client.isFirstParty
+        ? t("oauthClients.removeFirstParty")
+        : t("oauthClients.makeFirstParty"),
+      icon: ShieldCheck,
+      onSelect: () =>
+        handleUpdate(
+          { isFirstParty: !client.isFirstParty },
+          t(
+            client.isFirstParty
+              ? "oauthClients.firstPartyDisabled"
+              : "oauthClients.firstPartyEnabled",
+          ),
+        ),
+      disabled: updateMutation.isPending,
+      hidden: !canWrite,
+    },
+    {
+      id: "toggle-disabled",
+      label: client.disabled ? t("oauthClients.enable") : t("oauthClients.disable"),
+      icon: Power,
+      onSelect: () =>
+        handleUpdate(
+          { disabled: !client.disabled },
+          t(client.disabled ? "oauthClients.enabled" : "oauthClients.disabled"),
+        ),
+      disabled: updateMutation.isPending,
+      hidden: !canWrite,
+    },
+    {
+      id: "rotate",
+      label: t("oauthClients.rotate"),
+      icon: RotateCcw,
+      onSelect: () => setRotateConfirmOpen(true),
+      disabled: rotateMutation.isPending,
+      hidden: !canWrite,
+    },
+    {
+      id: "delete",
+      label: t("common:btn.delete"),
+      icon: Trash2,
+      onSelect: () => setDeleteConfirmOpen(true),
+      disabled: deleteMutation.isPending,
+      destructive: true,
+      hidden: !canDelete,
+    },
+  ];
+
   return (
     <>
       <TableRowActions
         menuLabel={t("oauthClients.moreActions", { name: rowName })}
         isPending={isPending}
-      >
-        {canWrite && (
-          <DropdownMenuItem onSelect={onEdit}>
-            <Pencil />
-            {t("common:btn.edit")}
-          </DropdownMenuItem>
-        )}
-        {canWrite && (
-          <DropdownMenuItem
-            onSelect={() =>
-              handleUpdate(
-                { isFirstParty: !client.isFirstParty },
-                t(
-                  client.isFirstParty
-                    ? "oauthClients.firstPartyDisabled"
-                    : "oauthClients.firstPartyEnabled",
-                ),
-              )
-            }
-            disabled={updateMutation.isPending}
-          >
-            <ShieldCheck />
-            {client.isFirstParty
-              ? t("oauthClients.removeFirstParty")
-              : t("oauthClients.makeFirstParty")}
-          </DropdownMenuItem>
-        )}
-        {canWrite && (
-          <>
-            <DropdownMenuItem
-              onSelect={() =>
-                handleUpdate(
-                  { disabled: !client.disabled },
-                  t(client.disabled ? "oauthClients.enabled" : "oauthClients.disabled"),
-                )
-              }
-              disabled={updateMutation.isPending}
-            >
-              <Power />
-              {client.disabled ? t("oauthClients.enable") : t("oauthClients.disable")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => setRotateConfirmOpen(true)}
-              disabled={rotateMutation.isPending}
-            >
-              <RotateCcw />
-              {t("oauthClients.rotate")}
-            </DropdownMenuItem>
-          </>
-        )}
-        {canDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() => setDeleteConfirmOpen(true)}
-              disabled={deleteMutation.isPending}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 />
-              {t("common:btn.delete")}
-            </DropdownMenuItem>
-          </>
-        )}
-      </TableRowActions>
+        actions={actions}
+      />
 
       <ConfirmModal
         open={rotateConfirmOpen}

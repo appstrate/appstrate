@@ -35,7 +35,7 @@ import {
 import { Spinner } from "../spinner";
 import { ListToolbar } from "../list-toolbar";
 import { Badge } from "@appstrate/ui/components/badge";
-import { ErrorState, EmptyState, EmptyStateAction } from "../page-states";
+import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../page-states";
 import type { ResourceEntry } from "./types";
 import { caretRange } from "./utils";
 import { IntegrationToolPicker } from "./integration-tool-picker";
@@ -389,7 +389,7 @@ export function ResourceSection({
               could: the checkbox only removes the dependency. So the one action
               the sentence asks for had no button anywhere. */}
           {visibleItems.length === 0 && visibleMissingIds.length === 0 && !leadingItems && (
-            <EmptyState icon={SearchX} message={t("editor.resourceNoMatch")} compact />
+            <NoMatchState message={t("editor.resourceNoMatch")} />
           )}
           {visibleMissingIds.map((id) => (
             <div
@@ -682,13 +682,25 @@ function SelectedResources({
                       </TableCell>
                     )}
                     <TableCell className="text-right">
-                      <TableRowActions menuLabel={t("editor.resourceActions", { name })}>
-                        {isIntegration && !isMissing && (
-                          <DropdownMenuItem onSelect={() => toolsFor.open(entry.id)}>
-                            <Wrench />
-                            {t("editor.toolsEdit")}
-                          </DropdownMenuItem>
-                        )}
+                      <TableRowActions
+                        menuLabel={t("editor.resourceActions", { name })}
+                        actions={[
+                          {
+                            id: "tools",
+                            label: t("editor.toolsEdit"),
+                            icon: Wrench,
+                            onSelect: () => toolsFor.open(entry.id),
+                            hidden: !isIntegration || isMissing,
+                          },
+                          {
+                            id: "remove",
+                            label: t("editor.resourceRemove"),
+                            icon: Trash2,
+                            onSelect: () => onToggle(entry.id),
+                            destructive: true,
+                          },
+                        ]}
+                      >
                         <DropdownMenuItem asChild>
                           <Link
                             to={packageDetailPath(type, entry.id)}
@@ -698,13 +710,6 @@ function SelectedResources({
                             <ArrowUpRight />
                             {t("editor.resourceOpen", { name })}
                           </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onSelect={() => onToggle(entry.id)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 />
-                          {t("editor.resourceRemove")}
                         </DropdownMenuItem>
                       </TableRowActions>
                     </TableCell>
@@ -819,7 +824,7 @@ function ResourcePicker({
       />
       <div className="border-border max-h-[50dvh] divide-y overflow-y-auto rounded-lg border">
         {shown.length === 0 ? (
-          <EmptyState icon={SearchX} message={t("editor.resourceNoMatch")} compact />
+          <NoMatchState message={t("editor.resourceNoMatch")} />
         ) : (
           shown.map((item) => (
             <label

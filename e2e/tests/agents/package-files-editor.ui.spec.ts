@@ -338,11 +338,12 @@ for (const nonInline of [false, true]) {
       await route.continue().catch(() => {});
     });
     await editor.fileAction("z-notes.txt", "Modifier");
-    const lines = page
-      .getByRole("dialog", { name: "Modifier z-notes.txt" })
-      .locator(".monaco-editor .view-lines");
+    const dialog = page.getByRole("dialog", { name: "Modifier z-notes.txt" });
+    const lines = dialog.locator(".monaco-editor .view-lines");
     try {
-      await expect(lines).not.toContainText("OLD");
+      // Waiting may show a loading state or an empty editor; it never shows the old text.
+      await expect(dialog).toBeVisible();
+      await expect(dialog).not.toContainText("OLD");
     } finally {
       release();
     }

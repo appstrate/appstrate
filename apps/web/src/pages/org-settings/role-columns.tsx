@@ -14,9 +14,10 @@
  */
 import { useTranslation } from "react-i18next";
 import { Eye, Trash2 } from "lucide-react";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
+import { rowActionsColumn } from "../../components/row-actions-column";
+import { CellText } from "../../components/table-cells";
 import { spaceRoleDescription, spaceRoleLabel, type RoleObject } from "../../hooks/use-roles";
 
 export function useRoleColumns({
@@ -40,18 +41,12 @@ export function useRoleColumns({
       width: "minmax(160px,2fr)",
       cell: (role) => (
         <span className="block min-w-0">
-          <span
-            className="block truncate text-sm font-medium"
-            title={spaceRoleLabel(role, t) ?? role.name}
-          >
+          <CellText strong title={spaceRoleLabel(role, t) ?? role.name}>
             {spaceRoleLabel(role, t) ?? role.name}
-          </span>
-          <span
-            className="text-muted-foreground block truncate text-xs"
-            title={spaceRoleDescription(role, t) ?? role.key}
-          >
+          </CellText>
+          <CellText title={spaceRoleDescription(role, t) ?? role.key}>
             {spaceRoleDescription(role, t) ?? role.key}
-          </span>
+          </CellText>
         </span>
       ),
     },
@@ -67,35 +62,31 @@ export function useRoleColumns({
         </span>
       ),
     },
-    {
-      id: "actions",
-      header: "",
-      width: "48px",
-      align: "end",
-      cell: (role) =>
-        onPreview || canDelete(role) ? (
-          <TableRowActions
-            menuLabel={t("roles.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
-            isPending={isDeleting}
-          >
-            {onPreview && (
-              <DropdownMenuItem onSelect={() => onPreview(role)}>
-                <Eye />
-                {t("viewAs.rowAction")}
-              </DropdownMenuItem>
-            )}
-            {canDelete(role) && (
-              <DropdownMenuItem
-                onSelect={() => onDelete(role)}
-                disabled={isDeleting}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 />
-                {t("common:btn.delete")}
-              </DropdownMenuItem>
-            )}
-          </TableRowActions>
-        ) : null,
-    },
+    rowActionsColumn((role: RoleObject) =>
+      onPreview || canDelete(role) ? (
+        <TableRowActions
+          menuLabel={t("roles.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
+          isPending={isDeleting}
+          actions={[
+            {
+              id: "preview",
+              label: t("viewAs.rowAction"),
+              icon: Eye,
+              onSelect: () => onPreview?.(role),
+              hidden: !onPreview,
+            },
+            {
+              id: "delete",
+              label: t("common:btn.delete"),
+              icon: Trash2,
+              onSelect: () => onDelete(role),
+              disabled: isDeleting,
+              destructive: true,
+              hidden: !canDelete(role),
+            },
+          ]}
+        />
+      ) : null,
+    ),
   ];
 }
