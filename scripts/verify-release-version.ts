@@ -209,10 +209,13 @@ const LITERAL_IMAGE_PIN = /ghcr\.io\/appstrate\/[a-z0-9-]+:([^\s"'`${]+)/g;
  * Read straight off the `docker/metadata-action` config in
  * `.github/workflows/release.yml`: `flavor: latest=auto` gives `latest`,
  * `type=semver,pattern={{major}}.{{minor}}` gives `1.0`, and
- * `type=sha,prefix=sha-` gives `sha-<sha>`. Pinning to one of these is a
- * deliberate operator choice about which CHANNEL to track — the same reasoning
- * the image-trio boot guard applies — so the gate has no opinion about
- * it. The list is closed on purpose: anything outside it is junk, not a family
+ * `type=sha,prefix=sha-` gives `sha-<sha>`. The first two fire on a stable
+ * release only: metadata-action skips both for a prerelease (`v1.0.0-beta.N`
+ * publishes `1.0.0-beta.N` and `sha-<sha>`, never `latest` nor `1.0`). They
+ * stay in the family because a stable release does publish them. Pinning to
+ * one of these is a deliberate operator choice about which CHANNEL to track —
+ * the same reasoning the image-trio boot guard applies — so the gate has no
+ * opinion about it. The list is closed on purpose: anything outside it is junk, not a family
  * nobody thought of, and the fix for a genuinely new family is to add it here
  * with the metadata-action line that produces it.
  */

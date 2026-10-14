@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0-beta.67] - 2026-10-14
+
 ### Operators
 
 - **Before the deploy, check `EGRESS_ALLOW_INTERNAL_HOSTS`.** A malformed entry
@@ -182,7 +184,7 @@ integration_connections WHERE shared_with_org;` tells whether the step
   from this release together. An image built from this tree pulls the new
   base on its own; a builder overriding `BUN_IMAGE` must point it at 1.4.2.
 
-- **Model credentials: `pg_dump` before the deploy** (#1875). Migration `0087`
+- **Model credentials: `pg_dump` before the deploy** (#1875, #1956). Migration `0087`
   runs at boot (`model_provider_credentials.owner_user_id`,
   `org_models.provider_id` backfilled from each bound credential, a nullable
   `org_models.credential_id`, `uq_org_models_unbound`, `llm_usage.credential_id`);
@@ -367,7 +369,7 @@ pin` or `no pin: name the set`: the latter's next fire answers
   records that code.
 
 - **BREAKING (API): the credential proxy sends upstream no header describing
-  the platform's own inbound request.** One rule,
+  the platform's own inbound request** (#1941). One rule,
   `isPlatformRequestHeader` (`@appstrate/connect/platform-request-headers`),
   read by the credential proxy and by the LLM proxies' forwarding policy,
   names them: the caller's platform credential (`Authorization`, `Cookie`),
@@ -513,10 +515,13 @@ pin` or `no pin: name the set`: the latter's next fire answers
   - **A token response's `scope` is split on spaces** (RFC 6749 §3.3), and on
     `,` or a literal `%20` only when it holds no space: a scope containing a
     comma is no longer read back as two.
-- **The connect form masks what the manifest marks secret** (#1913): a
+- **The connect form masks what the manifest marks secret** (#1913, #1889): a
   credential field is a password input when its schema says `writeOnly: true`
   or `format: "password"`, the rule the connection label already follows, and
-  never because of its name. An integration whose manifest marks nothing shows
+  never because of its name. A `*_key` field such as `api_key` or
+  `consumer_key` is a single-line input, no longer a clear-text text area; only
+  key material (`*cert*`, `*private_key*`, `*public_key*`, `client_key`, `key`)
+  stays multi-line. An integration whose manifest marks nothing shows
   every field in clear: mark each secret. The 24 system integrations that take
   a pasted secret mark it and move one patch version: activecampaign 1.0.4,
   brevo 1.0.3, browser-use 1.0.1, browserless 1.0.1, coolify-mcp 1.0.1, fathom
@@ -682,7 +687,7 @@ pin` or `no pin: name the set`: the latter's next fire answers
     against `runs.payer_user_id`.
 
 - **BREAKING (API): members bring their own model credentials for the models
-  the organization leaves to them** (#1875). A model bound to an organization
+  the organization leaves to them** (#1875, #1956). A model bound to an organization
   credential is paid by the organization, and a built-in model by the platform,
   whoever calls. A model with no organization credential (`credentialId: null`,
   "each member uses their own credential") is served only by the payer's own
@@ -797,7 +802,7 @@ pin` or `no pin: name the set`: the latter's next fire answers
     already holds one for that server.
 
 - **A connection is reusable across the spaces of its organization**
-  (#1870). Its scope is the tier of the OAuth client that minted it: the
+  (#1870, #1908). Its scope is the tier of the OAuth client that minted it: the
   system client, an org client or none (API key, basic, fields) makes it
   usable by its owner in every space of the org; a space's own OAuth client,
   an end user, or a delegated credential (API key, third-party token)
@@ -1395,10 +1400,50 @@ pin` or `no pin: name the set`: the latter's next fire answers
   or previewing a custom space role naming the narrower grant. An effective
   permission set lists the implied permission next to the grant that implies
   it.
-- **A subscription pairing's redeem is audited.**
+- **A subscription pairing's redeem is audited** (#1956).
   `oauth_model_provider.imported` and `oauth_model_provider.reconnected` were
   dropped: the redeem route carries no organization context. They are recorded
   with the pairing's organization, and its minter as actor.
+- **A JSON object or array is no longer rendered as `[object Object]`**
+  (#1898). An agent's `object` or `array` input reached the model as
+  `[object Object]` in the prompt's `## User Input` section, and in a
+  `{{placeholder}}`; it is rendered as JSON text, as are an OAuth
+  `authorization_params` value (an OIDC `claims` object) and a `context_files`
+  error. The MCP `invoke_operation` tool refuses a non-scalar `path_params` or
+  `query` value with a tool error naming it, instead of sending
+  `?filter=[object Object]`.
+- **The agent editor saves an input or output schema as it loaded it**
+  (#1898). Any edit rebuilt every property from a flat, string-typed form,
+  dropping nested `properties` and `required`, `items`, `$defs`,
+  `additionalProperties` and every keyword it did not manage, writing object
+  defaults as `"[object Object]"` and numeric enums as strings. An edit now
+  changes only the keyword it touches; a value the form cannot edit as text is
+  shown read-only as JSON (the JSON tab edits it). The run form no longer
+  crashes on a property that `$ref`s the root `$defs`.
+- **A non-string credential value is sent as JSON text on every read**
+  (#1903, #1897). A credential that `credentials.schema` types as a number,
+  boolean, array or object (`port: 5432`) was dropped from the sidecar's
+  delivery, the token refresh and the run-start re-bootstrap, so
+  `{$credential.port}` rendered empty, while the first login received it
+  JSON-encoded. Every reader now JSON-encodes it (`5432` → `"5432"`), and a
+  `null` value is left out rather than sent as `"null"`. Stored values keep
+  their type; no system integration declares a non-string credential.
+- **The dashboard no longer loses the outcome of a subscription pairing**
+  (#1961, #1960). A transient error (5xx, 408, 429, network) stopped the poll,
+  leaving the modal on its spinner; a tab left hidden past the command's
+  expiry dropped a redeem that had succeeded, with no toast and no refresh of
+  the lists; and reopening the modal minted a second command. The poll keeps
+  going through transient errors, ends only on the server's own answer, and a
+  reopened modal shows the pairing in flight. Signing out empties the pending
+  pairings, whose commands carry a bearer token.
+- **A process-mode run leaves nothing in the host's temp directory** (#1962,
+  #1948). With `RUN_ADAPTER=process`, the sidecar and the agent wrote
+  extracted integration bundles, run CA material (the cert minter's staged CA
+  key included) and Pi's spilled bash output under the platform's `TMPDIR`,
+  and nothing removed them. Each workload now gets its own
+  `appstrate-tmp-<hash>` directory under the platform's `TMPDIR` (0700 for the
+  agent, 0711 for the sidecar), removed at run end and, after a platform crash,
+  reclaimed at the next boot. Docker and Firecracker runs are unchanged.
 - **A fire refused over the schedule's own connection choice disables the
   schedule** (#1954). It recorded a failed run and stayed armed, failing at
   every tick, on the verdicts the schedule write refuses
@@ -1442,7 +1487,8 @@ pin` or `no pin: name the set`: the latter's next fire answers
   lists**, and `space_id: null` is a `missing_argument`. The
   `/oauth2/authorize` gate attempts no write when the space's resource row
   exists. (#1925)
-- **An `Idempotency-Key` sent to the credential proxy reaches the upstream.**
+- **An `Idempotency-Key` sent to the credential proxy reaches the upstream**
+  (#1940).
   On `/api/credential-proxy/proxy` the header is the upstream's
   (Stripe's, for one): it is relayed with the caller's other headers,
   whatever the verb, where a mutating call carrying one was refused
@@ -1496,7 +1542,7 @@ pin` or `no pin: name the set`: the latter's next fire answers
   the sidecar through the forward proxy. The forward proxy also strips
   response hop-by-hop headers.
 - **A login connection that reports no identity is no longer just
-  `Connexion N`** (#1818): a `connect.login` or `connect.tool` connection is
+  `Connexion N`** (#1818, #1869): a `connect.login` or `connect.tool` connection is
   named, as a pasted credential already is, after its one non-secret required
   credential field, masked (`al****.com`).
 - **A new organization's starter agent runs from the CLI, the chat and the
@@ -1529,18 +1575,18 @@ pin` or `no pin: name the set`: the latter's next fire answers
   after the call returned.
 - **`ssh_read`, `ssh_write_file` and `ssh_edit_file` accept `~` and `~/…`**
   (#1798), from the account's home directory; `~user` is refused.
-- **A login input is encoded for the place it takes** (#1818), in a declarative
+- **A login input is encoded for the place it takes** (#1818, #1864), in a declarative
   `connect.login` and in a `connect.tool` login tool's requests: a password with
   `&` or `=` no longer breaks a form login, and no value adds a parameter,
   member or header line. A declarative login now validates the submitted
   credentials against `credentials.schema` and types them by it. Rules and
   refusals: `docs/guides/writing-an-integration-with-connect.md`.
 - **A refused declarative login answers `400 invalid_request`**, not `500`, on
-  `connect/fields` and the hosted form (#1818), as a refused `connect.tool`
+  `connect/fields` and the hosted form (#1818, #1864), as a refused `connect.tool`
   login does; an unreachable or failing service is `502`, a slow one `504`.
   Importing a form login without `success_criteria` warns.
 - **The guide's `connect.tool` examples send the session cookie as a `Cookie`
-  header** (#1818): `delivery.http.in: "cookie"` is refused at import.
+  header** (#1818, #1864): `delivery.http.in: "cookie"` is refused at import.
 - **Saving an agent in the editor no longer drops the
   `integrations_configuration` keys it does not edit**, such as `_meta` or a
   setting it does not model (AFPS §4.4) (#1830, #1855): the editor passes each
