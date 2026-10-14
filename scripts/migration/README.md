@@ -86,7 +86,8 @@ run steps 3 to 6.
    `0087` and `0089` are one-way).
 2. Run the migrate service alone (`docker compose run --rm appstrate-migrate` with `deploy/`,
    `migrate` with `examples/self-hosting/`): it applies the pending drizzle migrations, `0084` to
-   `0095`.
+   `0096`. `0096` only adds constraints, each validated: a row breaking one fails the migrate (root
+   `CHANGELOG.md`, Changed).
 3. `0044` dry run, then `--apply`: `shared_space_ids` copied into `integration_connection_shares`.
    The release refuses to boot while a connection still holds an entry there, naming the command.
 4. `0041` dry run, then `--apply`: connections widened to org scope.
