@@ -27,6 +27,8 @@ import { Input } from "@appstrate/ui/components/input";
 import { FormItem } from "@appstrate/ui/components/field";
 import { OptionSelect } from "@appstrate/ui/components/select";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SettingsSkeleton } from "@/components/loading-skeletons";
 import { Spinner } from "@/components/spinner";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { Modal } from "@/components/modal";
@@ -110,6 +112,7 @@ function SmtpSection({ personal }: { personal: boolean }) {
         icon={<Mail className="h-5 w-5" />}
         title={t("settings:spaceAuth.smtpTitle")}
         hint={t("settings:spaceAuth.smtpHint")}
+        loading={isLoading}
         configured={!!initial}
         personal={personal}
         del={del}
@@ -313,6 +316,7 @@ function SocialSection({
       icon={<Icon className="h-5 w-5" aria-hidden />}
       title={title}
       hint={t("settings:spaceAuth.socialHint", { provider: title })}
+      loading={isLoading}
       configured={!!config}
       personal={personal}
       del={del}
@@ -398,6 +402,7 @@ function ProviderConfigSection({
   icon,
   title,
   hint,
+  loading,
   configured,
   personal,
   del,
@@ -409,6 +414,8 @@ function ProviderConfigSection({
   icon: ReactNode;
   title: string;
   hint: string;
+  /** The stored row is still being read: the badge and the form hold their place. */
+  loading: boolean;
   configured: boolean;
   personal: boolean;
   del: { isPending: boolean; mutate: (v: undefined, o: { onSuccess: () => void }) => void };
@@ -420,7 +427,7 @@ function ProviderConfigSection({
   const { t } = useTranslation("settings");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  if (personal && !configured) return null;
+  if (!loading && personal && !configured) return null;
 
   const deleteButton = configured ? (
     <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
@@ -432,7 +439,9 @@ function ProviderConfigSection({
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon}
           {title}
-          {configured ? (
+          {loading ? (
+            <Skeleton className="h-5 w-20" />
+          ) : configured ? (
             <Badge variant="running">{t("spaceAuth.configured")}</Badge>
           ) : (
             <Badge variant="secondary">{t("spaceAuth.notConfigured")}</Badge>
@@ -441,7 +450,7 @@ function ProviderConfigSection({
         <p className="text-muted-foreground text-sm">{hint}</p>
       </header>
 
-      {personal ? deleteButton : children(deleteButton)}
+      {loading ? <SettingsSkeleton /> : personal ? deleteButton : children(deleteButton)}
 
       <ConfirmModal
         open={confirmDelete}

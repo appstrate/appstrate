@@ -19,6 +19,7 @@ import { fileActivation } from "./file-activation.ts";
 import { UNNAMED_FILE } from "./run-events.ts";
 import { useChatHost } from "./runtime-context.ts";
 import type { OpenFile } from "./runtime-context.ts";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 const ATTACHMENT_CHIP_CLASS =
   "bg-background text-foreground inline-flex max-w-52 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs";
@@ -97,6 +98,8 @@ function FileImageThumbnail({
   // — a stable, unconditional hook call position.
   const { useFileImageSrc } = useChatHost();
   const src = useFileImageSrc(id);
+  // In flight: the thumbnail's box, so the message does not reflow when it lands.
+  if (src === undefined) return <Skeleton className="size-16 shrink-0 rounded-lg" />;
   if (!src)
     return <AttachmentChip name={name} label={label} opener={opener} onActivate={onActivate} />;
   return (

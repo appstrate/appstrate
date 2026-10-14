@@ -149,7 +149,7 @@ export function IntegrationsPage() {
             options={INTEGRATION_EXECUTIONS.map((value) => ({
               value,
               label: t(`integrations.execution.${value}`),
-              count: countOf(value),
+              count: isLoading || error ? undefined : countOf(value),
             }))}
           />
         }

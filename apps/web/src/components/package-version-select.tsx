@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Label } from "@appstrate/ui/components/label";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { OptionSelect } from "@appstrate/ui/components/select";
 import { usePackageVersions } from "../hooks/use-packages";
 import type { PackageType } from "@appstrate/shared-types";
@@ -40,7 +41,8 @@ export function PackageVersionSelect({
   leadingOptions: VersionLeadingOption[];
   disabled?: boolean;
 }) {
-  const { data: versions } = usePackageVersions(type, packageId);
+  const { data: versions, isLoading } = usePackageVersions(type, packageId);
+  if (isLoading) return <Skeleton className="h-9 w-full" />;
   const options = [
     ...leadingOptions,
     ...(versions

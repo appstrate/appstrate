@@ -6,6 +6,7 @@ import { BrainCircuit, Braces, FileOutput, LoaderCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { useFiles, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -16,6 +17,7 @@ import { SettingsHeading } from "../settings/settings-heading";
 import { DocumentListPanel } from "../document-list-panel";
 import { JsonView } from "../json-view";
 import { EmptyState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { MemoryPanel } from "../persistence/memory-panel";
 import { RailButton } from "../settings/rail-link";
 import { featuredRunFile, producedRunFiles } from "../../lib/files";
@@ -29,6 +31,10 @@ interface RunResultsProps {
   output: Record<string, unknown> | null;
   hasRunMemory: boolean;
   isRunning: boolean;
+  /** The journal (the structured output rides in it) is still being read. */
+  outputLoading: boolean;
+  /** The run's memory rows are still being read. */
+  memoryLoading: boolean;
 }
 
 /** Fetches the run's file container and hands it to the view. */
@@ -54,6 +60,8 @@ export function RunResultsContent({
   output,
   hasRunMemory,
   isRunning,
+  outputLoading,
+  memoryLoading,
   files,
   hasMore,
   isLoading,
@@ -132,6 +140,27 @@ export function RunResultsContent({
   ];
   const activeSection =
     sections.find((section) => section.id === requestedSection) ?? sections[0] ?? null;
+
+  // The sections are told by the journal, the memory and the file container:
+  // until those that decide them answer, the frame is drawn and waits.
+  if (outputLoading || memoryLoading || (isLoading && !activeSection)) {
+    return (
+      <AgentDetailSplit
+        data-run-results-split
+        railClassName="p-3"
+        rail={
+          <div className="flex flex-col gap-0.5">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        }
+      >
+        <section className="min-w-0 p-6">
+          <TextSkeleton lines={4} />
+        </section>
+      </AgentDetailSplit>
+    );
+  }
 
   if (!hasProduction && !isLoading) {
     return (

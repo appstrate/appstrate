@@ -8,6 +8,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
@@ -78,7 +79,7 @@ export function OrgSettingsGeneralPage() {
   const { currentOrg, orgs, forgetOrg } = useOrg();
   const { can, orgRole } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
-  const { data: orgSettings } = useOrgSettings();
+  const { data: orgSettings, isLoading: orgSettingsLoading } = useOrgSettings();
   const updateSettingsMutation = useUpdateOrgSettings();
   // Every member opens this page (leaving lives here); each change is drawn
   // only for whoever holds its permission.
@@ -94,6 +95,7 @@ export function OrgSettingsGeneralPage() {
     limitBytes: storageLimit,
     percent: storagePercent,
     usageLabel,
+    isLoading: storageLoading,
   } = useOrgStorage();
   // The heads-up banner fires at the shared WARN threshold — the same point the
   // bar turns yellow — so the user is warned well before uploads get rejected.
@@ -107,11 +109,13 @@ export function OrgSettingsGeneralPage() {
 
   // Owners always get the member list.
   const { data: orgDetail } = useOrgDetail();
+  const orgDetailPending = !orgDetail;
   const ownerCount = orgDetail?.members?.filter((m) => m.role === "owner").length ?? 0;
   // Under a preview `orgRole` is the persona's, not the real membership.
   const previewing = useViewAsHeader() !== null;
   const lastOwner = !!orgDetail && orgRole !== null && !canLeaveOrg({ role: orgRole, ownerCount });
-  const canLeave = orgRole !== null && !previewing && !lastOwner;
+  // Until the member list answers, the last-owner guard cannot be evaluated: keep leaving off.
+  const canLeave = orgRole !== null && !previewing && !lastOwner && !orgDetailPending;
   // An only member has nobody to name owner: point to delete instead.
   const leaveHint = previewing
     ? t("orgSettings.leavePreview")
@@ -280,6 +284,14 @@ export function OrgSettingsGeneralPage() {
         </SettingRow>
       </SettingsGroup>
 
+      {storageLoading && (
+        <>
+          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
+            {t("orgStorage.section")}
+          </div>
+          <Skeleton className="mb-4 h-24 w-full rounded-lg" />
+        </>
+      )}
       {storage && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
@@ -334,17 +346,21 @@ export function OrgSettingsGeneralPage() {
                 />
               }
             >
-              <Switch
-                id="restrict-package-copy"
-                checked={orgSettings?.restrict_package_copy ?? false}
-                disabled={updateSettingsMutation.isPending}
-                onCheckedChange={(checked) =>
-                  updateSettingsMutation.mutate({
-                    params: { path: { orgId: currentOrg.id } },
-                    body: { restrict_package_copy: checked === true },
-                  })
-                }
-              />
+              {!orgSettingsLoading ? (
+                <Switch
+                  id="restrict-package-copy"
+                  checked={orgSettings?.restrict_package_copy ?? false}
+                  disabled={updateSettingsMutation.isPending || !orgSettings}
+                  onCheckedChange={(checked) =>
+                    updateSettingsMutation.mutate({
+                      params: { path: { orgId: currentOrg.id } },
+                      body: { restrict_package_copy: checked === true },
+                    })
+                  }
+                />
+              ) : (
+                <Skeleton className="h-5 w-9 rounded-full" />
+              )}
             </SettingRow>
           </SettingsGroup>
 
@@ -362,11 +378,17 @@ export function OrgSettingsGeneralPage() {
         <SettingRow
           variant="action"
           label={t("orgSettings.leaveOrg")}
-          description={<span id={leaveHintId}>{leaveHint}</span>}
+          description={
+            orgDetailPending && !previewing ? (
+              <Skeleton className="h-3.5 w-64" />
+            ) : (
+              <span id={leaveHintId}>{leaveHint}</span>
+            )
+          }
         >
           <Button
             data-testid="leave-org-button"
-            aria-describedby={leaveHintId}
+            aria-describedby={orgDetailPending && !previewing ? undefined : leaveHintId}
             variant="destructive"
             disabled={!canLeave || leaveOrgMutation.isPending}
             onClick={() => setConfirmLeave(true)}

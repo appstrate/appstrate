@@ -44,7 +44,16 @@ export function OnboardingPlanStep() {
     );
   };
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="plan"
+        title={t("onboarding.planTitle")}
+        subtitle={t("onboarding.planSubtitle")}
+      >
+        <TextSkeleton lines={5} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout

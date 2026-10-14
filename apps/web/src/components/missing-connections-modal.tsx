@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
+import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
 import {
@@ -159,17 +160,18 @@ export function MissingRow({
           <Puzzle className="text-muted-foreground size-4 shrink-0" />
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{displayName}</div>
-            <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
-              <Icon className="mt-0.5 size-3 shrink-0" />
-              <span className="min-w-0 break-words">
-                {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
-              </span>
-            </div>
+            {loadingVerdict ? (
+              <Skeleton className="mt-1 h-3 w-24" />
+            ) : (
+              <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
+                <Icon className="mt-0.5 size-3 shrink-0" />
+                <span className="min-w-0 break-words">
+                  {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
-        {loadingVerdict && (
-          <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
-        )}
       </div>
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">

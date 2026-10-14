@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
 import { triggerBlobDownload } from "../lib/blob-download";
 import { invalidateRunDetails } from "../lib/query-keys";
@@ -23,6 +23,8 @@ export interface FileListFilters {
   startingAfter?: string;
   limit?: number;
   enabled?: boolean;
+  /** Keep the previous result on screen while the next page or search loads. */
+  keepPrevious?: boolean;
 }
 
 /**
@@ -50,7 +52,10 @@ export function useFiles(filters: FileListFilters = {}) {
         header: scope.header,
       },
     },
-    { enabled: can("files:read") && scope.enabled && filters.enabled !== false },
+    {
+      enabled: can("files:read") && scope.enabled && filters.enabled !== false,
+      placeholderData: filters.keepPrevious ? keepPreviousData : undefined,
+    },
   );
 }
 
@@ -176,17 +181,19 @@ export function useFileTextCopy() {
 
 /**
  * Authenticated image preview: a stored file's bytes → an object URL for an
- * `<img src>`, revoked on unmount / id change. `null` while loading or on
- * failure, so callers fall back to a placeholder. Cookie auth alone is not
- * enough — the content route resolves the org/app context from the scoping
- * headers, which the typed client's middleware injects.
+ * `<img src>`, revoked on unmount / id change. `undefined` while the bytes are
+ * on their way, `null` when there is no preview (no grant, failed read), so a
+ * caller draws a placeholder in the image's place first and its own fallback
+ * only once the answer is no. Cookie auth alone is not enough — the content
+ * route resolves the org/app context from the scoping headers, which the typed
+ * client's middleware injects.
  *
  * THE single implementation for every image thumbnail in the app; the chat
  * module receives it through `ChatPage`'s injection seam instead of shipping
  * its own copy.
  */
-export function useFileImageSrc(id: string): string | null {
-  const [src, setSrc] = useState<string | null>(null);
+export function useFileImageSrc(id: string): string | null | undefined {
+  const [loaded, setLoaded] = useState<{ id: string; src: string | null } | null>(null);
   const readsFiles = usePermissions().can("files:read");
   useEffect(() => {
     if (!readsFiles) return;
@@ -200,12 +207,17 @@ export function useFileImageSrc(id: string): string | null {
         });
         // No await between this check and `createObjectURL`, so a cleanup that
         // has already run can never miss the URL it would have to revoke.
-        if (cancelled || !data) return;
+        if (cancelled) return;
+        if (!data) {
+          setLoaded({ id, src: null });
+          return;
+        }
         objectUrl = URL.createObjectURL(data);
-        setSrc(objectUrl);
+        setLoaded({ id, src: objectUrl });
       } catch {
-        // Fetch failure (403 on another member's upload, network) → stay on the
-        // placeholder; this preview is decorative.
+        // Fetch failure (403 on another member's upload, network) → no preview;
+        // it is decorative.
+        if (!cancelled) setLoaded({ id, src: null });
       }
     })();
     return () => {
@@ -213,5 +225,6 @@ export function useFileImageSrc(id: string): string | null {
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [id, readsFiles]);
-  return src;
+  if (!readsFiles) return null;
+  return loaded?.id === id ? loaded.src : undefined;
 }

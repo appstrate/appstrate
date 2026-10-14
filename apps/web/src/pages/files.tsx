@@ -21,6 +21,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListView } from "../stores/list-view-store";
+import { Spinner } from "../components/spinner";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 
@@ -82,7 +83,8 @@ function DocumentsCollection({
   }>({ signature, cursor: undefined, loadedPages: [] });
   const cursor = paging.signature === signature ? paging.cursor : undefined;
 
-  const { data, isLoading, error } = useFiles({
+  const { data, isLoading, isPlaceholderData, error } = useFiles({
+    keepPrevious: true,
     search: query || undefined,
     purpose: effectivePurpose,
     startingAfter: cursor,
@@ -197,6 +199,7 @@ function DocumentsCollection({
               <Button
                 variant="outline"
                 size="sm"
+                disabled={isPlaceholderData}
                 onClick={() => {
                   const last = currentPage[currentPage.length - 1];
                   if (last) {
@@ -211,7 +214,7 @@ function DocumentsCollection({
                   }
                 }}
               >
-                {t("page.loadMore")}
+                {isPlaceholderData && cursor !== undefined ? <Spinner /> : t("page.loadMore")}
               </Button>
             )}
           </ListFooter>

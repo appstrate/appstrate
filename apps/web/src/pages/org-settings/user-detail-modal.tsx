@@ -31,6 +31,7 @@ export function UserDetailModal({
   member,
   memberships,
   showSpaces,
+  spacesLoading,
   assignableRoles,
   isChangingOrgRole,
   onChangeOrgRole,
@@ -40,6 +41,8 @@ export function UserDetailModal({
   memberships: SpaceMembership[];
   /** Only an owner or admin reads every space's member list. */
   showSpaces: boolean;
+  /** The memberships are still being read: the table draws rows, not its empty state. */
+  spacesLoading: boolean;
   assignableRoles: readonly OrgRole[];
   isChangingOrgRole: boolean;
   onChangeOrgRole: (role: OrgRole) => void;
@@ -109,7 +112,7 @@ export function UserDetailModal({
               columns={columns}
               rows={memberships}
               rowKey={(membership) => membership.space.id}
-              isLoading={false}
+              isLoading={spacesLoading}
               empty={
                 <EmptyState
                   message={t("userDetail.noSpaces")}

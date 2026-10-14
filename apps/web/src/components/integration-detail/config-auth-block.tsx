@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CopyBlock } from "../copy-block";
 import { SettingValue } from "../settings/setting-row";
 import {
@@ -22,7 +23,11 @@ import { ClientsTable } from "./clients-table";
 function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; authKey: string }) {
   const { t } = useTranslation("settings");
   // Same query keys the table above holds: React Query dedupes, no request.
-  const { data: clients } = useIntegrationClients("space", packageId, authKey);
+  const { data: clients, isLoading: clientsLoading } = useIntegrationClients(
+    "space",
+    packageId,
+    authKey,
+  );
   const { data: detail } = useIntegrationDetail(packageId);
   // What connect will ACTUALLY send. A registered client may carry its own
   // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
@@ -33,7 +38,7 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
   // client's override is the one that decides.
   const redirectUri =
     clients?.find((c) => c.is_default)?.redirect_uri || detail?.platform_redirect_uri;
-  if (!redirectUri) return null;
+  if (!clientsLoading && !redirectUri) return null;
   return (
     <section className="mt-8">
       <h4 className="mb-4 text-sm font-medium">{t("integration.presentation.technicalDetails")}</h4>
@@ -42,7 +47,11 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
           <p className="text-muted-foreground text-sm">
             {t("integration.oauthClient.platformRedirectUri")}
           </p>
-          <CopyBlock value={redirectUri} testId={`platform-redirect-uri-${authKey}`} />
+          {clientsLoading || !redirectUri ? (
+            <Skeleton className="h-9 w-full" />
+          ) : (
+            <CopyBlock value={redirectUri} testId={`platform-redirect-uri-${authKey}`} />
+          )}
         </div>
       )}
     </section>

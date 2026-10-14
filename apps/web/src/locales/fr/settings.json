@@ -1172,7 +1172,6 @@
   "spaceMembers.rolesLoadError": "Impossible de charger les rôles disponibles.",
   "spaceMembers.noAssignableRoles": "Aucun rôle attribuable avec vos permissions actuelles.",
   "spaceMembers.spaceLoadError": "Impossible de vérifier l'accès qui subsisterait après le retrait.",
-  "spaceMembers.usersLoading": "Chargement des utilisateurs…",
   "spaceMembers.usersLoadError": "Impossible de charger les utilisateurs de l'organisation.",
   "spaceMembers.emailInvalid": "Saisissez une adresse e-mail valide.",
   "spaceMembers.added": "{{name}} a été ajouté à l'espace avec le rôle {{role}}.",

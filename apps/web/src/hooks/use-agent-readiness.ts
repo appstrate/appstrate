@@ -90,8 +90,9 @@ export function agentRunBlocker(
   return modelBlocker;
 }
 
-export function useAgentModelBlocker(packageId: string): AgentModelBlocker | null {
-  const { data: orgModels } = useModels();
+/** `undefined` for a page that is not an agent's: neither read is made. */
+export function useAgentModelBlocker(packageId: string | undefined): AgentModelBlocker | null {
+  const { data: orgModels } = useModels(packageId !== undefined);
   const { data: agentModel } = useAgentModel(packageId);
   return agentModelBlocker(orgModels, agentModel?.modelId);
 }

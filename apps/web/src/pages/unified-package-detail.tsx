@@ -28,7 +28,8 @@ import { isQueryInFlight } from "../lib/query-state";
 import { packageDetailPath } from "../lib/package-paths";
 
 // Shared components
-import { PackageDetailSkeleton, SharedHeader } from "../components/package-detail/shared-header";
+import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
@@ -62,10 +63,8 @@ const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
 const EMPTY_INPUT_WRAPPER: SchemaWrapper = { schema: { type: "object", properties: {} } };
 
 /** No model a run could use: said where it can be acted on, graded by who may act. */
-function ModelRequiredAlert({ packageId }: { packageId: string }) {
+function ModelRequiredAlert({ blocker }: { blocker: ReturnType<typeof useAgentModelBlocker> }) {
   const { t } = useTranslation(["settings"]);
-  // The model verdict alone: it holds whatever else blocks the run first.
-  const blocker = useAgentModelBlocker(packageId);
   const { can } = usePermissions();
 
   const copy =
@@ -129,6 +128,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const detailQuery = usePackageDetail(type, packageId);
   const { data: detail, error } = detailQuery;
   const { data: versionInfo } = useVersionInfo(type, type === "agent" ? packageId : undefined);
+  // The model verdict alone: it holds whatever else blocks the run first. Read
+  // here, beside the detail, so the alert does not wait for the loading gate.
+  const modelBlocker = useAgentModelBlocker(type === "agent" ? packageId : undefined);
 
   // Agents list for "Used by" tab enrichment
 
@@ -159,11 +161,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // below cannot see — and answers `409 no_changes` when nothing moved. The
   // comparison only decides whether a diff tab has anything to show.
   const hasTimestampChanges = source !== "system" && !!hasUnarchivedChanges;
-  const { data: latestVersionForDiff } = useVersionDetail(
+  const latestDiffQuery = useVersionDetail(
     type,
     packageId,
     hasTimestampChanges ? "latest" : undefined,
   );
+  const { data: latestVersionForDiff } = latestDiffQuery;
+  // An agent's header names its draft only once this comparison has settled:
+  // answering before it would show « Brouillon » and then swap it for the version.
+  const draftVerdictPending = type === "agent" && isQueryInFlight(latestDiffQuery);
   // Refine: once we have the latest version data, check for real content diff
   const currentManifest = type === "agent" ? agentDetail?.manifest : pkgDetail?.manifest;
   const currentContent = agentDetail?.prompt ?? pkgDetail?.content;
@@ -349,6 +355,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           // package it is authoring state, only whoever can publish the draft has
           // a use for it; an agent's header names its draft to whoever reads it,
           // and only when it differs from the last published version.
+          draftVerdictPending={draftVerdictPending}
           hasUnarchivedChanges={
             type === "agent" ? hasArchivableChanges : hasTimestampChanges && !!homeWritable
           }
@@ -404,7 +411,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           activeUrl={packageDetailPath(type, packageId)}
         />
 
-        {type === "agent" && <ModelRequiredAlert packageId={packageId} />}
+        {type === "agent" && <ModelRequiredAlert blocker={modelBlocker} />}
 
         {/* Placed here, switched off. The page renders in full — reading and
           configuring an agent is not running it — and says the one thing that

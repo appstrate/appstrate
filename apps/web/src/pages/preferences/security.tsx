@@ -19,6 +19,8 @@ import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
 import { errorMessage, toastError } from "../../lib/mutation-error";
 import { ApiError } from "../../api/errors";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
+import { ErrorState } from "../../components/page-states";
 
 // Shape as `listAccounts()` returns it. `id` is Better Auth's `account` row
 // primary key — the value `unlinkAccount()` takes. `accountId` is the id AT
@@ -86,93 +88,97 @@ function LinkedAccountsSection({
       <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.linkedAccountsDescription")}
       </p>
-      <div className="space-y-3">
-        {credentialAccount && (
-          <div className="border-border bg-card flex items-center justify-between rounded-lg border p-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-full">
-                <Mail size={16} />
-              </div>
-              <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
-            </div>
-            <span className="text-muted-foreground text-xs">
-              {t("preferences.linkedVia", { provider: "Email" })}
-            </span>
-          </div>
-        )}
-        {socialProviders.map((provider) => {
-          const Icon = provider.icon;
-          // Bound to a local so the narrowing survives into the click handlers.
-          const account = provider.account;
-          return account ? (
-            <div
-              key={provider.id}
-              className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
-            >
+      {accounts === undefined ? (
+        <SettingsSkeleton rows={2} />
+      ) : (
+        <div className="space-y-3">
+          {credentialAccount && (
+            <div className="border-border bg-card flex items-center justify-between rounded-lg border p-4">
               <div className="flex items-center gap-3">
-                <Icon className="h-5 w-5" />
-                <div>
-                  <span className="text-sm font-medium">{provider.name}</span>
-                  <div className="text-muted-foreground text-xs">{account.accountId}</div>
+                <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-full">
+                  <Mail size={16} />
                 </div>
+                <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!canUnlink || unlinking === provider.id}
-                title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
-                onClick={async () => {
-                  setUnlinking(provider.id);
-                  try {
-                    await unlinkAccount(account.id);
-                    await refetch();
-                  } catch (err: unknown) {
-                    if (err instanceof SessionNotFreshError) {
-                      // Session too old for a sensitive action — walk the user
-                      // through a step-up re-login, then retry the unlink.
-                      setPendingUnlink(account.id);
-                    } else {
-                      // Surface the failure: swallowed, the button just stops spinning.
-                      toastError(err);
+              <span className="text-muted-foreground text-xs">
+                {t("preferences.linkedVia", { provider: "Email" })}
+              </span>
+            </div>
+          )}
+          {socialProviders.map((provider) => {
+            const Icon = provider.icon;
+            // Bound to a local so the narrowing survives into the click handlers.
+            const account = provider.account;
+            return account ? (
+              <div
+                key={provider.id}
+                className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
+              >
+                <div className="flex items-center gap-3">
+                  <Icon className="h-5 w-5" />
+                  <div>
+                    <span className="text-sm font-medium">{provider.name}</span>
+                    <div className="text-muted-foreground text-xs">{account.accountId}</div>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canUnlink || unlinking === provider.id}
+                  title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
+                  onClick={async () => {
+                    setUnlinking(provider.id);
+                    try {
+                      await unlinkAccount(account.id);
+                      await refetch();
+                    } catch (err: unknown) {
+                      if (err instanceof SessionNotFreshError) {
+                        // Session too old for a sensitive action — walk the user
+                        // through a step-up re-login, then retry the unlink.
+                        setPendingUnlink(account.id);
+                      } else {
+                        // Surface the failure: swallowed, the button just stops spinning.
+                        toastError(err);
+                      }
+                    } finally {
+                      setUnlinking(false);
                     }
-                  } finally {
-                    setUnlinking(false);
-                  }
-                }}
-              >
-                {unlinking === provider.id
-                  ? t("preferences.unlinking")
-                  : t("preferences.unlinkGoogle")}
-              </Button>
-            </div>
-          ) : (
-            <div
-              key={provider.id}
-              className="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
-            >
-              <div className="flex items-center gap-3">
-                <Icon className="h-5 w-5" />
-                <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
+                  }}
+                >
+                  {unlinking === provider.id
+                    ? t("preferences.unlinking")
+                    : t("preferences.unlinkGoogle")}
+                </Button>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={linking === provider.id}
-                onClick={async () => {
-                  setLinking(provider.id);
-                  try {
-                    await provider.link();
-                  } finally {
-                    setLinking(false);
-                  }
-                }}
+            ) : (
+              <div
+                key={provider.id}
+                className="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
               >
-                {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
-              </Button>
-            </div>
-          );
-        })}
-      </div>
+                <div className="flex items-center gap-3">
+                  <Icon className="h-5 w-5" />
+                  <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={linking === provider.id}
+                  onClick={async () => {
+                    setLinking(provider.id);
+                    try {
+                      await provider.link();
+                    } finally {
+                      setLinking(false);
+                    }
+                  }}
+                >
+                  {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <ReauthModal
         open={pendingUnlink !== null}
         methods={availableReauthMethods(accounts, features)}
@@ -348,7 +354,11 @@ export function PreferencesSecurityPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { listLinkedAccounts } = useAuth();
 
-  const { data: accounts, refetch } = useQuery({
+  const {
+    data: accounts,
+    refetch,
+    error: accountsError,
+  } = useQuery({
     queryKey: ["linked-accounts"],
     queryFn: () => listLinkedAccounts(),
   });
@@ -359,8 +369,14 @@ export function PreferencesSecurityPage() {
 
   return (
     <>
-      <LinkedAccountsSection accounts={accounts} refetch={refetch} />
-      {accounts !== undefined && (
+      {accountsError ? (
+        <ErrorState error={accountsError} />
+      ) : (
+        <LinkedAccountsSection accounts={accounts} refetch={refetch} />
+      )}
+      {accountsError ? null : accounts === undefined ? (
+        <SettingsSkeleton rows={2} />
+      ) : (
         <>
           <div className="text-muted-foreground mb-4 text-sm font-medium">
             {t(hasCredential ? "preferences.changePassword" : "preferences.setPassword")}

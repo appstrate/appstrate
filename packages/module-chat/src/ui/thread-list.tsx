@@ -123,6 +123,8 @@ export function ChatConversationList({
   const {
     data: sessions,
     isLoading,
+    isError,
+    refetch,
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
@@ -176,12 +178,21 @@ export function ChatConversationList({
                 onClick={() => void fetchNextPage()}
                 className="text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-sidebar-ring flex h-7 w-full items-center rounded-md px-2 text-left text-xs outline-none focus-visible:ring-2 disabled:opacity-50"
               >
-                {isFetchingNextPage ? t("threads.loadingMore") : t("threads.showMore")}
+                {isFetchingNextPage && <Loader2Icon className="mr-1.5 size-3 animate-spin" />}
+                {t("threads.showMore")}
               </button>
             </SidebarMenuItem>
           )}
         </SidebarMenu>
-        {!isLoading && list.length === 0 && (
+        {isError && list.length === 0 && (
+          <div className="flex flex-col items-center gap-2 px-2 py-6 text-center">
+            <p className="text-sidebar-foreground/70 text-xs">{t("threads.error")}</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>
+              {t("turn.retry")}
+            </Button>
+          </div>
+        )}
+        {!isLoading && !isError && list.length === 0 && (
           <p className="text-sidebar-foreground/70 px-2 py-6 text-center text-xs">
             {t(canWrite ? "threads.empty" : "threads.emptyReadOnly")}
           </p>

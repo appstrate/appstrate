@@ -38,6 +38,8 @@ import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choic
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { EmptyState, ErrorState } from "./page-states";
 import { SettingsSkeleton } from "./loading-skeletons";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { isQueryInFlight } from "../lib/query-state";
 import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
@@ -364,6 +366,12 @@ function ScheduleSettingsPanel({
   const { can } = usePermissions();
   const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   const write = useScheduleWrite(schedule);
+  // Read alongside the write's facts, not once the section mounts: the agent-bound sections
+  // wait for it under the same skeleton.
+  const formDeps = useScheduleFormDeps(schedule.packageId);
+  const agentBound =
+    active.id !== "general" && active.id !== "recurrence" && active.id !== "identity";
+  const formDepsSettled = !agentBound || !!formDeps.deps || !!formDeps.error || formDeps.denied;
   // The section the last field write came from: its state is that section's to say.
   const [writtenFrom, setWrittenFrom] = useState<ScheduleSettingsSection | null>(null);
   const update: Save = {
@@ -393,13 +401,14 @@ function ScheduleSettingsPanel({
           <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
           {/* Every control writes: none is offered before its write can name the
               connections the server re-checks. */}
-          {update.ready ? (
+          {update.ready && formDepsSettled ? (
             <SectionBody
               section={active.id}
               schedule={schedule}
               update={update}
               moveWrite={moveWrite}
               move={move}
+              formDeps={formDeps}
             />
           ) : (
             <SettingsSkeleton />
@@ -415,6 +424,8 @@ interface SectionWrites {
   update: Save;
   moveWrite: Save;
   move: ScheduleMove;
+  /** The agent's settings, already read by the tab. */
+  formDeps: ReturnType<typeof useScheduleFormDeps>;
 }
 
 function SectionBody({ section, ...writes }: SectionWrites & { section: ScheduleSettingsSection }) {
@@ -429,8 +440,9 @@ function SectionBody({ section, ...writes }: SectionWrites & { section: Schedule
 
 function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save }) {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
-  const agent = agents?.find((a) => a.id === schedule.packageId);
+  const agentsQuery = useAgents();
+  const agent = agentsQuery.data?.find((a) => a.id === schedule.packageId);
+  const agentPending = isQueryInFlight(agentsQuery);
   return (
     <>
       <SettingRow
@@ -456,21 +468,34 @@ function GeneralSection({ schedule, update }: { schedule: Schedule; update: Save
           to={`/agents/${schedule.packageId}`}
           className="border-border bg-muted/20 hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-3 transition-colors"
         >
-          <PackageIcon
-            type="agent"
-            icon={agent?.icon}
-            color={agent?.color}
-            className="size-11 rounded-xl"
-            iconClassName="size-5"
-          />
+          {agentPending ? (
+            <Skeleton className="size-11 shrink-0 rounded-xl" />
+          ) : (
+            <PackageIcon
+              type="agent"
+              icon={agent?.icon}
+              color={agent?.color}
+              className="size-11 rounded-xl"
+              iconClassName="size-5"
+            />
+          )}
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-medium">
-              {agent?.display_name || schedule.packageId}
-            </span>
-            {agent?.description && (
-              <span className="text-muted-foreground block truncate text-xs">
-                {agent.description}
-              </span>
+            {agentPending ? (
+              <>
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="mt-1.5 h-3 w-48 max-w-full" />
+              </>
+            ) : (
+              <>
+                <span className="block text-sm font-medium">
+                  {agent?.display_name || schedule.packageId}
+                </span>
+                {agent?.description && (
+                  <span className="text-muted-foreground block truncate text-xs">
+                    {agent.description}
+                  </span>
+                )}
+              </>
             )}
           </span>
           <ArrowRight className="text-muted-foreground size-4 shrink-0" aria-hidden />
@@ -544,11 +569,11 @@ function AgentBoundSection({
   section,
   ...writes
 }: SectionWrites & { section: "inputs" | "execution" | "connections" }) {
-  const { schedule, update } = writes;
-  const { deps, error, denied } = useScheduleFormDeps(schedule.packageId);
+  const { schedule, update, formDeps } = writes;
+  const { deps, error, denied } = formDeps;
   if (error) return <ErrorState error={error} />;
   if (denied) return <NoAccessState />;
-  if (!deps) return <SettingsSkeleton rows={2} />;
+  if (!deps) return <SettingsSkeleton />;
   // Keyed on the schedule: each section seeds its local state once.
   if (section === "inputs")
     return <InputsSection key={schedule.id} schedule={schedule} deps={deps} update={update} />;

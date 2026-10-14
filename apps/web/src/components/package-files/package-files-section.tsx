@@ -41,7 +41,7 @@ export function PackageFilesSection({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const scope = useOrgScope();
-  const { data } = $api.useQuery(
+  const { data, error } = $api.useQuery(
     "get",
     "/api/packages/{scope}/{name}/files",
     { params: { path: splitPackageRef(packageId), header: scope.header } },
@@ -70,7 +70,8 @@ export function PackageFilesSection({
         rowKey={(entry) => entry.path}
         rowHref={(entry) => filesHref(entry.path)}
         rowLabel={(entry) => entry.path}
-        isLoading={!data}
+        isLoading={!data && !error}
+        failure={error}
       />
       <p className="text-muted-foreground text-xs">{t("editor.bundleFilesHint")}</p>
     </div>

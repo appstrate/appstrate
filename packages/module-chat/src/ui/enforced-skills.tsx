@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LockIcon } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { useChatHost, type GetHeaders } from "./runtime-context.ts";
 import { useEnforcedSkills } from "./use-enforced-skills.ts";
@@ -8,7 +9,8 @@ import { useEnforcedSkills } from "./use-enforced-skills.ts";
 /** For a member who chats without `skills:read`: the space's policy applies to them too. */
 export function EnforcedSkillsIndicator({ getHeaders }: { getHeaders: GetHeaders | undefined }) {
   const { t } = useChatHost();
-  const { data: enforced } = useEnforcedSkills(getHeaders);
+  const { data: enforced, isPending } = useEnforcedSkills(getHeaders);
+  if (isPending) return <Skeleton className="size-8 rounded-lg" aria-hidden />;
   if (!enforced || enforced.length === 0) return null;
   const names = enforced.map((skill) => skill.display_name ?? skill.packageId).join(", ");
 

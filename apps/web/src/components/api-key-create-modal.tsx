@@ -11,6 +11,7 @@ import { FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@appstrate/ui/components/select";
+import { TextSkeleton } from "./loading-skeletons";
 import { ScopeMultiSelect } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
@@ -211,16 +212,18 @@ function ApiKeyCreateForm({
       />
 
       {/* Permissions */}
-      {availableScopes && (
-        <div className="space-y-2">
-          <Label>{t("apiKeys.permissionSummary")}</Label>
+      <div className="space-y-2">
+        <Label>{t("apiKeys.permissionSummary")}</Label>
+        {availableScopes ? (
           <ScopeMultiSelect
             available={availableScopes}
             selected={effectiveScopes}
             onChange={setSelectedScopes}
           />
-        </div>
-      )}
+        ) : (
+          <TextSkeleton lines={4} />
+        )}
+      </div>
     </FormModal>
   );
 }

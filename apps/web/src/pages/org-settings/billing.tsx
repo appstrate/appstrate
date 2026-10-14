@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, CreditCard } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePermissions } from "../../hooks/use-permissions";
 import type { components } from "../../api/client";
 import {
@@ -41,8 +42,28 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
 };
 
 export function OrgSettingsBillingPage() {
-  const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const { data: billing, isLoading } = useBilling();
+  // The two admin sections read their own data (managers, contact) independently of the billing
+  // account, so they mount alongside it and fetch in parallel instead of after it. They are MOUNTED
+  // on `billing:manage`, not merely hidden by it, so their queries never fire for a caller the
+  // routes would 403.
+  const showAdminSections = can("billing:manage") && (isLoading || !!billing);
+  return (
+    <>
+      <BillingOverview />
+      {showAdminSections && (
+        <>
+          <BillingManagersSection />
+          <BillingContactSection />
+        </>
+      )}
+    </>
+  );
+}
+
+function BillingOverview() {
+  const { t } = useTranslation(["settings", "common"]);
   // The route opens on `billing:read` under the `billing` feature
   // (`lib/route-access.ts`), both only `@appstrate/module-ee` contributes, so
   // `/api/billing` answers.
@@ -61,13 +82,10 @@ export function OrgSettingsBillingPage() {
     limitBytes: storageLimit,
     percent: storagePercent,
     usageLabel,
+    isLoading: storageLoading,
   } = useOrgStorage();
 
-  // The two admin sections below are MOUNTED on `billing:manage`, not merely
-  // hidden by it, so their queries never fire for a caller the routes would 403.
-  const canManageBilling = can("billing:manage");
-
-  if (isLoading) return <SettingsSkeleton rows={4} />;
+  if (isLoading) return <SettingsSkeleton />;
   if (error) return <ErrorState error={error} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;
@@ -175,6 +193,15 @@ export function OrgSettingsBillingPage() {
           <UsageBar percent={billing.usage_percent} label={t("billing.usage")} />
         </div>
 
+        {storageLoading && (
+          <div className="mt-4">
+            <div className="mb-1 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">{t("billing.storageUsage")}</span>
+              <Skeleton className="h-4 w-32" />
+            </div>
+            <Skeleton className="h-2 w-full rounded-full" />
+          </div>
+        )}
         {storage && (
           <div className="mt-4">
             <div className="mb-1 flex items-center justify-between text-sm">
@@ -229,13 +256,6 @@ export function OrgSettingsBillingPage() {
             onSelect={handleSelectPlan}
           />
         </div>
-      )}
-
-      {canManageBilling && (
-        <>
-          <BillingManagersSection />
-          <BillingContactSection />
-        </>
       )}
     </>
   );

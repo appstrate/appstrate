@@ -7,10 +7,11 @@ import { Unplug, Pencil, Trash2 } from "lucide-react";
 import { DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useMyConnections, useRenameMeConnection } from "../../hooks/use-me-connections";
 import { useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
-import { EmptyState, ErrorState } from "../../components/page-states";
+import { EmptyState } from "../../components/page-states";
 import { ItemList } from "../../components/item-list";
 import { PackageIcon } from "../../components/package-icon";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
@@ -265,7 +266,7 @@ function SourceGroupCard({
 
 export function PreferencesConnectionsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: groups, isLoading, isError } = useMyConnections();
+  const { data: groups, isLoading, error } = useMyConnections();
   const canBrowseIntegrations = useCanReach()("/integrations");
 
   const renameIntegration = useRenameMeConnection();
@@ -293,9 +294,13 @@ export function PreferencesConnectionsPage() {
         <div className="text-muted-foreground text-sm font-medium">
           {t("connections.myConnections")}
         </div>
-        <span className="text-muted-foreground text-xs">
-          {t("connections.totalConnections", { count: totalConnections })}
-        </span>
+        {isLoading ? (
+          <Skeleton className="h-3 w-20" />
+        ) : (
+          <span className="text-muted-foreground text-xs">
+            {t("connections.totalConnections", { count: totalConnections })}
+          </span>
+        )}
       </div>
 
       <div className="border-border bg-card mb-4 rounded-lg border p-5">
@@ -319,8 +324,7 @@ export function PreferencesConnectionsPage() {
         items={groups ?? []}
         itemKey={(group) => `${group.kind}:${group.source_id}`}
         isLoading={isLoading}
-        isError={isError}
-        error={<ErrorState compact />}
+        failure={error}
         empty={
           <EmptyState
             message={t("connections.noConnections")}

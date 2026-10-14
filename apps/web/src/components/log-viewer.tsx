@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { DropdownMenuCheckboxItem, DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "./page-actions-menu";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
@@ -201,6 +202,8 @@ function ToolResult({ tool, result }: { tool: string; result: unknown }) {
 
 interface LogViewerProps {
   entries: ExecutionEntry[];
+  /** The entries are still being read: rows on their way replace the empty state. */
+  isLoading?: boolean;
   /** Terminal failures open with the causal event near the middle of the journal. */
   focusError?: boolean;
   headerActions?: ReactNode;
@@ -241,6 +244,7 @@ function journalSearchText(entry: ExecutionEntry): string {
 
 export function LogViewer({
   entries,
+  isLoading = false,
   focusError = false,
   headerActions,
   selectedEntryId,
@@ -460,7 +464,15 @@ export function LogViewer({
           </div>
 
           <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
-            {entries.length === 0 ? (
+            {isLoading && entries.length === 0 ? (
+              <div role="status" aria-busy="true" aria-label={t("loading", { ns: "common" })}>
+                <div aria-hidden className="space-y-2 p-4">
+                  {Array.from({ length: 8 }, (_, i) => (
+                    <Skeleton key={i} className="h-8 w-full" />
+                  ))}
+                </div>
+              </div>
+            ) : entries.length === 0 ? (
               <div className="flex h-full items-center justify-center">
                 <EmptyState compact icon={ScrollText} message={t("log.empty")} />
               </div>

@@ -55,6 +55,7 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import type { PageAction } from "../../components/page-actions-menu";
+import { TextSkeleton } from "../../components/loading-skeletons";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
   isSystemModel,
@@ -83,7 +84,7 @@ export function OrgSettingsModelsPage() {
   // A row is a key and its models: either read failing leaves the table wrong, so both surface.
   const tableError = modelsError ?? pkError;
   const { data: registry } = useProvidersRegistry();
-  const { data: orgSettings } = useOrgSettings();
+  const { data: orgSettings, isLoading: settingsLoading } = useOrgSettings();
 
   const addProvider = useModalParam("newCredential");
   const editKey = useModalTarget("editCredential", credentials);
@@ -214,40 +215,46 @@ export function OrgSettingsModelsPage() {
               <PersonalCredentialsSetting />
             </SettingsGroup>
           )}
-          {personalOff && (
-            <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
-          )}
-          <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
-            <PersonalServicesTable
-              rows={serviceRows}
-              isLoading={modelsLoading || (canReadCredentials && pkLoading)}
-              error={tableError}
-              canWriteModels={canWriteModels}
-              onChooseModels={(row) => personalModels.open(row.id)}
-            />
-          </div>
-          {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
-          {canReadCredentials && personalRows.length > 0 && (
-            <section className="mb-6">
-              <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
-              <ProvidersTable
-                label={t("providers.memberKeys")}
-                tableId="member-providers"
-                rows={personalRows}
-                showType
-                isLoading={false}
-                error={null}
-                empty={{ message: t("modelCredentials.empty") }}
-                canWriteModels={false}
-                {...keyDeeds}
-              />
-            </section>
-          )}
-          {canConnect && personalAllowed && (
-            <p className="text-muted-foreground text-sm">
-              {t("providers.personalFooter")}{" "}
-              <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
-            </p>
+          {settingsLoading ? (
+            <TextSkeleton lines={4} />
+          ) : (
+            <>
+              {personalOff && (
+                <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
+              )}
+              <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
+                <PersonalServicesTable
+                  rows={serviceRows}
+                  isLoading={modelsLoading || (canReadCredentials && pkLoading)}
+                  error={tableError}
+                  canWriteModels={canWriteModels}
+                  onChooseModels={(row) => personalModels.open(row.id)}
+                />
+              </div>
+              {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
+              {canReadCredentials && personalRows.length > 0 && (
+                <section className="mb-6">
+                  <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
+                  <ProvidersTable
+                    label={t("providers.memberKeys")}
+                    tableId="member-providers"
+                    rows={personalRows}
+                    showType
+                    isLoading={false}
+                    error={null}
+                    empty={{ message: t("modelCredentials.empty") }}
+                    canWriteModels={false}
+                    {...keyDeeds}
+                  />
+                </section>
+              )}
+              {canConnect && personalAllowed && (
+                <p className="text-muted-foreground text-sm">
+                  {t("providers.personalFooter")}{" "}
+                  <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
+                </p>
+              )}
+            </>
           )}
         </>
       )}

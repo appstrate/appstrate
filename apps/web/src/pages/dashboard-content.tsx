@@ -35,6 +35,7 @@ import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 const CODING_AGENT_SETUP_URL = "https://raw.githubusercontent.com/appstrate/skills/main/README.md";
 
@@ -67,7 +68,14 @@ function SectionHeading({ title, href, action }: { title: string; href: string; 
   );
 }
 
-function DashboardHeader({ firstName, runningCount }: { firstName: string; runningCount: number }) {
+/** The greeting: drawn at once, its running count a placeholder until the runs answer. */
+export function DashboardHeader({
+  firstName,
+  runningCount,
+}: {
+  firstName: string;
+  runningCount?: number;
+}) {
   const { t, i18n } = useTranslation("agents");
   const canChat = useCanReach()("/chat");
   const { copy } = useCopyToClipboard();
@@ -104,9 +112,13 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
           </Button>
         }
       >
-        <p className="text-muted-foreground mt-1 text-sm first-letter:uppercase">
-          {t("dashboard.subtitle", { date, count: runningCount })}
-        </p>
+        {runningCount === undefined ? (
+          <Skeleton className="mt-1.5 h-3.5 w-56" />
+        ) : (
+          <p className="text-muted-foreground mt-1 text-sm first-letter:uppercase">
+            {t("dashboard.subtitle", { date, count: runningCount })}
+          </p>
+        )}
       </PageHeader>
 
       {assist.value !== null && (

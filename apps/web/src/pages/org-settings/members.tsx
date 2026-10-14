@@ -92,7 +92,8 @@ export function OrgSettingsMembersPage() {
   // Which spaces a person reaches, and as what: one shared query set for the
   // column and for the detail, so opening a person costs nothing more.
   const seesEverySpace = hasFullOrgAccess(orgRole);
-  const { byUser: spacesByUser } = useSpaceMembershipsByUser(seesEverySpace);
+  const { byUser: spacesByUser, isLoading: spacesLoading } =
+    useSpaceMembershipsByUser(seesEverySpace);
 
   const assignableRoles = (member: OrgMember) =>
     orgRole && canChangeRole
@@ -120,6 +121,7 @@ export function OrgSettingsMembersPage() {
     spaces: seesEverySpace
       ? (member) => (spacesByUser.get(member.userId) ?? []).map(({ space }) => space.name)
       : undefined,
+    spacesLoading,
   });
 
   const openedUser = memberParam.target;
@@ -177,6 +179,7 @@ export function OrgSettingsMembersPage() {
           member={openedUser}
           memberships={spacesByUser.get(openedUser.userId) ?? []}
           showSpaces={seesEverySpace}
+          spacesLoading={spacesLoading}
           assignableRoles={assignableRoles(openedUser)}
           isChangingOrgRole={changeRoleMutation.isPending}
           onChangeOrgRole={(role) => handleRoleChange(openedUser, role)}
@@ -186,7 +189,7 @@ export function OrgSettingsMembersPage() {
 
       {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
 
-      {members.length === 0 && invitations.length === 0 && (
+      {!isLoading && !error && members.length === 0 && invitations.length === 0 && (
         <EmptyState
           message={t("orgSettings.noMembers")}
           hint={t("orgSettings.noMembersHint")}

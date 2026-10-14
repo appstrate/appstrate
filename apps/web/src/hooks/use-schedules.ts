@@ -48,10 +48,16 @@ export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
+  const qc = useQueryClient();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
     // ["schedule", orgId, spaceId, scheduleId] on SSE events.
     queryKey: scheduleKeys.detail(orgId, spaceId, id),
+    // The list caches the same enriched rows: show the page from it while the detail loads.
+    placeholderData: () =>
+      qc
+        .getQueryData<EnrichedSchedule[]>(scheduleKeys.list(orgId, spaceId))
+        ?.find((s) => s.id === id),
     queryFn: async (): Promise<EnrichedSchedule> => {
       const { data } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },

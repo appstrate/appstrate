@@ -22,11 +22,12 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { ResourceErrorState, EmptyState } from "../components/page-states";
-import { DetailPageSkeleton } from "../components/loading-skeletons";
+import { ScheduleDetailSkeleton, SettingsSkeleton } from "../components/loading-skeletons";
 import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ScopedRunList } from "../components/scoped-run-list";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
@@ -68,12 +69,7 @@ export function ScheduleDetailPage() {
   const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (isQueryInFlight(scheduleQuery))
-    return (
-      <DetailPageSkeleton
-        breadcrumbs={[{ label: t("schedule.breadcrumbList"), href: "/schedules" }]}
-      />
-    );
+  if (isQueryInFlight(scheduleQuery)) return <ScheduleDetailSkeleton />;
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const tabs: DetailTab<ScheduleTab>[] = [
     { value: "details", label: t("detail.overview.summary") },
@@ -162,7 +158,14 @@ export function ScheduleDetailPage() {
         </DetailTabPanel>
 
         <DetailTabPanel value="settings" flush>
-          <ScheduleSettings schedule={schedule} />
+          {/* The settings seed their fields once: never from a list row that may be stale. */}
+          {scheduleQuery.isPlaceholderData ? (
+            <div className="p-6">
+              <SettingsSkeleton />
+            </div>
+          ) : (
+            <ScheduleSettings schedule={schedule} />
+          )}
         </DetailTabPanel>
       </DetailTabs>
 
@@ -194,7 +197,9 @@ function ScheduleParams({
   schedule: NonNullable<ReturnType<typeof useScheduleById>["data"]>;
 }) {
   const { t } = useTranslation(["agents"]);
-  const { data: agents } = useAgents();
+  const agentsQuery = useAgents();
+  const { data: agents } = agentsQuery;
+  const agentsPending = isQueryInFlight(agentsQuery);
   const canReach = useCanReach();
   const agentPath = `/agents/${schedule.packageId}`;
   const nextRunAt = scheduleNextRunAt(schedule);
@@ -216,7 +221,9 @@ function ScheduleParams({
       >
         <FactGrid columns={2}>
           <Fact label={t("schedule.paramAgent")}>
-            {canReach(agentPath) ? (
+            {agentsPending ? (
+              <Skeleton className="h-4 w-32" />
+            ) : canReach(agentPath) ? (
               <Link className="text-primary hover:underline" to={agentPath}>
                 {agentDisplayName}
               </Link>
@@ -313,11 +320,12 @@ function ScheduleHistory({
   // The same query ScopedRunList makes for its first page (12 rows), so React
   // Query serves both from one fetch.
   // We only need the first run for the "next run" preview row.
-  const { data } = usePaginatedRuns({
+  const runsQuery = usePaginatedRuns({
     scheduleId: schedule.id,
     limit: 12,
     offset: 0,
   });
+  const { data } = runsQuery;
   const firstExec = data?.data?.[0];
 
   // Show the fake "next run" row only if the last run started > 30s ago.
@@ -345,7 +353,8 @@ function ScheduleHistory({
   const previewRow =
     isActive && showNext && nextRunAt ? (
       <NextRunPreview
-        runNumber={(firstExec?.runNumber ?? 0) + 1}
+        // The last run's + 1: unknown while the runs load.
+        runNumber={isQueryInFlight(runsQuery) ? null : (firstExec?.runNumber ?? 0) + 1}
         agentName={agentName}
         schedule_name={schedule.name || t("schedule.unnamed")}
         next_run_at={nextRunAt}

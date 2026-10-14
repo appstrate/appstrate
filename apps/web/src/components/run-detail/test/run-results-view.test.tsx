@@ -42,6 +42,8 @@ function results(
       output={null}
       hasRunMemory={false}
       isRunning={false}
+      outputLoading={false}
+      memoryLoading={false}
       files={files}
       hasMore={extra.hasMore ?? false}
       isLoading={false}

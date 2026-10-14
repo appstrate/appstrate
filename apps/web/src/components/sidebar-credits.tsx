@@ -3,6 +3,7 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SidebarGroup } from "@appstrate/ui/components/sidebar";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useBilling } from "../hooks/use-billing";
@@ -15,9 +16,20 @@ export function SidebarCredits() {
   // The gauge links to the billing tab: fetched and drawn only where that tab
   // opens (the billing module loaded and `billing:read` granted).
   const shown = useCanReach()("/org-settings/billing");
-  const { data: billing } = useBilling({ enabled: shown });
+  const { data: billing, isPending } = useBilling({ enabled: shown });
 
-  if (!billing) return null;
+  // The gauge's own box while billing is read, so the foot of the column holds still.
+  if (!billing) {
+    if (!(shown && isPending)) return null;
+    return (
+      <SidebarGroup className="mt-auto" aria-hidden>
+        <div className="px-2 py-2">
+          <Skeleton className="mb-1.5 h-3 w-full" />
+          <Skeleton className="h-1.5 w-full rounded-full" />
+        </div>
+      </SidebarGroup>
+    );
+  }
 
   return (
     <SidebarGroup className="mt-auto">

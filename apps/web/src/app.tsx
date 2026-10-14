@@ -28,10 +28,14 @@ import { chunkComponent } from "./lib/lazy-chunk";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { ShellFrameProvider, ShellHeader } from "./components/shell-frame";
 import {
+  ChatPanelSkeleton,
   DashboardSkeleton,
-  DetailPageSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
+  OverlayPanelSkeleton,
+  PackageDetailSkeleton,
+  RunDetailSkeleton,
+  ScheduleDetailSkeleton,
   SettingsSkeleton,
 } from "./components/loading-skeletons";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
@@ -58,6 +62,7 @@ import {
   SETTINGS_INDEX,
   type RoutePath,
 } from "./lib/route-access";
+import type { PackageType } from "@appstrate/core/validation";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -311,17 +316,28 @@ const inLayout = (path: RoutePath) => LAYOUTS.some((layout) => isUnder(path, lay
 const flatPaths = (mount: ReturnType<typeof mountOf>) =>
   PATHS.filter((path) => mountOf(path) === mount && !inLayout(path));
 
+/** The package detail routes, by family. */
+const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
+  ["/agents/", "agent"],
+  ["/skills/", "skill"],
+  ["/mcp-servers/", "mcp-server"],
+  ["/integrations/", "integration"],
+];
+
 /**
  * What a route draws while its chunk or its permissions load: the skeleton its
- * page draws while its data loads, so both waits share one shape. An overlay
- * draws its own frame first, and the chat its own panel.
+ * page draws while its data loads, so both waits share one shape.
  */
 function skeletonOf(path: RoutePath): ReactNode {
   if (inLayout(path)) return <SettingsSkeleton />;
-  if (isOverlayPath(path) || isUnder(path, "/chat")) return null;
+  if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
+  if (isUnder(path, "/chat")) return <ChatPanelSkeleton />;
   if (path === "/") return <DashboardSkeleton />;
   if (path.endsWith("/new")) return <FormPageSkeleton />;
-  if (path.includes("/:")) return <DetailPageSkeleton />;
+  if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
+  if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
+  const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
+  if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
   return <ListPageSkeleton />;
 }
 
@@ -809,7 +825,7 @@ export function App() {
                   {flatPaths("overlay").map(pageRoute)}
                   <Route
                     element={
-                      <Suspense fallback={null}>
+                      <Suspense fallback={<OverlayPanelSkeleton />}>
                         <UnifiedSettingsLayout />
                       </Suspense>
                     }

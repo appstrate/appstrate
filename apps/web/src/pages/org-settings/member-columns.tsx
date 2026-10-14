@@ -28,6 +28,7 @@ import { OrgRoleSelect } from "../../components/org-role-select";
 import { TableRowActions } from "../../components/table-row-actions";
 import { rowActionsColumn } from "../../components/row-actions-column";
 import { CellDate, CellEmpty, CellList, CellText } from "../../components/table-cells";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -39,6 +40,7 @@ export function useMemberColumns({
   onChangeRole,
   onRemove,
   spaces,
+  spacesLoading = false,
 }: {
   /** Which roles this actor may move that member to. Empty = not theirs to change. */
   assignableRoles: (member: OrgMember) => readonly OrgRole[];
@@ -49,6 +51,8 @@ export function useMemberColumns({
   onRemove: (member: OrgMember) => void;
   /** The spaces this person reaches, when the caller may see every one. */
   spaces?: (member: OrgMember) => string[];
+  /** The memberships are still being read: the column holds its place. */
+  spacesLoading?: boolean;
 }): DataColumn<OrgMember>[] {
   const { t } = useTranslation(["settings", "common"]);
 
@@ -108,7 +112,12 @@ export function useMemberColumns({
             header: t("orgSettings.spacesColumn"),
             width: "minmax(100px,1.2fr)" as const,
             tier: 3 as const,
-            cell: (member: OrgMember) => <CellList items={spaces(member)} />,
+            cell: (member: OrgMember) =>
+              spacesLoading ? (
+                <Skeleton className="h-4 w-24" />
+              ) : (
+                <CellList items={spaces(member)} />
+              ),
           },
         ]
       : []),

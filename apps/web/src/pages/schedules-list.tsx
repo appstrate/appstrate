@@ -7,6 +7,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
+import { isQueryInFlight } from "../lib/query-state";
 import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState } from "../components/page-states";
 import { SchedulesTable } from "../components/schedules-table";
@@ -32,7 +33,9 @@ export function SchedulesListPage() {
   const { can } = usePermissions();
   const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
   const { data: schedules, isLoading, isError, error } = useAllSchedules();
-  const { data: agents } = useAgents();
+  const agentsQuery = useAgents();
+  const { data: agents } = agentsQuery;
+  const agentsPending = isQueryInFlight(agentsQuery);
   const placeholder = useSearchPlaceholder(t("schedules.title"));
   const [view, setView] = useListView("schedules");
 
@@ -56,6 +59,7 @@ export function SchedulesListPage() {
 
   const allColumns = useScheduleColumns({
     agentName: (schedule) => agentName(schedule.packageId),
+    agentPending: agentsPending,
   });
   const visibility = useColumnVisibility("schedules");
   const columns = visibleColumns(allColumns, visibility.hidden);
@@ -142,7 +146,11 @@ export function SchedulesListPage() {
           items={shown}
           itemKey={(schedule) => schedule.id}
           renderCard={(schedule) => (
-            <ScheduleCard schedule={schedule} agentName={agentName(schedule.packageId)} />
+            <ScheduleCard
+              schedule={schedule}
+              agentName={agentName(schedule.packageId)}
+              agentPending={agentsPending}
+            />
           )}
           isLoading={isLoading}
           isError={isError}

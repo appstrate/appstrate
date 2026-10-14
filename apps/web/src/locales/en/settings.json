@@ -1171,7 +1171,6 @@
   "spaceMembers.rolesLoadError": "Could not load available roles.",
   "spaceMembers.noAssignableRoles": "Your current permissions do not allow assigning any roles.",
   "spaceMembers.spaceLoadError": "Could not check which access would remain after removal.",
-  "spaceMembers.usersLoading": "Loading users…",
   "spaceMembers.usersLoadError": "Could not load organization users.",
   "spaceMembers.emailInvalid": "Enter a valid email address.",
   "spaceMembers.added": "{{name}} was added to the space with the {{role}} role.",

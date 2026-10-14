@@ -14,6 +14,7 @@ import { useScheduleColumns } from "../schedule-columns";
 import { AgentRunButton } from "./agent-run-button";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState, EmptyStateAction } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { readList } from "../../lib/list-params";
@@ -71,14 +72,15 @@ export function AgentRunsTab({
 export function AgentSchedulesTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: schedules } = useSchedules(packageId);
+  const schedulesQuery = useSchedules(packageId);
+  const schedules = schedulesQuery.data;
   const [search, setSearch] = useState("");
   const [states, setStates] = useState<string[]>([]);
   const columns = useScheduleColumns({ agentName: () => packageId, showAgentName: false });
   const { can } = usePermissions();
   const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
 
-  if (!detail) return null;
+  if (!detail) return <TextSkeleton lines={3} />;
 
   if (schemaHasFileFields(detail.input?.schema)) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
@@ -105,48 +107,46 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
     },
   ];
 
+  const hasSchedules = (schedules ?? []).length > 0;
+
   return (
     <>
-      {!schedules || schedules.length === 0 ? (
-        <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
-          {can("schedules:write") && (
-            <EmptyStateAction
-              action={{
-                label: t("schedule.titleNew"),
-                onSelect: () => newSchedule.open(packageId),
-              }}
-            />
-          )}
-        </EmptyState>
-      ) : (
-        <>
-          <ListToolbar
-            placement="panel"
-            search={{
-              value: search,
-              onChange: setSearch,
-              placeholder: t("detail.schedulesTable.search"),
-            }}
-            filters={filters}
-            onReset={() => {
-              setSearch("");
-              setStates([]);
-            }}
-          />
-          <SchedulesTable
-            schedules={filteredSchedules}
-            columns={columns}
-            surface="integrated"
-            empty={
-              <EmptyState
-                message={t("detail.schedulesTable.noMatch")}
-                icon={CalendarClock}
-                compact
-              />
-            }
-          />
-        </>
-      )}
+      <ListToolbar
+        placement="panel"
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: t("detail.schedulesTable.search"),
+        }}
+        filters={filters}
+        onReset={() => {
+          setSearch("");
+          setStates([]);
+        }}
+      />
+      <SchedulesTable
+        schedules={filteredSchedules}
+        columns={columns}
+        surface="integrated"
+        isLoading={schedulesQuery.isPending}
+        isError={schedulesQuery.isError}
+        empty={
+          hasSchedules ? (
+            <EmptyState message={t("detail.schedulesTable.noMatch")} icon={CalendarClock} compact />
+          ) : (
+            <EmptyState message={t("detail.emptySchedule")} icon={CalendarClock} compact>
+              {can("schedules:write") && (
+                <EmptyStateAction
+                  action={{
+                    label: t("schedule.titleNew"),
+                    onSelect: () => newSchedule.open(packageId),
+                  }}
+                />
+              )}
+            </EmptyState>
+          )
+        }
+      />
     </>
   );
 }

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Label } from "@appstrate/ui/components/label";
 import { Switch } from "@appstrate/ui/components/switch";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingRow } from "./setting-row";
 import { SaveFeedback } from "./save-feedback";
 import { useOrg } from "../../hooks/use-org";
@@ -19,13 +20,13 @@ export function PersonalCredentialsSetting() {
   const { t } = useTranslation("settings");
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
-  const { data: orgSettings } = useOrgSettings();
+  const { data: orgSettings, isLoading: orgSettingsLoading } = useOrgSettings();
   const update = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   if (!currentOrg) return null;
 
-  // The switch reads neither on nor off until the settings load, so a click can never send a
-  // value read off a default.
+  // A skeleton stands in until the settings load, so a click can never send a value read off a
+  // default.
   return (
     <SettingRow
       variant="toggle"
@@ -43,29 +44,33 @@ export function PersonalCredentialsSetting() {
         />
       }
     >
-      <Switch
-        id="personal-model-credentials"
-        checked={orgSettings?.personal_model_credentials ?? false}
-        disabled={!can("org:settings") || !orgSettings || update.isPending}
-        onCheckedChange={(checked) =>
-          update.mutate(
-            {
-              params: { path: { orgId: currentOrg.id } },
-              body: { personal_model_credentials: checked === true },
-            },
-            {
-              // The flag changes which models each person can use and which credentials
-              // serve a call: refresh both lists.
-              onSuccess: () => {
-                void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
-                void queryClient.invalidateQueries({
-                  queryKey: ["get", "/api/model-provider-credentials"],
-                });
+      {!orgSettingsLoading ? (
+        <Switch
+          id="personal-model-credentials"
+          checked={orgSettings?.personal_model_credentials ?? false}
+          disabled={!can("org:settings") || update.isPending || !orgSettings}
+          onCheckedChange={(checked) =>
+            update.mutate(
+              {
+                params: { path: { orgId: currentOrg.id } },
+                body: { personal_model_credentials: checked === true },
               },
-            },
-          )
-        }
-      />
+              {
+                // The flag changes which models each person can use and which credentials
+                // serve a call: refresh both lists.
+                onSuccess: () => {
+                  void queryClient.invalidateQueries({ queryKey: ["get", "/api/models"] });
+                  void queryClient.invalidateQueries({
+                    queryKey: ["get", "/api/model-provider-credentials"],
+                  });
+                },
+              },
+            )
+          }
+        />
+      ) : (
+        <Skeleton className="h-5 w-9 rounded-full" />
+      )}
     </SettingRow>
   );
 }

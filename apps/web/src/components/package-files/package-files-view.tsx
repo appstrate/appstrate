@@ -603,61 +603,66 @@ export function PackageFilesView({
                   )}
                   compact
                 />
-              ) : !bundleIndex || dependenciesLoading ? (
+              ) : !bundleIndex ? (
                 <TextSkeleton lines={6} />
               ) : (
-                <FileTree
-                  entries={visibleFiles.map((file) => file.treeEntry)}
-                  directories={[
-                    TREE_BUNDLE,
-                    ...(skills.length > 0 ? [TREE_DEPENDENCIES, TREE_SKILLS] : []),
-                    ...(mcpServers.length > 0 ? [TREE_DEPENDENCIES, TREE_MCP_SERVERS] : []),
-                  ]}
-                  initialCollapsedPaths={[TREE_SKILLS, TREE_MCP_SERVERS]}
-                  directoryLabels={folderLabels}
-                  selectedPath={
-                    activeSelection?.kind === "file"
-                      ? activeSelection.file.treeEntry.path
-                      : (activeSelection?.path ?? null)
-                  }
-                  onSelect={(path) => {
-                    const file = fileByPath.get(path);
-                    if (file) setSelected({ kind: "file", file });
-                  }}
-                  onSelectNode={(node) => {
-                    if (node.kind === "dir") selectPath(node.path, node);
-                  }}
-                  label={t("agents:files.treeLabel")}
-                  controlsId="agent-file-preview"
-                  className="h-full w-full p-1 text-left"
-                  // Its new-file and import buttons live in the bar above.
-                  showToolbar={false}
-                  actions={
-                    editing
-                      ? {
-                          onCreate: staged.openNewFile,
-                          onUpload: () => staged.pickUpload(null),
-                          onRename: (path) =>
-                            path.startsWith(BUNDLE_ROOT) &&
-                            staged.openRename(path.slice(BUNDLE_ROOT.length)),
-                          onDelete: (path) =>
-                            path.startsWith(BUNDLE_ROOT) &&
-                            staged.openDelete(path.slice(BUNDLE_ROOT.length)),
-                          // Dependencies are other packages: never renamed or deleted here.
-                          isPinned: (path) =>
-                            !path.startsWith(BUNDLE_ROOT) ||
-                            isPinned(path.slice(BUNDLE_ROOT.length)),
-                          isBusy: busy,
-                          labels: {
-                            newFile: t("files.newFile"),
-                            upload: t("files.upload"),
-                            rename: t("files.rename"),
-                            delete: t("files.delete"),
-                          },
-                        }
-                      : undefined
-                  }
-                />
+                // The bundle is drawn as soon as its index is in; only the
+                // dependencies folder waits for the indexes it lists.
+                <div className="flex h-full flex-col">
+                  <FileTree
+                    entries={visibleFiles.map((file) => file.treeEntry)}
+                    directories={[
+                      TREE_BUNDLE,
+                      ...(skills.length > 0 ? [TREE_DEPENDENCIES, TREE_SKILLS] : []),
+                      ...(mcpServers.length > 0 ? [TREE_DEPENDENCIES, TREE_MCP_SERVERS] : []),
+                    ]}
+                    initialCollapsedPaths={[TREE_SKILLS, TREE_MCP_SERVERS]}
+                    directoryLabels={folderLabels}
+                    selectedPath={
+                      activeSelection?.kind === "file"
+                        ? activeSelection.file.treeEntry.path
+                        : (activeSelection?.path ?? null)
+                    }
+                    onSelect={(path) => {
+                      const file = fileByPath.get(path);
+                      if (file) setSelected({ kind: "file", file });
+                    }}
+                    onSelectNode={(node) => {
+                      if (node.kind === "dir") selectPath(node.path, node);
+                    }}
+                    label={t("agents:files.treeLabel")}
+                    controlsId="agent-file-preview"
+                    className="min-h-0 w-full flex-1 p-1 text-left"
+                    // Its new-file and import buttons live in the bar above.
+                    showToolbar={false}
+                    actions={
+                      editing
+                        ? {
+                            onCreate: staged.openNewFile,
+                            onUpload: () => staged.pickUpload(null),
+                            onRename: (path) =>
+                              path.startsWith(BUNDLE_ROOT) &&
+                              staged.openRename(path.slice(BUNDLE_ROOT.length)),
+                            onDelete: (path) =>
+                              path.startsWith(BUNDLE_ROOT) &&
+                              staged.openDelete(path.slice(BUNDLE_ROOT.length)),
+                            // Dependencies are other packages: never renamed or deleted here.
+                            isPinned: (path) =>
+                              !path.startsWith(BUNDLE_ROOT) ||
+                              isPinned(path.slice(BUNDLE_ROOT.length)),
+                            isBusy: busy,
+                            labels: {
+                              newFile: t("files.newFile"),
+                              upload: t("files.upload"),
+                              rename: t("files.rename"),
+                              delete: t("files.delete"),
+                            },
+                          }
+                        : undefined
+                    }
+                  />
+                  {dependenciesLoading && <TextSkeleton lines={2} className="shrink-0 px-3 pb-3" />}
+                </div>
               )}
             </div>
           </>

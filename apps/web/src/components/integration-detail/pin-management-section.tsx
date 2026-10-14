@@ -8,6 +8,7 @@ import { OptionSelect } from "@appstrate/ui/components/select";
 import { SettingsHeading } from "../settings/settings-heading";
 import { ConfirmModal } from "../confirm-modal";
 import { DataTable } from "../data-table";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import type { IntegrationPin } from "@appstrate/shared-types";
 import { usePinColumns } from "./pin-columns";
 import {
@@ -30,8 +31,9 @@ import { connectionSetOption } from "../integration-connect/connection-set-optio
 export function PinManagementSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["settings", "agents"]);
   const { data: pins, isLoading: pinsLoading } = useIntegrationPins(packageId);
-  const { data: connections } = useIntegrationConnections(packageId);
-  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
+  const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
+  const { data: consumingAgents, isLoading: agentsLoading } =
+    useAgentsConsumingIntegration(packageId);
   const deletePin = useDeleteIntegrationPin();
 
   const [adding, setAdding] = useState(false);
@@ -40,7 +42,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
   const pinnableConnections = (connections ?? []).filter((c) => c.shared_here);
 
   // Lookup helpers for the table
-  const agentDisplayName = (id: string): string =>
+  const agentDisplayName = (id: string) =>
     consumingAgents?.find((a) => a.agent_package_id === id)?.display_name ?? id;
 
   const columns = usePinColumns({
@@ -76,7 +78,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
           columns={columns}
           rows={pins ?? []}
           rowKey={(pin) => pin.agent_package_id}
-          isLoading={pinsLoading}
+          isLoading={pinsLoading || agentsLoading}
           empty={
             <p className="text-muted-foreground px-3 py-3 text-xs italic">
               {t("integration.admin.pinManagement.empty")}
@@ -86,7 +88,9 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
       </div>
 
       {/* Add new pin — "no connection" needs no shared connection. */}
-      {pinnableAgents.length === 0 ? (
+      {agentsLoading || connectionsLoading || pinsLoading ? (
+        <Skeleton className="h-8 w-32" />
+      ) : pinnableAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>

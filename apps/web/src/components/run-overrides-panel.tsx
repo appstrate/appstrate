@@ -3,6 +3,8 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { isQueryInFlight } from "../lib/query-state";
 import { OptionSelect, SelectItem } from "@appstrate/ui/components/select";
 import { useModels } from "../hooks/use-models";
 import { isModelSelectable } from "../lib/model-selectability";
@@ -143,8 +145,13 @@ export function RunOverridesPanel({
   onLeave,
 }: RunOverridesPanelProps) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: orgModels } = useModels();
-  const { data: orgProxies } = useProxies();
+  const modelsQuery = useModels();
+  const proxiesQuery = useProxies();
+  const { data: orgModels } = modelsQuery;
+  const { data: orgProxies } = proxiesQuery;
+  // A row stands in as a skeleton until its list lands, and is dropped only if it lands empty.
+  const modelsPending = isQueryInFlight(modelsQuery);
+  const proxiesPending = isQueryInFlight(proxiesQuery);
 
   // The inherited row stays visible even when the default is unavailable, so
   // users can still clear an override and see which model will be resolved.
@@ -220,7 +227,7 @@ export function RunOverridesPanel({
 
   return (
     <div className={layout === "launch" ? "space-y-4" : undefined}>
-      {orgModels && orgModels.length > 0 && (
+      {(modelsPending || (orgModels && orgModels.length > 0)) && (
         <OverrideRow
           layout={layout}
           label={
@@ -230,23 +237,27 @@ export function RunOverridesPanel({
           }
           description={t("schedule.settings.modelHint", { ns: "agents" })}
         >
-          <ModelSelect
-            models={orgModels}
-            value={value.model_id_override ?? null}
-            onChange={setModel}
-            scheduled={scheduled}
-            // "Inherit" stays selectable even when the default is dead: it is the absence of an
-            // override, so disabling it would trap a user who wants to clear one.
-            inherit={{
-              label: inheritedModel
-                ? t("run.overrides.modelInheritWithDefault", {
-                    ns: "agents",
-                    name: inheritedModel.label,
-                  })
-                : t("run.overrides.modelInherit", { ns: "agents" }),
-              modelId: inheritedModel?.id ?? null,
-            }}
-          />
+          {modelsPending || !orgModels ? (
+            <Skeleton className="h-9 w-full" />
+          ) : (
+            <ModelSelect
+              models={orgModels}
+              value={value.model_id_override ?? null}
+              onChange={setModel}
+              scheduled={scheduled}
+              // "Inherit" stays selectable even when the default is dead: it is the absence of an
+              // override, so disabling it would trap a user who wants to clear one.
+              inherit={{
+                label: inheritedModel
+                  ? t("run.overrides.modelInheritWithDefault", {
+                      ns: "agents",
+                      name: inheritedModel.label,
+                    })
+                  : t("run.overrides.modelInherit", { ns: "agents" }),
+                modelId: inheritedModel?.id ?? null,
+              }}
+            />
+          )}
         </OverrideRow>
       )}
 
@@ -282,44 +293,48 @@ export function RunOverridesPanel({
           </p>
         )}
 
-      {orgProxies && orgProxies.length > 0 && (
+      {(proxiesPending || (orgProxies && orgProxies.length > 0)) && (
         <OverrideRow
           layout={layout}
           label={t("detail.configSectionProxy", { ns: "agents" })}
           description={t("schedule.settings.proxyHint", { ns: "agents" })}
         >
-          <OptionSelect
-            value={proxySelectValue}
-            onValueChange={setProxy}
-            leading={
-              <SelectItem value={INHERIT}>
-                {persistedProxyId === NONE
-                  ? t("run.overrides.proxyInheritWithDefault", {
-                      ns: "agents",
-                      name: t("run.overrides.proxyNone", { ns: "agents" }),
-                    })
-                  : inheritedProxy
+          {proxiesPending || !orgProxies ? (
+            <Skeleton className="h-9 w-full" />
+          ) : (
+            <OptionSelect
+              value={proxySelectValue}
+              onValueChange={setProxy}
+              leading={
+                <SelectItem value={INHERIT}>
+                  {persistedProxyId === NONE
                     ? t("run.overrides.proxyInheritWithDefault", {
                         ns: "agents",
-                        name: inheritedProxy.label,
+                        name: t("run.overrides.proxyNone", { ns: "agents" }),
                       })
-                    : t("run.overrides.proxyInherit", { ns: "agents" })}
-              </SelectItem>
-            }
-            options={[
-              { value: NONE, label: t("run.overrides.proxyNone", { ns: "agents" }) },
-              ...(goneProxyOverride
-                ? [
-                    {
-                      value: goneProxyOverride,
-                      label: t("run.overrides.proxyGone", { ns: "agents" }),
-                      disabled: true,
-                    },
-                  ]
-                : []),
-              ...orgProxies.map((p) => ({ value: p.id, label: p.label })),
-            ]}
-          />
+                    : inheritedProxy
+                      ? t("run.overrides.proxyInheritWithDefault", {
+                          ns: "agents",
+                          name: inheritedProxy.label,
+                        })
+                      : t("run.overrides.proxyInherit", { ns: "agents" })}
+                </SelectItem>
+              }
+              options={[
+                { value: NONE, label: t("run.overrides.proxyNone", { ns: "agents" }) },
+                ...(goneProxyOverride
+                  ? [
+                      {
+                        value: goneProxyOverride,
+                        label: t("run.overrides.proxyGone", { ns: "agents" }),
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+                ...orgProxies.map((p) => ({ value: p.id, label: p.label })),
+              ]}
+            />
+          )}
         </OverrideRow>
       )}
 
@@ -407,7 +422,8 @@ function IntegrationOverrideRow({
   onChange: (next: ConnectionSet) => void;
   onLeave?: (to: string) => void;
 }) {
-  const { data: detail } = useIntegrationDetail(integration.id);
+  const detailQuery = useIntegrationDetail(integration.id);
+  const { data: detail } = detailQuery;
   const displayName = detail?.manifest.display_name ?? integration.id;
 
   // Gate the row on whether the agent can connect this integration at all
@@ -415,7 +431,15 @@ function IntegrationOverrideRow({
   // selection: an agent writing no `tools` inherits `default_tools`).
   // Mirrors the run-time `integration_not_active`/no-auth gates so neither
   // form offers an override for an unconnectable integration.
-  if (!detail) return null;
+  if (!detail) {
+    if (!isQueryInFlight(detailQuery)) return null;
+    return (
+      <div className="space-y-1.5">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    );
+  }
   const effectiveTools = resolveEffectiveToolSelection(integration.tools, detail.manifest);
   if (connectableAuthKeysForAgent(detail.manifest, effectiveTools).length === 0) return null;
 

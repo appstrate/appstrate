@@ -147,7 +147,7 @@ export function DocumentListPanel({
           <ItemList
             items={documents}
             itemKey={(doc) => doc.id}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
             renderItem={(doc) => (
@@ -179,7 +179,7 @@ export function DocumentListPanel({
             rowAction={(doc) => preview.open(doc.id)}
             rowActionable={(doc) => doc.capabilities.preview}
             rowLabel={(doc) => doc.name}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
           />
@@ -189,7 +189,7 @@ export function DocumentListPanel({
             items={documents}
             min="10rem"
             itemKey={(doc) => doc.id}
-            isLoading={isLoading}
+            isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
             renderCard={(doc) => (

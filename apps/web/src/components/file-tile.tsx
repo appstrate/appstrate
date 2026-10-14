@@ -31,6 +31,7 @@ import { formatDateField } from "../lib/format-date";
 import { mimeIconFor, fileRunHref, fileExpiryInfo, type RunFileDirection } from "../lib/files";
 import { isImageMime } from "@appstrate/core/mime";
 import { useFileImageSrc, type FileDto } from "../hooks/use-files";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 /**
  * Relative-expiry badge, the one label every file surface shows for a retention
@@ -80,13 +81,14 @@ function MimePlaceholder({ mime }: { mime: string }) {
 }
 
 /**
- * Image branch: the authenticated cover-cropped preview, falling back to the
- * mime placeholder while the fetch is in flight or on failure (src null). Kept
- * as its own component so the fetch hook only runs for eligible images (hooks
- * can't be called conditionally).
+ * Image branch: the authenticated cover-cropped preview, a placeholder block in
+ * its place while the fetch is in flight, the mime placeholder when there is
+ * none. Kept as its own component so the fetch hook only runs for eligible
+ * images (hooks can't be called conditionally).
  */
 function FileTileImage({ file }: { file: FileDto }) {
   const src = useFileImageSrc(file.id);
+  if (src === undefined) return <Skeleton className="size-full rounded-none" />;
   if (!src) return <MimePlaceholder mime={file.mime} />;
   return <img src={src} alt={file.name} className="size-full object-cover" />;
 }

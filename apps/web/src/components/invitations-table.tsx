@@ -44,8 +44,8 @@ export function InvitationsTable({
   const queryClient = useQueryClient();
   const { currentOrg } = useOrg();
   const { can } = usePermissions();
-  const { data: spaces } = useSpaces();
-  const { options: roles } = useSpaceRoleOptions();
+  const { data: spaces, isLoading: spacesLoading } = useSpaces();
+  const { options: roles, isLoading: rolesLoading } = useSpaceRoleOptions();
   const { copy } = useCopyToClipboard();
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
@@ -80,6 +80,7 @@ export function InvitationsTable({
   };
 
   const columns = useInvitationColumns({
+    assignmentsLoading: spacesLoading || rolesLoading,
     assignments: (invitation) =>
       invitation.space_assignments.map(
         (assignment) =>

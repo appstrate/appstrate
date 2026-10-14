@@ -34,6 +34,7 @@ import {
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { ErrorState, ResourceErrorState } from "../components/page-states";
 import { SettingsSkeleton } from "../components/loading-skeletons";
 import { DetailTabs, DetailTabBar, DetailTabPanel } from "../components/detail-tabs";
@@ -43,7 +44,8 @@ import {
   SettingsRailView,
   type SettingsRailGroup,
 } from "../components/settings/settings-rail-view";
-import { PackageDetailSkeleton, SharedHeader } from "../components/package-detail/shared-header";
+import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailSkeleton } from "../components/loading-skeletons";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageCommonSection } from "../components/package-detail/package-common-section";
@@ -364,8 +366,9 @@ export function IntegrationDetailPage() {
   };
   const canBrowseIntegrations = useCanReach()("/integrations");
 
-  // `source` (system or local) comes from the package detail only: wait for it.
-  if (isLoading || pkgLoading) return <PackageDetailSkeleton type="integration" />;
+  // Only the integration detail gates the page; the package detail brings `source` and
+  // follows in place (badges, read-only alert, actions menu).
+  if (isLoading) return <PackageDetailSkeleton type="integration" />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.
@@ -385,7 +388,7 @@ export function IntegrationDetailPage() {
   const m = detail.manifest;
   // Only the package detail knows the source.
   const source = pkg?.source;
-  const version = pkg?.version ?? m.version;
+  const version = pkgLoading ? undefined : (pkg?.version ?? m.version);
   const isOwned = isOwnedSource(source);
 
   return (
@@ -406,9 +409,12 @@ export function IntegrationDetailPage() {
           label: t(`integration.tabs.${tab}`),
         }}
         actionsLeft={
-          <Badge variant={active ? "success" : "warning"}>
-            {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
-          </Badge>
+          <>
+            {pkgLoading && <Skeleton className="h-5 w-16" />}
+            <Badge variant={active ? "success" : "warning"}>
+              {active ? t("integrations.badge.active") : t("integrations.badge.inactive")}
+            </Badge>
+          </>
         }
         actionsRight={
           <>
@@ -422,15 +428,19 @@ export function IntegrationDetailPage() {
                 {t("integrations.btn.activate")}
               </Button>
             )}
-            <PackageActionsDropdown
-              packageId={packageId}
-              type="integration"
-              detail={pkg}
-              isHistoricalVersion={false}
-              downloadVersion={version}
-              onDownload={downloadPackage}
-              isActiveHere={active}
-            />
+            {pkgLoading ? (
+              <Skeleton className="size-8 rounded-md" />
+            ) : (
+              <PackageActionsDropdown
+                packageId={packageId}
+                type="integration"
+                detail={pkg}
+                isHistoricalVersion={false}
+                downloadVersion={version}
+                onDownload={downloadPackage}
+                isActiveHere={active}
+              />
+            )}
           </>
         }
       />
@@ -469,19 +479,24 @@ export function IntegrationDetailPage() {
 
         {/* Configuration is admin-only; package files stay readable for every member. */}
         <DetailTabPanel value="configuration" flush>
-          <IntegrationSettings
-            packageId={packageId}
-            detail={detail}
-            blockUserConnections={detail.block_user_connections}
-            canConfigure={canConfigure}
-            // Write authority is the package's HOME space, never the space being browsed.
-            definition={homeWritable && pkg ? pkg : undefined}
-            isOwned={isOwned}
-            versionGrants={{
-              canRestore: isOwned && !!homeWritable,
-              canDelete: isOwned && !!homeDeletable,
-            }}
-          />
+          {/* Its rail (definition, versions) depends on the package's source. */}
+          {pkgLoading ? (
+            <SettingsSkeleton className="p-6" />
+          ) : (
+            <IntegrationSettings
+              packageId={packageId}
+              detail={detail}
+              blockUserConnections={detail.block_user_connections}
+              canConfigure={canConfigure}
+              // Write authority is the package's HOME space, never the space being browsed.
+              definition={homeWritable && pkg ? pkg : undefined}
+              isOwned={isOwned}
+              versionGrants={{
+                canRestore: isOwned && !!homeWritable,
+                canDelete: isOwned && !!homeDeletable,
+              }}
+            />
+          )}
         </DetailTabPanel>
 
         {/* ─── Outils (effective tool catalog — read-only) ─── */}

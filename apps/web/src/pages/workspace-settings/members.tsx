@@ -51,6 +51,7 @@ import { FormModal } from "../../components/form-modal";
 import type { PageAction } from "../../components/page-actions-menu";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
@@ -180,6 +181,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
       {canManageRoles && (
         <RoleCatalogState
           className="mb-4"
+          pending={null}
           isLoading={rolesLoading}
           rolesKnown={rolesKnown}
           error={rolesError}
@@ -464,29 +466,30 @@ function AddSpaceMemberModal({
         {selectingUser ? (
           <Field data-disabled={usersLoading || !!usersError || isPending}>
             <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
-            <Select
-              value={userId}
-              onValueChange={(value) => {
-                setUserId(value);
-                setFormError(null);
-              }}
-              disabled={usersLoading || !!usersError || isPending}
-            >
-              <SelectTrigger id="space-member-user">
-                <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {candidates.map((member) => (
-                    <SelectItem key={member.userId} value={member.userId}>
-                      {memberLabel(member)}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            {usersLoading && (
-              <FieldDescription role="status">{t("spaceMembers.usersLoading")}</FieldDescription>
+            {usersLoading ? (
+              <Skeleton className="h-9 w-full" />
+            ) : (
+              <Select
+                value={userId}
+                onValueChange={(value) => {
+                  setUserId(value);
+                  setFormError(null);
+                }}
+                disabled={!!usersError || isPending}
+              >
+                <SelectTrigger id="space-member-user">
+                  <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {candidates.map((member) => (
+                      <SelectItem key={member.userId} value={member.userId}>
+                        {memberLabel(member)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             )}
             {usersError && (
               <Alert variant="destructive">
@@ -544,12 +547,14 @@ function AddSpaceMemberModal({
             fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
             placeholder={t("spaceMembers.noAssignableRoles")}
             disabled={roleFieldLocked}
+            loading={rolesLoading}
             onValueChange={(value) => {
               setRole(value);
               setFormError(null);
             }}
           />
           <RoleCatalogState
+            pending={null}
             isLoading={rolesLoading}
             rolesKnown={rolesKnown}
             error={rolesError}

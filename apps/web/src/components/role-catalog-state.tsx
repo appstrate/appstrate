@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
@@ -23,6 +24,7 @@ export function RoleCatalogState({
   error,
   refetch,
   emptyMessage,
+  pending,
   className,
 }: {
   isLoading: boolean;
@@ -30,6 +32,8 @@ export function RoleCatalogState({
   error: unknown;
   refetch: () => void;
   emptyMessage: string | null;
+  /** What stands in while the catalog loads; `null` when the caller draws its own wait. */
+  pending?: ReactNode;
   className?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -47,7 +51,8 @@ export function RoleCatalogState({
       </Alert>
     );
 
-  if (isLoading || !rolesKnown) return <TextSkeleton lines={2} className={className} />;
+  if (isLoading || !rolesKnown)
+    return pending === undefined ? <TextSkeleton lines={2} className={className} /> : pending;
 
   if (emptyMessage)
     return <p className={cn("text-muted-foreground text-sm", className)}>{emptyMessage}</p>;

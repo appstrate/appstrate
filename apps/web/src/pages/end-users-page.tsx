@@ -17,6 +17,7 @@ import { SettingsSkeleton } from "../components/loading-skeletons";
 import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
+import { Spinner } from "../components/spinner";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
 import { DataTable } from "../components/data-table";
@@ -61,6 +62,8 @@ function EndUsersPageContent() {
 
   const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
   const hasMore = data?.hasMore ?? false;
+  // The next page has no data yet: the rows already loaded stay on screen.
+  const loadingMore = isLoading && loadedPages.length > 0;
   // The detail and the edition are two addresses of one modal: `?endUser=<id>`
   // shows, `?editEndUser=<id>` edits, and switching hands one over to the other.
   const detailParam = useModalParam(END_USER_PARAM);
@@ -160,7 +163,7 @@ function EndUsersPageContent() {
             name: endUserDisplayName(user, t("spaces.anonymousUser")),
           })
         }
-        isLoading={isLoading}
+        isLoading={isLoading && endUsers.length === 0}
         failure={error}
         empty={
           search.trim() ? (
@@ -178,9 +181,10 @@ function EndUsersPageContent() {
         }
       />
 
-      {hasMore && !isLoading && !error && (
+      {(hasMore || loadingMore) && !error && (
         <Button
           variant="outline"
+          disabled={loadingMore}
           onClick={() => {
             const last = currentPage[currentPage.length - 1];
             if (last) {
@@ -190,7 +194,7 @@ function EndUsersPageContent() {
           }}
           className="mt-3 w-full"
         >
-          {t("spaces.loadMore")}
+          {loadingMore ? <Spinner /> : t("spaces.loadMore")}
         </Button>
       )}
 

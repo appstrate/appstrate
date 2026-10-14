@@ -13,6 +13,7 @@ import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { CheckCircle2 } from "lucide-react";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingDoneStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -32,7 +33,16 @@ export function OnboardingDoneStep() {
   const modelReady = !!defaultModel && !defaultModel.needs_reconnection;
   const invitationCount = orgData?.invitations?.length ?? 0;
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="complete"
+        title={t("onboarding.doneTitle")}
+        subtitle={t("onboarding.doneSubtitle")}
+      >
+        <TextSkeleton lines={4} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout
