@@ -179,13 +179,13 @@ describe("lookup — exact mounts", () => {
     const table = tableOf((sub) =>
       sub.all(
         "/credential-proxy/proxy",
-        requireAnyPermission(["credential-proxy:call-run", "credential-proxy:call-own"]),
+        requireAnyPermission(["credential-proxy:call-own", "credential-proxy:call"]),
         ok,
       ),
     );
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
       expect(served(table, method, "/api/credential-proxy/proxy").requirements).toEqual([
-        "credential-proxy:call-run|credential-proxy:call-own",
+        "credential-proxy:call-own|credential-proxy:call",
       ]);
     }
   });

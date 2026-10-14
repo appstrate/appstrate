@@ -182,6 +182,9 @@ const OPERATOR_PRESET_PERMISSIONS: ReadonlySet<SpaceLevelPermission> =
     "integrations:read",
     "integrations:connect",
     "integrations:disconnect",
+    // Call the credential proxy outside a run, on own connections only. A shared connection and
+    // the run path are `credential-proxy:call` (admin, builder).
+    "credential-proxy:call-own",
     "end-users:read",
     "end-users:write",
   ]);
@@ -332,11 +335,12 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "end-users:read",
   "end-users:write",
   "end-users:delete",
-  // Credential proxy for a run (`X-Run-Id`) — BYOI ("Bring Your Own Instance")
-  // for remote AFPS runs. A key minted with `scopes` omitted or empty carries
-  // it when its creator holds it; a non-empty `scopes` mints a narrower key.
-  "credential-proxy:call-run",
-  // Credential proxy outside a run, under the same `scopes` rule.
+  // Credential proxy: outside a run on the connections usable in the space, and for a run
+  // (`X-Run-Id`) — BYOI ("Bring Your Own Instance") for remote AFPS runs. A key minted with
+  // `scopes` omitted or empty carries it when its creator holds it; a non-empty `scopes` mints a
+  // narrower key.
+  "credential-proxy:call",
+  // Credential proxy outside a run on own connections only, under the same `scopes` rule.
   "credential-proxy:call-own",
   // LLM proxy — server-side LLM model injection for remote-backed
   // `appstrate run` and headless CI (GitHub Action). Scopes metered

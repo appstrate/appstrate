@@ -113,9 +113,9 @@ export interface CoreResources {
   "api-keys": "read" | "create" | "revoke";
   spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  // `/api/credential-proxy/proxy`: `call-run` for a run (`X-Run-Id`), reaching the
-  // connections that run bound; `call-own` outside a run: own ones, or with `call-run` usable ones.
-  "credential-proxy": "call-run" | "call-own";
+  // `/api/credential-proxy/proxy`: `call` outside a run reaches the connections usable in the
+  // space, and for a run (`X-Run-Id`) the ones it bound; `call-own` outside a run, own ones only.
+  "credential-proxy": "call" | "call-own";
   "llm-proxy": "call";
   // AFPS integrations (marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
@@ -169,6 +169,15 @@ export const RUNS_READ_PERMISSIONS = [
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
   return RUNS_READ_PERMISSIONS.some((permission) => has(permission));
 }
+
+/**
+ * `credential-proxy:call` implies `credential-proxy:call-own`: every door a call outside a run
+ * opens guards on this tuple, so a credential holding `call` alone passes them.
+ */
+export const PROXY_CALL_PERMISSIONS = [
+  "credential-proxy:call-own",
+  "credential-proxy:call",
+] as const satisfies readonly CorePermission[];
 
 /**
  * The permission resource each package family's routes guard on. Declared, not
@@ -285,7 +294,7 @@ export const CORE_RESOURCE_ACTIONS = {
   "api-keys": ["read", "create", "revoke"],
   spaces: ["read", "write", "delete"],
   "end-users": ["read", "write", "delete"],
-  "credential-proxy": ["call-run", "call-own"],
+  "credential-proxy": ["call", "call-own"],
   "llm-proxy": ["call"],
   integrations: [
     "read",

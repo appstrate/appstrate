@@ -61,7 +61,7 @@ export interface ReportSession {
   httpSink: HttpSink;
   /**
    * Headers to attach to every credential-proxy call. `X-Run-Id` makes it a
-   * call made for this run: it requires `credential-proxy:call-run` and reaches
+   * call made for this run: it requires `credential-proxy:call` and reaches
    * the connections the run bound.
    */
   proxyHeaders: Record<string, string>;

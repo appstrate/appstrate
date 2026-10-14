@@ -3,29 +3,30 @@
 /**
  * Who may call the credential proxy. Decided here from the caller, so every door that reaches the
  * proxy (the REST route, and through it the MCP module's `api_call` tool, its one MCP path)
- * applies one rule. A call takes one of two paths, each with its own permission:
+ * applies one rule:
  *
- *   - for a run (`X-Run-Id`): `credential-proxy:call-run`, and the run is the actor's own, in flight,
+ *   - for a run (`X-Run-Id`): `credential-proxy:call`, and the run is the actor's own, in flight,
  *     and executed by the caller ({@link requireCallerRun}). It reaches what the run bound, a
  *     colleague's shared connection included, which is why launching runs (`agents:run`) is not
  *     enough: registering a remote run would otherwise hand out raw access to that connection.
- *   - outside a run: `credential-proxy:call-own`: own connections, and with `call-run` shared ones
- *     (`selectAccessibleConnection`).
+ *   - outside a run: `credential-proxy:call` reaches the connections usable in the space,
+ *     `credential-proxy:call-own` the caller's own only ({@link reachOutsideRun},
+ *     `selectAccessibleConnection`).
  */
 
+import { PROXY_CALL_PERMISSIONS } from "@appstrate/core/permissions";
 import type { Actor } from "../../lib/actor.ts";
 import type { Permission } from "../../lib/permissions.ts";
 import { forbidden } from "../../lib/errors.ts";
 import type { ProxyReach } from "../integration-connections.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
-/** What a call made for a run requires. */
-export const PROXY_RUN_PERMISSION = "credential-proxy:call-run" satisfies Permission;
-/** What a call naming no run requires. */
-export const PROXY_OWN_PERMISSION = "credential-proxy:call-own" satisfies Permission;
+/** Reaches the connections usable in the space, and opens the run path. */
+const PROXY_CALL_PERMISSION = "credential-proxy:call" satisfies Permission;
 
+/** Outside a run: `usable` under `credential-proxy:call`, `own` under `call-own` alone. */
 export function reachOutsideRun(permissions: ReadonlySet<string>): ProxyReach {
-  return permissions.has(PROXY_RUN_PERMISSION) ? "usable" : "own";
+  return permissions.has(PROXY_CALL_PERMISSION) ? "usable" : "own";
 }
 
 interface ProxyAccessInput {
@@ -44,18 +45,17 @@ interface ProxyAccessInput {
 export async function authorizeProxyCall(input: ProxyAccessInput): Promise<void> {
   const { permissions, orgId, spaceId, actor, runId, onDenied } = input;
   if (runId === null) {
-    if (permissions.has(PROXY_OWN_PERMISSION)) return;
-    onDenied(PROXY_OWN_PERMISSION);
+    if (PROXY_CALL_PERMISSIONS.some((permission) => permissions.has(permission))) return;
+    const required = PROXY_CALL_PERMISSIONS.join("|");
+    onDenied(required);
     throw forbidden(
-      `Insufficient permissions: ${PROXY_OWN_PERMISSION} required to call the credential proxy ` +
-        `outside a run. A call made for a run names it with X-Run-Id and requires ` +
-        `${PROXY_RUN_PERMISSION} instead.`,
+      `Insufficient permissions: ${required} required to call the credential proxy outside a run`,
     );
   }
-  if (!permissions.has(PROXY_RUN_PERMISSION)) {
-    onDenied(PROXY_RUN_PERMISSION);
+  if (!permissions.has(PROXY_CALL_PERMISSION)) {
+    onDenied(PROXY_CALL_PERMISSION);
     throw forbidden(
-      `Insufficient permissions: ${PROXY_RUN_PERMISSION} required to call the credential proxy ` +
+      `Insufficient permissions: ${PROXY_CALL_PERMISSION} required to call the credential proxy ` +
         `for a run (X-Run-Id)`,
     );
   }

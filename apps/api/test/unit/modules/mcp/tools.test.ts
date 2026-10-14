@@ -104,13 +104,13 @@ describe("mcp catalog", () => {
     expect(calls).toHaveLength(0);
     // The listing stays an operation: `deriveMcpSurface` reads its guard to declare the tools.
     expect(operationIdGranted("listCredentialProxyConnections", new Set(), undefined)).toBe(false);
-    expect(
-      operationIdGranted(
-        "listCredentialProxyConnections",
-        new Set(["credential-proxy:call-own"]),
-        undefined,
-      ),
-    ).toBe(true);
+    // `credential-proxy:call` implies `call-own`: either one alone grants the listing.
+    for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
+      expect(
+        operationIdGranted("listCredentialProxyConnections", new Set([permission]), undefined),
+        permission,
+      ).toBe(true);
+    }
   });
 });
 

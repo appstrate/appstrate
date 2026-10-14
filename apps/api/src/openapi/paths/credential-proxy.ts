@@ -26,23 +26,22 @@ const proxySharedDescription =
   "token for the interactive CLI, dashboard access token for second-party apps). Cookie " +
   "sessions are rejected. Session binding pins the `X-Session-Id` to the first principal " +
   "(API key or JWT user) that used it.\n\n" +
-  "A call takes one of two paths, each with its own permission. **For a run** (`X-Run-Id`): " +
-  "requires `credential-proxy:call-run` — launching runs (`agents:run`) does not open it; the " +
-  "header names the caller's own in-flight run that the caller executes itself (a remote " +
-  "run), and the call reaches the connections that run bound, a connection another member " +
-  "shared into the space included. **Outside a run** (no " +
-  "`X-Run-Id`): requires `credential-proxy:call-own`. With it alone the call reaches the " +
-  "caller's OWN connections only: a connection another member shared into the space is out " +
-  "of reach, and so is every connection of an integration governed by an enforced org " +
-  "default. A caller who also holds `credential-proxy:call-run` reaches the connections " +
-  "usable in the space, their own and those shared into it, through the resolver's cascade " +
-  "without agent pins: the rows a run in the space binds for that caller. " +
-  "`GET /api/credential-proxy/connections` lists the candidates of a call outside a run " +
-  "and, per row, what such a call would still refuse. Holding one permission never opens " +
-  "the other path.\n\n" +
+  "Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. " +
+  "**For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs " +
+  "(`agents:run`) does not grant it; the header names the caller's own in-flight run that " +
+  "the caller executes itself (a remote run), and the call reaches the connections that run " +
+  "bound, a connection another member shared into the space included. **Outside a run** " +
+  "(no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable " +
+  "in the space, the caller's own and those shared into it, through the resolver's cascade " +
+  "without agent pins (org defaults included): the rows a run in the space binds for that " +
+  "caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections " +
+  "only: a connection another member shared into the space is out of reach, and so is " +
+  "every connection of an integration governed by an enforced org default; a call for a " +
+  "run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call " +
+  "outside a run and, per row, what such a call would still refuse.\n\n" +
   "Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: " +
-  "outside a run the call reaches the end-user's own connections, and with both permissions " +
-  "those a member shared into the space.\n\n" +
+  "outside a run the call reaches the end-user's own connections, and with " +
+  "`credential-proxy:call` those a member shared into the space.\n\n" +
   "URL and headers can contain `{{credential_field}}` placeholders substituted " +
   "against the integration's credential schema, each value encoded for the place it " +
   "takes: percent-encoded as one URL component (a placeholder that starts the URL is a " +
@@ -138,7 +137,8 @@ const proxyParameters = [
     required: false,
     description:
       "Impersonation header — the end-user is the caller: outside a run the call reaches " +
-      "their own connections, and with both permissions those a member shared into the space.",
+      "their own connections, and with `credential-proxy:call` those a member shared into the " +
+      "space.",
     schema: { type: "string", pattern: "^eu_" },
   },
   {
@@ -178,7 +178,7 @@ const proxyParameters = [
     required: false,
     description:
       "Optional run id (`run_…`) of the run this call acts for — sent by a runner executing it " +
-      "(`appstrate run --report`). Requires `credential-proxy:call-run`. Must name an in-flight " +
+      "(`appstrate run --report`). Requires `credential-proxy:call`. Must name an in-flight " +
       "run of the calling actor in this space, executed by the caller (`runOrigin: remote`): an " +
       "unknown id or one of another space is a `404`, another actor's run or a run the " +
       "platform executes a `403`, a finished run a `400`. It binds the call to the run's " +
@@ -189,8 +189,8 @@ const proxyParameters = [
       "(`409 must_choose_connection` when absent, `400 connection_not_in_run` when it names " +
       "another); none is a `404`, and so is a bound one no longer reachable (deleted or " +
       "unshared); a bound one that needs reconnecting is a " +
-      "`409 needs_reconnection`. Without it the call is made outside a run: it requires " +
-      "`credential-proxy:call-own` and reaches what `X-Connection-Id` describes.",
+      "`409 needs_reconnection`. Without it the call is made outside a run and reaches what " +
+      "`X-Connection-Id` describes.",
     schema: { type: "string" },
   },
   {
@@ -201,15 +201,16 @@ const proxyParameters = [
       "Optional explicit connection UUID. With `X-Run-Id`, it must name a connection the run " +
       "bound (see `X-Run-Id`). Without it, what is reachable depends on the caller's " +
       "permissions.\n\n" +
-      "**`credential-proxy:call-own` alone**: only the caller's own connections (user or " +
-      "end-user) usable in the request's space are candidates — no org default applies, a soft " +
-      "one included — in this order: (1) an integration governed by an ENFORCED org default " +
-      "answers `403 call_run_permission_required` whatever is named; (2) a named connection is used when it is " +
+      "**`credential-proxy:call-own` without `credential-proxy:call`**: only the caller's own " +
+      "connections (user or end-user) usable in the request's space are candidates — no org " +
+      "default applies, a soft one included — in this order: (1) an integration governed by " +
+      "an ENFORCED org default answers `403 call_permission_required` whatever is named; (2) " +
+      "a named connection is used when it is " +
       "one of the caller's own, of the requested integration; any other id — another member's " +
       "connection, shared into the space or not, or an unknown id — is one and the same " +
       "`404 credential_not_found`; (3) nothing named: exactly one own connection is used, none " +
       "is a `404 credential_not_found`, several a `409 must_choose_connection` listing them.\n\n" +
-      "**With `credential-proxy:call-run` as well**: the candidates are the caller's own " +
+      "**With `credential-proxy:call`**: the candidates are the caller's own " +
       "connections and those another member shared into the space, in this order: (1) an " +
       "ENFORCED org default of the integration binds its set — a named id must be a member " +
       "(`400 connection_not_in_org_default` otherwise, whatever the id names); (2) a named " +
@@ -298,12 +299,12 @@ const proxyResponses = {
       "does not name its hosts: it is empty or has an entry that leaves the host to the " +
       "caller, or every entry matching the target reaches it through a wildcard past the " +
       "registrable domain written under it, judged with the Public Suffix List (the message " +
-      "then names the host to list) (`http_request_denied`); `call_run_permission_required` — no `X-Run-Id`, " +
-      "an enforced org default governs the integration in this space and the caller holds " +
-      "`credential-proxy:call-own` without `credential-proxy:call-run` " +
-      "(`http_request_denied`); `forbidden` — the principal lacks " +
-      "the permission of the path the call takes (`credential-proxy:call-run` with `X-Run-Id`, " +
-      "`credential-proxy:call-own` without, the detail naming it), session " +
+      "then names the host to list) (`http_request_denied`); `call_permission_required` — no " +
+      "`X-Run-Id`, an enforced org default governs the integration in this space and the " +
+      "caller holds `credential-proxy:call-own` without `credential-proxy:call` " +
+      "(`http_request_denied`); `forbidden` — the principal lacks the permission of the path " +
+      "the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` " +
+      "or `credential-proxy:call` without), session " +
       "bound to a different principal, cookie session used, or `X-Run-Id` names another " +
       "actor's run or a run the platform executes.",
     headers: PROXY_STATUS_HEADER,
@@ -325,11 +326,12 @@ const proxyResponses = {
     description:
       "`must_choose_connection` — no `X-Connection-Id` and no single candidate: the " +
       "`X-Run-Id` run bound several connections to the integration, or (no run) the caller " +
-      "owns several, an org default holds several, or a caller holding both permissions owns " +
-      "none while a shared one is a candidate. `errors[0].candidate_connections` lists " +
-      "what the caller may name (the run's bound set, else the org default's set, else the " +
-      "caller's own connections — with those shared into the space for a caller holding both " +
-      "permissions, never another member's otherwise), with " +
+      "owns several, an org default holds several, or a caller holding " +
+      "`credential-proxy:call` owns none while a shared one is a candidate. " +
+      "`errors[0].candidate_connections` lists what the caller may name (the run's bound " +
+      "set, else the org default's set, else the caller's own connections — with those " +
+      "shared into the space for a caller holding `credential-proxy:call`, never another " +
+      "member's otherwise), with " +
       "`label`, `account_id`, `owned_by_actor`, `needs_reconnection`; retry with one `id` in " +
       "`X-Connection-Id`. `needs_reconnection` — the connection that would be bound (the run's " +
       "bound one included) needs its owner to reconnect it. `pinned_connection_unavailable` — " +
@@ -452,7 +454,7 @@ const connectionOutsideRunSchema = {
     "authorized_uris",
     "allow_all_uris",
     "needs_reconnection",
-    "call_run_permission_required",
+    "call_permission_required",
   ],
   properties: {
     integration_package_id: {
@@ -469,7 +471,7 @@ const connectionOutsideRunSchema = {
       type: "boolean",
       description:
         "True when the connection is the caller's own, false when another member shared it in " +
-        "the space: listed for a caller holding `credential-proxy:call-run` as well, and used " +
+        "the space: listed for a caller holding `credential-proxy:call`, and used " +
         "when named or designated by an org default.",
     },
     auth_key: { type: "string", description: "The manifest auth the connection is on." },
@@ -499,12 +501,12 @@ const connectionOutsideRunSchema = {
       type: "boolean",
       description: "A call binding it answers `409 needs_reconnection` until it is reconnected.",
     },
-    call_run_permission_required: {
+    call_permission_required: {
       type: "boolean",
       description:
         "An enforced org default governs the integration in this space and the caller holds " +
-        "no `credential-proxy:call-run`: their call without `X-Run-Id` answers " +
-        "`403 call_run_permission_required`, this connection named or not.",
+        "no `credential-proxy:call`: their call without `X-Run-Id` answers " +
+        "`403 call_permission_required`, this connection named or not.",
     },
   },
 } as const;
@@ -521,18 +523,18 @@ export const credentialProxyPaths = {
         "published version. Read with the rule the proxy applies. With " +
         "`credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) " +
         "usable here, and never one another member shared into the space. With " +
-        "`credential-proxy:call-run` as well: those and the connections shared into the " +
+        "`credential-proxy:call`: those and the connections shared into the " +
         "space, each telling which it is (`owned_by_actor`); of an integration governed by an " +
         "enforced org default, that default's members only. Grouped by integration, oldest " +
         "first within one. An entry the caller does not own is used when named with " +
-        "`X-Connection-Id` or designated by an org default. `call_run_permission_required` and " +
+        "`X-Connection-Id` or designated by an org default. `call_permission_required` and " +
         "`needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call " +
         "naming none follows the order that parameter describes on " +
         "`/api/credential-proxy/proxy`: several own entries of one integration need it, and " +
-        "with `credential-proxy:call-run` an org default binds its set before the caller's own " +
+        "with `credential-proxy:call` an org default binds its set before the caller's own " +
         "connection, refusing the call while one of its members is out of the caller's reach " +
         "or needs reconnecting. No credential is decrypted to build it. Requires " +
-        "`credential-proxy:call-own`.",
+        "`credential-proxy:call-own` or `credential-proxy:call`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

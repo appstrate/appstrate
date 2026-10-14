@@ -57,9 +57,9 @@ const PROXY_PROBLEMS = {
     title: "Credential Exfiltration Refused",
     proxyError: "http_request_denied",
   },
-  call_run_permission_required: {
+  call_permission_required: {
     status: 403,
-    title: "Call-Run Permission Required",
+    title: "Call Permission Required",
     proxyError: "http_request_denied",
   },
   credential_not_found: { status: 404, title: "Credential Not Found" },
