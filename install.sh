@@ -99,16 +99,16 @@ _appstrate_bootstrap() {
   esac
 
   # Default version pinned by `publish-installer.yml` at publish time —
-  # rewriting `v1.0.0-beta.66` so `curl get.appstrate.dev | bash`
+  # rewriting `v1.0.0-beta.67` so `curl get.appstrate.dev | bash`
   # downloads the binary matching the release that published this script.
   # Users can override via APPSTRATE_VERSION env var (e.g. to pin an older
   # release). When the placeholder is still present (local dev / unrendered
   # copy), fall back to `latest` so the script stays runnable out of tree.
-  _DEFAULT_VERSION="v1.0.0-beta.66"
+  _DEFAULT_VERSION="v1.0.0-beta.67"
   if [[ "$_DEFAULT_VERSION" == __* ]]; then _DEFAULT_VERSION="latest"; fi
   VERSION="${APPSTRATE_VERSION:-$_DEFAULT_VERSION}"
   # A release is `v1.2.3` as a git tag but `1.2.3` everywhere an operator
-  # reads it (image tags, `.env`, `appstrate --version`): accept both (#1788).
+  # reads it (image tags, `.env`, `appstrate --version`): accept both.
   if [ "$VERSION" != "latest" ]; then VERSION="v${VERSION#v}"; fi
   # Rootless default: install into $HOME/.local/bin (XDG user-space equivalent
   # of /usr/local/bin). Matches uv, rustup, Bun, Deno, pipx — avoids a sudo
@@ -179,7 +179,7 @@ _appstrate_bootstrap() {
   have_shasum() { command -v shasum >/dev/null 2>&1; }
   have_minisign() { command -v minisign >/dev/null 2>&1; }
 
-  # ─── minisign auto-install (issue #470) ─────────────────────────────────────
+  # ─── minisign auto-install ─────────────────────────────────────
   #
   # The one-liner one-step UX promise ("paste this, get a running Appstrate")
   # breaks on every Debian-family box without minisign pre-installed: the
@@ -272,7 +272,7 @@ _appstrate_bootstrap() {
       err "Failed to install minisign via $_mgr."
       return 1
     fi
-    # Homebrew edge case (#479): `brew install` on an already-installed-but-
+    # Homebrew edge case: `brew install` on an already-installed-but-
     # unlinked keg exits 0 with a "not linked" warning on stderr, leaving the
     # binary off PATH. The keg is already on disk — just re-create the
     # symlinks. `brew link` (no flags) is the documented remediation;
@@ -288,7 +288,7 @@ _appstrate_bootstrap() {
     return 0
   }
 
-  # ─── Dual-install pre-check (issue #249, phase 4) ───────────────────────────
+  # ─── Dual-install pre-check ───────────────────────────
   #
   # If the user already has `appstrate` on PATH at a DIFFERENT location than
   # the one we're about to write, the two binaries will silently shadow each
@@ -338,9 +338,8 @@ _appstrate_bootstrap() {
   # Extracted into a function (rather than inlined at the call site) so the
   # rc-file logic — the most platform-divergent and regression-prone part of
   # the installer — is reachable by the unit harness under
-  # APPSTRATE_BOOTSTRAP_SOURCE_ONLY=1. The previous inline form lived below
-  # the source-only guard AND behind the CI opt-out, so it had zero test
-  # coverage (issue #527 shipped because of exactly that blind spot).
+  # APPSTRATE_BOOTSTRAP_SOURCE_ONLY=1. Inlined below the source-only guard and
+  # behind the CI opt-out, it would have zero test coverage.
   #
   # Reads globals: BIN_DIR, SHELL, HOME, CI, APPSTRATE_NO_MODIFY_PATH, PATH.
   #
@@ -406,7 +405,7 @@ _appstrate_bootstrap() {
               # .profile and does NOT fall through to .bashrc. So CREATING a
               # .bash_profile that contains only our PATH line would shadow
               # the user's entire existing .bashrc/.profile on every future
-              # login shell (issue #527). This is the same exclusivity reason
+              # login shell. This is the same exclusivity reason
               # .zshenv is guarded below — except bash's .bash_profile and
               # .bashrc are mutually exclusive at login, whereas zsh sources
               # .zprofile AND .zshrc, which is why .zprofile is unconditional.
@@ -787,13 +786,13 @@ _appstrate_bootstrap() {
   # ─── PATH setup ─────────────────────────────────────────────────────────────
   _setup_path
 
-  # ─── Launch decision (#344 + #199 sidestep) ────────────────────────────────
+  # ─── Launch decision ────────────────────────────────────────────────────────
   #
   # Two-step is the new default: drop the verified binary on PATH, print
   # a copy-pasteable next step, exit 0. The user's interactive shell
   # launches `appstrate install` from a real TTY where clack's
-  # `setRawMode` works — the Bun macOS keypress/kqueue regressions (#199,
-  # oven-sh/bun #6862, #7033, #24615, #5240, #14483, #18239) are bypassed
+  # `setRawMode` works — the Bun macOS keypress/kqueue regressions
+  # (oven-sh/bun #6862, #7033, #24615, #5240, #14483, #18239) are bypassed
   # by construction because no prompt fires inside this shell-piped child
   # process and no `</dev/tty` redirect chains a kqueue EINVAL into later
   # subprocesses (`bun run dev`, `docker compose up`).
@@ -811,7 +810,7 @@ _appstrate_bootstrap() {
   # On the auto path, the CLI's `resolveBootstrapEmail` ships a
   # bootstrap token (closed-by-default) when no
   # `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` is set — no more silently-public
-  # VPS (#344 Layer 2b). The operator claims ownership at `<URL>/claim`
+  # VPS. The operator claims ownership at `<URL>/claim`
   # with the printed token.
   #
   # Escape hatch:
@@ -852,7 +851,7 @@ _appstrate_bootstrap() {
   # Docker image tag to `appstrate install` (`1.0.0`), which writes it to
   # `.env` as is. The binary we just verified IS the pinned release, and
   # lockstep derives the image tag from its own version, so the child must
-  # not inherit ours (#1788).
+  # not inherit ours.
   unset APPSTRATE_VERSION
   exec "$DEST" install --yes "$@"
 
