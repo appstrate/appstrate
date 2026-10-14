@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "../cn.ts";
+import { Label } from "./label.tsx";
 
 function FieldGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
@@ -65,4 +67,55 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
   );
 }
 
-export { Field, FieldDescription, FieldGroup, FieldTitle };
+/** A field's refusal, announced when it appears. Renders nothing without a message. */
+function FieldError({ className, children, ...props }: React.ComponentProps<"p">) {
+  if (!children) return null;
+  return (
+    <p
+      role="alert"
+      data-slot="field-error"
+      className={cn("text-destructive text-sm", className)}
+      {...props}
+    >
+      {children}
+    </p>
+  );
+}
+
+/**
+ * One labelled control: label, the control, then its hint and its refusal.
+ * The single child receives `id`, `aria-invalid` and `aria-describedby`, so a
+ * caller never wires them by hand.
+ */
+function FormItem({
+  id,
+  label,
+  hint,
+  error,
+  className,
+  children,
+}: {
+  id: string;
+  label: React.ReactNode;
+  hint?: React.ReactNode;
+  /** The message to show; nothing when the field is valid. */
+  error?: React.ReactNode;
+  className?: string;
+  children: React.ReactElement;
+}) {
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
+  return (
+    <div data-slot="form-item" className={cn("space-y-2", className)}>
+      <Label htmlFor={id}>{label}</Label>
+      <Slot id={id} aria-invalid={error ? true : undefined} aria-describedby={describedBy}>
+        {children}
+      </Slot>
+      {hint && <FieldDescription id={hintId}>{hint}</FieldDescription>}
+      <FieldError id={errorId}>{error}</FieldError>
+    </div>
+  );
+}
+
+export { Field, FieldDescription, FieldError, FieldGroup, FieldTitle, FormItem };

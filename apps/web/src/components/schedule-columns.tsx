@@ -18,7 +18,8 @@ import { cn } from "@appstrate/ui/cn";
 import { Loader2 } from "lucide-react";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
-import { ScheduleStatusBadge, ScheduleUnreadBadge } from "./schedule-status-badge";
+import { ScheduleStatusBadge } from "./schedule-status-badge";
+import { CountBadge } from "./count-badge";
 import { ActorLabel } from "./actor-label";
 import { formatDateField } from "../lib/format-date";
 import { scheduleNextRunAt } from "../lib/schedule-options";
@@ -45,7 +46,11 @@ export function useScheduleColumns({
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
-            <ScheduleUnreadBadge count={schedule.unread_count} className="relative z-10 shrink-0" />
+            <CountBadge
+              count={schedule.unread_count}
+              label={t("dashboard.unreadRuns", { ns: "agents", count: schedule.unread_count })}
+              className="relative z-10 shrink-0"
+            />
           </span>
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule

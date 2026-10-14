@@ -24,7 +24,11 @@ export function CollectionStates({
 }) {
   // `isError` always draws something, whether or not the caller wrote the sentence.
   if (verdict === "error") {
-    return <CollectionFrame>{state.error ?? <ErrorState compact />}</CollectionFrame>;
+    return (
+      <CollectionFrame>
+        {state.error ?? <ErrorState error={state.failure} compact />}
+      </CollectionFrame>
+    );
   }
   if (verdict === "loading") return skeleton;
   return <CollectionFrame>{state.empty}</CollectionFrame>;

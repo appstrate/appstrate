@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { DetailSectionCard } from "../components/detail-section-card";
-import { FactGrid } from "../components/package-manifest/manifest-fact";
+import { ManifestFacts } from "../components/package-manifest/manifest-fact";
 import { ListToolbar } from "../components/list-toolbar";
 import { useLocalListParams } from "../lib/list-params";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
@@ -261,7 +261,7 @@ function ScheduleParams({
         icon={CalendarClock}
         headerAction={open("recurrence")}
       >
-        <FactGrid
+        <ManifestFacts
           facts={[
             {
               labelKey: "schedule.settings.recurrence",
