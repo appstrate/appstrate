@@ -378,6 +378,29 @@ const [, bundle] = await Promise.all([
   ),
 ]);
 
+// --- Liveness keep-alive ---
+//
+// Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
+// The server bumps `runs.last_heartbeat_at` on every ping; the stall
+// watchdog reads that column to detect a crashed container (network
+// partition, SIGKILL, Docker daemon drop). This path is identical to
+// the CLI's — same helper, same endpoint, same HMAC auth — so platform
+// and remote runs share one liveness mechanism. It starts before the
+// runner's first event, which retires the platform's boot-phase pump:
+// the sidecar waits below (MCP connect, integration boot report) can each
+// outlast the stall threshold.
+const heartbeat = startSinkHeartbeat({
+  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
+  runSecret: env.sink.secret,
+  intervalMs: HEARTBEAT_INTERVAL_MS,
+  onError: (err) => {
+    // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
+    // container log forwarding captures it without polluting the event
+    // stream.
+    process.stderr.write(`[heartbeat] ${getErrorMessage(err)}\n`);
+  },
+});
+
 phaseTimings.provisioningMs = Math.round(performance.now() - provisionStart);
 await progress("workspace initialized · agent package read", {
   provisioningMs: phaseTimings.provisioningMs,
@@ -531,8 +554,8 @@ await progress("MCP connected", { mcpConnectMs: phaseTimings.mcpConnectMs });
 // health aborts too.
 //
 // This gate runs BEFORE the tools are listed: the report is the one sidecar
-// answer that waits for the boot to finish, whereas `tools/list` stops waiting
-// after a fixed cap and then omits every integration tool. Listing first would
+// answer that waits for the boot to finish, whereas `/mcp` never waits and
+// `tools/list` omits every integration still booting. Listing first would
 // freeze an empty toolset into a run whose report then says all is well.
 const bootResult = await fetchIntegrationBootReport(sidecarUrl, sidecarAuthToken);
 if ("error" in bootResult) {
@@ -671,26 +694,6 @@ await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
   phaseTimings,
-});
-
-// --- 6a. Liveness keep-alive ---
-//
-// Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
-// The server bumps `runs.last_heartbeat_at` on every ping; the stall
-// watchdog reads that column to detect a crashed container (network
-// partition, SIGKILL, Docker daemon drop). This path is identical to
-// the CLI's — same helper, same endpoint, same HMAC auth — so platform
-// and remote runs share one liveness mechanism.
-const heartbeat = startSinkHeartbeat({
-  url: `${env.sink.url.replace(/\/$/, "")}/heartbeat`,
-  runSecret: env.sink.secret,
-  intervalMs: HEARTBEAT_INTERVAL_MS,
-  onError: (err) => {
-    // Non-fatal — stall watchdog is the backstop. Keep it on stderr so
-    // container log forwarding captures it without polluting the event
-    // stream.
-    process.stderr.write(`[heartbeat] ${getErrorMessage(err)}\n`);
-  },
 });
 
 // --- 7. Run via the Pi engine ---
