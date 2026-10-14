@@ -13,11 +13,12 @@
  * activate nothing still reads what each space holds, and every control inside
  * is graded by what they may do.
  */
-import { useLocation, useParams } from "react-router-dom";
+import { Navigate, useLocation, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 import {
+  catalogueHref,
   CATALOGUE_KINDS,
   isCatalogueKind,
   isCatalogueReading,
@@ -28,11 +29,21 @@ import { searchOf } from "../lib/url-search";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import { OverlayUnavailable } from "../components/overlay-unavailable";
 
+/**
+ * `/catalogue` names no view: it lands on the first kind of Découvrir, the
+ * reading everybody needs — what exists, and whether the space I am in runs
+ * it — while the matrix serves the reader who manages several spaces. The
+ * query (a `?package=` link) and the entry's state ride along.
+ */
+export function CatalogueIndexRedirect() {
+  const { search, hash, state } = useLocation();
+  return (
+    <Navigate to={`${catalogueHref(CATALOGUE_KINDS[0])}${search}${hash}`} replace state={state} />
+  );
+}
+
 export function CataloguePage() {
-  // Découvrir by default: it is the reading everybody needs — what exists,
-  // and whether the space I am in runs it — while the matrix serves the
-  // reader who manages several spaces.
-  const { reading = "discover", type = CATALOGUE_KINDS[0] } = useParams();
+  const { reading = "", type = "" } = useParams();
   const location = useLocation();
   const close = useCloseOverlay();
   const { t } = useTranslation("common");
@@ -48,8 +59,9 @@ export function CataloguePage() {
       hrefOf={(nextReading: CatalogueReading, nextType: PackageType) => {
         // The state filter speaks each reading's own words (here / elsewhere
         // against active / inactive), so it does not survive a change of
-        // reading; the rest of the query does.
+        // reading; the rest of the query does. An open sheet closes with the switch.
         const query = new URLSearchParams(location.search);
+        query.delete("package");
         if (nextReading !== reading) query.delete("state");
         return `/catalogue/${nextReading}/${nextType}${searchOf(query)}`;
       }}

@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from "bun:test";
 import { createMemoryRouter, resolvePath } from "react-router-dom";
-import { closeOncePerEntry, modalLeaveSteps, modalParamStep } from "../use-modal-param.ts";
+import {
+  closeOncePerEntry,
+  modalLeaveSteps,
+  modalOpeningState,
+  modalParamStep,
+} from "../use-modal-param.ts";
 
 const at = (search: string, state: unknown = null) => ({ search, state });
 
@@ -229,5 +234,29 @@ describe("closing a modal twice from one entry", () => {
     expect(guard.take("a")).toBe(true);
     guard.release();
     expect(guard.take("a")).toBe(true);
+  });
+});
+
+describe("opening a modal on another address", () => {
+  it("closes it the way Back does, to the list it was opened from", async () => {
+    // The catalogue's waiting shares open a package's sheet on its own kind.
+    const router = createMemoryRouter([{ path: "*" }], {
+      initialEntries: ["/catalogue/shared/agent"],
+    });
+    const from = router.state.location;
+    await router.navigate("/catalogue/discover/skill?package=%40acme%2Fnotes", {
+      state: modalOpeningState(from.state, "package"),
+    });
+    const { location } = router.state;
+    expect(modalParamStep(location, "package", null)).toEqual({ back: true });
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe("/catalogue/shared/agent");
+  });
+
+  it("keeps the entry's other state", () => {
+    expect(modalOpeningState({ overlayBackground: { index: 2 } }, "package")).toEqual({
+      overlayBackground: { index: 2 },
+      openedModal: "package",
+    });
   });
 });

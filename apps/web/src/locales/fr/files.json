@@ -55,6 +55,7 @@
   "artifact.copyFailed": "Impossible de copier le contenu.",
   "artifact.fullscreen": "Plein écran",
   "artifact.exitFullscreen": "Quitter le plein écran",
+  "artifact.openInNewTab": "Ouvrir dans un nouvel onglet",
   "run.noAccess": "Votre rôle ne donne pas accès aux fichiers de cet espace.",
   "run.truncated": "Seuls les 100 premiers fichiers de ce run sont affichés."
 }
