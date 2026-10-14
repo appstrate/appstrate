@@ -69,7 +69,6 @@ export function CataloguePage() {
         const search = query.toString();
         navigate(`/catalogue/${nextReading}/${nextType}${search ? `?${search}` : ""}`, {
           replace: true,
-          state: location.state,
         });
       }}
       onClose={close}

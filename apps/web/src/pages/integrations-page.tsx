@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -31,7 +31,6 @@ import {
   isOrganizationIntegration,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
-import { openAsModal } from "../lib/modal-route";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useAllIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
@@ -78,7 +77,6 @@ export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const { data, isLoading, error } = useAllIntegrations();
-  const location = useLocation();
   const navigate = useNavigate();
   const list = useListParams(["status", "origin", "protocol"]);
   const view = useIntegrationViewStore((state) => state.view);
@@ -150,7 +148,7 @@ export function IntegrationsPage() {
           <PageActionsMenu>
             {can("integrations:install") && (
               <DropdownMenuItem asChild data-page-action="catalogue">
-                <Link to={catalogueHref("integration")} state={openAsModal(location)}>
+                <Link to={catalogueHref("integration")}>
                   <LibraryBig />
                   {t("catalogue.browse")}
                 </Link>

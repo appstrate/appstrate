@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Users } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client";
-import { useOrg } from "../../hooks/use-org";
+import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
@@ -43,7 +42,6 @@ export function OrgSettingsMembersPage() {
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
   const userParam = useModalParam("user");
-  const location = useLocation();
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -58,16 +56,7 @@ export function OrgSettingsMembersPage() {
     from: OrgRole;
   } | null>(null);
 
-  const {
-    data: orgData,
-    isLoading,
-    error,
-  } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: orgData, isLoading, error } = useOrgDetail();
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
@@ -188,7 +177,6 @@ export function OrgSettingsMembersPage() {
         rows={members}
         rowKey={(member) => member.userId}
         rowHref={(member) => `?user=${encodeURIComponent(member.userId)}`}
-        rowState={() => location.state}
         rowLabel={(member) => member.displayName || member.email || member.userId}
         isLoading={isLoading}
         isError={Boolean(error)}

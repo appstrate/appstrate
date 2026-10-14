@@ -92,7 +92,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/component
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -271,26 +271,16 @@ function ColumnsMenu({
         {columns.options.map((option) => {
           const isVisible = !hidden.has(option.id);
           return (
-            <DropdownMenuItem
+            <DropdownMenuCheckboxItem
               key={option.id}
+              checked={isVisible}
               disabled={option.required || (isVisible && visibleCount === 1)}
-              onSelect={(event) => {
-                event.preventDefault();
-                columns.onToggle(option.id);
-              }}
+              onCheckedChange={() => columns.onToggle(option.id)}
+              // Stay open: several columns are usually toggled in a row.
+              onSelect={(event) => event.preventDefault()}
             >
-              <div
-                className={cn(
-                  "flex size-4 items-center justify-center rounded-[4px] border",
-                  isVisible
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-input [&_svg]:invisible",
-                )}
-              >
-                <Check className="text-primary-foreground size-3.5" />
-              </div>
-              <span>{option.label}</span>
-            </DropdownMenuItem>
+              {option.label}
+            </DropdownMenuCheckboxItem>
           );
         })}
       </DropdownMenuContent>

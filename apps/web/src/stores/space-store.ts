@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createStore } from "zustand/vanilla";
+import { isPlainObject } from "@appstrate/core/safe-json";
 import { authStore } from "./auth-store";
+import { persistedJson } from "./local-storage";
 import { getCurrentOrgId } from "./org-store";
 
 const STORAGE_KEY = "appstrate_last_space";
@@ -11,26 +13,16 @@ export function rememberedSpaceKey(userId: string, orgId: string): string {
   return `${userId}:${orgId}`;
 }
 
-function readRemembered(): Record<string, string> {
-  if (typeof localStorage === "undefined") return {};
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "");
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    return parsed as Record<string, string>;
-  } catch {
-    return {};
-  }
-}
+/** Blocked storage keeps the choice for this tab only. */
+const persistedRemembered = persistedJson<Record<string, string>>(STORAGE_KEY, (value) =>
+  isPlainObject(value) ? (value as Record<string, string>) : {},
+);
 
 /** Applies `change` to the PERSISTED map, not this tab's copy: another tab may have written since. */
 function writeRemembered(change: (map: Record<string, string>) => void): Record<string, string> {
-  const remembered = readRemembered();
+  const remembered = persistedRemembered.read();
   change(remembered);
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(remembered));
-  } catch {
-    // Storage blocked: the choice holds for this tab only.
-  }
+  persistedRemembered.write(remembered);
   return remembered;
 }
 
@@ -48,7 +40,7 @@ interface SpaceState {
 
 export const spaceStore = createStore<SpaceState>()((set) => ({
   id: null,
-  remembered: readRemembered(),
+  remembered: persistedRemembered.read(),
   setId: (id) => {
     const orgId = getCurrentOrgId();
     const userId = authStore.getState().user?.id;

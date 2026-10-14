@@ -4,12 +4,9 @@
  * A modal's open state, kept in the URL.
  *
  * A modal has an address: support can say "open this", a reload lands on it,
- * and Back closes it. The navigation state rides along, so a modal opened
- * inside the settings overlay keeps the overlay's background instead of
- * turning it into a full page (the same trap `NavigateKeepingState` exists for).
- * Closing replaces rather than pushes, like the OAuth client editor, so Back
- * after a close does not reopen it. The hash rides along too, for the same
- * reason as the state: it holds the tab the modal was opened from.
+ * and Back closes it. Closing replaces rather than pushes, like the OAuth
+ * client editor, so Back after a close does not reopen it. The hash rides
+ * along: it holds the tab the modal was opened from.
  */
 import { useCallback, useEffect } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -32,10 +29,10 @@ export function useModalParam(name: string) {
       const search = out.toString();
       navigate(
         { pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash },
-        { replace: next === null, state: location.state },
+        { replace: next === null },
       );
     },
-    [location.search, location.pathname, location.hash, location.state, name, navigate],
+    [location.search, location.pathname, location.hash, name, navigate],
   );
   const open = useCallback((value = "1", closing?: string) => set(value, closing), [set]);
   const close = useCallback(() => set(null), [set]);

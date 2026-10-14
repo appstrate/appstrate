@@ -2,7 +2,7 @@
 
 import { useForm } from "react-hook-form";
 import { useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Eye, Grid3x3, Plus, Rows3, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -64,7 +64,6 @@ type RoleTab = "org" | "space";
 
 export function OrgSettingsRolesPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const location = useLocation();
   const { can } = usePermissions();
   const { data: roles, isLoading, error } = useRoles();
   const deleteRole = useDeleteRole();
@@ -79,15 +78,12 @@ export function OrgSettingsRolesPage() {
   const tab: RoleTab = searchParams.get("tab") === "space" ? "space" : "org";
   const view: RoleView = searchParams.get("view") === "matrix" ? "matrix" : "list";
   const setParam = (name: "tab" | "view", value: string, fallback: string) =>
-    setSearchParams(
-      (prev) => {
-        const out = new URLSearchParams(prev);
-        if (value === fallback) out.delete(name);
-        else out.set(name, value);
-        return out;
-      },
-      { state: location.state },
-    );
+    setSearchParams((prev) => {
+      const out = new URLSearchParams(prev);
+      if (value === fallback) out.delete(name);
+      else out.set(name, value);
+      return out;
+    });
   const [confirmDelete, setConfirmDelete] = useState<RoleObject | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -245,7 +241,6 @@ export function OrgSettingsRolesPage() {
                   rows={presets}
                   rowKey={(role) => role.key}
                   rowHref={roleHref}
-                  rowState={() => location.state}
                   rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
                   {...tableState}
                 />
@@ -259,7 +254,6 @@ export function OrgSettingsRolesPage() {
                   rows={custom}
                   rowKey={(role) => role.id ?? role.key}
                   rowHref={roleHref}
-                  rowState={() => location.state}
                   rowLabel={(role) => role.name}
                   {...tableState}
                   empty={

@@ -4,14 +4,14 @@
  * The catalogue: what this space could be given, and what it already has.
  *
  * The rail carries the two questions in order, the way the settings rail
- * carries organisation then workspace:
+ * carries organization then workspace:
  *
  * - **Where it comes from.** "Organisation" is what this org owns — imported,
  *   built, forked. "Appstrate" is what ships with the instance: a system
  *   package lives as ONE row with no `org_id`, loaded at boot from the `.afps`
  *   archives in the image (`services/system-packages.ts`), so every org sees
  *   the same ones. There is no remote registry to poll, and nothing to
- *   "install into the organisation" first.
+ *   "install into the organization" first.
  * - **Which kind**, under each.
  *
  * And the table says where each package is ALREADY active, because this
@@ -236,7 +236,7 @@ export function OrgCatalogueModal({
     // Découvrir is the WHOLE catalogue, the way a store keeps showing what you
     // already own with a tick beside it. Were it the complement of the other
     // half, a package would leave it the moment it was placed — and for agents
-    // and skills that would empty it, since an organisation's own packages are
+    // and skills that would empty it, since an organization's own packages are
     // placed by their home. Espaces stays the matrix of what is placed.
     if (discovering) return true;
     const placement = placementById.get(item.id);

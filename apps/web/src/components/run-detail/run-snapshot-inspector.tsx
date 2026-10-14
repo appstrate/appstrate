@@ -37,6 +37,7 @@ import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { useModalParam } from "../../hooks/use-modal-param";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { RunWarnings } from "./run-warnings";
+import { formatNumber } from "../../lib/format-number";
 
 export function RunSnapshotInspector({
   run,
@@ -197,24 +198,24 @@ export function RunSnapshotInspector({
                 <OverviewMetric
                   className="border-border border-r border-b"
                   label={t("run.overview.logEvents")}
-                  value={logs.length.toLocaleString()}
+                  value={formatNumber(logs.length)}
                   onClick={logs.length > 0 ? () => onOpenJournal() : undefined}
                 />
                 <OverviewMetric
                   className="border-border border-b"
                   label={t("run.overview.toolCalls")}
-                  value={toolCallCount.toLocaleString()}
+                  value={formatNumber(toolCallCount)}
                   onClick={toolCallCount > 0 ? () => onOpenJournal("tools") : undefined}
                 />
                 <OverviewMetric
                   className="border-border border-r"
                   label={t("run.overview.warnings")}
-                  value={warningCount.toLocaleString()}
+                  value={formatNumber(warningCount)}
                   onClick={warningCount > 0 ? () => onOpenJournal("warnings") : undefined}
                 />
                 <OverviewMetric
                   label={t("run.overview.errors")}
-                  value={errorCount.toLocaleString()}
+                  value={formatNumber(errorCount)}
                   onClick={errorCount > 0 ? () => onOpenJournal("errors") : undefined}
                 />
               </dl>
@@ -237,19 +238,19 @@ export function RunSnapshotInspector({
                 <OverviewMetric
                   className="border-border border-r border-b"
                   label={t("run.overview.outputFiles")}
-                  value={run.file_counts.output.toLocaleString()}
+                  value={formatNumber(run.file_counts.output)}
                   onClick={run.file_counts.output > 0 ? onOpenResults : undefined}
                 />
                 <OverviewMetric
                   className="border-border border-b"
                   label={t("run.overview.structuredFields")}
-                  value={structuredFieldCount.toLocaleString()}
+                  value={formatNumber(structuredFieldCount)}
                   onClick={structuredFieldCount > 0 ? onOpenResults : undefined}
                 />
                 <OverviewMetric
                   className="col-span-2"
                   label={t("run.overview.memoryChanges")}
-                  value={memoryChangeCount.toLocaleString()}
+                  value={formatNumber(memoryChangeCount)}
                   onClick={memoryChangeCount > 0 ? onOpenResults : undefined}
                 />
               </dl>
@@ -278,25 +279,25 @@ export function RunSnapshotInspector({
                   {usage?.input_tokens != null && (
                     <SnapshotFact
                       label={t("run.usageInputTokens")}
-                      value={usage.input_tokens.toLocaleString()}
+                      value={formatNumber(usage.input_tokens)}
                     />
                   )}
                   {usage?.output_tokens != null && (
                     <SnapshotFact
                       label={t("run.usageOutputTokens")}
-                      value={usage.output_tokens.toLocaleString()}
+                      value={formatNumber(usage.output_tokens)}
                     />
                   )}
                   {usage?.cache_creation_input_tokens != null && (
                     <SnapshotFact
                       label={t("run.usageCacheCreation")}
-                      value={usage.cache_creation_input_tokens.toLocaleString()}
+                      value={formatNumber(usage.cache_creation_input_tokens)}
                     />
                   )}
                   {usage?.cache_read_input_tokens != null && (
                     <SnapshotFact
                       label={t("run.usageCacheRead")}
-                      value={usage.cache_read_input_tokens.toLocaleString()}
+                      value={formatNumber(usage.cache_read_input_tokens)}
                     />
                   )}
                 </SnapshotFacts>

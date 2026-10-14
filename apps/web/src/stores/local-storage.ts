@@ -42,6 +42,23 @@ export function persistedValue<T extends string | boolean | null>(
 }
 
 /**
+ * One stored JSON value under `key`. `parse` narrows what is there; absent or
+ * unparseable JSON reaches it as `null`. Writing `null` removes the key.
+ */
+export function persistedJson<T>(key: string, parse: (value: unknown) => T) {
+  return {
+    read: (): T => {
+      try {
+        return parse(JSON.parse(readItem(key) ?? "null"));
+      } catch {
+        return parse(null);
+      }
+    },
+    write: (value: T | null): void => writeItem(key, value === null ? null : JSON.stringify(value)),
+  };
+}
+
+/**
  * One JSON value per key under `prefix` — a table's hidden columns, its column
  * widths — shared by every component naming the same key and kept in step
  * across them.

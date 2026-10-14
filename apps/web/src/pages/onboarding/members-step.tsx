@@ -10,7 +10,7 @@ import {
   useOnboardingNav,
 } from "../../components/onboarding-layout";
 import { CopyLinkButton } from "../../components/copy-link-button";
-import { $api } from "../../api/client";
+import { useOrgDetail } from "../../hooks/use-org";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import {
   OrgInvitationForm,
@@ -24,12 +24,7 @@ export function OnboardingMembersStep() {
   const { nextRoute, prevRoute } = useOnboardingNav("members");
   const inviteFormRef = useRef<OrgInvitationFormHandle>(null);
 
-  const { data: orgData } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: orgData } = useOrgDetail();
 
   const invitations = orgData?.invitations ?? [];
 

@@ -17,12 +17,11 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/componen
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import type { PackageType } from "@appstrate/core/validation";
-import { $api } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { Modal } from "../modal";
 import { Spinner } from "../spinner";
 import { splitPackageRef } from "../../lib/package-paths";
-import { useCurrentOrgId } from "../../hooks/use-org";
+import { useOrgDetail } from "../../hooks/use-org";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useSpaceGrant } from "../../hooks/use-permissions";
 import { coeditVerdict } from "../../lib/package-permissions";
@@ -118,15 +117,9 @@ export function SharePackageDialog({
   onMoveHome?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const orgId = useCurrentOrgId();
   const { data: shares, isLoading } = usePackageShares(packageId, open);
   const { data: spaces } = useSpaces(open);
-  const { data: org } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: open && !!orgId },
-  );
+  const { data: org } = useOrgDetail({ enabled: open });
   // Only an AGENT declares integrations; the other families have no closure a
   // recipient has to hold.
   const detail = usePackageDetail("agent", open && type === "agent" ? packageId : undefined);

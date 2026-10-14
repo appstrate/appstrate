@@ -25,7 +25,6 @@ export function RailLink({
   item,
   label,
   active,
-  state,
   mobile = false,
   onNavigate,
   locked = false,
@@ -33,7 +32,6 @@ export function RailLink({
   item: RailLinkItem;
   label: string;
   active: boolean;
-  state?: unknown;
   mobile?: boolean;
   onNavigate?: () => void;
   /** The entry stays, its content says what the role does not allow: a lock marks it. */
@@ -42,7 +40,6 @@ export function RailLink({
   return (
     <Link
       to={item.to}
-      state={state}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={railItemClass(active, mobile)}

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -28,7 +28,6 @@ import { webhookResource } from "@/lib/webhook-permissions";
  */
 export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   const { t } = useTranslation(["settings", "common"]);
-  const location = useLocation();
   const { can } = usePermissions();
   const navigate = useNavigate();
   // Save, test and rotate are all `write`.
@@ -94,7 +93,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       { params: { path: { id: webhook.id } } },
       {
         onSuccess: () => {
-          navigate("/workspace-settings/webhooks", { state: location.state });
+          navigate("/workspace-settings/webhooks");
         },
       },
     );

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Globe, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -27,7 +27,6 @@ import { ModelSelect } from "../model-select";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { usePermissions } from "../../hooks/use-permissions";
-import { openAsModal } from "../../lib/modal-route";
 import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
@@ -318,7 +317,6 @@ function ModelSectionEditor({
 /** The organisation has no proxy to route through: the button opens the proxy creation itself. */
 function NoProxyState() {
   const { t } = useTranslation(["agents", "settings"]);
-  const location = useLocation();
   const canReach = useCanReach();
   const { can } = usePermissions();
   return (
@@ -330,7 +328,7 @@ function NoProxyState() {
     >
       {canReach("/org-settings/proxies") && can("proxies:write") && (
         <Button asChild variant="outline" size="sm">
-          <Link to="/org-settings/proxies?newProxy=1" state={openAsModal(location)}>
+          <Link to="/org-settings/proxies?newProxy=1">
             <Plus />
             {t("proxies.add", { ns: "settings" })}
           </Link>

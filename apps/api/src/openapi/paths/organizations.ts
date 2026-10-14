@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+import { ORG_LOGO_PROPERTY, ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
@@ -187,12 +187,7 @@ export const organizationsPaths = {
               properties: {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
-                logo: {
-                  type: ["string", "null"],
-                  maxLength: 180000,
-                  description:
-                    "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null restores the initial fallback.",
-                },
+                logo: { ...ORG_LOGO_PROPERTY, maxLength: 180000 },
               },
               additionalProperties: false,
             },

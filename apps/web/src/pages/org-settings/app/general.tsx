@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
 import { usePermissions } from "../../../hooks/use-permissions";
@@ -62,7 +62,6 @@ function GeneralForm({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  const location = useLocation();
   const navigate = useNavigate();
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
@@ -349,7 +348,7 @@ function GeneralForm({
             {
               onSuccess: () => {
                 setConfirmOpen(false);
-                navigate("/org-settings/spaces", { state: location.state });
+                navigate("/org-settings/spaces");
               },
               // A space that homes packages refuses (409 `space_homes_packages`,
               // RBAC spec §6.9) and the detail names them — but not how to act

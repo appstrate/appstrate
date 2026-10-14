@@ -58,8 +58,10 @@ they start with `packages/` or `e2e/`.
   `ShellBreadcrumb` draws them.
 - Settings and the catalogue are **routed overlays**: `PanelDialog`
   (`components/panel-dialog.tsx`, a rail on the left, one scroll per pane) opened
-  by navigating with `openAsModal(location)` as router state (`lib/modal-route.ts`). A redirect inside them uses
-  `NavigateKeepingState`, or the overlay turns into a full page. Rail pieces:
+  by a plain navigation to a path under `OVERLAY_PREFIXES` (`lib/route-access.ts`).
+  `App` remembers the last page shown and keeps it rendered underneath (the
+  dashboard when the app opened on the overlay); closing returns to it
+  (`lib/modal-route.ts`). Nothing rides in the history state. Rail pieces:
   `RailHeader`, `RailGroup`, `RailLink`, `ContextSelector`
   (`components/settings/`).
 - The header's right end stays personal (notification bell, profile); page

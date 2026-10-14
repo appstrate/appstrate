@@ -9,7 +9,7 @@
  * flashing after a context switch.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Settings, X } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +25,6 @@ import { SettingsPageActionTargetProvider } from "../../components/settings/sett
 import { RailLink } from "../../components/settings/rail-link";
 import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
-import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { cn } from "@appstrate/ui/cn";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useSpaces } from "../../hooks/use-spaces";
@@ -35,7 +34,7 @@ import {
   useCurrentSpaceId,
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
-import { modalReturnTarget, openAsModal, useBackgroundLocation } from "../../lib/modal-route";
+import { modalReturnTarget, useBackgroundLocation } from "../../lib/modal-route";
 import {
   getLastWorkspaceId,
   pickWorkspaceForOrganization,
@@ -56,7 +55,6 @@ import { useSettingsSections } from "./use-settings-sections";
 interface ScopeNavigationProps {
   section: UnifiedSettingsSection;
   activeItem?: UnifiedSettingsNavItem;
-  keepOverlay?: unknown;
   contextSelector?: ReactNode;
   label: (key: string) => string;
   mobile?: boolean;
@@ -66,7 +64,6 @@ interface ScopeNavigationProps {
 function ScopeNavigation({
   section,
   activeItem,
-  keepOverlay,
   contextSelector,
   label,
   mobile = false,
@@ -82,7 +79,6 @@ function ScopeNavigation({
             item={item}
             label={label(item.labelKey)}
             active={activeItem?.to === item.to}
-            state={keepOverlay}
             mobile={mobile}
             onNavigate={onNavigate}
           />
@@ -130,7 +126,6 @@ export function UnifiedSettingsLayout() {
   const navigationOpen = mobileNavigationOpen || navigationAsIndex;
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
-  const keepOverlay = background ? openAsModal(background) : undefined;
   const label = (key: string) => t(key, { ns: "settings" });
   const settingsBreadcrumbLabel = label("unifiedSettings.title");
   const activeSectionLabel = activeSection ? label(activeSection.labelKey) : null;
@@ -279,7 +274,6 @@ export function UnifiedSettingsLayout() {
             key={section.scope}
             section={section}
             activeItem={activeItem}
-            keepOverlay={keepOverlay}
             contextSelector={selectorFor(section.scope)}
             label={label}
           />
@@ -321,7 +315,6 @@ export function UnifiedSettingsLayout() {
               key={section.scope}
               section={section}
               activeItem={activeItem}
-              keepOverlay={keepOverlay}
               contextSelector={selectorFor(section.scope)}
               label={label}
               mobile
@@ -422,8 +415,6 @@ export function SettingsIndexRedirect() {
   if (isMobile && sections.length > 0) return null;
   // No entry at all: nothing in settings is for this caller, so leave.
   return (
-    <NavigateKeepingState
-      to={firstSettingsPath(sections, settingsScopeFromPath(pathname)) ?? "/"}
-    />
+    <Navigate to={firstSettingsPath(sections, settingsScopeFromPath(pathname)) ?? "/"} replace />
   );
 }

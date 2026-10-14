@@ -15,8 +15,7 @@ import {
   CommandItem,
   CommandList,
 } from "@appstrate/ui/components/command";
-import { $api } from "../api/client";
-import { useCurrentOrgId } from "../hooks/use-org";
+import { useOrgDetail } from "../hooks/use-org";
 import { roleI18nKey } from "../hooks/use-permissions";
 import {
   useBillingManagers,
@@ -56,20 +55,12 @@ const STALE_I18N: Record<Exclude<BillingManagerStatus, "eligible">, [string, str
 export function BillingManagersSection() {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
-  const orgId = useCurrentOrgId();
   const managersQuery = useBillingManagers();
   const managersKey = useBillingManagersKey();
   const replace = useReplaceBillingManagers();
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // The same read the members page uses, with the same init — so the two share
-  // one cache entry instead of fetching the org twice.
-  const orgQuery = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const orgQuery = useOrgDetail();
 
   // `null` while the section shows exactly what the server holds; an array as
   // soon as the operator has edited the list. Derived rather than mirrored into

@@ -4,7 +4,7 @@ import { useCallback } from "react";
 import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
-import { client } from "../api/client";
+import { $api, client } from "../api/client";
 import { orgStore } from "../stores/org-store";
 import { spaceStore } from "../stores/space-store";
 import { exitViewAs, serializeViewAs, type ViewAsPersona } from "../stores/view-as-store";
@@ -15,6 +15,17 @@ import { viewAsRefusalCode } from "../lib/view-as-refusal";
 // Reactive hook for query key usage — re-renders when org changes
 export function useCurrentOrgId(): string | null {
   return useStore(orgStore, (s) => s.id);
+}
+
+/** The current org's detail (members, invitations, storage): one cache entry for every reader. */
+export function useOrgDetail(options?: { enabled?: boolean }) {
+  const orgId = useCurrentOrgId();
+  return $api.useQuery(
+    "get",
+    "/api/orgs/{orgId}",
+    { params: { path: { orgId: orgId ?? "" } } },
+    { enabled: (options?.enabled ?? true) && !!orgId },
+  );
 }
 
 async function requestOrgs(viewAs?: string) {

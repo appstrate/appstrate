@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { LibraryBig, Plug, Plus, Upload, Wrench } from "lucide-react";
@@ -15,7 +15,6 @@ import { PageActionsMenu } from "../components/page-actions-menu";
 import { EmptyStateAction } from "../components/page-states";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
-import { openAsModal } from "../lib/modal-route";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   PACKAGE_WRITE_PERMISSIONS,
@@ -57,7 +56,6 @@ export function ItemTab({
   const { can } = usePermissions();
   const importParam = useModalParam("import");
   const navigate = useNavigate();
-  const location = useLocation();
   // Creating is a write on the package type, as its route is.
   const canCreate = can(packagePermission(type, "write"));
   // Import is type-agnostic: any package write opens it, the door re-checks the type.
@@ -101,7 +99,7 @@ export function ItemTab({
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to={catalogueHref(type)} state={openAsModal(location)}>
+                  <Link to={catalogueHref(type)}>
                     <LibraryBig />
                     {t("catalogue.browse")}
                   </Link>

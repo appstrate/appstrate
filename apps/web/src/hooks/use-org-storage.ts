@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { $api } from "../api/client";
-import { useOrg } from "./use-org";
+import { useOrgDetail } from "./use-org";
 
 /**
  * Single source of truth for the org storage gauge. Wraps the org-detail fetch
@@ -16,16 +15,7 @@ import { useOrg } from "./use-org";
  * that must not fire the fetch yet passes `false`.
  */
 export function useOrgStorage(options?: { enabled?: boolean }) {
-  const { currentOrg } = useOrg();
-  const orgId = currentOrg?.id;
-  const enabled = (options?.enabled ?? true) && !!orgId;
-
-  const { data: orgDetail, isLoading } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled },
-  );
+  const { data: orgDetail, isLoading } = useOrgDetail(options);
 
   const storage = orgDetail?.storage;
   const usedBytes = storage?.used_bytes ?? null;

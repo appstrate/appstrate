@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Layers, LibraryBig, Plus, type LucideIcon, Upload } from "lucide-react";
@@ -22,7 +22,6 @@ import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
-import { openAsModal } from "../lib/modal-route";
 
 export interface CardItem {
   id: string;
@@ -122,7 +121,6 @@ export function PackageList() {
   const { can } = usePermissions();
   const importParam = useModalParam("import");
   const navigate = useNavigate();
-  const location = useLocation();
 
   const creation = useCreationHandoff("agent", can("agents:write"));
   const canActivate = can(spacePackagePermission("agent", "activate"));
@@ -162,7 +160,7 @@ export function PackageList() {
             <PageActionsMenu>
               {canActivate && (
                 <DropdownMenuItem asChild data-page-action="catalogue">
-                  <Link to={catalogueHref("agent")} state={openAsModal(location)}>
+                  <Link to={catalogueHref("agent")}>
                     <LibraryBig />
                     {t("catalogue.browse", { ns: "settings" })}
                   </Link>

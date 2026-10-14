@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { SidebarGroup } from "@appstrate/ui/components/sidebar";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useBilling } from "../hooks/use-billing";
-import { openAsModal } from "../lib/modal-route";
 import { getUsageBarColor } from "../lib/usage-severity";
+import { formatNumber } from "../lib/format-number";
 
 /** The organization's credit gauge, at the foot of the navigation. */
 export function SidebarCredits() {
   const { t } = useTranslation();
-  const location = useLocation();
   // The gauge links to the billing tab: fetched and drawn only where that tab
   // opens (the billing module loaded and `billing:read` granted). A cached
   // answer outlives a narrowed grant, hence both.
@@ -28,7 +27,6 @@ export function SidebarCredits() {
     <SidebarGroup className="mt-auto">
       <Link
         to="/org-settings/billing"
-        state={openAsModal(location)}
         className="hover:bg-sidebar-accent block rounded-md px-2 py-2 transition-colors"
       >
         <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
@@ -37,7 +35,7 @@ export function SidebarCredits() {
             {t("nav.credits")}
           </span>
           <span className="text-sidebar-foreground font-medium tabular-nums">
-            {billing.credits_used.toLocaleString()} / {billing.credit_quota.toLocaleString()}
+            {formatNumber(billing.credits_used)} / {formatNumber(billing.credit_quota)}
           </span>
         </div>
         <div

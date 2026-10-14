@@ -12,7 +12,7 @@
  */
 
 import type { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavUser } from "@/components/nav-user";
@@ -21,7 +21,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { useUnreadCount } from "@/hooks/use-notifications";
 import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
-import { openAsModal } from "@/lib/modal-route";
+import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach } from "@/hooks/use-can-reach";
 import { usePendingOfferCount, usePendingSharesHref } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
@@ -50,7 +50,6 @@ export function ShellSidebar({
   contentClassName?: string;
 }) {
   const { t } = useTranslation();
-  const location = useLocation();
   // Two organisation-wide destinations, each drawn only for a caller it admits:
   // settings when its own rail lists an entry for them, the catalogue when its
   // route does (`ROUTE_ACCESS`).
@@ -58,14 +57,11 @@ export function ShellSidebar({
   const canReach = useCanReach();
   const pendingOffers = usePendingOfferCount();
   const pendingHref = usePendingSharesHref();
-  // Under a routed modal the page tree renders the modal's background
-  // location, so `useLocation` answers the screen behind it: the address bar
-  // says whether settings or the catalogue is open.
-  const path = window.location.pathname;
+  const overlayPath = useOverlayPath() ?? "";
   const settingsActive = ["/org-settings", "/workspace-settings", "/preferences"].some((prefix) =>
-    isUnder(path, prefix),
+    isUnder(overlayPath, prefix),
   );
-  const catalogueActive = isUnder(path, "/catalogue");
+  const catalogueActive = isUnder(overlayPath, "/catalogue");
 
   return (
     <Sidebar>
@@ -111,7 +107,6 @@ export function ShellSidebar({
                   // promise, and the first click keeps it (one rule, in
                   // `usePendingSharesHref`).
                   to={pendingHref ?? catalogueHref("agent")}
-                  state={openAsModal(location)}
                 >
                   <LibraryBig />
                   <span>{t("nav.catalogue")}</span>
@@ -145,7 +140,7 @@ export function ShellSidebar({
                   <span>{t("nav.settings")}</span>
                 </button>
               ) : (
-                <Link to="/org-settings" state={openAsModal(location)}>
+                <Link to="/org-settings">
                   <Settings />
                   <span>{t("nav.settings")}</span>
                 </Link>

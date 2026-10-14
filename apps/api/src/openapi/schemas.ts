@@ -112,6 +112,24 @@ const PACKAGE_HOME_PROPERTIES = {
   },
 } as const;
 
+export const ORG_LOGO_PROPERTY = {
+  type: ["string", "null"],
+  description:
+    "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
+} as const;
+
+/** The agent's identity tile, on the list item and on the detail. */
+const AGENT_IDENTITY_PROPERTIES = {
+  icon: {
+    type: "string",
+    description: "AFPS manifest icon used for the Agent identity tile.",
+  },
+  color: {
+    type: "string",
+    description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
+  },
+} as const;
+
 export const ORG_SETTINGS_PROPERTIES = {
   restrict_package_copy: {
     type: "boolean",
@@ -705,11 +723,7 @@ export const schemas = {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      logo: {
-        type: ["string", "null"],
-        description:
-          "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
-      },
+      logo: ORG_LOGO_PROPERTY,
       role: { type: "string", enum: ORG_ROLES },
       permissions: {
         type: "array",
@@ -775,11 +789,7 @@ export const schemas = {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      logo: {
-        type: ["string", "null"],
-        description:
-          "Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial.",
-      },
+      logo: ORG_LOGO_PROPERTY,
       createdAt: { type: "string", format: "date-time" },
       deleting_at: {
         type: ["string", "null"],
@@ -854,14 +864,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
-      icon: {
-        type: "string",
-        description: "AFPS manifest icon used for the Agent identity tile.",
-      },
-      color: {
-        type: "string",
-        description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
-      },
+      ...AGENT_IDENTITY_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       schema_version: { type: "string" },
@@ -945,14 +948,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
-      icon: {
-        type: "string",
-        description: "AFPS manifest icon used for the Agent identity tile.",
-      },
-      color: {
-        type: "string",
-        description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
-      },
+      ...AGENT_IDENTITY_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: [...packageSourceValues] },

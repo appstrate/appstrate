@@ -183,6 +183,7 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
+  "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
   "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
@@ -227,7 +228,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "spaceMembers.source.", // pages/org-settings/space/space-member-columns.tsx, pages/org-settings/user-space-columns.tsx
   "spaces.visibility.", // pages/org-settings/app/general.tsx — t(`spaces.visibility.${value}`)
   "spaces.visibilityDesc.", // pages/org-settings/app/general.tsx — t(`spaces.visibilityDesc.${value}`)
-  "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)

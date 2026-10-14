@@ -25,12 +25,8 @@ import { DataTable } from "../../components/data-table";
 import { PermissionMark } from "../../components/permission-mark";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { MATRIX_HEAD } from "../../lib/matrix-head";
-import {
-  ORG_ROLES_ORDER,
-  ORG_ROLE_CAPABILITIES,
-  ORG_ROLE_SPACE_ACCESS,
-  useOrgRoleColumns,
-} from "./org-role-columns";
+import { ORG_ROLE_CAPABILITIES } from "../../lib/org-role-capabilities";
+import { ORG_ROLES_ORDER, ORG_ROLE_SPACE_ACCESS, useOrgRoleColumns } from "./org-role-columns";
 
 export function OrgRolesList({ onPreview }: { onPreview?: (role: ViewAsOrgRole) => void }) {
   const { t } = useTranslation(["settings", "common"]);

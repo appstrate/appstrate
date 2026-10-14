@@ -8,27 +8,6 @@ const read = (relative: string) =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf-8");
 
 describe("unified settings route wiring", () => {
-  it("keeps settings detail transitions inside the modal and carries its background", () => {
-    const applications = read("../../org-settings/spaces.tsx");
-    expect(applications).toContain(
-      'navigate("/workspace-settings/general", { state: location.state })',
-    );
-
-    const webhooks = read("../../../modules/webhooks/pages/webhooks-page.tsx");
-    expect(webhooks).toContain("rowHref={(wh) => `/workspace-settings/webhooks/${wh.id}`}");
-    expect(webhooks).toContain("rowState={() => location.state}");
-
-    const webhookSettings = read("../../../modules/webhooks/components/webhook-settings-tab.tsx");
-    expect(webhookSettings).toContain(
-      'navigate("/workspace-settings/webhooks", { state: location.state })',
-    );
-
-    const workspaceGeneral = read("../../org-settings/app/general.tsx");
-    expect(workspaceGeneral).toContain(
-      'navigate("/org-settings/spaces", { state: location.state })',
-    );
-  });
-
   it("says a page whose module is off is unavailable, instead of redirecting", () => {
     const oauth = read("../../org-settings/oauth.tsx");
     expect(oauth).toContain("<UnavailableState />");
@@ -47,7 +26,6 @@ describe("unified settings route wiring", () => {
     for (const page of guardedPages) {
       const source = read(page);
       expect(source).not.toContain("<Navigate ");
-      expect(source).not.toContain("<NavigateKeepingState ");
       expect(source).toMatch(/<(NoAccessState|UnavailableState) \/>/);
     }
   });

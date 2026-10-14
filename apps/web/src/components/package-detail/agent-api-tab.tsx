@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ExternalLink, KeyRound } from "lucide-react";
 import { isFileField } from "@appstrate/core/form";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
@@ -13,7 +13,6 @@ import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanReach } from "../../hooks/use-can-reach";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { openAsModal } from "../../lib/modal-route";
 import { buildCurlJson, buildCurlMultipart } from "../../lib/agent-api-request";
 import { ApiKeyCreateModal, NEW_API_KEY_PARAM } from "../api-key-create-modal";
 import { CopyBlock } from "../copy-block";
@@ -42,7 +41,6 @@ function Block({ title, children }: { title: ReactNode; children: ReactNode }) {
 /** How to launch this agent over HTTP, with a key of the space when the reader may hold one. */
 export function AgentApiTab({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "common"]);
-  const location = useLocation();
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
   const { currentOrg } = useOrg();
@@ -103,11 +101,7 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
                 <span className="text-muted-foreground text-xs">{t("api.keyMasked")}</span>
               )}
             </div>
-            <Link
-              to={API_KEYS_PAGE}
-              state={openAsModal(location)}
-              className="text-primary text-xs hover:underline"
-            >
+            <Link to={API_KEYS_PAGE} className="text-primary text-xs hover:underline">
               {t("api.manageKeys")}
             </Link>
           </div>

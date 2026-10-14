@@ -13,7 +13,7 @@ import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
-import { useOrg } from "../../hooks/use-org";
+import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
@@ -114,13 +114,8 @@ export function OrgSettingsGeneralPage() {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const leaveHintId = useId();
 
-  // Shares `useOrgStorage`'s cache entry; owners always get the member list.
-  const { data: orgDetail } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  // Owners always get the member list.
+  const { data: orgDetail } = useOrgDetail();
   const ownerCount = orgDetail?.members?.filter((m) => m.role === "owner").length ?? 0;
   // Under a preview `orgRole` is the persona's, not the real membership.
   const previewing = useViewAsHeader() !== null;

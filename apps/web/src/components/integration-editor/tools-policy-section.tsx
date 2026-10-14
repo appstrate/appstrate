@@ -8,7 +8,7 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { EditorSection, type EditorSurface } from "./editor-section";
-import { StringListInput } from "./string-list-input";
+import { RequiredScopesField } from "./required-scopes-field";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -58,9 +58,6 @@ export function ToolsPolicySection({
   };
   const update = (idx: number, patch: Partial<ToolPolicyState>) =>
     commit(rows.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
-
-  const setAuthScopes = (idx: number, authKey: string, scopes: string[]) =>
-    update(idx, { requiredScopes: { ...rows[idx]!.requiredScopes, [authKey]: scopes } });
 
   const addPolicy = () => commit([...rows, { name: "", requiredScopes: {} }]);
 
@@ -134,27 +131,11 @@ export function ToolsPolicySection({
             </Button>
           </div>
 
-          <div className="space-y-2">
-            <Label>{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
-            <p className="text-muted-foreground text-xs">
-              {t("integrationEditor.toolsPolicy.requiredScopesDesc")}
-            </p>
-            {authKeys.length === 0 ? (
-              <p className="text-muted-foreground text-xs italic">
-                {t("integrationEditor.toolsPolicy.noAuths")}
-              </p>
-            ) : (
-              authKeys.map((k) => (
-                <StringListInput
-                  key={k}
-                  label={k}
-                  values={policy.requiredScopes[k] ?? []}
-                  onChange={(scopes) => setAuthScopes(idx, k, scopes)}
-                  placeholder="read"
-                />
-              ))
-            )}
-          </div>
+          <RequiredScopesField
+            authKeys={authKeys}
+            value={policy.requiredScopes}
+            onChange={(requiredScopes) => update(idx, { requiredScopes })}
+          />
         </div>
       ))}
     </EditorSection>

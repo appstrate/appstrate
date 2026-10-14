@@ -132,6 +132,17 @@ function EmbeddedManifestEntry({
   );
 }
 
+/** The open section: the settings rail's when it names one (embedded), else the editor's own. */
+function useEditorTab(
+  tab: GenericEditorTab | undefined,
+  onTabRequest: ((tab: GenericEditorTab) => void) | undefined,
+) {
+  const [localTab, setLocalTab] = useState<GenericEditorTab>("general");
+  const setActiveTab = (next: GenericEditorTab) =>
+    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
+  return [tab ?? localTab, setActiveTab] as const;
+}
+
 // ─── Agent Editor Inner Form ────────────────────────────────────────
 
 function AgentEditorInner({
@@ -161,10 +172,7 @@ function AgentEditorInner({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [localTab, setLocalTab] = useState<GenericEditorTab>("general");
-  const activeTab = tab ?? localTab;
-  const setActiveTab = (next: GenericEditorTab) =>
-    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
+  const [activeTab, setActiveTab] = useEditorTab(tab, onTabRequest);
   const embedded = presentation === "embedded";
 
   const {
@@ -690,10 +698,7 @@ function IntegrationEditorInner({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [localTab, setLocalTab] = useState<GenericEditorTab>("general");
-  const activeTab = tab ?? localTab;
-  const setActiveTab = (next: GenericEditorTab) =>
-    tab !== undefined ? onTabRequest?.(next) : setLocalTab(next);
+  const [activeTab, setActiveTab] = useEditorTab(tab, onTabRequest);
   const embedded = presentation === "embedded";
 
   const {

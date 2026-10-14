@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { $api, ApiError } from "../../../api/client";
-import { useOrg } from "../../../hooks/use-org";
+import { useOrg, useOrgDetail } from "../../../hooks/use-org";
 import { useCanPreviewRole, usePermissions } from "../../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { useModalParam } from "../../../hooks/use-modal-param";
@@ -109,12 +109,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   // as a fake member row. Tokens are org invitation authority, so only that
   // permission fetches the list (the server returns [] to anyone else anyway).
   const canSeeInvitations = can("members:invite");
-  const { data: orgDetail } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: currentOrg?.id ?? "" } } },
-    { enabled: canSeeInvitations && !!currentOrg?.id },
-  );
+  const { data: orgDetail } = useOrgDetail({ enabled: canSeeInvitations });
 
   /**
    * One control, two routes: an explicit row is PATCHed, an implicit member
@@ -382,12 +377,7 @@ function AddSpaceMemberModal({
     isLoading: usersLoading,
     error: usersError,
     refetch: refetchUsers,
-  } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: open && !!orgId && selectingUser },
-  );
+  } = useOrgDetail({ enabled: open && selectingUser });
   // Owners and admins reach every space through their org role, so adding one
   // as a space member grants nothing and the route refuses it (409).
   const candidates = (orgData?.members ?? []).filter(

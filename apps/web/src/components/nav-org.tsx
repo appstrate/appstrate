@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link, useLocation } from "react-router-dom";
+import { useOverlayPath } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
@@ -37,13 +38,10 @@ type NavItem = {
 
 export function NavOrg() {
   const { t } = useTranslation();
-  // Subscribe to route changes even though the visible URL, not the
-  // background route exposed by this tree, owns the active state below.
-  useLocation();
-  // Routed settings keep the underlying page mounted, so React Router exposes
-  // that background location to this tree. Use the visible path to avoid
-  // painting Dashboard active behind an open settings surface.
-  const visiblePathname = window.location.pathname;
+  // Behind an open overlay no entry is active: the dashboard drawn under a
+  // cold settings link is not where the user is.
+  const { pathname } = useLocation();
+  const visiblePathname = useOverlayPath() ?? pathname;
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
   const canReach = useCanReach();

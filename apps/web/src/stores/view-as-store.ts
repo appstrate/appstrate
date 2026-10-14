@@ -15,6 +15,7 @@ import { createStore } from "zustand/vanilla";
 import type { components } from "../api/schema";
 import { queryClient } from "../lib/query-client";
 import { orgKeys, removeOrgScopedQueries } from "../lib/query-keys";
+import { persistedJson } from "./local-storage";
 import { getCurrentOrgId, orgStore } from "./org-store";
 
 export const STORAGE_KEY = "appstrate_view_as";
@@ -50,36 +51,23 @@ interface ViewAsState {
   commit: (persona: ViewAsPersona | null, stoppedReason: string | null) => void;
 }
 
-/** A stored value that no longer parses is dropped, never sent as a malformed header. */
-export function readPersistedPersona(): ViewAsPersona | null {
-  // The store itself, not `window`: the SSR harness has one without the other.
-  if (typeof localStorage === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = personaSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
-  }
-}
+/**
+ * A stored value that no longer parses is dropped, never sent as a malformed
+ * header. Blocked storage keeps the preview for this tab only.
+ */
+const persistedPersona = persistedJson<ViewAsPersona | null>(STORAGE_KEY, (value) => {
+  const parsed = personaSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+});
 
-function persist(persona: ViewAsPersona | null): void {
-  try {
-    if (persona) localStorage.setItem(STORAGE_KEY, JSON.stringify(persona));
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Storage blocked (private mode, sandboxed iframe): the preview works for
-    // this tab, it just does not survive a reload.
-  }
-}
+export const readPersistedPersona = persistedPersona.read;
 
 export const viewAsStore = createStore<ViewAsState>()((set) => ({
   persona: readPersistedPersona(),
   stoppedReason: null,
   commit: (persona, stoppedReason) => {
     set({ persona, stoppedReason });
-    persist(persona);
+    persistedPersona.write(persona);
   },
 }));
 

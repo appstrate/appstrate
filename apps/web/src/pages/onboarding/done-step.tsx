@@ -7,11 +7,10 @@ import {
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
-import { useOrg } from "../../hooks/use-org";
+import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
-import { $api } from "../../api/client";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { CheckCircle2 } from "lucide-react";
 
@@ -25,12 +24,7 @@ export function OnboardingDoneStep() {
 
   const { data: models } = useModels();
   const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
-  const { data: orgData } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: orgData } = useOrgDetail();
 
   const defaultModel = models?.find((m) => m.is_default);
   // A default whose credential is dead is not a completed step — it is named

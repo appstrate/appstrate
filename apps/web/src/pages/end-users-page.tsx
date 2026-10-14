@@ -110,7 +110,7 @@ function EndUsersPageContent() {
     : null;
 
   const closeUser = () => {
-    navigate(endUsersHref(location), { replace: true, state: location.state });
+    navigate(endUsersHref(location), { replace: true });
   };
 
   const setEditMode = (id: string, editing: boolean) => {
@@ -120,7 +120,7 @@ function EndUsersPageContent() {
     }
     navigate(endUserHref(location, id, editing), {
       replace: true,
-      state: editing ? withEndUserEditReturn(location.state, "detail") : location.state,
+      state: editing ? withEndUserEditReturn(location.state, "detail") : undefined,
     });
   };
 
@@ -176,7 +176,6 @@ function EndUsersPageContent() {
         rows={filtered}
         rowKey={(user) => user.id}
         rowHref={(user) => endUserHref(location, user.id)}
-        rowState={() => location.state}
         rowLabel={(user) =>
           t("applications.openEndUser", {
             name: endUserDisplayName(user, t("applications.anonymousUser")),

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { ModelPicker } from "@appstrate/ui/components/model-picker";
@@ -15,7 +15,6 @@ import { useOrgSettings } from "../hooks/use-org-settings";
 import { usePermissions } from "../hooks/use-permissions";
 import type { OrgModelInfo } from "../hooks/use-models";
 import { pickerCredentials } from "../lib/model-picker";
-import { openAsModal } from "../lib/modal-route";
 import { authStore } from "../stores/auth-store";
 import { getModelIcon } from "./icons";
 
@@ -44,7 +43,6 @@ export function ModelSelect({
   disabled?: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const location = useLocation();
   const { can } = usePermissions();
   const userId = useStore(authStore, (s) => s.user?.id);
   const { data: credentials } = useModelProviderCredentials();
@@ -68,10 +66,6 @@ export function ModelSelect({
       scheduled,
     ],
   );
-  const state = (location.state as { backgroundLocation?: unknown } | null)?.backgroundLocation
-    ? location.state
-    : openAsModal(location);
-
   return (
     <ModelPicker
       disabled={disabled}
@@ -86,7 +80,7 @@ export function ModelSelect({
         return Icon ? <Icon className="size-3.5 shrink-0" /> : null;
       }}
       fixLink={(label) => (
-        <Link to="/preferences/models" state={state} className="underline underline-offset-2">
+        <Link to="/preferences/models" className="underline underline-offset-2">
           {label}
         </Link>
       )}

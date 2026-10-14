@@ -19368,7 +19368,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
-                    /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null restores the initial fallback. */
+                    /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
                     logo?: string | null;
                 };
             };

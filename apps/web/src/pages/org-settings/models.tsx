@@ -17,7 +17,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { toast } from "sonner";
@@ -71,7 +71,6 @@ type ModelsTab = "org" | "personal";
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  const location = useLocation();
   const userId = useStore(authStore, (s) => s.user?.id);
 
   const canWriteModels = can("models:write");
@@ -98,15 +97,12 @@ export function OrgSettingsModelsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: ModelsTab = searchParams.get("tab") === "personal" ? "personal" : "org";
   const setTab = (next: ModelsTab) =>
-    setSearchParams(
-      (prev) => {
-        const out = new URLSearchParams(prev);
-        if (next === "org") out.delete("tab");
-        else out.set("tab", next);
-        return out;
-      },
-      { state: location.state },
-    );
+    setSearchParams((prev) => {
+      const out = new URLSearchParams(prev);
+      if (next === "org") out.delete("tab");
+      else out.set("tab", next);
+      return out;
+    });
 
   const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
   const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);

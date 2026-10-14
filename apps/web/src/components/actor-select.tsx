@@ -15,8 +15,7 @@ import {
   CommandList,
 } from "@appstrate/ui/components/command";
 import { cn } from "@appstrate/ui/cn";
-import { $api } from "../api/client";
-import { useCurrentOrgId } from "../hooks/use-org";
+import { useOrgDetail } from "../hooks/use-org";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import { useEndUsers } from "../hooks/use-end-users";
 import { useScheduleCaller } from "../hooks/use-can-write-schedule";
@@ -58,18 +57,12 @@ export function ActorSelect({
   disabled,
 }: ActorSelectProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const orgId = useCurrentOrgId();
   const [open, setOpen] = useState(false);
 
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query);
 
-  const { data: orgData } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: orgData } = useOrgDetail();
   const members = useMemo(() => orgData?.members ?? [], [orgData]);
   // Naming ANOTHER identity takes authority over it (`mayGovernScheduleActor`); anyone else picks
   // themselves or the actor the field started on — kept listed after picking someone else, so it

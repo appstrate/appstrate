@@ -27,7 +27,7 @@ import { Link } from "react-router-dom";
 import { AppVersion } from "./app-version";
 import { PanelDialog } from "./panel-dialog";
 import { SettingsHeading } from "./settings/settings-heading";
-import { openAsModal, useBackgroundLocation } from "../lib/modal-route";
+import { modalReturnTarget, useBackgroundLocation } from "../lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
 import { activeSettingsItem } from "../lib/settings-nav";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
@@ -71,18 +71,15 @@ function RailLink({
   icon: Icon,
   label,
   isActive,
-  state,
 }: {
   to: string;
   icon: LucideIcon;
   label: string;
   isActive: boolean;
-  state?: unknown;
 }) {
   return (
     <Link
       to={to}
-      state={state}
       className={cn(
         "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
         isActive
@@ -115,10 +112,6 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       : null,
   );
 
-  // Keep the same screen underneath while moving between sections; without it
-  // every rail click would close the overlay and navigate for real.
-  const keepOverlay = background ? openAsModal(background) : undefined;
-
   const rail = (
     <div className="flex h-full flex-col">
       <div className="border-sidebar-border flex items-center gap-2.5 border-b px-4 py-3">
@@ -146,7 +139,6 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
                   icon={item.icon}
                   label={item.label}
                   isActive={activeItem?.to === item.to}
-                  state={keepOverlay}
                 />
               ))}
             </div>
@@ -161,10 +153,7 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
 
   // Same items, one line high. Grouped so the sections survive the collapse.
   const mobileNav = (
-    <Select
-      value={activeItem?.to ?? ""}
-      onValueChange={(to) => navigate(to, { state: keepOverlay })}
-    >
+    <Select value={activeItem?.to ?? ""} onValueChange={(to) => navigate(to)}>
       <SelectTrigger>
         {/* No tab for this URL (a hidden one): name the surface, not a wrong tab. */}
         <SelectValue placeholder={title} />
@@ -192,7 +181,10 @@ export function SettingsLayout({ sections, title, scope }: SettingsLayoutProps) 
       title={title}
       rail={rail}
       mobileNav={mobileNav}
-      onClose={() => navigate(background?.pathname ?? "/", { replace: true })}
+      onClose={() => {
+        const close = modalReturnTarget(background);
+        navigate(close.to, { replace: true, state: close.state });
+      }}
     >
       {activeItem && <SettingsHeading title={activeItem.label} />}
       <Outlet />

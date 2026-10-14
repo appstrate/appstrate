@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -16,7 +15,6 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { webhookResource } from "@/lib/webhook-permissions";
 
 export function WebhooksPage() {
-  const location = useLocation();
   const { t } = useTranslation(["settings", "common"]);
   const newWebhook = useModalParam(NEW_WEBHOOK_PARAM);
   const { can } = usePermissions();
@@ -51,7 +49,6 @@ export function WebhooksPage() {
         rows={webhooks ?? []}
         rowKey={(wh) => wh.id}
         rowHref={(wh) => `/workspace-settings/webhooks/${wh.id}`}
-        rowState={() => location.state}
         rowLabel={(wh) => wh.url}
         isLoading={isLoading}
         isError={Boolean(error)}

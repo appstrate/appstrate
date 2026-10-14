@@ -18,7 +18,7 @@
  * manifest and its lock version, in one package PUT. Dependencies and
  * published versions stay read-only.
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -54,6 +54,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import type { PackageType } from "@appstrate/core/validation";
+import { asRecord, isPlainObject } from "@appstrate/core/safe-json";
 import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { client, $api, ApiError } from "../../api/client";
@@ -66,8 +67,6 @@ import {
   isPinnedEntry,
   languageForPath,
   previewBlockReason,
-  validateNewPath,
-  NEW_PATH_ERROR_KEYS,
   type PackageFileEntry,
   type PackageFileWriteOperation,
   type TreeNode,
@@ -76,24 +75,22 @@ import {
   fileTextOperation,
   packageUpdateBody,
   projectDraftFiles,
-  stageFileOperations,
-  uploadedFileOperation,
   type DraftFile,
 } from "../../lib/package-file-drafts";
 import { errorMessage } from "../../lib/mutation-error";
 import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-files";
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
-import { ConfirmModal } from "../confirm-modal";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
 import { ErrorState, LoadingState } from "../page-states";
 import { ContentEditor } from "../package-editor/content-editor";
 import { Spinner } from "../spinner";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
-import { FilePathDialog } from "./file-path-dialog";
 import { FilePreview } from "./file-preview";
 import { FileTree } from "./file-tree";
 import { usePackageFile, usePackageFileDownload } from "./use-package-file";
+import { useStagedPackageFiles } from "./use-staged-package-files";
+import { getSource } from "../integration-editor/utils";
 import { AgentDetailPaneHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
 
 interface PackageReference {
@@ -115,8 +112,6 @@ interface VirtualFile {
 
 const BUNDLE_ROOT = "Bundle AFPS/";
 
-type FileDialog = { kind: "delete"; path: string } | null;
-
 /** The file gestures a bundle file offers, when its draft is being edited. */
 interface FileGestures {
   canEdit: boolean;
@@ -131,19 +126,12 @@ type SelectedItem =
   | { kind: "file"; file: VirtualFile }
   | { kind: "folder"; path: string; dependency?: PackageReference };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function dependencyReferences(
   manifest: Record<string, unknown> | undefined,
   key: "skills" | "mcp_servers",
   type: PackageReference["type"],
 ): PackageReference[] {
-  if (!manifest || !isRecord(manifest.dependencies)) return [];
-  const dependencies = manifest.dependencies[key];
-  if (!isRecord(dependencies)) return [];
-  return Object.entries(dependencies).map(([id, version]) => ({
+  return Object.entries(asRecord(asRecord(manifest?.dependencies)[key])).map(([id, version]) => ({
     id,
     version: typeof version === "string" ? version : null,
     type,
@@ -152,11 +140,10 @@ function dependencyReferences(
 
 /** The local MCP server an integration launches: its one runtime dependency. */
 function localServerReference(manifest: Record<string, unknown> | undefined): PackageReference[] {
-  const source = manifest?.source;
-  if (!isRecord(source) || source.kind !== "local" || !isRecord(source.server)) return [];
-  const { name, version } = source.server;
-  if (typeof name !== "string") return [];
-  return [{ id: name, version: typeof version === "string" ? version : null, type: "mcp-server" }];
+  const source = getSource(manifest ?? {});
+  return source.kind === "local" && source.serverName
+    ? [{ id: source.serverName, version: source.serverVersion || null, type: "mcp-server" }]
+    : [];
 }
 
 function packageFolderName(packageId: string): string {
@@ -236,82 +223,29 @@ export function PackageFilesView({
   // The tree the first edit started from. A refetch cannot rebase staged edits;
   // the original ETag (sent as If-Match) rejects the save if the package moved meanwhile.
   const [base, setBase] = useState<readonly PackageFileEntry[] | null>(null);
-  // Naming a file has an address (`?newFile=1`, `?renameFile=<path>`); deleting one is a confirmation.
-  const [dialog, setDialog] = useState<FileDialog>(null);
-  const newFile = useModalParam("newFile");
-  const renameFile = useModalParam("renameFile");
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const editingFile = useModalParam("editFile");
-  const uploadRef = useRef<HTMLInputElement>(null);
-  const replaceTarget = useRef<string | null>(null);
   const dirty = operations.length > 0;
   const { blocker } = useUnsavedChanges(dirty);
-  const limit = formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES);
   const bundleBase = base ?? bundleIndex?.data;
   const bundleEntries: readonly DraftFile[] | undefined =
     editing && bundleBase ? projectDraftFiles(bundleBase, operations, type) : bundleIndex?.data;
-
-  const stage = (added: PackageFileWriteOperation[]) => {
-    if (!bundleBase) return;
-    try {
-      const next = stageFileOperations(operations, added);
-      projectDraftFiles(bundleBase, next, type);
-      if (base === null) setBase(bundleBase);
+  const staged = useStagedPackageFiles({
+    type,
+    base: bundleBase,
+    entries: bundleEntries ?? [],
+    operations,
+    onChange: (next) => {
+      if (base === null && bundleBase) setBase(bundleBase);
       setOperations(next);
-      setDialog(null);
-      if (newFile.value !== null) newFile.close();
-      else if (renameFile.value !== null) renameFile.close();
       setSaveError(null);
-      return true;
-    } catch (error) {
-      toast.error(t(packageFilesErrorKey(error) ?? "files.errorGeneric", { limit }));
-      return false;
-    }
-  };
-  const pickUpload = (target: string | null) => {
-    replaceTarget.current = target;
-    if (uploadRef.current) {
-      uploadRef.current.multiple = target === null;
-      uploadRef.current.click();
-    }
-  };
-  const upload = async (picked: File[]) => {
-    if (picked.some((file) => file.size > PACKAGE_FILE_INLINE_MAX_BYTES)) {
-      toast.error(t("files.errorTooLarge", { limit }));
-      return;
-    }
-    const target = replaceTarget.current;
-    if (target === null) {
-      // The whole selection is checked before anything is read or staged.
-      const planned: PackageFileEntry[] = [...(bundleEntries ?? [])];
-      for (const file of picked) {
-        const rejection = validateNewPath(planned, file.name);
-        if (rejection) {
-          toast.error(
-            t(
-              rejection === "exists" || rejection === "conflict"
-                ? "files.errorImportConflict"
-                : NEW_PATH_ERROR_KEYS[rejection],
-              { path: file.name },
-            ),
-          );
-          return;
-        }
-        planned.push({ path: file.name, size: file.size, media_kind: "binary" });
-      }
-    }
-    setBusy(true);
-    try {
-      stage(
-        await Promise.all(picked.map((file) => uploadedFileOperation(target ?? file.name, file))),
-      );
-    } catch {
-      toast.error(t("files.errorGeneric"));
-    } finally {
-      setBusy(false);
-    }
-  };
+    },
+    onSelect: (path) => setSelected({ kind: "file", file: emptyBundleFile(packageId, path) }),
+    disabled: saving,
+  });
+  const busy = staged.busy;
+
   const discardEdits = () => {
     setOperations([]);
     setBase(null);
@@ -319,7 +253,7 @@ export function PackageFilesView({
   };
   const saveEdits = async () => {
     if (!writableDraft || !dirty) return;
-    setBusy(true);
+    setSaving(true);
     setSaveError(null);
     try {
       await updatePackage.mutateAsync({
@@ -332,10 +266,12 @@ export function PackageFilesView({
       toast.success(t("files.saved"));
     } catch (error) {
       const key = packageFilesErrorKey(error);
-      setSaveError(key ? t(key, { limit }) : errorMessage(error));
+      setSaveError(
+        key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(error),
+      );
       throw error;
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   };
   const isPinned = (bundlePath: string) =>
@@ -384,9 +320,8 @@ export function PackageFilesView({
           { params: { path: splitPackageRef(server.id), header: scope.header } },
         );
         if (detailError) throw detailError;
-        if (!isRecord(detail.manifest)) return null;
-        const serverManifest = detail.manifest.server;
-        if (!isRecord(serverManifest) || typeof serverManifest.entry_point !== "string")
+        const serverManifest = asRecord(detail.manifest).server;
+        if (!isPlainObject(serverManifest) || typeof serverManifest.entry_point !== "string")
           return null;
 
         const { data: files, error: filesError } = await client.GET(
@@ -591,13 +526,13 @@ export function PackageFilesView({
                     icon={FilePlus}
                     label={t("files.newFile")}
                     disabled={busy}
-                    onClick={() => newFile.open()}
+                    onClick={staged.openNewFile}
                   />
                   <IconAction
                     icon={Upload}
                     label={t("files.upload")}
                     disabled={busy}
-                    onClick={() => pickUpload(null)}
+                    onClick={() => staged.pickUpload(null)}
                   />
                 </>
               )}
@@ -672,14 +607,14 @@ export function PackageFilesView({
                   actions={
                     editing
                       ? {
-                          onCreate: () => newFile.open(),
-                          onUpload: () => pickUpload(null),
+                          onCreate: staged.openNewFile,
+                          onUpload: () => staged.pickUpload(null),
                           onRename: (path) =>
                             path.startsWith(BUNDLE_ROOT) &&
-                            renameFile.open(path.slice(BUNDLE_ROOT.length)),
+                            staged.openRename(path.slice(BUNDLE_ROOT.length)),
                           onDelete: (path) =>
                             path.startsWith(BUNDLE_ROOT) &&
-                            setDialog({ kind: "delete", path: path.slice(BUNDLE_ROOT.length) }),
+                            staged.openDelete(path.slice(BUNDLE_ROOT.length)),
                           // Dependencies are other packages: never renamed or deleted here.
                           isPinned: (path) =>
                             !path.startsWith(BUNDLE_ROOT) ||
@@ -715,14 +650,13 @@ export function PackageFilesView({
                           activeSelection.file.bundlePath !== "manifest.json" &&
                           previewBlockReason(activeSelection.file.sourceEntry) === null,
                         onEdit: () => editingFile.open(activeSelection.file.bundlePath),
-                        onReplace: () => pickUpload(activeSelection.file.bundlePath!),
+                        onReplace: () => staged.pickUpload(activeSelection.file.bundlePath!),
                         onRename: isPinned(activeSelection.file.bundlePath)
                           ? undefined
-                          : () => renameFile.open(activeSelection.file.bundlePath),
+                          : () => staged.openRename(activeSelection.file.bundlePath!),
                         onDelete: isPinned(activeSelection.file.bundlePath)
                           ? undefined
-                          : () =>
-                              setDialog({ kind: "delete", path: activeSelection.file.bundlePath! }),
+                          : () => staged.openDelete(activeSelection.file.bundlePath!),
                         busy,
                       }
                     : undefined
@@ -785,58 +719,7 @@ export function PackageFilesView({
           </div>
         </div>
       )}
-      <input
-        ref={uploadRef}
-        type="file"
-        className="hidden"
-        onChange={(event) => {
-          const picked = [...(event.target.files ?? [])];
-          event.target.value = "";
-          if (picked.length) void upload(picked);
-        }}
-      />
-      {newFile.value !== null && (
-        <FilePathDialog
-          title={t("files.newFile")}
-          confirmLabel={t("btn.create", { ns: "common" })}
-          initialPath=""
-          entries={bundleEntries ?? []}
-          onClose={newFile.close}
-          onSubmit={(path) => {
-            if (stage([fileTextOperation(path, "")])) {
-              setSelected({
-                kind: "file",
-                file: { ...emptyBundleFile(packageId, path) },
-              });
-            }
-          }}
-        />
-      )}
-      {renameFile.value !== null && (
-        <FilePathDialog
-          title={t("files.newName")}
-          confirmLabel={t("files.rename")}
-          initialPath={renameFile.value}
-          entries={(bundleEntries ?? []).filter((entry) => entry.path !== renameFile.value)}
-          onClose={renameFile.close}
-          onSubmit={(to) => {
-            if (stage([{ op: "move", from: renameFile.value!, to }])) setSelected(null);
-          }}
-        />
-      )}
-      {dialog?.kind === "delete" && (
-        <ConfirmModal
-          open
-          onClose={() => setDialog(null)}
-          title={t("files.delete")}
-          description={t("files.deleteConfirm", { path: dialog.path })}
-          confirmLabel={t("files.delete")}
-          isPending={busy}
-          onConfirm={() => {
-            if (stage([{ op: "delete", path: dialog.path }])) setSelected(null);
-          }}
-        />
-      )}
+      {staged.dialogs}
       {editing && editingFile.value !== null && (
         <Modal
           open
@@ -854,7 +737,8 @@ export function PackageFilesView({
               entry={editedFile.sourceEntry}
               path={editingFile.value}
               onApply={(text) => {
-                if (stage([fileTextOperation(editingFile.value!, text)])) editingFile.close();
+                if (staged.stage([fileTextOperation(editingFile.value!, text)]))
+                  editingFile.close();
               }}
             />
           ) : bundleEntries ? (

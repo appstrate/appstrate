@@ -15,7 +15,7 @@
  */
 
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AppWindow, Plus } from "lucide-react";
@@ -38,7 +38,6 @@ export function OrgSettingsSpacesPage() {
   const { data: spaces, isLoading, error } = useSpaces();
   const newSpace = useModalParam(NEW_SPACE_PARAM);
   const [pending, setPending] = useState<{ id: string; action: "convert" | "sweep" } | null>(null);
-  const location = useLocation();
   const navigate = useNavigate();
   const { switchSpace } = useSpaceSwitcher();
   const { can } = usePermissions();
@@ -48,7 +47,7 @@ export function OrgSettingsSpacesPage() {
 
   const handleSpaceClick = (spaceId: string) => {
     switchSpace(spaceId);
-    navigate("/workspace-settings/general", { state: location.state });
+    navigate("/workspace-settings/general");
   };
 
   const runPending = () => {

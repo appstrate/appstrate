@@ -26,7 +26,12 @@ import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
-import { modalReturnTarget, useBackgroundLocation } from "./lib/modal-route";
+import {
+  modalReturnTarget,
+  OverlayProvider,
+  useBackgroundLocation,
+  usePageLocation,
+} from "./lib/modal-route";
 import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
@@ -640,18 +645,11 @@ export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
   const location = useLocation();
-  // A routed modal carries the screen it opened over. While one is up the main
-  // route tree renders from THAT location, so the page underneath stays exactly
-  // as the user left it — scroll, filters and all — instead of unmounting.
-  const explicitBackground = useBackgroundLocation();
-  // Opened cold — a pasted link, a reload, a new tab — there is no screen to
-  // float over, so the dashboard stands in: an overlay path always renders as
-  // a modal, so it has no page-shaped rendering to keep in step.
-  const modalBackground =
-    explicitBackground ??
-    (isOverlayPath(location.pathname)
-      ? { ...location, pathname: "/", search: "", hash: "", state: null }
-      : null);
+  // While an overlay is up the page tree renders the page it opened over, so
+  // that page stays exactly as the user left it — scroll, filters and all —
+  // instead of unmounting.
+  const page = usePageLocation();
+  const overlay = page === location ? null : { path: location.pathname, background: page };
   useExternalRedirect(!!user);
 
   if (loading) {
@@ -819,119 +817,122 @@ export function App() {
        */}
       <PendingPairingsWatcher />
       <OrgGate>
-        <Routes location={modalBackground ?? location}>
-          <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/register" element={<Navigate to="/" replace />} />
-          {/*
-           * `/auth/callback` must be reachable while authenticated too: by
-           * the time the browser lands here, the BA session cookie is
-           * already set by the server, so `useAuth()` flips us into this
-           * block before `AuthCallbackPage` runs. Without the route here
-           * the URL falls through to the catch-all and the `sessionStorage`
-           * returnTo we stashed pre-login is never consumed.
-           */}
-          {features.oidc && (
+        <OverlayProvider value={overlay}>
+          <Routes location={page}>
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="/register" element={<Navigate to="/" replace />} />
+            {/*
+             * `/auth/callback` must be reachable while authenticated too: by
+             * the time the browser lands here, the BA session cookie is
+             * already set by the server, so `useAuth()` flips us into this
+             * block before `AuthCallbackPage` runs. Without the route here
+             * the URL falls through to the catch-all and the `sessionStorage`
+             * returnTo we stashed pre-login is never consumed.
+             */}
+            {features.oidc && (
+              <Route
+                path="/auth/callback"
+                element={
+                  <Suspense fallback={<BootScreen />}>
+                    <AuthCallbackPage />
+                  </Suspense>
+                }
+              />
+            )}
+            <Route path="/invite/:token" element={<InviteAcceptPage />} />
             <Route
-              path="/auth/callback"
-              element={
-                <Suspense fallback={<BootScreen />}>
-                  <AuthCallbackPage />
-                </Suspense>
-              }
-            />
-          )}
-          <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route
-            path="/welcome"
-            element={
-              <LazyRoute>
-                <WelcomePage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/waiting"
-            element={
-              <LazyRoute>
-                <OnboardingWaitingStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/create"
-            element={
-              <LazyRoute>
-                <OnboardingCreateStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/plan"
-            element={
-              <LazyRoute>
-                <OnboardingPlanStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/model"
-            element={
-              <LazyRoute>
-                <OnboardingModelStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/members"
-            element={
-              <LazyRoute>
-                <OnboardingMembersStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/complete"
-            element={
-              <LazyRoute>
-                <OnboardingDoneStep />
-              </LazyRoute>
-            }
-          />
-          {/* Beside MainLayout, not inside it: see `ChatLayout`. */}
-          <Route element={<ChatLayout />}>{flatPaths("chat").map(pageRoute)}</Route>
-          <Route
-            element={
-              <GlobalRealtimeSync>
-                <MainLayout />
-              </GlobalRealtimeSync>
-            }
-          >
-            {flatPaths("main").map(pageRoute)}
-            <Route path="*" element={<NotFoundPage />} />
-          </Route>
-        </Routes>
-        {/* Overlay tree — the ONLY home of the routed modals. The tree above
-            renders the background location, so a second copy there could never
-            match; that is why there is no page-shaped variant to keep in sync. */}
-        {modalBackground && (
-          <Routes>
-            {flatPaths("overlay").map(pageRoute)}
-            {layoutRoute("/preferences")}
-            <Route
+              path="/welcome"
               element={
                 <LazyRoute>
-                  <UnifiedSettingsLayout />
+                  <WelcomePage />
                 </LazyRoute>
               }
+            />
+            <Route
+              path="/onboarding/waiting"
+              element={
+                <LazyRoute>
+                  <OnboardingWaitingStep />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/onboarding/create"
+              element={
+                <LazyRoute>
+                  <OnboardingCreateStep />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/onboarding/plan"
+              element={
+                <LazyRoute>
+                  <OnboardingPlanStep />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/onboarding/model"
+              element={
+                <LazyRoute>
+                  <OnboardingModelStep />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/onboarding/members"
+              element={
+                <LazyRoute>
+                  <OnboardingMembersStep />
+                </LazyRoute>
+              }
+            />
+            <Route
+              path="/onboarding/complete"
+              element={
+                <LazyRoute>
+                  <OnboardingDoneStep />
+                </LazyRoute>
+              }
+            />
+            {/* Beside MainLayout, not inside it: see `ChatLayout`. */}
+            <Route element={<ChatLayout />}>{flatPaths("chat").map(pageRoute)}</Route>
+            <Route
+              element={
+                <GlobalRealtimeSync>
+                  <MainLayout />
+                </GlobalRealtimeSync>
+              }
             >
-              {layoutRoute("/org-settings")}
-              {layoutRoute("/workspace-settings")}
+              {flatPaths("main").map(pageRoute)}
+              <Route path="*" element={<NotFoundPage />} />
             </Route>
-            {OVERLAY_PREFIXES.map((prefix) => (
-              <Route key={prefix} path={`${prefix}/*`} element={<OverlayNotFound />} />
-            ))}
           </Routes>
-        )}
+          {/* Overlay tree — the ONLY home of the routed modals. The tree above
+              renders the page under the overlay, so a second copy there could
+              never match; that is why there is no page-shaped variant to keep
+              in sync. */}
+          {overlay && (
+            <Routes>
+              {flatPaths("overlay").map(pageRoute)}
+              {layoutRoute("/preferences")}
+              <Route
+                element={
+                  <LazyRoute>
+                    <UnifiedSettingsLayout />
+                  </LazyRoute>
+                }
+              >
+                {layoutRoute("/org-settings")}
+                {layoutRoute("/workspace-settings")}
+              </Route>
+              {OVERLAY_PREFIXES.map((prefix) => (
+                <Route key={prefix} path={`${prefix}/*`} element={<OverlayNotFound />} />
+              ))}
+            </Routes>
+          )}
+        </OverlayProvider>
       </OrgGate>
     </ErrorBoundary>
   );

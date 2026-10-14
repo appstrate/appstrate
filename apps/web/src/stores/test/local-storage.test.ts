@@ -8,7 +8,7 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-import { createKeyedLocalStore, persistedValue } from "../local-storage.ts";
+import { createKeyedLocalStore, persistedJson, persistedValue } from "../local-storage.ts";
 
 const storage = installFakeStorage();
 
@@ -97,5 +97,44 @@ describe("persistedValue", () => {
     const value = persistedValue("t-view", view);
     expect(value.read()).toBe("table");
     expect(() => value.write("cards")).not.toThrow();
+  });
+});
+
+describe("persistedJson", () => {
+  let restore: (() => void) | undefined;
+  afterEach(() => {
+    restore?.();
+    restore = undefined;
+    storage.clear();
+  });
+
+  const list = (value: unknown) => strings(value);
+
+  it("round-trips a JSON value and removes the key when written null", () => {
+    const value = persistedJson<string[]>("t-list", list);
+    value.write(["a", "b"]);
+    expect(storage.getItem("t-list")).toBe('["a","b"]');
+    expect(value.read()).toEqual(["a", "b"]);
+    value.write(null);
+    expect(storage.getItem("t-list")).toBeNull();
+  });
+
+  it("hands absent and unparseable values to the parser as null", () => {
+    const seen: unknown[] = [];
+    const value = persistedJson("t-raw", (raw) => {
+      seen.push(raw);
+      return raw;
+    });
+    value.read();
+    storage.setItem("t-raw", "{not json");
+    value.read();
+    expect(seen).toEqual([null, null]);
+  });
+
+  it("falls back to the parser's default, and writes nothing, when storage refuses", () => {
+    restore = blockStorage();
+    const value = persistedJson<string[]>("t-list", list);
+    expect(value.read()).toEqual([]);
+    expect(() => value.write(["a"])).not.toThrow();
   });
 });

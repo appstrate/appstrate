@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Organisation and workspace switcher, at the head of the header trail.
+ * Organization and workspace switcher, at the head of the header trail.
  *
  * Two columns rather than a menu with a submenu: the left one lists the
- * organisations, the right one the workspaces OF THE ONE BEING EXPLORED —
- * clicking an organisation opens its workspaces, it does not switch to it.
+ * organizations, the right one the workspaces OF THE ONE BEING EXPLORED —
+ * clicking an organization opens its workspaces, it does not switch to it.
  *
  * That is what the context is: you are always in a workspace, never in an
- * organisation alone, so the pick ends on a workspace and org + workspace are
+ * organization alone, so the pick ends on a workspace and org + workspace are
  * applied together. Switching org alone would have to choose a workspace for you.
  *
  * The current context and the explored one are two different things and read
- * differently: the current organisation keeps the coral fill and the only gear,
+ * differently: the current organization keeps the coral fill and the only gear,
  * the explored one is the highlighted row with the chevron into column two.
  */
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { openAsModal } from "../lib/modal-route";
+import { useOverlayPath } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
@@ -68,6 +68,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const overlayPath = useOverlayPath();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
@@ -77,7 +78,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const canCreateOrg = useCanCreateOrg();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // The organisation whose workspaces column two is showing. Null means "the
+  // The organization whose workspaces column two is showing. Null means "the
   // one you are in": the panel always opens on your own context, and reopening
   // it after a look around never leaves you exploring somewhere else.
   const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
@@ -91,7 +92,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     setOpenMobile(false);
   };
 
-  // Spaces of the EXPLORED organisation. The header is passed explicitly,
+  // Spaces of the EXPLORED organization. The header is passed explicitly,
   // so it is part of the query key and the client middleware leaves it alone
   // (it only fills headers a request does not already carry). Exploring your
   // own org therefore hits the very same key as `useSpaces()` — same
@@ -121,7 +122,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
    * org first would blank the workspace and let the auto-selector land the user
    * anywhere for a frame; both stores are set in the same tick instead.
    *
-   * A new organisation also means the current URL may not exist there (an agent
+   * A new organization also means the current URL may not exist there (an agent
    * id, a run number), so the landing is the root of the product you are in.
    * Settings are the exception: their routes describe a page type, not a
    * resource id, so they remain valid when the context changes.
@@ -131,12 +132,9 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     if (orgChanged) switchOrg(orgId, spaceId);
     else switchSpace(spaceId);
     setOpen(false);
-    // The global shell stays on the background router location while settings
-    // are mounted as an overlay route. Read the visible URL for this exception
-    // so a context switch does not mistake settings for the page underneath.
-    const visiblePathname = window.location.pathname;
     const settingsRoute =
-      isUnder(visiblePathname, "/org-settings") || isUnder(visiblePathname, "/workspace-settings");
+      overlayPath !== null &&
+      (isUnder(overlayPath, "/org-settings") || isUnder(overlayPath, "/workspace-settings"));
     if (orgChanged && !settingsRoute) {
       navigate(location.pathname.startsWith("/chat") ? "/chat" : "/", { replace: true });
     }
@@ -262,7 +260,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     isCurrent && "bg-spark-soft hover:bg-spark-soft",
                   )}
                 >
-                  {/* Opens this organisation's workspaces beside it. It does
+                  {/* Opens this organization's workspaces beside it. It does
                       NOT switch: you are always in a workspace, so the pick is
                       only complete one column to the right. */}
                   <button
@@ -299,7 +297,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                   {isCurrent && (
                     <Link
                       to="/org-settings"
-                      state={openAsModal(location)}
                       onClick={closeSwitcherAndSidebar}
                       aria-label={t("switcher.orgSettings", { org: org.name })}
                       className="text-muted-foreground hover:text-foreground shrink-0 p-2"
@@ -385,7 +382,6 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                       {isCurrent && (
                         <Link
                           to="/workspace-settings"
-                          state={openAsModal(location)}
                           onClick={closeSwitcherAndSidebar}
                           aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
                           className="text-muted-foreground hover:text-foreground shrink-0 p-2"

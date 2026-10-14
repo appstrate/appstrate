@@ -5,7 +5,7 @@
  * authentication/access settings, and the read-only artifact. Technical auth
  * identifiers never stand in for navigation or capability activation.
  * OAuth clients are listed in one table across tiers (the space's own, the
- * organisation's, the system's); client and connection mutations retain their
+ * organization's, the system's); client and connection mutations retain their
  * ownership gates. The sections live in `components/integration-detail/`.
  */
 
@@ -164,7 +164,7 @@ function IntegrationSettings({
   // Same order as an agent's: Explorer (see it: map, files, versions), then
   // what is set here, then the AFPS package, what the integration IS for every
   // space, edited in place when the reader may. The tool catalogue belongs to
-  // the package: nothing about it is set per organisation or per space.
+  // the package: nothing about it is set per organization or per space.
   const item = (
     id: IntegrationSettingsSection,
     icon: SectionRailItem["icon"],

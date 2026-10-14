@@ -7,7 +7,7 @@
  * Both come from the package alone: the local server's declared `tools[]`
  * (or the manifest's `tools_policy` keys) for the catalog, the manifest's
  * `tools_policy` for the scopes a tool requires. Nothing about them is set
- * per organisation or per space, and which tools an agent may call is chosen
+ * per organization or per space, and which tools an agent may call is chosen
  * in the agent. So they are one section of the package: the catalog as a
  * table, the policy edited from each row, in a modal.
  *
@@ -32,7 +32,7 @@ import { SettingRow, SettingsGroup } from "../settings/setting-row";
 import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
-import { StringListInput } from "./string-list-input";
+import { RequiredScopesField } from "./required-scopes-field";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -215,32 +215,11 @@ function ToolPolicyForm({
           {policy.name && nameError && <p className="text-destructive text-xs">{nameError}</p>}
         </div>
       )}
-      <div className="space-y-2">
-        <Label>{t("integrationEditor.toolsPolicy.requiredScopes")}</Label>
-        <p className="text-muted-foreground text-xs">
-          {t("integrationEditor.toolsPolicy.requiredScopesDesc")}
-        </p>
-        {authKeys.length === 0 ? (
-          <p className="text-muted-foreground text-xs italic">
-            {t("integrationEditor.toolsPolicy.noAuths")}
-          </p>
-        ) : (
-          authKeys.map((key) => (
-            <StringListInput
-              key={key}
-              label={key}
-              values={policy.requiredScopes[key] ?? []}
-              onChange={(scopes) =>
-                setPolicy((prev) => ({
-                  ...prev,
-                  requiredScopes: { ...prev.requiredScopes, [key]: scopes },
-                }))
-              }
-              placeholder="read"
-            />
-          ))
-        )}
-      </div>
+      <RequiredScopesField
+        authKeys={authKeys}
+        value={policy.requiredScopes}
+        onChange={(requiredScopes) => setPolicy((prev) => ({ ...prev, requiredScopes }))}
+      />
       <div className="flex justify-end">
         <Button
           type="button"
