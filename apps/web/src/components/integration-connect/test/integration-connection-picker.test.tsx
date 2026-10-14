@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it, spyOn } from "bun:test";
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { isValidElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
@@ -28,10 +28,7 @@ import {
 import { ConfirmModal } from "../../confirm-modal.tsx";
 import { IntegrationConnectionPicker } from "../integration-connection-picker.tsx";
 import { PickerMenu } from "../connection-picker-menu.tsx";
-import {
-  ConnectionChoiceMenu,
-  type ConnectionChoiceMenuProps,
-} from "../connection-choice-menu.tsx";
+import { ConnectionChoiceMenu } from "../connection-choice-menu.tsx";
 import { UnderScopedWarning } from "../connection-picker-states.tsx";
 import { ScopeSummaryText } from "../scope-summary-text.tsx";
 import {
@@ -475,7 +472,7 @@ function MenuProbe({
   const adapter = PickerMenu({
     integrationId: INTEGRATION,
     picker,
-  }) as ReactElement<ConnectionChoiceMenuProps>;
+  }) as ReactElement<ComponentProps<typeof ConnectionChoiceMenu>>;
   onTree(ConnectionChoiceMenu(adapter.props));
   return null;
 }

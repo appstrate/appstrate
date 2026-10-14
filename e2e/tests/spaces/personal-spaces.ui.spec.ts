@@ -94,15 +94,17 @@ test("an agent authored in a personal space is invisible to a colleague and to t
     spaceId: personalId,
   });
   const scope = `@personal-${Date.now().toString(36)}`;
-  await createAgent(authorClient, scope, "draft");
-  const agentPath = `/agents/${scope}/draft`;
+  const name = `draft-${Date.now().toString(36)}`;
+  await createAgent(authorClient, scope, name);
+  const agentPath = `/agents/${scope}/${name}`;
 
-  // The author sees it in their own space. The library renders the manifest's
-  // `display_name`, never the package id, so the row is located by the link it
-  // carries to the detail page — which is the id, and unique. Matching on
-  // `${scope}/draft` there found nothing, and would have made the two
+  // The author sees it in their own space. The catalogue renders the manifest's
+  // `display_name`, never the package id, and a row opens the package's sheet
+  // through a button named after it, so the agent gets a name of its own.
+  // Matching on the package id there would find nothing and make the
   // `toHaveCount(0)` below pass vacuously.
-  const libraryRow = (page: Page) => page.locator(`a[href="${agentPath}"]`);
+  const libraryRow = (page: Page) =>
+    page.getByRole("button", { name: `Test Agent ${name}`, exact: true });
   const authorContext = await createAuthedContext(browser, author, orgId, personalId);
   try {
     const authorPage = await authorContext.newPage();
@@ -110,7 +112,7 @@ test("an agent authored in a personal space is invisible to a colleague and to t
     await expect(libraryRow(authorPage)).toBeVisible();
     await authorPage.goto(agentPath);
     // The detail page DOES print the id, under the display name.
-    await expect(authorPage.getByText(`${scope}/draft`).first()).toBeVisible();
+    await expect(authorPage.getByText(`${scope}/${name}`).first()).toBeVisible();
   } finally {
     await authorContext.close();
   }
@@ -122,16 +124,22 @@ test("an agent authored in a personal space is invisible to a colleague and to t
     const context = await createAuthedContext(browser, other, orgId, browserCtx.org.defaultSpaceId);
     try {
       const page = await context.newPage();
-      await page.goto("/catalogue/placed/agent");
       // An empty page satisfies a count of zero as happily as a rendered one,
-      // so wait for the type tabs before reading the absence.
-      await expect(page.getByRole("tab").first()).toBeVisible();
+      // so the absence is read once the catalogue's library has answered (the
+      // org-wide one for the owner, each space's for a member).
+      const library = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          /\/api\/(spaces\/[^/]+\/)?library(\?|$)/.test(response.url()),
+      );
+      await page.goto("/catalogue/placed/agent");
+      expect((await library).status()).toBe(200);
       await expect(libraryRow(page)).toHaveCount(0);
 
       const detail = page.waitForResponse(
         (response) =>
           response.request().method() === "GET" &&
-          response.url().includes(`/api/packages/agents/${scope}/draft`),
+          response.url().includes(`/api/packages/agents/${scope}/${name}`),
       );
       await page.goto(agentPath);
       expect((await detail).status()).toBe(404);

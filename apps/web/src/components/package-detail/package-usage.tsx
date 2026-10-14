@@ -7,7 +7,7 @@ import { useAgents } from "../../hooks/use-packages";
 import type { CardItem } from "../../pages/package-list";
 import { packageDetailPath } from "../../lib/package-paths";
 import { DataTable } from "../data-table";
-import { usePackageColumns } from "../packages-table";
+import { usePackageColumns } from "../package-columns";
 import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
 

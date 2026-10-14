@@ -7,8 +7,8 @@
  * more than it looks. You cannot send someone a link to a settings page, the
  * back button does nothing, and support cannot say "open this". Attaching the
  * previous location to the navigation state gets both: opened from inside the
- * app the surface floats over what you were doing, opened from a cold link or a
- * reload it renders as a full page.
+ * app the surface floats over what you were doing; opened from a cold link or a
+ * reload it floats over the dashboard (`App` supplies that background).
  */
 import type { Location } from "react-router-dom";
 import { useLocation } from "react-router-dom";

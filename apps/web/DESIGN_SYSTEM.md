@@ -119,10 +119,10 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
    on the run's overview (the chosen model, the one that served, a link to the agent's model
    setting), read off the `model_fallback` row of the journal the page already holds.
 6. **Paramètres**: `AgentDetailSplit`
-   (`components/agent-detail/agent-detail-split.tsx`) with a rail of `RailLink`
-   (`components/settings/rail-link.tsx`, a lock when the role may not open the
-   section) and one section at a time under `AgentDetailSectionHeader` (title +
-   one-sentence description). The section is chosen by a search param
+   (`components/agent-detail/agent-detail-split.tsx`) with a `SectionRail`
+   (`components/settings/section-rail.tsx`, one `RailLink` per section, a lock
+   when the role may not open it) and one section at a time under
+   `SettingsHeading` (title + one-sentence description). The section is chosen by a search param
    (`?agentSettings=`, `?scheduleSettings=`; the default section leaves the
    param out) and the tab by `#settings`. Reference implementations:
    `components/agent-detail/agent-settings-view.tsx`,
@@ -301,7 +301,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
      and is always drawn. The type forbids a `tier` on a control, and
      `components/test/column-tiers.test.tsx` fails on one in any real column
      set (add your set to it, and mark every column that holds a control). When a
-     table no longer fits, it scrolls sideways and holds its name column (the
+     table does not fit, it scrolls sideways and holds its name column (the
      first read column, with the ticks before it) and its row's end (the
      headerless « … » column) in place (`sticky`), so a row is always named and
      its actions are always in reach. When the held columns would take more than
@@ -572,8 +572,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
     and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open` or
     `onClose` is driven by a `useState`, unless the pair is in its `EXCEPTIONS`
-    list with one line of reason. The list also fails when an entry no longer
-    matches code. Port the modal to `useModalParam` first; add an exception only
+    list with one line of reason. The list also fails when an entry matches no
+    code. Port the modal to `useModalParam` first; add an exception only
     for the four cases above.
 - **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
   Escape, Back): the form is mounted only while its param is set (`{param.value !== null && <Form />}`,
@@ -588,7 +588,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 - **Creating a small object** (schedule, model, webhook, key): a modal asking
   only what it needs to exist, opened by a URL param from every entry point
   with the context preselected, then the object's page takes the rest
-  (`components/new-schedule-modal.tsx` is the reference). **Creating a package**
+  (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
   (agent, skill, integration, MCP server): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
   manual / chat / coding agent), then the editor page.

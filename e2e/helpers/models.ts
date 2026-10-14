@@ -10,6 +10,7 @@
  */
 
 import { expect, type Locator, type Page } from "@playwright/test";
+import type { ApiClient } from "./api-client.ts";
 
 export const MODELS_SETTINGS_PATH = "/org-settings/models";
 /** The dialog's title and its last button (`credentials.add`). */
@@ -36,4 +37,13 @@ export function modelRow(dialog: Locator, modelId: string): Locator {
 /** The footer button that writes everything: the same label as the dialog's title. */
 export function submitAddKey(dialog: Locator): Locator {
   return dialog.getByRole("button", { name: ADD_KEY, exact: true });
+}
+
+/** The org's models, as `GET /api/models` resolves them. */
+export async function listModels(
+  apiClient: Pick<ApiClient, "get">,
+): Promise<Array<Record<string, unknown>>> {
+  const res = await apiClient.get("/models");
+  expect(res.status()).toBe(200);
+  return (await res.json()).data as Array<Record<string, unknown>>;
 }

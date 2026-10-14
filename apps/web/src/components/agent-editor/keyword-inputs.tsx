@@ -46,49 +46,26 @@ export function DraftInput({
 export function KeywordInput({
   value,
   onCommit,
-  placeholder,
-  className,
 }: {
   value: TextValue;
   onCommit: (text: string) => void;
-  placeholder: string;
-  className: string;
 }) {
   const { t } = useTranslation("agents");
   if (value.locked) {
     return (
-      <Input
-        type="text"
-        placeholder={placeholder}
-        value={value.text}
-        disabled
-        readOnly
-        title={t("editor.fieldLockedJson")}
-        className={className}
-      />
+      <Input type="text" value={value.text} disabled readOnly title={t("editor.fieldLockedJson")} />
     );
   }
-  return (
-    <DraftInput
-      text={value.text}
-      onCommit={onCommit}
-      placeholder={placeholder}
-      className={className}
-    />
-  );
+  return <DraftInput text={value.text} onCommit={onCommit} />;
 }
 
 export function NumberKeywordInput({
   prop,
   keyword,
-  placeholder,
-  className,
   onChange,
 }: {
   prop: JSONSchema7;
   keyword: NumericKeyword;
-  placeholder: string;
-  className: string;
   onChange: (prop: JSONSchema7) => void;
 }) {
   const current = prop[keyword];
@@ -96,8 +73,6 @@ export function NumberKeywordInput({
     <DraftInput
       text={typeof current === "number" ? String(current) : ""}
       onCommit={(text) => onChange(setKeyword(prop, keyword, toKeywordNumber(keyword, text)))}
-      placeholder={placeholder}
-      className={className}
     />
   );
 }

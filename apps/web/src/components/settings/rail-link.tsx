@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 
-export interface RailLinkItem {
+interface RailLinkItem {
   to: string;
   icon: LucideIcon;
 }

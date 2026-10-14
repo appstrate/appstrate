@@ -219,7 +219,7 @@ export interface PersonalServiceRow {
   models: OrgModelInfo[];
   /** Everyone the server shows the caller, the caller first. */
   holders: ServiceHolder[];
-  /** Keys are connected and none of them can serve any more. */
+  /** Keys are connected and none of them can serve. */
   unavailable: boolean;
   /** Models are left to personal keys, and every one of them is switched off. */
   disabled: boolean;

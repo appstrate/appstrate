@@ -38,7 +38,7 @@ interface SettingsNavigationOptions {
   can: (permission: GateablePermission) => boolean;
 }
 
-export function buildSettingsNavigation({
+function buildSettingsNavigation({
   canReach,
   can,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {

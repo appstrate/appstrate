@@ -342,7 +342,7 @@ export function RunDetailPage() {
 
       <Tabs value={tab} onValueChange={(value) => setTab(value as RunDetailTab)}>
         <div className="overflow-visible" data-run-detail-surface>
-          <DetailTabsList className="mt-6 mb-3">
+          <DetailTabsList>
             <DetailTabsTrigger value="overview">{t("run.tabOverview")}</DetailTabsTrigger>
             <DetailTabsTrigger value="journal">{t("run.tabJournal")}</DetailTabsTrigger>
             <DetailTabsTrigger value="results">{t("run.tabResults")}</DetailTabsTrigger>

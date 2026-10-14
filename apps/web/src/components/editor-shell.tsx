@@ -51,7 +51,6 @@ interface EditorShellProps {
    */
   presentation?: "page" | "embedded";
   activeDescription?: string;
-  activeSecondaryDescription?: string;
   isDirty?: boolean;
   onDiscardChanges?: () => void;
   children: ReactNode;
@@ -72,7 +71,6 @@ export function EditorShell({
   hideSubmitBar = false,
   presentation = "page",
   activeDescription,
-  activeSecondaryDescription,
   isDirty = false,
   onDiscardChanges,
   children,
@@ -141,16 +139,7 @@ export function EditorShell({
         <div className="flex-1 space-y-4 p-6">
           <SettingsHeading
             title={tabs.find((tab) => tab.id === activeTab)?.label}
-            description={
-              activeDescription || activeSecondaryDescription ? (
-                <>
-                  {activeDescription}
-                  {activeSecondaryDescription && (
-                    <p className="mt-2">{activeSecondaryDescription}</p>
-                  )}
-                </>
-              ) : undefined
-            }
+            description={activeDescription}
           />
           {error && (
             <div className="bg-destructive/15 text-destructive rounded-md px-3 py-2 text-sm">

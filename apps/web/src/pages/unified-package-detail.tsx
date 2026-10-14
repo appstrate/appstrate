@@ -568,7 +568,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       {type === "agent" && agentDetail && (
         <div className="overflow-visible" data-agent-detail-surface>
           <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)}>
-            <DetailTabsList className="mt-6 mb-3">
+            <DetailTabsList>
               {agentTabs.map((item) => (
                 <DetailTabsTrigger key={item.id} value={item.id}>
                   {item.label}
@@ -650,7 +650,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
       {type !== "agent" && (
         <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
-          <DetailTabsList className="mt-6 mb-3">
+          <DetailTabsList>
             {tabDefs.map((td) => (
               <DetailTabsTrigger key={td.id} value={td.id}>
                 {td.label}

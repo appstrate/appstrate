@@ -3,10 +3,9 @@
 /**
  * A list's filters, held in the URL rather than in the component.
  *
- * A filtered list is what people paste to each other, and the rule that gave
+ * A filtered list is what people paste to each other, and the rule that gives
  * modals real URLs brings the same obligation here: Back has to undo a filter.
- * That was written once for the runs page and would have been written a second
- * time, word for word, the moment a second screen learned to filter.
+ * Every filtering screen shares this one copy.
  *
  * Two behaviours are the whole reason this is not four lines at each call site:
  *
@@ -16,7 +15,7 @@
  *
  * And `reset` is ONE update, not one per dimension. Three `setParams` in the
  * same tick each read the same committed location, so the last would win and
- * the other two filters would survive a "Réinitialiser" that looked like it
+ * the other two filters would survive a "Réinitialiser" that looks like it
  * worked. That is why this function exists at all rather than a loop at the
  * call site.
  */

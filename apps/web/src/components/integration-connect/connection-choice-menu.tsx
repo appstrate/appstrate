@@ -62,7 +62,7 @@ function RadioDot({ checked }: { checked: boolean }) {
   );
 }
 
-export interface ConnectionChoiceMenuProps {
+interface ConnectionChoiceMenuProps {
   /** Test ids read `<prefix>-<part>-<key>`; the agent's own keep `member-pick`. */
   testPrefix: string;
   testKey: string;
@@ -345,7 +345,6 @@ export function ConnectionSetPicker({
   allowNone = false,
   noneHint,
   inheritDescription,
-  placeholder,
 }: {
   options: readonly SetOption[];
   value: ConnectionSet;
@@ -358,8 +357,6 @@ export function ConnectionSetPicker({
   /** Overrides the default « runs without this integration » line of the none mode. */
   noneHint?: string;
   inheritDescription?: string;
-  /** What the trigger reads before anything is chosen, when there is no « Hériter » to read. */
-  placeholder?: string;
 }) {
   const { t } = useTranslation(["agents", "settings"]);
   const picked = value ?? [];
@@ -368,7 +365,7 @@ export function ConnectionSetPicker({
     if (value === null) {
       return inheritDescription
         ? t("detail.integrationMemberPicker.inherit")
-        : (placeholder ?? t("detail.integrationMemberPicker.modeChoose"));
+        : t("detail.integrationMemberPicker.modeChoose");
     }
     if (value.length === 0) return t("detail.integrationMemberPicker.none");
     const base =

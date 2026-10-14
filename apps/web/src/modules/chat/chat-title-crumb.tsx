@@ -5,8 +5,8 @@
  *
  * The trail is drawn ONCE, by `ShellBreadcrumb`, next to the org chip that
  * opens it — pages declare, the shell draws. So the chat declares here rather
- * than re-implementing a breadcrumb inside its own header, which is how the two
- * products' trails drifted apart once already.
+ * than re-implementing a breadcrumb inside its own header, where the two
+ * products' trails would drift apart.
  *
  * The segment is published only when the conversation is KNOWN. A cold load, or
  * a URL naming a conversation that was deleted, then costs no segment at all —

@@ -29,8 +29,8 @@ export function PackageCard({
 }: CardItem & {
   /**
    * Whether an agent card offers to run it. False in the catalogue: a package
-   * this space has not activated cannot be run from here, and the button was
-   * the reason those cards were a row taller than the rest.
+   * this space has not activated cannot be run from here, and the button would
+   * make those cards a row taller than the rest.
    */
   showRun?: boolean;
   /** Read it in place instead of navigating — what the catalogue's rows do. */

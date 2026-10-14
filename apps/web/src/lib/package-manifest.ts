@@ -11,8 +11,7 @@
  *
  * The readers live here rather than in the components because that is what
  * makes the rules testable without a DOM: presence, ordering, URL safety and
- * de-duplication are all pure functions of the manifest. (`tools_policy` is
- * deliberately NOT read — see `IntegrationManifestDetails` for why.)
+ * de-duplication are all pure functions of the manifest.
  */
 
 import { normalizeHttpUrl } from "@appstrate/core/url";
@@ -30,19 +29,10 @@ function str(value: unknown): string | undefined {
 
 /**
  * The non-blank strings of an array, VERBATIM — order preserved, duplicates
- * kept. Non-strings and blanks are still dropped, as everywhere else here.
- *
- * This used to dedupe through a `Set`, for the React-key reason: `keywords`,
- * `default_scopes` and the `labelKey:value` rows of `FactGrid` are all keyed
- * lists, and `"keywords": ["a", "a"]` is legal hand-written jsonb. But the same
- * helper also reads `server.mcp_config.args`, and an argv is an ORDERED
- * MULTISET, not a set: `["run","--with","pkgA","--with","pkgB","server.py"]`
- * rendered as one launch line came out `uv run --with pkgA pkgB server.py` —
- * the second `--with` silently deleted, i.e. this module inventing a command
- * the author never wrote. Corrupting the data to make a key unique is the wrong
- * trade in either direction, so uniqueness is now the RENDERER's job: every
- * keyed site includes the index (`manifest-overview.tsx`,
- * `integration-details.tsx`, `manifest-fact.tsx`).
+ * kept. `server.mcp_config.args` is an argv, an ordered multiset
+ * (`--with pkgA --with pkgB` needs both flags), so keyed renderers
+ * (`manifest-overview.tsx`, `manifest-fact.tsx`) put the index in the key
+ * rather than this reader deduplicating.
  */
 function strArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -213,34 +203,12 @@ export function readManifestOverview(manifest: unknown): ManifestOverview {
   };
 }
 
-// ─── Integration tail ───────────────────────────────────────────────
+// ─── Integration source ───────────────────────────────────────────────
 
 type IntegrationSourceView =
-  | { kind: "local"; serverName: string; serverVersion: string; vendored: boolean }
+  | { kind: "local"; serverName: string; serverVersion: string }
   | { kind: "remote"; url: string; transport: string }
   | { kind: "none" };
-
-interface IntegrationAuthView {
-  id: string;
-  /** AFPS auth type verbatim (oauth2 | api_key | basic | mtls | custom). */
-  type?: string;
-  defaultScopes: string[];
-}
-
-/**
- * `source` + `auths` + the wildcard opt-in, and nothing else.
- *
- * `tools_policy` and `hidden_tools` are NOT read: the integration page's Tools
- * tab already renders the server-resolved catalog with its per-auth
- * `required_scopes` and the tool descriptions the manifest map lacks. A second,
- * poorer rendering of the same thing on the same page is not worth a reader.
- */
-export interface IntegrationManifestDetails {
-  source?: IntegrationSourceView;
-  auths: IntegrationAuthView[];
-  allowUndeclaredTools: boolean;
-  isEmpty: boolean;
-}
 
 /** `source` is a oneOf — an incomplete branch is dropped, never half-rendered. */
 export function readIntegrationSource(value: unknown): IntegrationSourceView | undefined {
@@ -251,7 +219,7 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
     const serverName = str(server?.name);
     const serverVersion = str(server?.version);
     if (!serverName || !serverVersion) return undefined;
-    return { kind: "local", serverName, serverVersion, vendored: server?.vendored === true };
+    return { kind: "local", serverName, serverVersion };
   }
   if (kind === "remote") {
     const remote = obj(source?.remote);
@@ -262,24 +230,6 @@ export function readIntegrationSource(value: unknown): IntegrationSourceView | u
   }
   if (kind === "none") return { kind: "none" };
   return undefined;
-}
-
-export function readIntegrationDetails(manifest: unknown): IntegrationManifestDetails {
-  const m = obj(manifest) ?? {};
-  const source = readIntegrationSource(m.source);
-  const auths = Object.entries(obj(m.auths) ?? {}).map(([id, raw]) => {
-    const auth = obj(raw);
-    const type = str(auth?.type);
-    return { id, ...(type ? { type } : {}), defaultScopes: strArray(auth?.default_scopes) };
-  });
-  const allowUndeclaredTools = m.allow_undeclared_tools === true;
-
-  return {
-    ...(source ? { source } : {}),
-    auths,
-    allowUndeclaredTools,
-    isEmpty: !source && auths.length === 0 && !allowUndeclaredTools,
-  };
 }
 
 // ─── MCP server tail ────────────────────────────────────────────────
@@ -314,7 +264,6 @@ export interface McpServerManifestDetails {
   server?: McpServerView;
   tools: McpToolView[];
   userConfig: McpUserConfigView[];
-  isEmpty: boolean;
 }
 
 /**
@@ -394,6 +343,5 @@ export function readMcpServerDetails(manifest: unknown): McpServerManifestDetail
     ...(server ? { server } : {}),
     tools,
     userConfig,
-    isEmpty: !manifestVersion && !server && tools.length === 0 && userConfig.length === 0,
   };
 }

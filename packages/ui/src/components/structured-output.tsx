@@ -12,8 +12,6 @@
  * toggle away at every call site, so nothing is ever hidden here.
  */
 
-import { cn } from "../cn.ts";
-
 interface FieldDoc {
   title?: string;
   description?: string;
@@ -55,12 +53,10 @@ function FactValue({ value }: { value: unknown }) {
 export function StructuredOutput({
   value,
   schema,
-  className,
 }: {
   value: Record<string, unknown>;
   /** The agent's output JSON schema, when known. */
   schema?: unknown;
-  className?: string;
 }) {
   const fields = schemaFields(schema);
   const keys = [
@@ -68,7 +64,7 @@ export function StructuredOutput({
     ...Object.keys(value).filter((key) => !(key in fields)),
   ];
   return (
-    <dl className={cn("grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2", className)}>
+    <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
       {keys.map((key) => (
         <div key={key} className="min-w-0">
           <dt className="text-muted-foreground text-xs">{fields[key]?.title ?? key}</dt>

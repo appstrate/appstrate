@@ -17,7 +17,7 @@
  * no stable address, and what is not a modal at all (a popover that turns into a
  * sheet on a phone). The first two are named by their component and need no line
  * below. Anything else is listed, with one line of reason that falls in those
- * categories, and an entry that no longer matches code fails too: the list cannot rot.
+ * categories, and an entry that matches no code fails too: the list cannot rot.
  */
 
 import { describe, it, expect } from "bun:test";

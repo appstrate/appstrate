@@ -29,12 +29,10 @@ import type {
 import { $api, client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 
-// Spec-pinned narrowing for the integration detail endpoint. It takes the
-// generated OpenAPI response shape verbatim (so a rename/removal of any
+// Spec-pinned narrowing for the integration list and detail endpoints. It takes
+// the generated OpenAPI response shape verbatim (so a rename/removal of any
 // non-`manifest` field breaks compilation) and narrows only the freeform AFPS
-// `manifest` JSON to IntegrationManifestView — the one trust boundary of these reads. This
-// replaces a blind `as IntegrationSummary[]` that erased the spec type and could hide drift on
-// every non-manifest field.
+// `manifest` JSON to IntegrationManifestView — the one trust boundary of these reads.
 type RawIntegrationSummary = NonNullable<
   paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];

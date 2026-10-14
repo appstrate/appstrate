@@ -19,9 +19,8 @@ import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
 /**
  * The filters live in the URL, so a filtered list is a link. They also come
- * back as one closed set rather than two tab strips: three dimensions drawn as
- * tabs is three rows of chrome above five rows of data, and `status` would have
- * nowhere to go at all.
+ * back as one closed set rather than tab strips: three dimensions drawn as
+ * tabs is three rows of chrome above five rows of data.
  *
  * Each dimension takes SEVERAL values. It matters for one of them: "everything
  * that broke" is `failed` or `timeout`, one question the endpoint answers

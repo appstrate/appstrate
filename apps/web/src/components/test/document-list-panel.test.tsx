@@ -4,12 +4,11 @@
  * The run-scoped documents panel: its per-tile direction badge must read the
  * SAME rule as the run's "produced" list (`runFileDirection`).
  *
- * It did not, twice. Keyed on `runId` alone (`doc.runId === runId`), an upload
- * made FOR the run — committed with that run's id — was badged as something the
- * run had produced. Keyed on `purpose` alone, a file chained in from an EARLIER
- * run (that run's `agent_output`) was. One predicate, two halves, each wrong on
- * a different row shape; the rule itself is exercised in `lib/test/files.test.ts`,
- * and this asserts the tile is wired to it.
+ * Keyed on `runId` alone (`doc.runId === runId`), an upload made FOR the run —
+ * committed with that run's id — would badge as something the run produced.
+ * Keyed on `purpose` alone, a file chained in from an EARLIER run (that run's
+ * `agent_output`) would. The rule itself is exercised in
+ * `lib/test/files.test.ts`; this asserts the tile is wired to it.
  */
 
 import { describe, it, expect } from "bun:test";

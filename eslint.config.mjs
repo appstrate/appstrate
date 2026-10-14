@@ -738,22 +738,7 @@ export default tseslint.config(
           extraHOCs: ["makeAssistantToolUI"],
           // Public shadcn-style design-system helpers exported from component
           // entrypoints. Keep the API stable while avoiding Fast Refresh noise.
-          // Column hooks exported beside the table they feed are Fast Refresh
-          // exceptions too: each lives with its table rather than in a
-          // `*-columns.tsx` of its own, so it is named here.
-          allowExportNames: [
-            "badgeVariants",
-            "buttonVariants",
-            "useSidebar",
-            "usePackageColumns",
-            "useRunColumns",
-            "useScheduleColumns",
-            "useProxyColumns",
-            "getRunTriggerType",
-            "getRunTriggerActor",
-            "columnMenu",
-            "visibleColumns",
-          ],
+          allowExportNames: ["badgeVariants", "buttonVariants", "useSidebar"],
         },
       ],
       // Re-render robustness: the React Compiler rules above check Rules-of-React

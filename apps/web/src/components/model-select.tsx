@@ -26,7 +26,6 @@ import { getModelIcon } from "./icons";
  * composer draws the same list from the same `@appstrate/ui` pieces.
  */
 export function ModelSelect({
-  id,
   models,
   value,
   onChange,
@@ -34,7 +33,6 @@ export function ModelSelect({
   scheduled,
   disabled,
 }: {
-  id?: string;
   models: readonly OrgModelInfo[];
   /** The picked model id; `null` is the inherit row. */
   value: string | null;
@@ -76,7 +74,6 @@ export function ModelSelect({
 
   return (
     <ModelPicker
-      id={id}
       disabled={disabled}
       groups={groups}
       value={value}

@@ -18,7 +18,8 @@ import { ArrowRight, Lock, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
-import { AgentDetailSectionHeader, AgentDetailSplit } from "./agent-detail/agent-detail-split";
+import { AgentDetailSplit } from "./agent-detail/agent-detail-split";
+import { SettingsHeading } from "./settings/settings-heading";
 import { SectionRail } from "./settings/section-rail";
 import { SettingRow } from "./settings/setting-row";
 import { InlineTextSetting } from "./settings/inline-text-setting";
@@ -291,10 +292,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
       }
     >
       <section className="min-w-0 p-6">
-        <AgentDetailSectionHeader
-          title={t(active.labelKey)}
-          description={t(active.descriptionKey)}
-        />
+        <SettingsHeading title={t(active.labelKey)} description={t(active.descriptionKey)} />
         {/* Same tabs and sections for every role: what a role does not allow
             is said where the controls would be. */}
         {!mayWrite ? (

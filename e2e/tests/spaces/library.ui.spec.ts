@@ -173,7 +173,9 @@ test("an admin places, revokes, deactivates and moves a package from the catalog
   // Home is now the destination (the Provenance cell says so), and it runs
   // there without anybody activating it: creating a package activates it at its
   // home, and so does moving one.
-  await expect(movedRow.getByRole("cell", { name: new RegExp(target.name) }).first()).toBeVisible();
+  // Every space column's switch names its space too, so only the Provenance
+  // cell itself tells a moved home from an unmoved one.
+  await expect(movedRow.locator('[data-data-table-column="origin"]')).toContainText(target.name);
   expect(
     (await packagesIn(target.id)).find((p) => p.packageId === `${scope}/${name}`)?.enabled,
   ).toBe(true);

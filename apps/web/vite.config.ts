@@ -84,11 +84,10 @@ function i18nBootPreload(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), i18nBootPreload()],
   envDir: "../../",
-  // Hot-reload dev server (`bun run dev:hmr`). The production
-  // pipeline is unchanged: `dev`/`build` still emit into `dist/`, which the
-  // API serves. This block only exists for `vite dev`, which serves the SPA
-  // itself and swaps edited modules into the running page instead of
-  // rebuilding the whole bundle and reloading the tab.
+  // Hot-reload dev server (`bun run dev:hmr`). `dev`/`build` emit into
+  // `dist/`, which the API serves; this block only applies to `vite dev`,
+  // which serves the SPA itself and swaps edited modules into the running page
+  // instead of rebuilding the whole bundle and reloading the tab.
   //
   // `proxy` forwards API + auth + SSE traffic to the local backend so the
   // same-origin cookie and `/api` paths keep working from port 5173, so

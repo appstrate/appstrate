@@ -130,8 +130,7 @@ describe("column templates", () => {
     // Each row is its own grid container, so an `auto` track is measured per
     // row and the columns stop lining up — the one thing the table is for.
     // And `minmax(0,…)` tells the browser it may take the column away
-    // entirely: that is how the agent name, the only thing naming a run,
-    // measured 6px at a 900px window before the tiers existed.
+    // entirely, down to a few pixels for the name that identifies the row.
     for (const col of COLUMNS) {
       expect(col.width).not.toContain("auto");
       expect(col.width).toMatch(/^(\d+px|minmax\([1-9]\d*px,[\d.]+fr\))$/);

@@ -7,8 +7,8 @@ import { Navigate, useLocation } from "react-router-dom";
  *
  * A plain redirect drops it, which silently breaks routed modals: opening
  * `/org-settings` bounces to `/org-settings/general` and the
- * `backgroundLocation` that made it an overlay is gone by the time anything
- * reads it, so the modal renders as a full page instead.
+ * `backgroundLocation` the modal floats over is gone by the time anything
+ * reads it, so the screen underneath is swapped for the dashboard.
  */
 export function NavigateKeepingState({ to }: { to: string }) {
   const location = useLocation();

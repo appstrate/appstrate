@@ -23,7 +23,6 @@ export function CopyBlock({
   dense = false,
   className = "",
   testId,
-  plain = false,
 }: {
   value: string;
   /** Preserve newlines and scroll horizontally instead of wrapping. */
@@ -33,19 +32,17 @@ export function CopyBlock({
   /** Extra classes on the value itself (e.g. a height cap); the copy button stays put. */
   className?: string;
   testId?: string;
-  /** Settings rows already provide their own visual container. */
-  plain?: boolean;
 }) {
   const { t } = useTranslation("common");
   const { copied, copy } = useCopyToClipboard();
   return (
     <div
-      className={plain ? "relative" : "border-border bg-muted/50 relative rounded-md border"}
+      className="border-border bg-muted/50 relative rounded-md border"
       {...(testId ? { "data-testid": testId } : {})}
     >
       <code
         className={`text-foreground block font-mono text-xs select-all ${
-          plain ? "py-2 pr-12" : dense ? "px-2 py-1.5 pr-9" : "px-3 py-2 pr-12"
+          dense ? "px-2 py-1.5 pr-9" : "px-3 py-2 pr-12"
         } ${multiline ? "overflow-x-auto whitespace-pre" : "break-all"} ${className}`}
       >
         {value}

@@ -444,8 +444,8 @@ export function ClientsTable({
         rowKey={(row) => row.client.client_ref}
         isLoading={spaceClients.isLoading}
         isError={spaceClients.isError}
-        // The reason, not just the fact: `DataTable` owes a default when the
-        // caller writes no message, and a default is all this had.
+        // The reason, not just the fact: without it `DataTable` falls back on
+        // its default message.
         error={<ErrorState error={spaceClients.error} compact />}
         // On an auto-provisioned auth the reason the list is empty IS the state, so
         // it is the empty state's hint rather than a second sentence above a

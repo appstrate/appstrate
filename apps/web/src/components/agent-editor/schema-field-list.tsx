@@ -416,13 +416,7 @@ function FieldModal({
                     </label>
                     {kind === "multiple" && (
                       <Row label={t("editor.fieldMaxFilesLabel")}>
-                        <NumberKeywordInput
-                          prop={prop}
-                          keyword="maxItems"
-                          placeholder=""
-                          className=""
-                          onChange={setProp}
-                        />
+                        <NumberKeywordInput prop={prop} keyword="maxItems" onChange={setProp} />
                       </Row>
                     )}
                   </>
@@ -435,8 +429,6 @@ function FieldModal({
                           onCommit={(text) =>
                             setProp(setKeyword(prop, "default", textToValue(text, type)))
                           }
-                          placeholder=""
-                          className=""
                         />
                       </Row>
                     )}
@@ -454,8 +446,6 @@ function FieldModal({
                               onCommit={(text) =>
                                 setProp(setItemsEnum(prop, textToList(text, itemType(prop))))
                               }
-                              placeholder=""
-                              className=""
                             />
                           </Row>
                         )
@@ -469,8 +459,6 @@ function FieldModal({
                                   setKeyword(prop, "enum", values.length > 0 ? values : undefined),
                                 );
                               }}
-                              placeholder=""
-                              className=""
                             />
                           </Row>
                         )}
@@ -496,22 +484,10 @@ function FieldModal({
                           </Select>
                         </Row>
                         <Row label={t("editor.fieldMinLength")}>
-                          <NumberKeywordInput
-                            prop={prop}
-                            keyword="minLength"
-                            placeholder=""
-                            className=""
-                            onChange={setProp}
-                          />
+                          <NumberKeywordInput prop={prop} keyword="minLength" onChange={setProp} />
                         </Row>
                         <Row label={t("editor.fieldMaxLength")}>
-                          <NumberKeywordInput
-                            prop={prop}
-                            keyword="maxLength"
-                            placeholder=""
-                            className=""
-                            onChange={setProp}
-                          />
+                          <NumberKeywordInput prop={prop} keyword="maxLength" onChange={setProp} />
                         </Row>
                         <Row label={t("editor.fieldPattern")}>
                           <Input
@@ -527,31 +503,13 @@ function FieldModal({
                     {isNumeric && (
                       <>
                         <Row label={t("editor.fieldMin")}>
-                          <NumberKeywordInput
-                            prop={prop}
-                            keyword="minimum"
-                            placeholder=""
-                            className=""
-                            onChange={setProp}
-                          />
+                          <NumberKeywordInput prop={prop} keyword="minimum" onChange={setProp} />
                         </Row>
                         <Row label={t("editor.fieldMax")}>
-                          <NumberKeywordInput
-                            prop={prop}
-                            keyword="maximum"
-                            placeholder=""
-                            className=""
-                            onChange={setProp}
-                          />
+                          <NumberKeywordInput prop={prop} keyword="maximum" onChange={setProp} />
                         </Row>
                         <Row label={t("editor.fieldStep")}>
-                          <NumberKeywordInput
-                            prop={prop}
-                            keyword="multipleOf"
-                            placeholder=""
-                            className=""
-                            onChange={setProp}
-                          />
+                          <NumberKeywordInput prop={prop} keyword="multipleOf" onChange={setProp} />
                         </Row>
                       </>
                     )}

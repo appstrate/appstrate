@@ -39,27 +39,21 @@
  *   control a screen exists to offer is the last thing that should need a
  *   second click to find.
  *
- * Two rules inside the filter menus that were got wrong once each, and are
- * worth keeping written down:
+ * Two rules inside the filter menus:
  *
- * - **A tick adds, an untick removes, and nothing else happens.** A version
- *   that also collapsed "every value ticked" to "nothing ticked" was true of
- *   the RESULTS and nonsense as an interaction: Kind has two values, so ticking
- *   the second silently unticked the first, and Scope has one, so its only box
- *   could never stay ticked at all.
+ * - **A tick adds, an untick removes, and nothing else happens**
+ *   (`lib/toggle-value.ts`).
  * - **The reset is the CALLER's**, not a loop over the filters here. These
  *   filters live in the URL, and three `setSearchParams` in one tick each
  *   compute from the same committed location: the last wins and the others
- *   survive. The button cleared the status and left the scope and the kind
- *   where they were.
+ *   survive, so a loop would clear one filter and leave the rest.
  *
  * And what the pattern deliberately does NOT do: write the operators. Values of
  * one dimension are alternatives, dimensions narrow each other — `(statut =
  * échoué OU timeout) ET (type = agent)` — and no faceted filter anywhere spells
  * that out.
  *
- * One piece of the original we still cannot have: the per-value counts in the
- * menu. shadcn reads them off the rows it holds
+ * No per-value counts in the menu: shadcn reads them off the rows it holds
  * (`column.getFacetedUniqueValues()`); ours are paginated server-side, so a
  * count would describe the page rather than the list.
  */
@@ -151,10 +145,9 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
             // a button carrying an icon (`has-[>svg]:px-2.5`); ours is a flat
             // `px-3 gap-2`, which would put extra width inside every filter.
             "h-8 gap-1.5 bg-transparent px-2.5 shadow-none",
-            // Dashed AND `+` mean "an empty slot you can fill". Once it is
-            // filled the button is not an invitation any more, it is a
-            // statement, so both go: the border closes and the plus leaves with
-            // it. It also happens to save the width exactly where width is
+            // Dashed AND `+` mean "an empty slot you can fill". A filled
+            // button is a statement, not an invitation, so both go: the border
+            // closes and the plus leaves with it. It also happens to save the width exactly where width is
             // scarce, since a filter with values is the wide one.
             selected.length === 0 && "border-dashed",
           )}

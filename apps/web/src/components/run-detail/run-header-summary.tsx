@@ -5,7 +5,7 @@ import { Play, Square } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { RunDuration } from "../run-duration";
-import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
+import { getRunTriggerActor, getRunTriggerType } from "../../lib/run-trigger";
 import { RunCostReadout } from "../run-cost-readout";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
 import { formatDateField } from "../../lib/format-date";

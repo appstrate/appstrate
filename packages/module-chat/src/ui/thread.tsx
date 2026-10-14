@@ -65,8 +65,8 @@ export function Thread({
     <ThreadPrimitive.Root
       // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
       // this shell are grey with white cards on top (the composer, the tool
-      // cards). `background` is shadcn's component surface — using it here made
-      // the chat the one screen in the product that was flat white.
+      // cards). `background` is shadcn's component surface, which would make
+      // the chat the one flat white screen in the product.
       className="bg-canvas flex h-full flex-col"
       style={{ ["--thread-max-width" as string]: "42rem" }}
     >

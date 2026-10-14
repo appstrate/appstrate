@@ -3,15 +3,13 @@
 /**
  * One table, many column sets.
  *
- * The reference design does not draw four list screens — it draws ONE table
- * (`.data-table`) and four column sets (`.dt-runs`, `.dt-agents`, `.dt-sched`,
- * `.dt-intg`). This is that table: a caller describes its columns and nothing
- * else, so the head band, the row rhythm, the hover, the loading placeholder,
- * the empty state and the breakpoint behaviour are written once and cannot
- * drift from one list to the next — which is exactly how the run list, the
- * agent list and the schedule list ended up three different-looking things.
+ * Every list screen (runs, packages, schedules, integrations, settings) is
+ * this table with its own column set: a caller describes its columns and
+ * nothing else, so the head band, the row rhythm, the hover, the loading
+ * placeholder, the empty state and the breakpoint behaviour are written once
+ * and cannot drift from one list to the next.
  *
- * Three decisions worth knowing before changing it:
+ * Four decisions worth knowing before changing it:
  *
  * - **Grid tracks, not table layout.** A column is declared as a grid track
  *   (`"88px"`, `"minmax(0,1.2fr)"`) because a run list wants a name that takes
@@ -36,8 +34,8 @@
  *   its cell AND its track go together or the row keeps a gap where the column
  *   was. A column that carries a control (`control: true`: a select, a switch,
  *   a button, an action link) has no tier and is never dropped, because a
- *   person who cannot see the control cannot act: when the table no longer
- *   fits it scrolls sideways instead, its name column and its row end (« … »)
+ *   person who cannot see the control cannot act: when the table does not
+ *   fit it scrolls sideways instead, its name column and its row end (« … »)
  *   held in place (`sticky`) so the row stays named and its actions stay in
  *   reach. Settings is the exception because its static rows have no detail
  *   destination: there every fact remains rendered and the complete track
@@ -69,6 +67,7 @@ import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
+import { isIdentityColumn } from "../lib/column-visibility";
 import { useColumnWidths, type ColumnWidths } from "../stores/column-widths-store";
 
 type DataColumnWidth = `${number}px` | `minmax(${number}px,${number}fr)`;
@@ -156,49 +155,9 @@ interface DataTableProps<T> extends CollectionState {
   surface?: "framed" | "integrated";
 }
 
-/**
- * The column that says WHICH row this is: the first one read and always drawn.
- * A tick or a select before it is not the row's name.
- */
-function isIdentity<T>(column: DataColumn<T>): boolean {
-  return !column.tier && !column.control;
-}
-
 /** The row's end (« … »): no head to name it, so nothing to drag, hide or list. */
 function isRowEnd<T>(column: DataColumn<T>): boolean {
   return !column.header && !column.headerNode;
-}
-
-/**
- * The columns a reader may hide, and the menu spec that goes with them.
- *
- * A column with no header cannot be named in a menu (the actions column), so it
- * is never offered — and never hidden either.
- */
-export function columnMenu<T>(
-  columns: DataColumn<T>[],
-  visibility: { hidden: string[]; toggle: (id: string) => void },
-) {
-  const requiredId = columns.find((column) => isIdentity(column) && column.header)?.id;
-  return {
-    options: columns
-      .filter((column) => column.header)
-      .map((column) => ({
-        id: column.id,
-        label: column.header,
-        required: column.id === requiredId,
-      })),
-    hidden: visibility.hidden,
-    onToggle: visibility.toggle,
-  };
-}
-
-/** What is left once the reader's hidden columns are taken out. */
-export function visibleColumns<T>(columns: DataColumn<T>[], hidden: string[]): DataColumn<T>[] {
-  const requiredId = columns.find((column) => isIdentity(column) && column.header)?.id;
-  return columns.filter(
-    (column) => column.id === requiredId || !column.header || !hidden.includes(column.id),
-  );
 }
 
 const SKELETON_ROWS = 3;
@@ -276,7 +235,7 @@ type Stick = { side: "start"; index: number; offset: number; last: boolean } | {
 
 function stickyColumns<T>(columns: DataColumn<T>[]): Map<string, Stick> {
   const held = new Map<string, Stick>();
-  const identity = columns.findIndex(isIdentity);
+  const identity = columns.findIndex(isIdentityColumn);
   if (identity >= 0) {
     const lead = columns.slice(0, identity);
     if (lead.every((c) => c.control && isFixed(c.width))) {
@@ -569,7 +528,7 @@ export function DataTable<T>({
   // list leads with `#131`, which is a tier-two column, so a link parked there
   // would leave the row unclickable on a phone. A control column is skipped
   // too — the catalogue leads with a tick, and a tick inside a link navigates.
-  const linkColumn = columns.findIndex(isIdentity);
+  const linkColumn = columns.findIndex(isIdentityColumn);
 
   const rowGrid =
     columnMode === "scroll"

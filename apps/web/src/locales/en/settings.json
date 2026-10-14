@@ -1408,7 +1408,7 @@
   "catalogue.shared.with": "With",
   "catalogue.shared.action": "Action",
   "catalogue.shared.noRight": "Ask an administrator of {{space}}",
-  "catalogue.sourceOrg": "{{name}} (organisation)",
+  "catalogue.sourceOrg": "{{name}} (organization)",
   "catalogue.sourceSystem": "Appstrate (system)",
   "catalogue.moreActions": "Actions for {{name}}",
   "catalogue.viewDetail": "View details",

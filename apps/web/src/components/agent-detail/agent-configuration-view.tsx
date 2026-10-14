@@ -6,7 +6,7 @@ import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentConfigurationTab } from "../package-detail/agent-configuration-tab";
 import { AgentConnectionsSection } from "../package-detail/agent-connections-section";
 import { AgentSchedulesTab } from "../package-detail/agent-tabs";
-import { AgentDetailSectionHeader } from "./agent-detail-split";
+import { SettingsHeading } from "../settings/settings-heading";
 import type { ConfigurationSection } from "../../lib/settings-section-href";
 
 const CONFIGURATION_SECTION_TEXT: Record<
@@ -93,7 +93,7 @@ export function AgentConfigurationView({
 
   return (
     <section className="min-w-0 p-6">
-      <AgentDetailSectionHeader title={t(text.labelKey)} description={t(text.descriptionKey)} />
+      <SettingsHeading title={t(text.labelKey)} description={t(text.descriptionKey)} />
       <div>{sectionBody}</div>
     </section>
   );

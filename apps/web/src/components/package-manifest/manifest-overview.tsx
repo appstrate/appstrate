@@ -1,86 +1,40 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Rendered, read-only view of an AFPS manifest — the "À propos" tab.
- *
- * One generic component for all four package types: they share ~21 metadata
- * fields, and only `integration` and `mcp-server` carry a tail worth
- * rendering (a skill's schema has none; an agent's `input`/`output`
- * already have their own tabs). Before this existed the manifest was readable
- * only as raw JSON, and the structured integration view lived behind an Edit
- * affordance gated on admin + owned + non-system + non-historical — i.e. every
- * system package and every archived version had no structured view at all.
- *
- * TWO MOUNT POINTS, and that asymmetry is correct — do not "fix" it. Agents,
- * skills and mcp-servers reach this through the À propos tab of
- * `pages/unified-package-detail.tsx`; integrations do not use that page at all
- * (`app.tsx` routes them to `pages/integration-detail.tsx`, which has its own
- * tab set) and mount the same component in their own À propos tab. One
- * component, one name — the two tabs are deliberately labelled alike.
+ * The manifest metadata a package overview shows below its own summary cards.
  *
  * Everything rendered here is AUTHOR-CONTROLLED text. It reaches the screen as
  * JSX children and nothing else; the only string that becomes an `href` is one
- * `normalizeHttpUrl` accepted. Render tests cover both safe and rejected URLs.
+ * `normalizeHttpUrl` accepted.
  */
 
 import { useTranslation } from "react-i18next";
-import { FileJson } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import type { PackageType } from "@appstrate/core/validation";
-import {
-  readIntegrationDetails,
-  readManifestOverview,
-  readMcpServerDetails,
-} from "../../lib/package-manifest";
-import { DetailSectionCard as SectionCard } from "../detail-section-card";
-import { EmptyState } from "../page-states";
+import { readManifestOverview } from "../../lib/package-manifest";
+import { DetailSectionCard } from "../detail-section-card";
 import { FactGrid } from "./manifest-fact";
-import { IntegrationDetails } from "./integration-details";
-import { McpServerDetails } from "./mcp-server-details";
 
-interface ManifestOverviewProps {
-  /** The manifest of the version being viewed — jsonb, so `unknown`-shaped. */
-  manifest: unknown;
-  type: PackageType;
-  /** Overview pages provide capability-specific sections themselves. */
-  metadataOnly?: boolean;
-}
-
-export function ManifestOverview({ manifest, type, metadataOnly = false }: ManifestOverviewProps) {
+export function ManifestOverview({ manifest }: { manifest: unknown }) {
   const { t } = useTranslation("agents");
   const overview = readManifestOverview(manifest);
-  // Read here rather than inside the tails so this component can tell an
-  // entirely undeclared manifest from one whose only content is its tail.
-  const integration =
-    !metadataOnly && type === "integration" ? readIntegrationDetails(manifest) : undefined;
-  const mcpServer =
-    !metadataOnly && type === "mcp-server" ? readMcpServerDetails(manifest) : undefined;
-
-  const tailEmpty = integration?.isEmpty ?? mcpServer?.isEmpty ?? true;
-  if (overview.isEmpty && tailEmpty) {
-    return <EmptyState icon={FileJson} message={t("manifest.empty")} compact />;
-  }
+  if (overview.isEmpty) return null;
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-2">
       {overview.longDescription && (
-        <SectionCard
-          bodyClassName="space-y-4 p-4"
-          headerInside
-          title={t("manifest.longDescription")}
-        >
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.longDescription")}>
           <p className="text-sm whitespace-pre-wrap">{overview.longDescription}</p>
-        </SectionCard>
+        </DetailSectionCard>
       )}
 
       {overview.facts.length > 0 && (
-        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.metadata")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.metadata")}>
           <FactGrid facts={overview.facts} />
-        </SectionCard>
+        </DetailSectionCard>
       )}
 
       {overview.keywords.length > 0 && (
-        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.keywords")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.keywords")}>
           <div className="flex flex-wrap gap-1.5">
             {/* Index in the key: `keywords` is author-controlled jsonb and the
                 reader keeps duplicates verbatim rather than editing the data to
@@ -91,17 +45,17 @@ export function ManifestOverview({ manifest, type, metadataOnly = false }: Manif
               </Badge>
             ))}
           </div>
-        </SectionCard>
+        </DetailSectionCard>
       )}
 
       {overview.links.length > 0 && (
-        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.links")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.links")}>
           <FactGrid facts={overview.links} />
-        </SectionCard>
+        </DetailSectionCard>
       )}
 
       {overview.dependencies.length > 0 && (
-        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.dependencies")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.dependencies")}>
           {overview.dependencies.map((group) => (
             <div key={group.labelKey}>
               <p className="text-muted-foreground text-xs">{t(group.labelKey)}</p>
@@ -114,11 +68,8 @@ export function ManifestOverview({ manifest, type, metadataOnly = false }: Manif
               </ul>
             </div>
           ))}
-        </SectionCard>
+        </DetailSectionCard>
       )}
-
-      {integration && <IntegrationDetails details={integration} />}
-      {mcpServer && <McpServerDetails details={mcpServer} />}
     </div>
   );
 }

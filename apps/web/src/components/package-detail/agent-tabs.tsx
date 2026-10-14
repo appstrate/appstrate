@@ -9,7 +9,8 @@ import { useSchedules } from "../../hooks/use-schedules";
 import { schemaHasFileFields } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
 import { RunList } from "../run-list";
-import { SchedulesTable, useScheduleColumns } from "../schedules-table";
+import { SchedulesTable } from "../schedules-table";
+import { useScheduleColumns } from "../schedule-columns";
 import { AgentRunButton } from "./agent-run-button";
 import { Ban, CalendarClock, Play, SearchX } from "lucide-react";
 import { EmptyState, EmptyStateAction } from "../page-states";
@@ -137,7 +138,6 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
           <SchedulesTable
             schedules={filteredSchedules}
             columns={columns}
-            columnMode="scroll"
             surface="integrated"
             empty={
               <EmptyState

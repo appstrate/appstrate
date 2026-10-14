@@ -29,12 +29,7 @@ describe("unified settings route wiring", () => {
     );
   });
 
-  it("preserves gated redirects", () => {
-    // Billing lost its sidebar entry (the credits gauge left the nav on
-    // 2026-08-20); it is reached from the settings rail like every other
-    // org surface, which `navigation.ts` wires and the rail opens as an
-    // overlay on its own.
-    // A page whose module is off says so instead of sending the caller elsewhere.
+  it("says a page whose module is off is unavailable, instead of redirecting", () => {
     const oauth = read("../../org-settings/oauth.tsx");
     expect(oauth).toContain("<UnavailableState />");
   });

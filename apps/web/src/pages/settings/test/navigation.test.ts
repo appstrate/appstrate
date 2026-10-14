@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { routeVerdict } from "../../../lib/route-access";
-import { buildSettingsNavigation, firstSettingsPath, visibleSettingsSections } from "../navigation";
+import { firstSettingsPath, visibleSettingsSections } from "../navigation";
 
 type Features = Record<string, boolean>;
 
@@ -19,8 +19,8 @@ function options(features: Features, granted: string[], inPersonalSpace = false)
 }
 
 function destinations(features: Features, granted: string[], inPersonalSpace = false) {
-  return buildSettingsNavigation(options(features, granted, inPersonalSpace)).flatMap((section) =>
-    section.items.filter((item) => item.show).map((item) => item.to),
+  return visibleSettingsSections(options(features, granted, inPersonalSpace)).flatMap((section) =>
+    section.items.map((item) => item.to),
   );
 }
 

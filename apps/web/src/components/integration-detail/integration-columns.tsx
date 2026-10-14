@@ -23,9 +23,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpFromLine, Building2, CircleCheck, Pencil, Trash2 } from "lucide-react";
+import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../data-table";
-import { DefaultCell } from "../default-cell";
 import { TableRowActions } from "../table-row-actions";
 import { isConnectionOwnedBy } from "../integration-connect/connection-ownership";
 import type { ConnectionAuthContext } from "../../lib/integration-presentation";
@@ -127,14 +127,7 @@ export function useIntegrationClientColumns({
       tier: 2,
       cell: (row) =>
         row.usedHere ? (
-          <DefaultCell
-            isDefault
-            defaultLabel={t("integration.clients.usedHere")}
-            setLabel={t("integration.clients.useHere")}
-            canSetDefault={false}
-            onSetDefault={() => onUseHere(row)}
-            testId={`client-used-here-${row.client.client_ref}`}
-          />
+          <Badge variant="success">{t("integration.clients.usedHere")}</Badge>
         ) : row.orgDefault ? (
           <span className="text-muted-foreground block truncate text-xs">
             {t("integration.clients.orgDefault")}

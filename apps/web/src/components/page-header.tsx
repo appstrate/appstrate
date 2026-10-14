@@ -30,8 +30,8 @@ export function PageHeader({
   wrapActions = false,
   children,
 }: PageHeaderProps) {
-  // Pages keep declaring their trail here, next to the code that knows the
-  // dynamic labels; the shell header draws it. Keyed on the labels and hrefs
+  // Pages declare their trail here, next to the code that knows the dynamic
+  // labels; the shell header draws it. Keyed on the labels and hrefs
   // rather than the array itself, which every page rebuilds on each render and
   // which would otherwise publish in a loop.
   const setEntries = useBreadcrumbStore((s) => s.setEntries);

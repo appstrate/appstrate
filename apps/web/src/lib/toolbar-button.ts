@@ -11,7 +11,7 @@
  * Both start from `variant="outline"`; the utility one takes its fill and its
  * shadow back off. `px-2.5 gap-1.5` is what shadcn's `size="sm"` resolves to for
  * a button carrying an icon (`has-[>svg]:px-2.5`) — ours is a flat `px-3 gap-2`,
- * which is where the extra width inside every one of them came from.
+ * which would put extra width inside every one of them.
  */
 
 /** Filters, Columns: adjusts what you are looking at. */

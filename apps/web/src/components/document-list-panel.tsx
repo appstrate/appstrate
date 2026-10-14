@@ -18,7 +18,8 @@ import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../ho
 import { ErrorState, EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
 import { ItemList } from "./item-list";
-import { DataTable, columnMenu, visibleColumns } from "./data-table";
+import { DataTable } from "./data-table";
+import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import type { ColumnMenuSpec } from "./list-toolbar";
 import { FileTile } from "./file-tile";
 import { useDocumentColumns } from "./document-columns";

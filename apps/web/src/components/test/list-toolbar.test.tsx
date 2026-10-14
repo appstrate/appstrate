@@ -53,10 +53,9 @@ describe("ticking a value", () => {
   });
 
   it("does nothing else — ticking the last box keeps every tick", () => {
-    // A version that also collapsed "all ticked" to "nothing ticked" was true
-    // of the RESULTS and nonsense as an interaction: Kind has two values, so
-    // ticking the second silently unticked the first, and Scope has one, so its
-    // only box could never stay ticked at all.
+    // "All ticked" is not collapsed to "nothing ticked": Kind has two values,
+    // so the second tick would undo the first, and Scope has one, so its only
+    // box could never stay ticked.
     expect(toggleValue(["package"], "inline")).toEqual(["package", "inline"]);
     expect(toggleValue([], "me")).toEqual(["me"]);
   });

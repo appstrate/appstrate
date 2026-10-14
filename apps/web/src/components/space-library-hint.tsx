@@ -25,10 +25,10 @@ import { packagePermission } from "@appstrate/core/permissions";
  * merely mounts behind. The two are different questions, and a `runner` is
  * where they part: it holds `agents:run` and `spaces:read` but no
  * `agents:read`, so the page answers 200 with an empty list rather than a 403.
- * Gating on reachability alone therefore sent the one preset that can act on
+ * Gating on reachability alone would send the one preset that can act on
  * NOTHING in that library — no activation, no deactivation, no configuration —
- * to a page that is empty for it by design. Reachability is still asked, of
- * the one route declaration (`lib/route-access.ts`), so the link never names a
+ * to a page that is empty for it by design. Reachability is asked too, of the
+ * one route declaration (`lib/route-access.ts`), so the link never names a
  * page the route gate would refuse.
  */
 export function SpaceLibraryHint({ type }: { type: PackageType }) {

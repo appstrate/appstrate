@@ -13,7 +13,6 @@ import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
 import { Modal } from "../modal";
-import { SettingsHeading } from "../settings/settings-heading";
 import { useModalParam } from "../../hooks/use-modal-param";
 
 export interface PackageTool {
@@ -29,12 +28,10 @@ export function PackageToolCatalog({
   selection,
   inspection,
   integrationId,
-  title,
   actions,
   rowActions,
   showBasis = true,
 }: {
-  title?: string;
   /** Off where the section heading already says where the list comes from. */
   showBasis?: boolean;
   /** The list's one "Actions" menu, when the catalog is edited where it is read. */
@@ -243,27 +240,13 @@ export function PackageToolCatalog({
 
   return (
     <>
-      {title ? (
-        <SettingsHeading
-          title={title}
-          description={
-            inventory ? (
-              <span data-testid="tool-inventory-basis">
-                {ti(`integration.inventory.basis.${inventory.basis}`)}
-              </span>
-            ) : undefined
-          }
-        />
-      ) : (
-        inventory &&
-        showBasis && (
-          <p
-            className="text-muted-foreground text-sm leading-relaxed"
-            data-testid="tool-inventory-basis"
-          >
-            {ti(`integration.inventory.basis.${inventory.basis}`)}
-          </p>
-        )
+      {inventory && showBasis && (
+        <p
+          className="text-muted-foreground text-sm leading-relaxed"
+          data-testid="tool-inventory-basis"
+        >
+          {ti(`integration.inventory.basis.${inventory.basis}`)}
+        </p>
       )}
       <ListToolbar
         placement="panel"

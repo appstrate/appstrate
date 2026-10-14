@@ -14,11 +14,12 @@ import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
-import { RunsTable, useRunColumns } from "./runs-table";
+import { RunsTable } from "./runs-table";
+import { useRunColumns } from "./run-columns";
 import { RunCard } from "./run-card";
 import { CardGrid } from "./card-grid";
 import { EmptyState, ErrorState } from "./page-states";
-import { columnMenu, visibleColumns } from "./data-table";
+import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { RunStatus } from "@appstrate/core/run-status";
@@ -60,8 +61,7 @@ interface RunListProps {
   /**
    * What the list amounts to, under the table — IN THE CALLER'S OWN WORDS. A
    * render prop because the query lives here: a page asking for the same rows a
-   * second time to count them is the duplicate `GET /api/runs` the dashboard
-   * already had to be cured of.
+   * second time to count them would send a duplicate `GET /api/runs`.
    */
   countLabel?: (total: number) => React.ReactNode;
   /** Level-one Runs offers both representations; embedded run lists stay tables. */

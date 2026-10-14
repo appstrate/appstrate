@@ -30,8 +30,14 @@ import { createServer, type Server } from "node:http";
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { selectOption } from "../../helpers/radix.ts";
 import { openRowMenuItem } from "../../helpers/table.ts";
-import { NEXT, modelRow, openAddKeyDialog, submitAddKey } from "../../helpers/models.ts";
-import type { APIResponse, Locator, Page } from "@playwright/test";
+import {
+  NEXT,
+  listModels,
+  modelRow,
+  openAddKeyDialog,
+  submitAddKey,
+} from "../../helpers/models.ts";
+import type { Locator, Page } from "@playwright/test";
 
 const GOOD_KEY = "e2e-good-key";
 /** The single picker row every overridable endpoint collapses into (`models.form.customEndpoint`). */
@@ -198,14 +204,6 @@ async function submitPartlyRefusedBatch(page: Page): Promise<Locator> {
   }
   await expect(dialog.getByText(`Impossible de terminer pour : ${REFUSED_MODEL}`)).toBeVisible();
   return dialog;
-}
-
-async function listModels(apiClient: {
-  get(path: string): Promise<APIResponse>;
-}): Promise<Array<Record<string, unknown>>> {
-  const res = await apiClient.get("/models");
-  expect(res.status()).toBe(200);
-  return (await res.json()).data as Array<Record<string, unknown>>;
 }
 
 test.describe("Custom endpoint model — UI", () => {

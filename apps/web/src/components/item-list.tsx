@@ -5,11 +5,10 @@
  *
  * The family's other two ask something of their container. `DataTable` wants
  * width, and columns that line up from one row to the next — put it in a card
- * on a padded page and it clips, which is exactly what happened to the
- * integration tables. `CardGrid` wants 20rem per card before it will take a
- * second column. **This one asks for nothing**, which is why it is the shape
- * that works in a panel, in a modal, in a tab beside a sidebar, on a phone —
- * and why it should have been built first rather than last.
+ * on a padded page and it clips. `CardGrid` wants 20rem per card before it
+ * will take a second column. **This one asks for nothing**, which is why it is
+ * the shape that works in a panel, in a modal, in a tab beside a sidebar, on a
+ * phone.
  *
  * What makes an item here rather than a row of a table: the item is a
  * SELF-CONTAINED BLOCK. It carries its own border and decides its own internal
@@ -23,11 +22,9 @@
  * whole point of there being a family at all.
  *
  * It is deliberately NOT `CardGrid` with one column. The two are one line of
- * CSS apart today and it is tempting, but the merge would be three props
- * (a column floor, a gap, a skeleton shape) configuring a component instead of
- * a component being used, and the call sites would stop saying which shape
- * they meant. If a third arrangement ever turns up, merge them then, with the
- * evidence.
+ * CSS apart, but the merge would be three props (a column floor, a gap, a
+ * skeleton shape) configuring a component instead of a component being used,
+ * and the call sites would stop saying which shape they meant.
  */
 
 import type { ReactNode } from "react";
@@ -50,9 +47,8 @@ export function ItemList<T>({
   const verdict = collectionVerdict(state, items.length);
 
   // A failure always draws something, whether or not the caller wrote the
-  // sentence. This is the body where it matters most: the panel this was
-  // extracted from had no failure branch at all, so a 500 rendered as "there
-  // is nothing here" — a list saying it is empty when nobody knows that.
+  // sentence: without it a 500 would render as "there is nothing here" — a
+  // list saying it is empty when nobody knows that.
   if (verdict === "error") return <Frame>{state.error ?? <ErrorState compact />}</Frame>;
   if (verdict === "loading") {
     return (

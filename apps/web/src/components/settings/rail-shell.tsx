@@ -4,8 +4,8 @@
  * The two pieces every panel rail is made of: its header, and a titled group
  * of rows.
  *
- * Written once because a second panel exists. The settings overlay and the
- * catalogue are the same surface with different contents, and a rail that is
+ * The settings overlay and the catalogue are the same surface with different
+ * contents, and a rail that is
  * "nearly the settings rail" reads as a bug — a heading one pixel taller, a
  * separator missing, and the two stop being the same object.
  */

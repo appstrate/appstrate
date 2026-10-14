@@ -153,7 +153,7 @@ export function ScheduleDetailPage() {
             </AlertDescription>
           </Alert>
         )}
-        <DetailTabsList className="mt-6 mb-3">
+        <DetailTabsList>
           <DetailTabsTrigger value="details">{t("detail.overview.summary")}</DetailTabsTrigger>
           <DetailTabsTrigger value="runs">{t("schedule.tabRuns")}</DetailTabsTrigger>
           <DetailTabsTrigger value="settings">{t("schedule.tabSettings")}</DetailTabsTrigger>
@@ -222,7 +222,6 @@ function ScheduleParams({
   return (
     <div className="grid items-start gap-6 lg:grid-cols-2">
       <DetailSectionCard
-        headerInside
         title={t("run.infoExecution")}
         icon={CirclePlay}
         headerAction={open("execution")}
@@ -253,7 +252,6 @@ function ScheduleParams({
         </dl>
       </DetailSectionCard>
       <DetailSectionCard
-        headerInside
         title={t("schedule.timing")}
         icon={CalendarClock}
         headerAction={open("recurrence")}
@@ -279,7 +277,6 @@ function ScheduleParams({
         />
       </DetailSectionCard>
       <DetailSectionCard
-        headerInside
         title={t("schedule.tabInput")}
         icon={FileInput}
         headerAction={open("inputs")}

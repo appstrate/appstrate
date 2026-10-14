@@ -150,7 +150,7 @@ export function PanelDialog({
           // wrapper puts around every content box.
           "max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0",
           // The reserved header band owns the close control at every modal
-          // width. Other panels keep the existing phone-sized target only.
+          // width; other panels enlarge the close target on a phone only.
           reserveCloseArea
             ? "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md"
             : "max-md:[&>button]:top-2.5 max-md:[&>button]:right-2.5 max-md:[&>button]:z-30 max-md:[&>button]:flex max-md:[&>button]:size-11 max-md:[&>button]:items-center max-md:[&>button]:justify-center",

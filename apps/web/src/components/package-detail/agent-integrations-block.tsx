@@ -379,8 +379,8 @@ function InactiveIntegration({ packageId, required }: { packageId: string; requi
       >
         {t(required ? "detail.integrationInactive" : UNBOUND_LABEL_KEYS.integration_not_active)}
       </span>
-      {/* The sentence asks for an activation; without this the reader had to
-          go find the integration page to perform it. Somebody the route
+      {/* The sentence asks for an activation, so the button performing it
+          sits beside it. Somebody the route
           would refuse gets the button DEAD with the reason on it, rather
           than a click that ends in a toast. */}
       <Button

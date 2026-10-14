@@ -177,15 +177,18 @@ describe("t() keys", () => {
  * site, so the reverse guard cannot see them. Each entry below is a prefix
  * under which a REAL interpolation site exists — the comment names it. This
  * is the one list that must be justified per line: widening it to silence a
- * failure is how a dead-key guard becomes decorative. Kept alphabetical.
+ * failure is how a dead-key guard becomes decorative. A generic head is
+ * qualified with its namespace (`files:type.`) so it shields that namespace
+ * alone. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx: one per runtime tool id
-  "integration.admin.creation.", // pages/integration-detail.tsx — t(`integration.admin.creation.${value}`)
-  "integration.admin.orgDefault.connection.", // pages/integration-detail.tsx — forced / default
-  "integration.admin.usage.", // pages/integration-detail.tsx — t(`integration.admin.usage.${mode}Help`)
+  "files:type.", // components/document-columns.tsx, components/file-artifact.tsx — t(`type.${mimeKind(…)}`)
+  "integration.admin.creation.", // components/integration-detail/access-rules-section.tsx
+  "integration.admin.orgDefault.connection.", // components/integration-detail/org-default-section.tsx — forced / default
+  "integration.admin.usage.", // components/integration-detail/org-default-section.tsx — t(`integration.admin.usage.${mode}Help`)
   "integration.auth.type.", // components/integration-connect/connection-picker-menu.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "integration.connect.handoff.", // components/integration-connect/handoff-steps.tsx — stepLabel()/stepNote()
@@ -214,19 +217,18 @@ const DYNAMIC_KEY_PREFIXES = [
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
   "permissions.resource.", // lib/permission-labels.ts — permissionResourceLabel()
   "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
-  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/space/general.tsx
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/app/general.tsx
   "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
-  "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx, run-execution-tab.tsx
+  "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
-  "run.triggerType.", // components/run-detail/{run-header-summary,run-snapshot-inspector}.tsx
+  "run.triggerType.", // components/run-trigger.tsx, components/run-detail/run-header-summary.tsx + run-snapshot-inspector.tsx
   "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
-  "spaceMembers.source.", // pages/org-settings/space/members.tsx — t(`spaceMembers.source.${member.source}`)
-  "spaces.visibility.", // pages/org-settings/space/general.tsx — t(`spaces.visibility.${value}`)
-  "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
+  "spaceMembers.source.", // pages/org-settings/space/space-member-columns.tsx, pages/org-settings/user-space-columns.tsx
+  "spaces.visibility.", // pages/org-settings/app/general.tsx — t(`spaces.visibility.${value}`)
+  "spaces.visibilityDesc.", // pages/org-settings/app/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
-  "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];
@@ -252,8 +254,16 @@ function isReferenced(key: string): boolean {
   return false;
 }
 
-function isShielded(key: string): boolean {
-  return DYNAMIC_KEY_PREFIXES.some((prefix) => key.startsWith(prefix));
+/** An entry's optional `namespace:` qualifier, and the key head it shields. */
+function parsePrefix(entry: string): { ns: string | null; head: string } {
+  const qualified = /^([\w-]+):(.+)$/.exec(entry);
+  return qualified ? { ns: qualified[1]!, head: qualified[2]! } : { ns: null, head: entry };
+}
+
+function isShielded(ns: string, key: string): boolean {
+  return DYNAMIC_KEY_PREFIXES.map(parsePrefix).some(
+    (prefix) => (prefix.ns === null || prefix.ns === ns) && key.startsWith(prefix.head),
+  );
 }
 
 describe("declared keys", () => {
@@ -264,9 +274,11 @@ describe("declared keys", () => {
     () => {
       // The guard the other direction lacks: deleting the last call site of a
       // key leaves the translation behind in both bundles, and nothing notices.
-      const orphans = [...allKeys]
-        .filter((key) => !isShielded(key))
-        .filter((key) => !isReferenced(key) && !isReferenced(key.replace(PLURAL_SUFFIX, "")))
+      const orphans = [...en]
+        .flatMap(([ns, keys]) => Object.keys(keys).map((key) => ({ ns, key })))
+        .filter(({ ns, key }) => !isShielded(ns, key))
+        .filter(({ key }) => !isReferenced(key) && !isReferenced(key.replace(PLURAL_SUFFIX, "")))
+        .map(({ ns, key }) => `${ns}:${key}`)
         .sort();
 
       expect(orphans).toEqual([]);
@@ -280,8 +292,8 @@ describe("declared keys", () => {
       // An exemption is only legitimate while the code it excuses exists. This
       // is what stops the allow-list from being widened to silence a failure:
       // an invented prefix has no `` `prefix.${…}` `` anywhere and fails here.
-      const unjustified = DYNAMIC_KEY_PREFIXES.filter((prefix) => {
-        const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const unjustified = DYNAMIC_KEY_PREFIXES.filter((entry) => {
+        const escaped = parsePrefix(entry).head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         // Optional `namespace:` — some sites interpolate `settings:foo.${x}`.
         return !new RegExp("`(?:[\\w-]+:)?" + escaped + "\\$\\{").test(SOURCE_BLOB);
       });

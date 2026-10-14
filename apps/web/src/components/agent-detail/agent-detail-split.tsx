@@ -2,7 +2,6 @@
 
 import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
-import { SettingsHeading } from "../settings/settings-heading";
 
 /** Shared two-pane frame for the Agent file and configuration destinations. */
 interface AgentDetailSplitProps extends HTMLAttributes<HTMLDivElement> {
@@ -46,15 +45,4 @@ export function AgentDetailPaneHeader({ className, ...props }: HTMLAttributes<HT
       )}
     />
   );
-}
-
-/** Editorial heading for the content selected in a split surface's left rail. */
-export function AgentDetailSectionHeader({
-  title,
-  description,
-}: {
-  title: ReactNode;
-  description: ReactNode;
-}) {
-  return <SettingsHeading title={title} description={description} />;
 }

@@ -645,9 +645,8 @@ export function App() {
   // as the user left it — scroll, filters and all — instead of unmounting.
   const explicitBackground = useBackgroundLocation();
   // Opened cold — a pasted link, a reload, a new tab — there is no screen to
-  // float over, so the dashboard stands in. The surface is then a modal in
-  // every case, which removes the second, page-shaped rendering of it that
-  // otherwise had to exist and had to be kept looking like the first.
+  // float over, so the dashboard stands in: an overlay path always renders as
+  // a modal, so it has no page-shaped rendering to keep in step.
   const modalBackground =
     explicitBackground ??
     (isOverlayPath(location.pathname)

@@ -29,24 +29,11 @@ import {
 import { SettingsHeading } from "./settings-heading";
 
 /** Read-only counterpart of a setting field. Render inside a description list. */
-export function SettingValue({
-  label,
-  children,
-  technical = false,
-}: {
-  label: ReactNode;
-  children: ReactNode;
-  technical?: boolean;
-}) {
+export function SettingValue({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div className="pb-8 last:pb-0">
       <dt className="text-sm font-medium">{label}</dt>
-      <dd
-        className={cn(
-          "text-muted-foreground mt-1 space-y-2 text-sm leading-relaxed break-words",
-          technical && "font-mono break-all",
-        )}
-      >
+      <dd className="text-muted-foreground mt-1 space-y-2 text-sm leading-relaxed break-words">
         {children}
       </dd>
     </div>

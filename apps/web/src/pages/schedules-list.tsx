@@ -9,10 +9,11 @@ import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
 import { EmptyState, EmptyStateAction, ErrorState } from "../components/page-states";
-import { SchedulesTable, useScheduleColumns } from "../components/schedules-table";
+import { SchedulesTable } from "../components/schedules-table";
+import { useScheduleColumns } from "../components/schedule-columns";
 import { ScheduleCard } from "../components/schedule-card";
 import { CardGrid } from "../components/card-grid";
-import { columnMenu, visibleColumns } from "../components/data-table";
+import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
@@ -132,7 +133,6 @@ export function SchedulesListPage() {
         <SchedulesTable
           schedules={shown}
           columns={columns}
-          columnMode="scroll"
           isLoading={isLoading}
           isError={isError}
           error={<ErrorState error={error} compact />}

@@ -27,12 +27,12 @@ import { runFileDirection } from "../../lib/files";
 import { formatDateField } from "../../lib/format-date";
 import { runConnectionRows } from "../../lib/run-connections";
 import { runErrorText } from "../../lib/run-error";
-import { getRunTriggerActor, getRunTriggerType } from "../run-trigger";
+import { getRunTriggerActor, getRunTriggerType } from "../../lib/run-trigger";
 import type { ExecutionEntry } from "../log-utils";
 import { OverviewCardAction } from "../overview-card-action";
 import type { JournalOverviewFilter } from "../log-viewer";
 import { RunDuration } from "../run-duration";
-import { DetailSectionCard as RunDetailCard } from "../detail-section-card";
+import { DetailSectionCard } from "../detail-section-card";
 import { HealthAction, HealthCard, HealthCardItem } from "../health-card";
 import { useModalParam } from "../../hooks/use-modal-param";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
@@ -128,11 +128,10 @@ export function RunSnapshotInspector({
         <RunWarnings run={run} modelFallback={modelFallback} />
         <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
           <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
-            <RunDetailCard
+            <DetailSectionCard
               title={t("run.infoExecution")}
               icon={CirclePlay}
               className="lg:col-span-2"
-              headerInside
             >
               <SnapshotFacts columns four>
                 <SnapshotFact label={t("run.sourceAgent")} value={agentExecuted} />
@@ -179,13 +178,12 @@ export function RunSnapshotInspector({
                   <SnapshotFact label={t("run.infoProxy")} value={run.proxy_label} />
                 )}
               </SnapshotFacts>
-            </RunDetailCard>
+            </DetailSectionCard>
 
-            <RunDetailCard
+            <DetailSectionCard
               title={t("run.overview.activity")}
               icon={Activity}
               bodyClassName="p-0"
-              headerInside
               headerAction={
                 logs.length > 0
                   ? {
@@ -220,13 +218,12 @@ export function RunSnapshotInspector({
                   onClick={errorCount > 0 ? () => onOpenJournal("errors") : undefined}
                 />
               </dl>
-            </RunDetailCard>
+            </DetailSectionCard>
 
-            <RunDetailCard
+            <DetailSectionCard
               title={t("run.overview.results")}
               icon={Trophy}
               bodyClassName="p-0"
-              headerInside
               headerAction={
                 run.file_counts.output + structuredFieldCount + memoryChangeCount > 0
                   ? {
@@ -256,15 +253,14 @@ export function RunSnapshotInspector({
                   onClick={memoryChangeCount > 0 ? onOpenResults : undefined}
                 />
               </dl>
-            </RunDetailCard>
+            </DetailSectionCard>
           </div>
 
           <div className="grid min-w-0 content-start gap-6">
-            <RunDetailCard
+            <DetailSectionCard
               title={t("run.infoUsage")}
               icon={ChartNoAxesCombined}
               bodyClassName="flex flex-col p-0"
-              headerInside
             >
               <div className="flex-1 p-4">
                 <SnapshotFacts columns>
@@ -310,9 +306,9 @@ export function RunSnapshotInspector({
                   {t("run.viewTurnDetails")}
                 </OverviewCardAction>
               )}
-            </RunDetailCard>
+            </DetailSectionCard>
 
-            <RunDetailCard title={t("run.infoInput")} icon={FileInput} headerInside>
+            <DetailSectionCard title={t("run.infoInput")} icon={FileInput}>
               <RunInputFacts
                 run={run}
                 files={filesQuery.data?.data ?? []}
@@ -321,10 +317,10 @@ export function RunSnapshotInspector({
                 error={filesQuery.error}
                 filesDenied={filesDenied}
               />
-            </RunDetailCard>
+            </DetailSectionCard>
 
             {connections.length > 0 && (
-              <RunDetailCard title={t("run.infoConnections")} icon={Link2} headerInside>
+              <DetailSectionCard title={t("run.infoConnections")} icon={Link2}>
                 <SnapshotFacts>
                   {connections.map(({ integrationId, bound, unboundCause }) => (
                     <SnapshotFact
@@ -362,21 +358,21 @@ export function RunSnapshotInspector({
                     />
                   ))}
                 </SnapshotFacts>
-              </RunDetailCard>
+              </DetailSectionCard>
             )}
 
             {metadata && Object.keys(metadata).length > 0 && (
-              <RunDetailCard title={t("run.infoMetadata")} icon={Tags} headerInside>
+              <DetailSectionCard title={t("run.infoMetadata")} icon={Tags}>
                 <SnapshotFacts columns wide>
                   {Object.entries(metadata).map(([key, value]) => (
                     <SnapshotFact key={key} label={key} value={snapshotValue(value)} />
                   ))}
                 </SnapshotFacts>
-              </RunDetailCard>
+              </DetailSectionCard>
             )}
 
             {run.package_ephemeral && (run.inline_prompt || run.inline_manifest) && (
-              <RunDetailCard title={t("run.technicalDetails")} icon={Code2} headerInside>
+              <DetailSectionCard title={t("run.technicalDetails")} icon={Code2}>
                 <SnapshotFacts>
                   {run.inline_prompt && (
                     <SnapshotFact label={t("run.tabPrompt")} value={run.inline_prompt} />
@@ -388,7 +384,7 @@ export function RunSnapshotInspector({
                     />
                   )}
                 </SnapshotFacts>
-              </RunDetailCard>
+              </DetailSectionCard>
             )}
           </div>
         </div>

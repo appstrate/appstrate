@@ -45,10 +45,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
-import {
-  AgentDetailSplit,
-  AgentDetailSectionHeader,
-} from "../components/agent-detail/agent-detail-split";
+import { AgentDetailSplit } from "../components/agent-detail/agent-detail-split";
+import { SettingsHeading } from "../components/settings/settings-heading";
 import { SectionRail, type SectionRailItem } from "../components/settings/section-rail";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
@@ -268,7 +266,7 @@ function IntegrationSettings({
           />
         ) : active === "functioning" || active === "map" ? (
           <div className="p-6">
-            <AgentDetailSectionHeader
+            <SettingsHeading
               title={t(
                 active === "map"
                   ? "integration.structure.map"
@@ -346,7 +344,7 @@ function IntegrationSettings({
           </div>
         ) : active === "tools" ? (
           <div className="p-6">
-            <AgentDetailSectionHeader
+            <SettingsHeading
               title={t("integrationEditor.tabTools", { ns: "agents" })}
               description={t("integrationEditor.description.tools", { ns: "agents" })}
             />
@@ -367,7 +365,7 @@ function IntegrationSettings({
           </div>
         ) : (
           <div className="p-6">
-            <AgentDetailSectionHeader
+            <SettingsHeading
               title={t(
                 active === "access"
                   ? "integration.admin.accessRules.title"
@@ -626,7 +624,7 @@ export function IntegrationDetailPage() {
         onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
         className="mt-2"
       >
-        <DetailTabsList className="mt-6 mb-3">
+        <DetailTabsList>
           <DetailTabsTrigger value="overview" data-testid="tab-overview">
             {t("integration.tabs.overview")}
           </DetailTabsTrigger>

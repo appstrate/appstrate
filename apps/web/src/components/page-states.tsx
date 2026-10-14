@@ -81,14 +81,12 @@ export function ResourceErrorState({
 }
 
 /**
- * Nothing here — said the way the reference says it (`empty-state`): the icon
- * in a raised badge at the centre of three concentric rings, then the sentence,
- * then whatever gets you out of the emptiness.
+ * Nothing here: the icon in a raised badge at the centre of three concentric
+ * rings, then the sentence, then whatever gets you out of the emptiness.
  *
  * The rings are the whole point of the treatment. A 40px glyph at 40% opacity
  * over an empty card reads as a rendering failure; the same glyph on a card
- * with a border and a shadow, ringed, reads as a state someone designed. Same
- * props as before, so every screen that already had an empty state gets it.
+ * with a border and a shadow, ringed, reads as a state someone designed.
  *
  * `compact` is for an empty state inside a frame that is already an answer
  * (a list card, a tab body); the full one is for a page that has nothing else

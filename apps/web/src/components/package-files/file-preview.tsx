@@ -30,8 +30,7 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { Download, FileWarning, Pencil } from "lucide-react";
+import { Download, FileWarning } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "../../lib/format-bytes";
@@ -55,8 +54,6 @@ interface FilePreviewProps {
   entry: PackageFileEntry;
   className?: string;
   hideHeader?: boolean;
-  /** "Modifier" beside the download, when a Définition section edits this file. */
-  editHref?: string;
   /**
    * Extra controls in the header, right of the download button. The authoring
    * surface puts *Remplacer* and *Supprimer* here: a binary or oversized file
@@ -75,7 +72,6 @@ export function FilePreview({
   entry,
   className,
   hideHeader = false,
-  editHref,
   actions,
   downloadPath = entry.path,
 }: FilePreviewProps) {
@@ -110,14 +106,6 @@ export function FilePreview({
           {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
             already shows a Download-icon "Télécharger" for the WHOLE archive,
             and both are visible on this tab at the same time. */}
-          {editHref && (
-            <Button asChild variant="outline" size="sm" className="shrink-0">
-              <Link to={editHref}>
-                <Pencil size={14} />
-                {t("btn.edit", { ns: "common" })}
-              </Link>
-            </Button>
-          )}
           <Button
             variant="outline"
             size="sm"

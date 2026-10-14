@@ -10,7 +10,7 @@
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
-import { DetailSectionCard as SectionCard } from "../detail-section-card";
+import { DetailSectionCard } from "../detail-section-card";
 import { FactGrid } from "./manifest-fact";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 
@@ -38,24 +38,23 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
   return (
     <>
       {facts.length > 0 && (
-        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.server")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.server")}>
           <FactGrid facts={facts} />
-        </SectionCard>
+        </DetailSectionCard>
       )}
 
       {tools.length > 0 && (
-        <SectionCard
+        <DetailSectionCard
           bodyClassName="space-y-4 p-4"
-          headerInside
           title={t("manifest.tools")}
           className="lg:col-span-2"
         >
           <PackageToolCatalog tools={tools} />
-        </SectionCard>
+        </DetailSectionCard>
       )}
 
       {userConfig.length > 0 && (
-        <SectionCard bodyClassName="space-y-4 p-4" headerInside title={t("manifest.userConfig")}>
+        <DetailSectionCard bodyClassName="space-y-4 p-4" title={t("manifest.userConfig")}>
           {userConfig.map((entry) => (
             <div key={entry.key}>
               <div className="flex flex-wrap items-center gap-2">
@@ -73,7 +72,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
               )}
             </div>
           ))}
-        </SectionCard>
+        </DetailSectionCard>
       )}
     </>
   );

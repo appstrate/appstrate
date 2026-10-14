@@ -11,7 +11,8 @@ import { useFiles, type FileDto } from "../../hooks/use-files";
 import { usePermissions } from "../../hooks/use-permissions";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { classifyRunResults } from "../../lib/run-results";
-import { AgentDetailSectionHeader, AgentDetailSplit } from "../agent-detail/agent-detail-split";
+import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
+import { SettingsHeading } from "../settings/settings-heading";
 import { DocumentListPanel } from "../document-list-panel";
 import { JsonView } from "../json-view";
 import { EmptyState } from "../page-states";
@@ -209,10 +210,7 @@ export function RunResultsContent({
       }
     >
       <section className="min-w-0 p-6">
-        <AgentDetailSectionHeader
-          title={activeSection.label}
-          description={activeSection.description}
-        />
+        <SettingsHeading title={activeSection.label} description={activeSection.description} />
         <div className="space-y-4">
           {isPartial && (
             <Alert>

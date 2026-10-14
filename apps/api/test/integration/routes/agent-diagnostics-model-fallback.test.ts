@@ -2,7 +2,7 @@
 
 /**
  * The agent's diagnostics warn BEFORE a run that the model set for the agent
- * is no longer usable and that the organisation default will serve. They share
+ * is not usable and that the organisation default will serve. They share
  * the launch's cascade (`resolveModelCascade`), so the run that follows records
  * the matching `model_fallback` marker (`run-model-fallback-marker.test.ts`),
  * and the launch's credential test, so a model no credential serves blocks here

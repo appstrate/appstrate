@@ -4,30 +4,25 @@
  * The other half of the Collection family: a list of entities as cards.
  *
  * It exists to be SYMMETRICAL with `DataTable`, not because a card grid is hard
- * to draw. One line of `grid-cols-1 md:grid-cols-2` is easy; what is not easy
- * is remembering that a collection also has a loading shape, an empty sentence
- * and a failure — and every screen that wrote the easy line forgot the rest and
- * handled it by returning early, ABOVE the toolbar. That is where the empty
- * package list lost its bar and had to re-offer its own actions as two
- * unlabelled squares.
+ * to draw: a collection also has a loading shape, an empty sentence and a
+ * failure, and they belong in the body, below the toolbar — a screen that
+ * returns early for them loses its bar.
  *
  * So this takes the same contract as the table (`items`, `isLoading`,
  * `isError`, `empty`) and answers it in the same places. A caller that hands
  * both of them the same props has nothing left to branch on, and the bar and
  * the footer stop depending on what the body happens to contain.
  *
- * Two decisions worth knowing:
+ * Three decisions worth knowing:
  *
  * - **The states come from `collection.ts`**, which owns the ORDER the table
- *   uses too — failure, then loading, then emptiness. Written here once, the
- *   two bodies answered the same props differently within a day.
+ *   uses too — failure, then loading, then emptiness — so the two bodies answer
+ *   the same props the same way.
  * - **No breakpoints.** `repeat(auto-fill, minmax(<floor>, 1fr))` says "as many
  *   columns as fit, none narrower than this" in one value, and the browser
  *   recomputes it against the CONTAINER. A ladder of `md:` / `lg:` classes
- *   answers the WINDOW, which is why the package list stayed at two columns on
- *   a 1440px screen while the same grid beside a sidebar wanted one. Same
- *   lesson as the table's tiers, one step further: here nothing has to be
- *   declared at all.
+ *   answers the WINDOW, which keeps two columns on a wide screen even when the
+ *   grid beside a sidebar has room for one.
  * - **The states wear the table's frame.** Cards sit loose on the canvas, so an
  *   empty grid has no shape of its own and its message floats. Inside the same
  *   white card the table uses, "there is nothing here" occupies the place the
@@ -82,9 +77,8 @@ export function CardGrid<T>({
       {items.map((item) => (
         // The cell fills its row and the card fills the cell. Without the
         // second half, a card with one line of description sits short beside
-        // one with two, and every card has to remember `h-full` for itself —
-        // which is the kind of thing a family exists to stop having to
-        // remember. `PackageCard` did; `IntegrationCard` did not.
+        // one with two, and every card would have to remember `h-full` for
+        // itself.
         <div key={itemKey(item)} className="h-full [&>*]:h-full">
           {renderCard(item)}
         </div>

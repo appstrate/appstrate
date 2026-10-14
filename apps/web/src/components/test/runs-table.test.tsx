@@ -11,7 +11,8 @@
 import { describe, it, expect } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import agentsFr from "../../locales/fr/agents.json";
-import { RunsTable, useRunColumns } from "../runs-table.tsx";
+import { RunsTable } from "../runs-table.tsx";
+import { useRunColumns } from "../run-columns.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { makeRun, STARTED_AT } from "./run-fixture.tsx";

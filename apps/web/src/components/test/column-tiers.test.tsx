@@ -10,17 +10,17 @@
  * at 6px.
  *
  * So the arithmetic is done here, on the real sets, at the real thresholds.
- * A column set that no longer fits fails a test instead of a screen.
+ * A column set that does not fit fails a test instead of a screen.
  */
 
 import { describe, it, expect } from "bun:test";
 import type { ReactElement } from "react";
 import type { IntegrationManifestView } from "../../hooks/use-integrations.ts";
 import type { DataColumn } from "../data-table.tsx";
-import { useRunColumns } from "../runs-table.tsx";
-import { useScheduleColumns } from "../schedules-table.tsx";
-import { usePackageColumns } from "../packages-table.tsx";
-import { useProxyColumns } from "../../pages/org-settings/proxies.tsx";
+import { useRunColumns } from "../run-columns.tsx";
+import { useScheduleColumns } from "../schedule-columns.tsx";
+import { usePackageColumns } from "../package-columns.tsx";
+import { useProxyColumns } from "../../pages/org-settings/proxy-columns.tsx";
 import {
   useConnectionColumns,
   useIntegrationClientColumns,
@@ -359,8 +359,8 @@ describe.each(Object.entries(SETS))("the %s column set", (name, load) => {
    * link) is never hidden for lack of room: a person who cannot see it cannot
    * act, and a table that does not fit scrolls sideways instead. So it declares
    * `control: true`, and a control with a `tier` is the defect this catches.
-   * The `DataColumn` type forbids it as well; this is the check that still
-   * holds when a column set is built with a cast.
+   * The `DataColumn` type forbids it as well; this check also holds when a
+   * column set is built with a cast.
    */
   it("never gives a control, or the row's end, a tier to hide at", () => {
     for (const column of columns) {

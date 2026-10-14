@@ -444,11 +444,8 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   };
   // Named by the server against its own vocabulary, and listed as it sends
   // them. NOT intersected with the selection: `selected` is seeded from the
-  // GRANTED half alone, so the two sets are disjoint by construction and the
-  // filter this replaces emptied the panel every time. It dated from when the
-  // client derived both halves from one selection, and it outlived the change
-  // that split them — while a save kept dropping the unknown permissions
-  // silently, which is the very thing the panel is here to announce.
+  // GRANTED half alone, so the two sets are disjoint by construction and an
+  // intersection would always be empty.
   const unavailable = role?.unavailable_permissions ?? [];
 
   return (

@@ -102,7 +102,6 @@ export function IntegrationOverview({
       )}
       <div className="grid items-start gap-4 lg:grid-cols-3">
         <DetailSectionCard
-          headerInside
           title={t("integration.tabs.connections")}
           icon={Plug}
           bodyClassName="p-0"
@@ -121,7 +120,6 @@ export function IntegrationOverview({
           </dl>
         </DetailSectionCard>
         <DetailSectionCard
-          headerInside
           title={t("integration.summary.agents")}
           icon={Layers}
           bodyClassName="p-0"
@@ -145,12 +143,7 @@ export function IntegrationOverview({
             />
           </dl>
         </DetailSectionCard>
-        <DetailSectionCard
-          headerInside
-          title={t("integration.tabs.tools")}
-          icon={Wrench}
-          bodyClassName="p-0"
-        >
+        <DetailSectionCard title={t("integration.tabs.tools")} icon={Wrench} bodyClassName="p-0">
           <dl className="divide-y">
             <OperationalStat
               label={t("integration.summary.availableTools")}

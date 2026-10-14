@@ -33,12 +33,10 @@ export function TimeField({
   id,
   value,
   onChange,
-  disabled,
 }: {
   id?: string;
   value: string;
   onChange: (value: string) => void;
-  disabled?: boolean;
 }) {
   const { t, i18n } = useTranslation("common");
   const lang = i18n.language;
@@ -55,7 +53,6 @@ export function TimeField({
       <Select
         value={String(hour12 ? hour % 12 : hour)}
         onValueChange={(v) => emit(hour12 ? (Number(v) % 12) + (pm ? 12 : 0) : Number(v), minute)}
-        disabled={disabled}
       >
         <SelectTrigger id={id} className="w-[4.5rem]" aria-label={t("timeField.hour")}>
           <SelectValue />
@@ -69,11 +66,7 @@ export function TimeField({
         </SelectContent>
       </Select>
       <span aria-hidden>:</span>
-      <Select
-        value={String(minute)}
-        onValueChange={(v) => emit(hour, Number(v))}
-        disabled={disabled}
-      >
+      <Select value={String(minute)} onValueChange={(v) => emit(hour, Number(v))}>
         <SelectTrigger className="w-[4.5rem]" aria-label={t("timeField.minute")}>
           <SelectValue />
         </SelectTrigger>
@@ -89,7 +82,6 @@ export function TimeField({
         <Select
           value={pm ? "pm" : "am"}
           onValueChange={(v) => emit((hour % 12) + (v === "pm" ? 12 : 0), minute)}
-          disabled={disabled}
         >
           <SelectTrigger className="w-20" aria-label={t("timeField.period")}>
             <SelectValue />

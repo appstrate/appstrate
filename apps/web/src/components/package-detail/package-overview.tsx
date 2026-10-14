@@ -6,7 +6,7 @@ import { DetailSectionCard } from "../detail-section-card";
 import { Markdown } from "../markdown";
 import { ManifestOverview } from "../package-manifest/manifest-overview";
 import { McpServerDetails } from "../package-manifest/mcp-server-details";
-import { readManifestOverview, readMcpServerDetails } from "../../lib/package-manifest";
+import { readMcpServerDetails } from "../../lib/package-manifest";
 
 const roleFallbackKeys = {
   skill: "packageOverview.roleFallback.skill",
@@ -38,18 +38,16 @@ export function PackageOverview({
 }) {
   const { t } = useTranslation("agents");
   const server = readMcpServerDetails(manifest);
-  const metadata = readManifestOverview(manifest);
   return (
     <div className="space-y-6" data-testid="package-overview">
       <div className="grid items-start gap-6 lg:grid-cols-2">
         <DetailSectionCard
-          headerInside
           title={t("packageOverview.role")}
           icon={type === "skill" ? BookOpen : Server}
         >
           <p className="text-sm">{description || t(roleFallbackKeys[type])}</p>
         </DetailSectionCard>
-        <DetailSectionCard headerInside title={t("packageOverview.package")} icon={Tags}>
+        <DetailSectionCard title={t("packageOverview.package")} icon={Tags}>
           <dl className="grid grid-cols-2 gap-4">
             <div>
               <dt className="text-muted-foreground text-xs">{t("run.infoVersion")}</dt>
@@ -65,7 +63,6 @@ export function PackageOverview({
         </DetailSectionCard>
         {type === "skill" && (
           <DetailSectionCard
-            headerInside
             title={t("packageOverview.instructions")}
             icon={FileCode}
             headerAction={{ label: t("packageOverview.openInstructions"), onClick: onOpenFiles }}
@@ -87,7 +84,6 @@ export function PackageOverview({
           </DetailSectionCard>
         )}
         <DetailSectionCard
-          headerInside
           title={t("packageOverview.usage")}
           icon={Layers}
           headerAction={
@@ -105,7 +101,6 @@ export function PackageOverview({
           )}
         </DetailSectionCard>
         <DetailSectionCard
-          headerInside
           title={t("detail.tabFiles")}
           icon={FolderOpen}
           headerAction={{ label: t("packageOverview.openFiles"), onClick: onOpenFiles }}
@@ -116,12 +111,12 @@ export function PackageOverview({
         </DetailSectionCard>
         {type === "mcp-server" && <McpServerDetails details={server} />}
         {type === "mcp-server" && server.tools.length === 0 && (
-          <DetailSectionCard headerInside title={t("manifest.tools")} icon={Wrench}>
+          <DetailSectionCard title={t("manifest.tools")} icon={Wrench}>
             <p className="text-sm">{t("packageOverview.noDeclaredTools")}</p>
           </DetailSectionCard>
         )}
       </div>
-      {!metadata.isEmpty && <ManifestOverview manifest={manifest} type={type} metadataOnly />}
+      <ManifestOverview manifest={manifest} />
     </div>
   );
 }

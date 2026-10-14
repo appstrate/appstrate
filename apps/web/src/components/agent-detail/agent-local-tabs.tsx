@@ -41,14 +41,13 @@ function useScrollEdges() {
 }
 
 /** Stock shadcn tabs, tighter on a phone; when they still do not fit they scroll, with a fade on the hidden edge. */
-export function DetailTabsList({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<typeof TabsList>) {
+export function DetailTabsList(
+  props: Omit<React.ComponentPropsWithoutRef<typeof TabsList>, "className">,
+) {
   const { ref, edge } = useScrollEdges();
   return (
     <div ref={ref} className={cn("max-w-full overflow-x-auto", FADE_EDGE[edge])}>
-      <TabsList className={cn("w-max justify-start", className)} {...props} />
+      <TabsList className="mt-6 mb-3 w-max justify-start" {...props} />
     </div>
   );
 }

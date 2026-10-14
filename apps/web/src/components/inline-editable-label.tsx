@@ -19,21 +19,14 @@ import { Spinner } from "./spinner";
  * product decision: "Direct manipulation in forms. No Edit button revealing a
  * field." The rename is the menu's, and the field appears in the name's place.
  *
- * Two things it had to grow before the second caller could take it:
- *
- * - **It truncates.** It sits in a table cell whose column has a floor, and a
- *   long account name that refuses to shrink eats the column — which is
- *   exactly how the connections table lost the name it was naming rows with.
- * - **It can be CLEARED** (`allowEmpty`), because a connection's label falls
- *   back to its account id when null, so emptying the field is a real
- *   operation there. A credential has no such fallback, which is why clearing
- *   stays opt-in rather than becoming the rule.
+ * **It truncates.** It sits in a table cell whose column has a floor, and a
+ * long account name that refuses to shrink eats the column, and with it the
+ * name the row is known by.
  */
 export function InlineEditableLabel({
   value,
   editable,
   onSave,
-  allowEmpty = false,
   placeholder,
   testId,
   editing,
@@ -42,8 +35,6 @@ export function InlineEditableLabel({
   value: string;
   editable: boolean;
   onSave: (newValue: string) => void | Promise<void>;
-  /** Emptying the field is meaningful — the caller has a fallback to fall to. */
-  allowEmpty?: boolean;
   placeholder?: string;
   testId?: string;
   /** Edit mode, driven by the row: its « Renommer » menu entry sets it. */
@@ -74,8 +65,7 @@ export function InlineEditableLabel({
   const commit = async () => {
     if (savingRef.current) return;
     const next = draft.trim();
-    // `allowEmpty` is what makes clearing a real answer rather than a no-op.
-    if (next === value || (!allowEmpty && !next)) {
+    if (next === value || !next) {
       setEditing(false);
       return;
     }

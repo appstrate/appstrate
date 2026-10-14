@@ -20,7 +20,13 @@
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { selectOption } from "../../helpers/radix.ts";
 import { openRowMenuItem } from "../../helpers/table.ts";
-import { NEXT, modelRow, openAddKeyDialog, submitAddKey } from "../../helpers/models.ts";
+import {
+  NEXT,
+  listModels,
+  modelRow,
+  openAddKeyDialog,
+  submitAddKey,
+} from "../../helpers/models.ts";
 import type { APIResponse, Locator, Page } from "@playwright/test";
 
 const EDIT_MODEL = "Modifier le modèle";
@@ -58,14 +64,6 @@ async function catalogEntry(apiClient: {
     ?.models.find((m) => m.id === MODEL_ID);
   expect(entry).toBeDefined();
   return entry!;
-}
-
-async function listModels(apiClient: {
-  get(path: string): Promise<APIResponse>;
-}): Promise<Array<Record<string, unknown>>> {
-  const res = await apiClient.get("/models");
-  expect(res.status()).toBe(200);
-  return (await res.json()).data as Array<Record<string, unknown>>;
 }
 
 /** Open the flow and answer step 1: the provider, and the key to open it with; lands on the model list. */
