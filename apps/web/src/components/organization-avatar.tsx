@@ -2,21 +2,18 @@
 
 import { useState } from "react";
 import { cn } from "@appstrate/ui/cn";
-import { ORG_LOGO_EMOJI_PREFIX } from "@appstrate/core/validation";
-import { orgLogoUrl } from "../lib/org-logo";
+import type { OrgLogo } from "../lib/org-logo";
 
 export function OrganizationAvatar({
   org,
   className,
 }: {
-  org: { id: string; name: string; logo?: string | null };
+  org: { name: string; logo?: OrgLogo | null };
   className?: string;
 }) {
   const { logo } = org;
-  const emoji = logo?.startsWith(ORG_LOGO_EMOJI_PREFIX)
-    ? logo.slice(ORG_LOGO_EMOJI_PREFIX.length)
-    : null;
-  const image = orgLogoUrl(org.id, logo);
+  const emoji = logo?.kind === "emoji" ? logo.emoji : null;
+  const image = logo?.kind === "image" ? logo.url : null;
   // An image that fails to load falls back to the initial rather than a broken icon.
   const [failed, setFailed] = useState<string | null>(null);
 

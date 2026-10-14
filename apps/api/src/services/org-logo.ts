@@ -3,10 +3,11 @@
 /**
  * Organization logo — one emoji, or one WebP image kept in object storage.
  *
- * `organizations.logo` holds the wire value: `emoji:<grapheme>`, `image:<version>` or
- * null. An image's bytes live at `orgs/{orgId}/logo.webp` and never in the row; the
- * version is a digest of those bytes, so the URL a client builds from it changes with
- * the image and `GET /api/orgs/{orgId}/logo` can answer with the version as `ETag`.
+ * `organizations.logo` stores `emoji:<grapheme>`, `image:<version>` or null; the wire
+ * carries it as an `OrgLogo` (`orgLogoWire`). An image's bytes live at
+ * `orgs/{orgId}/logo.webp` and never in the row; the version is a digest of those
+ * bytes, so the URL served for it changes with the image and
+ * `GET /api/orgs/{orgId}/logo` can answer with the version as `ETag`.
  *
  * Every write locks the organization row and does its storage I/O inside that
  * transaction. The key is the same for every image of an org, so two unserialized
@@ -23,10 +24,31 @@ import {
   downloadFile as storageDownload,
   deleteFile as storageDelete,
 } from "@appstrate/db/storage";
-import { ORG_LOGO_EMOJI_PREFIX, ORG_LOGO_IMAGE_PREFIX } from "@appstrate/core/validation";
 import type { StorageDeletionJobInput } from "./storage-deletion.ts";
 
 export const ORG_LOGO_BUCKET = "orgs";
+
+const EMOJI_PREFIX = "emoji:";
+const IMAGE_PREFIX = "image:";
+
+/** An organization logo on the wire: one emoji, or the URL of its uploaded image. */
+export type OrgLogo = { kind: "emoji"; emoji: string } | { kind: "image"; url: string };
+
+/**
+ * The wire form of a stored logo. An image's URL names its version, so it is a new
+ * URL whenever the image changes and the response to it can be cached for good.
+ */
+export function orgLogoWire(orgId: string, stored: string | null): OrgLogo | null {
+  if (stored?.startsWith(EMOJI_PREFIX)) {
+    return { kind: "emoji", emoji: stored.slice(EMOJI_PREFIX.length) };
+  }
+  const version = logoImageVersion(stored);
+  if (!version) return null;
+  return {
+    kind: "image",
+    url: `/api/orgs/${encodeURIComponent(orgId)}/logo?v=${encodeURIComponent(version)}`,
+  };
+}
 
 const LOGO_FILE = "logo.webp";
 
@@ -53,7 +75,7 @@ export async function orgIdsWithLogoImage(): Promise<Set<string>> {
   const rows = await db
     .select({ id: organizations.id })
     .from(organizations)
-    .where(like(organizations.logo, `${ORG_LOGO_IMAGE_PREFIX}%`));
+    .where(like(organizations.logo, `${IMAGE_PREFIX}%`));
   return new Set(rows.map((r) => r.id));
 }
 
@@ -65,7 +87,7 @@ export function isWebp(bytes: Uint8Array): boolean {
 
 /** The version of an `image:` logo, null for an emoji or no logo. */
 export function logoImageVersion(logo: string | null): string | null {
-  return logo?.startsWith(ORG_LOGO_IMAGE_PREFIX) ? logo.slice(ORG_LOGO_IMAGE_PREFIX.length) : null;
+  return logo?.startsWith(IMAGE_PREFIX) ? logo.slice(IMAGE_PREFIX.length) : null;
 }
 
 /**
@@ -89,9 +111,9 @@ export async function setOrgLogo(
     if (next && "image" in next) {
       await storageUpload(ORG_LOGO_BUCKET, orgLogoKey(orgId), next.image);
       const version = new Bun.CryptoHasher("sha256").update(next.image).digest("hex").slice(0, 16);
-      logo = `${ORG_LOGO_IMAGE_PREFIX}${version}`;
+      logo = `${IMAGE_PREFIX}${version}`;
     } else if (next) {
-      logo = `${ORG_LOGO_EMOJI_PREFIX}${next.emoji}`;
+      logo = `${EMOJI_PREFIX}${next.emoji}`;
     }
 
     await tx

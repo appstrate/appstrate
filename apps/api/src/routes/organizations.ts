@@ -56,8 +56,14 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import { ORG_LOGO_EMOJI_PREFIX, ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
-import { isWebp, logoImageVersion, readOrgLogoImage, setOrgLogo } from "../services/org-logo.ts";
+import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
+import {
+  isWebp,
+  logoImageVersion,
+  orgLogoWire,
+  readOrgLogoImage,
+  setOrgLogo,
+} from "../services/org-logo.ts";
 import { ifNoneMatchSatisfied } from "../lib/conditional-request.ts";
 
 export const createOrgSchema = z
@@ -71,10 +77,8 @@ export const createOrgSchema = z
 const MAX_EMOJI_CODE_POINTS = 16;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** `emoji:` followed by exactly one emoji. An image is uploaded by `PUT /:orgId/logo`. */
-function isEmojiLogo(value: string): boolean {
-  if (!value.startsWith(ORG_LOGO_EMOJI_PREFIX)) return false;
-  const emoji = value.slice(ORG_LOGO_EMOJI_PREFIX.length);
+/** Exactly one emoji. An image is uploaded by `PUT /:orgId/logo`. */
+function isOneEmoji(emoji: string): boolean {
   return (
     [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
     [...graphemes.segment(emoji)].length === 1 &&
@@ -87,11 +91,14 @@ export const updateOrgSchema = z
     name: z.string().min(1).optional(),
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
     logo: z
-      .string()
-      .refine(
-        isEmojiLogo,
-        "Logo must be one emoji; upload an image with PUT /api/orgs/{orgId}/logo",
-      )
+      .object({
+        kind: z.literal("emoji", {
+          error:
+            "Only an emoji logo is written here; upload an image with PUT /api/orgs/{orgId}/logo",
+        }),
+        emoji: z.string().refine(isOneEmoji, "Logo must be exactly one emoji"),
+      })
+      .strict()
       .nullable()
       .optional(),
   })
@@ -160,7 +167,7 @@ router.get("/", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
-            logo: o.logo,
+            logo: orgLogoWire(o.id, o.logo),
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
@@ -238,7 +245,7 @@ router.post("/", async (c) => {
       id: org.id,
       name: org.name,
       slug: org.slug,
-      logo: org.logo,
+      logo: orgLogoWire(org.id, org.logo),
       role: "owner",
       createdAt: org.createdAt,
     },
@@ -275,7 +282,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
-    logo: org.logo,
+    logo: orgLogoWire(org.id, org.logo),
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
     storage: {
@@ -338,7 +345,7 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     });
   }
   if (logo !== undefined) {
-    await setOrgLogo(orgId, logo ? { emoji: logo.slice(ORG_LOGO_EMOJI_PREFIX.length) } : null);
+    await setOrgLogo(orgId, logo ? { emoji: logo.emoji } : null);
   }
 
   await recordAuditFromContext(c, {
@@ -392,12 +399,13 @@ router.put("/:orgId/logo", requirePermission("org", "update"), async (c) => {
 
   await setOrgLogo(orgId, { image });
 
-  // An image is recorded as changed, never as its bytes.
+  // An image is recorded by its version, never by its bytes.
+  const org = await getOrgById(orgId);
   await recordAuditFromContext(c, {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: { logo: "image" },
+    after: { logo: { kind: "image", version: logoImageVersion(org?.logo ?? null) } },
     orgIdOverride: orgId,
   });
 

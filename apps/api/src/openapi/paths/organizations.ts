@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+import { ORG_LOGO_EMOJI_SCHEMA, ORG_LOGO_PROPERTY, ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
@@ -101,7 +101,7 @@ export const organizationsPaths = {
                   id: { type: "string", format: "uuid" },
                   name: { type: "string" },
                   slug: { type: "string" },
-                  logo: { type: ["string", "null"] },
+                  logo: ORG_LOGO_PROPERTY,
                   role: { type: "string", enum: ["owner"] },
                   createdAt: { type: "string", format: "date-time" },
                 },
@@ -177,7 +177,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Update organization",
       description:
-        "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes one emoji or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.",
+        'Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: "emoji", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.',
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -189,10 +189,9 @@ export const organizationsPaths = {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
                 logo: {
-                  type: ["string", "null"],
-                  pattern: "^emoji:",
+                  oneOf: [ORG_LOGO_EMOJI_SCHEMA, { type: "null" }],
                   description:
-                    "`emoji:<grapheme>` (exactly one emoji), or `null` to clear the logo.",
+                    '`{ "kind": "emoji", "emoji": "<one emoji>" }`, or `null` to clear the logo.',
                 },
               },
               additionalProperties: false,
@@ -239,7 +238,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Get organization logo image",
       description:
-        "The organization's logo image, for any member. Its `ETag` is the version carried by `logo` (`image:<version>`); a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
+        "The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
       parameters: [
         { name: "orgId", in: "path", required: true, schema: { type: "string" } },
         {
@@ -247,7 +246,7 @@ export const organizationsPaths = {
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "The logo version the caller expects, from `logo`.",
+          description: "The logo version the caller expects: the `v` of `logo.url`.",
         },
       ],
       responses: {
@@ -287,7 +286,7 @@ export const organizationsPaths = {
       operationId: "uploadOrganizationLogo",
       tags: ["Organizations"],
       summary: "Upload organization logo image",
-      description: `Replace the organization logo with a WebP image sent as the raw request body (\`Content-Type: image/webp\`, at most ${ORG_LOGO_MAX_BYTES} bytes, a RIFF container of form type \`WEBP\`). Requires \`org:update\`. \`logo\` becomes \`image:<version>\`.`,
+      description: `Replace the organization logo with a WebP image sent as the raw request body (\`Content-Type: image/webp\`, at most ${ORG_LOGO_MAX_BYTES} bytes, a RIFF container of form type \`WEBP\`). Requires \`org:update\`. \`logo\` becomes \`{ kind: "image", url }\`.`,
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,

@@ -19,11 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
   other Iconify id, or image URL), `null` when no surface can draw it;
   **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
-- **`ORG_LOGO_EMOJI_PREFIX`**, **`ORG_LOGO_IMAGE_PREFIX`** and
-  **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the organization
-  logo's wire form — `emoji:<grapheme>` or `image:<version>`, the bytes of the
-  latter served by `GET /api/orgs/{orgId}/logo` — and the largest image
-  accepted, 36 000 bytes.
+- **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
+  organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
 
 ## [16.0.0] — 2026-10-14
 

@@ -56,12 +56,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `GET /api/files` takes `q` (by name, inside the existing visibility filter);
   the agent list and detail return optional `icon` and `color`; organizations
   carry a `logo` (migration `0097_org_logo`, a nullable column), returned by
-  `GET /api/orgs`, `GET /api/me/orgs` and invitation accept and written by
-  `PATCH /api/orgs/{id}` as `emoji:<one grapheme>`, a WebP data URL of at most
-  48 000 characters, or `null`. The audit log records an image logo as
-  `"image"`, never its bytes. In the OpenAPI spec the `status` parameter of the
-  run lists becomes a string with a pattern instead of an enum, so a generated
-  client types it more widely; the server refuses the same values.
+  `GET /api/orgs`, `GET /api/me/orgs` and invitation accept as
+  `{ kind: "emoji", emoji }`, `{ kind: "image", url }` or `null`. An emoji (or
+  `null`) is written by `PATCH /api/orgs/{id}`; an image is uploaded as WebP
+  bytes by `PUT /api/orgs/{id}/logo`, kept in object storage and served by
+  `GET /api/orgs/{id}/logo`, whose URL names the image's version. The audit log
+  records an image logo by its version, never its bytes. In the OpenAPI spec the
+  `status` parameter of the run lists becomes an array of the status enum,
+  serialized `style: form, explode: false` (`status=failed,timeout`).
 
 ### Fixed
 

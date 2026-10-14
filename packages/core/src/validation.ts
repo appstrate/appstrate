@@ -238,14 +238,6 @@ export function readAgentAppearance(manifest: Record<string, unknown>): {
   };
 }
 
-/** Prefix of an organization logo that is one emoji: `emoji:<grapheme>`. */
-export const ORG_LOGO_EMOJI_PREFIX = "emoji:";
-/**
- * Prefix of an organization logo that is an uploaded WebP image: `image:<version>`. The
- * bytes live in object storage and are served by `GET /api/orgs/{orgId}/logo`; the
- * version is a digest of those bytes, so it changes whenever the image does.
- */
-export const ORG_LOGO_IMAGE_PREFIX = "image:";
 /** Largest organization logo image accepted, in bytes. */
 export const ORG_LOGO_MAX_BYTES = 36_000;
 

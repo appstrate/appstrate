@@ -30,8 +30,7 @@ import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
 import { OrganizationAvatar } from "../../components/organization-avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import { ORG_LOGO_EMOJI_PREFIX } from "@appstrate/core/validation";
-import { storableLogo } from "../../lib/org-logo";
+import { storableLogo, type OrgLogo } from "../../lib/org-logo";
 
 const ORGANIZATION_EMOJIS = ["⚡️", "🚜", "🏢", "🧠", "✨", "🔵", "🟣", "🟠"];
 const MAX_LOGO_SOURCE_BYTES = 5 * 1024 * 1024;
@@ -140,7 +139,7 @@ export function OrgSettingsGeneralPage() {
         error: uploadLogoMutation.isError,
       };
   const logoBusy = updateNameMutation.isPending || uploadLogoMutation.isPending || processingLogo;
-  const patchLogo = (logo: string | null) => {
+  const patchLogo = (logo: Extract<OrgLogo, { kind: "emoji" }> | null) => {
     if (!orgId) return;
     uploadLogoMutation.reset();
     updateNameMutation.mutate({ params: { path: { orgId } }, body: { logo } });
@@ -230,7 +229,7 @@ export function OrgSettingsGeneralPage() {
                           size="icon"
                           className="text-lg"
                           aria-label={t("orgSettings.logoUseEmoji", { emoji })}
-                          onClick={() => patchLogo(`${ORG_LOGO_EMOJI_PREFIX}${emoji}`)}
+                          onClick={() => patchLogo({ kind: "emoji", emoji })}
                         >
                           {emoji}
                         </Button>

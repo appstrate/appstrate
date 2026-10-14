@@ -28,10 +28,10 @@ export const organizations = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     name: text("name").notNull(),
     slug: text("slug").unique().notNull(),
-    // Small presentation asset for the shell and organization switcher. The web
-    // client stores either `emoji:<grapheme>` or a square WebP data URL that it
-    // has already resized and compressed. Null renders the organization's
-    // initial.
+    // Small presentation asset for the shell and organization switcher:
+    // `emoji:<grapheme>`, or `image:<version>` for a WebP image kept in object
+    // storage (`services/org-logo.ts`, which also gives its wire form). Null
+    // renders the organization's initial.
     logo: text("logo"),
     orgSettings: jsonb("org_settings").notNull().default({}),
     // The org's default model — a flat model id that may name a system model

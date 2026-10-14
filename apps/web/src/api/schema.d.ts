@@ -3036,7 +3036,7 @@ export interface paths {
         head?: never;
         /**
          * Update organization
-         * @description Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes one emoji or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.
+         * @description Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes `{ kind: "emoji", emoji }` or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.
          */
         patch: operations["updateOrganization"];
         trace?: never;
@@ -3136,12 +3136,12 @@ export interface paths {
         };
         /**
          * Get organization logo image
-         * @description The organization's logo image, for any member. Its `ETag` is the version carried by `logo` (`image:<version>`); a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.
+         * @description The organization's logo image, for any member. Its `ETag` is the image's version, the `v` of `logo.url`; a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.
          */
         get: operations["getOrganizationLogo"];
         /**
          * Upload organization logo image
-         * @description Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `image:<version>`.
+         * @description Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `{ kind: "image", url }`.
          */
         put: operations["uploadOrganizationLogo"];
         post?: never;
@@ -6292,8 +6292,18 @@ export interface components {
             id?: string;
             name?: string;
             slug?: string;
-            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial. */
-            logo?: string | null;
+            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+            logo?: {
+                /** @constant */
+                kind: "emoji";
+                /** @description Exactly one emoji. */
+                emoji: string;
+            } | {
+                /** @constant */
+                kind: "image";
+                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                url: string;
+            } | null;
             /** Format: date-time */
             createdAt?: string;
             /**
@@ -6509,8 +6519,18 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial. */
-            logo: string | null;
+            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+            logo: {
+                /** @constant */
+                kind: "emoji";
+                /** @description Exactly one emoji. */
+                emoji: string;
+            } | {
+                /** @constant */
+                kind: "image";
+                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                url: string;
+            } | null;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
             /** @description The caller's ORG-LEVEL effective permissions in this organization: what the role grants, narrowed by the credential's ceiling (an API key's scopes, an OIDC scope claim). Space-level permissions are answered per space by GET /api/spaces. */
@@ -16828,8 +16848,18 @@ export interface operations {
                             id: string;
                             name: string;
                             slug: string;
-                            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial. */
-                            logo: string | null;
+                            /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+                            logo: {
+                                /** @constant */
+                                kind: "emoji";
+                                /** @description Exactly one emoji. */
+                                emoji: string;
+                            } | {
+                                /** @constant */
+                                kind: "image";
+                                /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                                url: string;
+                            } | null;
                             /**
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
@@ -19155,7 +19185,18 @@ export interface operations {
                         id: string;
                         name: string;
                         slug: string;
-                        logo: string | null;
+                        /** @description Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial. */
+                        logo: {
+                            /** @constant */
+                            kind: "emoji";
+                            /** @description Exactly one emoji. */
+                            emoji: string;
+                        } | {
+                            /** @constant */
+                            kind: "image";
+                            /** @description Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good. */
+                            url: string;
+                        } | null;
                         /** @enum {string} */
                         role: "owner";
                         /** Format: date-time */
@@ -19260,8 +19301,13 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
-                    /** @description `emoji:<grapheme>` (exactly one emoji), or `null` to clear the logo. */
-                    logo?: string | null;
+                    /** @description `{ "kind": "emoji", "emoji": "<one emoji>" }`, or `null` to clear the logo. */
+                    logo?: {
+                        /** @constant */
+                        kind: "emoji";
+                        /** @description Exactly one emoji. */
+                        emoji: string;
+                    } | null;
                 };
             };
         };
@@ -19473,7 +19519,7 @@ export interface operations {
     getOrganizationLogo: {
         parameters: {
             query?: {
-                /** @description The logo version the caller expects, from `logo`. */
+                /** @description The logo version the caller expects: the `v` of `logo.url`. */
                 v?: string;
             };
             header?: never;
