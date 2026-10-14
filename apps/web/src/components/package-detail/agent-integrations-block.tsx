@@ -109,11 +109,11 @@ export function AgentIntegrationsBlock({
         state,
         displayName: state.detail?.manifest.display_name ?? entry.id,
         // Optimistic while the detail loads so the table does not flash an inactive state.
-        appActive: state.detail ? state.detail.active : !isNotPlaced(state.error),
+        spaceActive: state.detail ? state.detail.active : !isNotPlaced(state.error),
       };
     })
     .filter((row) => {
-      const state = row.appActive ? "active" : "inactive";
+      const state = row.spaceActive ? "active" : "inactive";
       const matchesState = states.length === 0 || states.includes(state);
       const matchesSearch =
         normalizedSearch === "" ||
@@ -165,10 +165,10 @@ export function AgentIntegrationsBlock({
       id: "status",
       header: t("detail.connectionsTable.status"),
       width: "130px",
-      cell: ({ entry, appActive }) => (
+      cell: ({ entry, spaceActive }) => (
         <IntegrationStatusCell
           packageId={entry.id}
-          appActive={appActive}
+          spaceActive={spaceActive}
           agentPackageId={agentPackageId}
         />
       ),
@@ -476,16 +476,16 @@ function IntegrationAccessCell({ state }: { state: DetailState }) {
  */
 function IntegrationStatusCell({
   packageId,
-  appActive,
+  spaceActive,
   agentPackageId,
 }: {
   packageId: string;
-  appActive: boolean;
+  spaceActive: boolean;
   agentPackageId: string;
 }) {
   const { t } = useTranslation("agents");
   const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
-  if (!appActive) {
+  if (!spaceActive) {
     return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
   }
   if (isPending || !entry) {

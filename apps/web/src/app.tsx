@@ -184,22 +184,22 @@ const OrgSettingsSpacesPage = lazy(() =>
     default: m.OrgSettingsSpacesPage,
   })),
 );
-const OrgSettingsAppGeneralPage = lazy(() =>
-  import("./pages/org-settings/app/general").then((m) => ({
-    default: m.OrgSettingsAppGeneralPage,
+const WorkspaceSettingsGeneralPage = lazy(() =>
+  import("./pages/workspace-settings/general").then((m) => ({
+    default: m.WorkspaceSettingsGeneralPage,
   })),
 );
-const OrgSettingsSpaceMembersPage = lazy(() =>
-  import("./pages/org-settings/space/members").then((m) => ({
-    default: m.OrgSettingsSpaceMembersPage,
+const WorkspaceSettingsMembersPage = lazy(() =>
+  import("./pages/workspace-settings/members").then((m) => ({
+    default: m.WorkspaceSettingsMembersPage,
   })),
 );
-const OrgSettingsAppAuthPage = lazy(() =>
-  import("./pages/org-settings/app/auth").then((m) => ({ default: m.OrgSettingsAppAuthPage })),
+const WorkspaceSettingsAuthPage = lazy(() =>
+  import("./pages/workspace-settings/auth").then((m) => ({ default: m.WorkspaceSettingsAuthPage })),
 );
-const OrgSettingsSpaceOauthPage = lazy(() =>
-  import("./pages/org-settings/space/oauth").then((m) => ({
-    default: m.OrgSettingsSpaceOauthPage,
+const WorkspaceSettingsOAuthPage = lazy(() =>
+  import("./pages/workspace-settings/oauth").then((m) => ({
+    default: m.WorkspaceSettingsOAuthPage,
   })),
 );
 const PreferencesGeneralPage = lazy(() =>
@@ -394,14 +394,14 @@ const PAGES: Record<RoutePath, ReactNode> = {
   // `X-Space-Id`, which is a different scope from the org, not a subsection
   // of it.
   "/workspace-settings": <Outlet />,
-  "/workspace-settings/general": <OrgSettingsAppGeneralPage />,
+  "/workspace-settings/general": <WorkspaceSettingsGeneralPage />,
   // Space membership and its custom roles: who is in THIS space, and as what.
   // Org members are the other surface — a person can hold an org role and no
   // seat here.
-  "/workspace-settings/members": <OrgSettingsSpaceMembersPage />,
-  "/workspace-settings/auth": <OrgSettingsAppAuthPage />,
+  "/workspace-settings/members": <WorkspaceSettingsMembersPage />,
+  "/workspace-settings/auth": <WorkspaceSettingsAuthPage />,
   "/workspace-settings/api-keys": <ApiKeysPage />,
-  "/workspace-settings/oauth": <OrgSettingsSpaceOauthPage />,
+  "/workspace-settings/oauth": <WorkspaceSettingsOAuthPage />,
   "/workspace-settings/end-users": <EndUsersPage />,
   "/workspace-settings/webhooks": <WebhooksPage />,
   "/workspace-settings/webhooks/:id": <WebhookDetailPage />,

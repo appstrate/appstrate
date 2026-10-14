@@ -131,12 +131,12 @@ export function AgentOverviewTab({
       <div className="grid gap-6 xl:grid-cols-3">
         <section
           className="border-border bg-muted/35 flex min-w-0 flex-col overflow-hidden rounded-lg border"
-          aria-labelledby="agent-executions-heading"
+          aria-labelledby="agent-runs-heading"
         >
           <OverviewSectionHeading
-            id="agent-executions-heading"
+            id="agent-runs-heading"
             icon={PlayCircle}
-            title={t("detail.overview.executions")}
+            title={t("detail.overview.runs")}
           />
           <div
             className={cn(
@@ -182,7 +182,7 @@ export function AgentOverviewTab({
                 >
                   <div className="min-w-0">
                     <p className="text-muted-foreground text-xs font-medium">
-                      {t("detail.overview.nextExecution")}
+                      {t("schedule.paramNextRun")}
                     </p>
                     <p className="text-foreground mt-3 truncate text-sm">
                       {formatDateField(nextSchedule.next_run_at, "datetime")}
@@ -193,7 +193,7 @@ export function AgentOverviewTab({
               ) : (
                 <div className="p-4">
                   <p className="text-muted-foreground text-xs font-medium">
-                    {t("detail.overview.nextExecution")}
+                    {t("schedule.paramNextRun")}
                   </p>
                   {schedulesError ? (
                     <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>

@@ -16,12 +16,12 @@
 import { useTranslation } from "react-i18next";
 import { RotateCcw, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
-import type { DataColumn } from "../../../components/data-table";
-import { TableRowActions } from "../../../components/table-row-actions";
-import { SpaceRoleSelect } from "../../../components/space-role-select";
-import { roleI18nKey } from "../../../hooks/use-permissions";
-import { spaceRoleLabel, type useSpaceRoleOptions } from "../../../hooks/use-roles";
-import type { SpaceMemberObject } from "../../../hooks/use-space-members";
+import type { DataColumn } from "../../components/data-table";
+import { TableRowActions } from "../../components/table-row-actions";
+import { SpaceRoleSelect } from "../../components/space-role-select";
+import { roleI18nKey } from "../../hooks/use-permissions";
+import { spaceRoleLabel, type useSpaceRoleOptions } from "../../hooks/use-roles";
+import type { SpaceMemberObject } from "../../hooks/use-space-members";
 
 type SpaceRoleOption = ReturnType<typeof useSpaceRoleOptions>["options"][number];
 

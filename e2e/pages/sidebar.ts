@@ -41,7 +41,7 @@ export class Sidebar {
       .filter({ has: this.page.getByText(orgName, { exact: true }) })
       .click();
     await this.dropdownMenu
-      .getByTestId(/^app-item-/)
+      .getByTestId(/^space-item-/)
       .filter({ has: this.page.getByText(spaceName, { exact: true }) })
       .click();
     await expect(this.dropdownMenu).toHaveCount(0);
@@ -55,14 +55,14 @@ export class Sidebar {
     // "Default 2" or "My Default".
     await this.clickSpaceItem(
       this.dropdownMenu
-        .getByTestId(/^app-item-/)
+        .getByTestId(/^space-item-/)
         .filter({ has: this.page.getByText(spaceName, { exact: true }) }),
     );
   }
 
   /** Open the switcher and click a workspace of the current org by id. */
   async switchSpaceById(spaceId: string) {
-    await this.clickSpaceItem(this.page.getByTestId(`app-item-${spaceId}`));
+    await this.clickSpaceItem(this.page.getByTestId(`space-item-${spaceId}`));
   }
 
   private async clickSpaceItem(item: Locator) {

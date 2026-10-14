@@ -41,7 +41,7 @@ export function ApiKeysPage() {
   });
 
   if (!can("api-keys:read")) return null;
-  if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   return (
     <div>

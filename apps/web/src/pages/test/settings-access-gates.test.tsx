@@ -32,8 +32,8 @@ const { OrgSettingsModelsPage } = await import("../org-settings/models.tsx");
 const { OrgSettingsProxiesPage } = await import("../org-settings/proxies.tsx");
 const { OrgSettingsBillingPage } = await import("../org-settings/billing.tsx");
 const { OrgSettingsOAuthPage } = await import("../org-settings/oauth.tsx");
-const { OrgSettingsAppAuthPage } = await import("../org-settings/app/auth.tsx");
-const { OrgSettingsSpaceOauthPage } = await import("../org-settings/space/oauth.tsx");
+const { WorkspaceSettingsAuthPage } = await import("../workspace-settings/auth.tsx");
+const { WorkspaceSettingsOAuthPage } = await import("../workspace-settings/oauth.tsx");
 const { SettingsPageActionTargetProvider } =
   await import("../../components/settings/settings-page-actions.tsx");
 
@@ -193,17 +193,17 @@ describe("a settings page its own guard refuses", () => {
   it("says the page does not exist here when its module is off", () => {
     expect(renderAs(<OrgSettingsBillingPage />, { permissions: [] })).toContain(UNAVAILABLE);
     expect(renderAs(<OrgSettingsOAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
-    expect(renderAs(<OrgSettingsSpaceOauthPage />, { permissions: [] })).toContain(UNAVAILABLE);
-    expect(renderAs(<OrgSettingsAppAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
+    expect(renderAs(<WorkspaceSettingsOAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
+    expect(renderAs(<WorkspaceSettingsAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
     features.oidc = true;
     expect(renderAs(<OrgSettingsOAuthPage />, { permissions: [] })).not.toContain(UNAVAILABLE);
   });
 
   it("tells a module that is on from a write that is missing", () => {
     features.oidc = true;
-    expect(renderAs(<OrgSettingsAppAuthPage />, { permissions: [] })).toContain(DENIED);
+    expect(renderAs(<WorkspaceSettingsAuthPage />, { permissions: [] })).toContain(DENIED);
     expect(
-      renderAs(<OrgSettingsAppAuthPage />, { permissions: ["space-settings:write"] }),
+      renderAs(<WorkspaceSettingsAuthPage />, { permissions: ["space-settings:write"] }),
     ).not.toContain(DENIED);
   });
 });

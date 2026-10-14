@@ -30,7 +30,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api } = await import("../../api/client.ts");
 const { OrgSettingsRolesPage } = await import("../org-settings/roles.tsx");
-const { OrgSettingsSpaceMembersPage } = await import("../org-settings/space/members.tsx");
+const { WorkspaceSettingsMembersPage } = await import("../workspace-settings/members.tsx");
 const { rolesPageDeeds, spaceMembersPageDeeds } = await import("../org-settings/rbac-deeds.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
@@ -182,7 +182,7 @@ describe("trigger visibility", () => {
   });
 
   it("lists the preview beside the add action, and only for a previewer", () => {
-    expect(renderAs("owner", <OrgSettingsSpaceMembersPage />)).toContain(
+    expect(renderAs("owner", <WorkspaceSettingsMembersPage />)).toContain(
       "data-page-actions-trigger",
     );
     // The two live side by side in one menu; adding is unaffected by preview.

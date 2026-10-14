@@ -22,42 +22,42 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { $api, ApiError } from "../../../api/client";
-import { useOrg, useOrgDetail } from "../../../hooks/use-org";
-import { useCanPreviewRole, usePermissions } from "../../../hooks/use-permissions";
-import { useCurrentSpaceId } from "../../../hooks/use-current-space";
-import { useModalParam } from "../../../hooks/use-modal-param";
-import { useCanReach } from "../../../hooks/use-can-reach";
+import { $api, ApiError } from "../../api/client";
+import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useModalParam } from "../../hooks/use-modal-param";
+import { useCanReach } from "../../hooks/use-can-reach";
 import {
   DEFAULT_SPACE_ROLE_VALUE,
   memberRoleValue,
   spaceRoleAssignment,
   spaceRoleDescription,
   useSpaceRoleOptions,
-} from "../../../hooks/use-roles";
+} from "../../hooks/use-roles";
 import {
   useAddSpaceMember,
   useRemoveSpaceMember,
   useUpdateSpaceMember,
   useSpaceMembers,
   type SpaceMemberObject,
-} from "../../../hooks/use-space-members";
-import { useSpace } from "../../../hooks/use-spaces";
-import { ConfirmModal } from "../../../components/confirm-modal";
-import { CopyLinkButton } from "../../../components/copy-link-button";
-import { DataTable } from "../../../components/data-table";
-import { InvitationsTable } from "../../../components/invitations-table";
-import { Modal } from "../../../components/modal";
-import { PageActionsMenu } from "../../../components/page-actions-menu";
-import { RoleCatalogState } from "../../../components/role-catalog-state";
-import { SettingsPageActions } from "../../../components/settings/settings-page-actions";
-import { SpaceRoleSelect } from "../../../components/space-role-select";
-import { ViewAsDialog } from "../../../components/view-as-dialog";
-import { ErrorState, EmptyState, EmptyStateAction } from "../../../components/page-states";
-import { Spinner } from "../../../components/spinner";
+} from "../../hooks/use-space-members";
+import { useSpace } from "../../hooks/use-spaces";
+import { ConfirmModal } from "../../components/confirm-modal";
+import { CopyLinkButton } from "../../components/copy-link-button";
+import { DataTable } from "../../components/data-table";
+import { InvitationsTable } from "../../components/invitations-table";
+import { Modal } from "../../components/modal";
+import { PageActionsMenu } from "../../components/page-actions-menu";
+import { RoleCatalogState } from "../../components/role-catalog-state";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { SpaceRoleSelect } from "../../components/space-role-select";
+import { ViewAsDialog } from "../../components/view-as-dialog";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { Spinner } from "../../components/spinner";
 import { useSpaceMemberColumns } from "./space-member-columns";
-import { spaceMemberRemoval, spaceMembersPageDeeds } from "../rbac-deeds";
-import { errorMessage } from "../../../lib/mutation-error";
+import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
+import { errorMessage } from "../../lib/mutation-error";
 
 /** Owners and admins reach every space by role; a space-member row adds nothing. */
 const FULL_ACCESS_ORG_ROLES: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
@@ -66,7 +66,7 @@ function memberLabel(member: SpaceMemberObject): string {
   return member.name || member.email || member.userId;
 }
 
-export function OrgSettingsSpaceMembersPage() {
+export function WorkspaceSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
   const spaceId = useCurrentSpaceId();
 

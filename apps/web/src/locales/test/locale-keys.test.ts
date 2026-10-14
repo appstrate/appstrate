@@ -218,16 +218,16 @@ const DYNAMIC_KEY_PREFIXES = [
   "permissions.label.", // lib/permission-labels.ts — permissionLabel()
   "permissions.resource.", // lib/permission-labels.ts — permissionResourceLabel()
   "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
-  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/org-settings/app/general.tsx
+  "roles.preset.", // hooks/use-roles.ts spaceRoleLabel(), pages/workspace-settings/general.tsx
   "roles.presetDesc.", // hooks/use-roles.ts — spaceRoleDescription()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "run.triggerType.", // components/run-trigger.tsx, components/run-detail/run-header-summary.tsx + run-snapshot-inspector.tsx
   "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
-  "spaceMembers.source.", // pages/org-settings/space/space-member-columns.tsx, pages/org-settings/user-space-columns.tsx
-  "spaces.visibility.", // pages/org-settings/app/general.tsx — t(`spaces.visibility.${value}`)
-  "spaces.visibilityDesc.", // pages/org-settings/app/general.tsx — t(`spaces.visibilityDesc.${value}`)
+  "spaceMembers.source.", // pages/workspace-settings/space-member-columns.tsx, pages/org-settings/user-space-columns.tsx
+  "spaces.visibility.", // pages/workspace-settings/general.tsx — t(`spaces.visibility.${value}`)
+  "spaces.visibilityDesc.", // pages/workspace-settings/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)

@@ -67,7 +67,7 @@ describe("the dashboard", () => {
     const html = asOrgMember(READER, <DashboardContent {...content()} />);
     expect(html).toContain("Rien à afficher ici");
     expect(html).not.toContain("Réussite des derniers runs");
-    expect(html).not.toContain("Exécutions récentes");
+    expect(html).not.toContain("Derniers runs");
     expect(html).not.toContain("Planifications à venir");
   });
 
@@ -77,7 +77,7 @@ describe("the dashboard", () => {
       <DashboardContent {...content({ runs: [run], runTotal: 1 })} />,
     );
     expect(html).not.toContain("Rien à afficher ici");
-    expect(html).toContain("Exécutions récentes");
+    expect(html).toContain("Derniers runs");
     expect(html).toContain("Rapporteur");
     expect(html).not.toContain("Planifications à venir");
     expect(html).not.toContain("Agents récents");

@@ -3,7 +3,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
-import { OrgSettingsAppGeneralPage } from "../org-settings/app/general.tsx";
+import { WorkspaceSettingsGeneralPage } from "../workspace-settings/general.tsx";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
@@ -15,7 +15,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 await i18nReady;
 await i18n.changeLanguage("fr");
 
-function generalPage(personal: boolean): string {
+function generalPage(personal: boolean, domains: string[] = []): string {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
   const org: components["schemas"]["Organization"] = {
     id: "org_general",
@@ -33,7 +33,7 @@ function generalPage(personal: boolean): string {
     orgId: org.id,
     name: personal ? "Mon espace" : "Equipe",
     isDefault: false,
-    settings: {},
+    settings: { allowedRedirectDomains: domains },
     visibility: personal ? "private" : "open",
     default_role: "viewer",
     personal,
@@ -64,7 +64,7 @@ function generalPage(personal: boolean): string {
     space,
   );
   try {
-    return render(<OrgSettingsAppGeneralPage />, { queryClient });
+    return render(<WorkspaceSettingsGeneralPage />, { queryClient });
   } finally {
     orgSnapshot.mockRestore();
     spaceSnapshot.mockRestore();
@@ -89,5 +89,12 @@ describe("a workspace's general settings", () => {
     expect(html).toContain("Rôle des accès automatiques");
     expect(html).toContain("Zone de danger");
     expect(html).not.toContain("toujours privé");
+  });
+
+  it("labels each redirect domain and its remove button", () => {
+    const html = generalPage(false, ["a.example", "b.example"]);
+    expect(html).toContain('aria-label="Domaine de redirection 1"');
+    expect(html).toContain('aria-label="Domaine de redirection 2"');
+    expect(html.split('aria-label="Retirer ce domaine"')).toHaveLength(3);
   });
 });

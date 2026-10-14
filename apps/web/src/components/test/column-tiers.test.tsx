@@ -27,7 +27,7 @@ import {
 } from "../integration-detail/integration-columns.tsx";
 import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
 import { useRoleColumns } from "../../pages/org-settings/role-columns.tsx";
-import { useSpaceMemberColumns } from "../../pages/org-settings/space/space-member-columns.tsx";
+import { useSpaceMemberColumns } from "../../pages/workspace-settings/space-member-columns.tsx";
 import { useInvitationColumns } from "../invitation-columns.tsx";
 import {
   useCatalogueActionsColumn,
@@ -260,7 +260,7 @@ const SETS = {
         spaces: () => ["Production"],
       }),
     ),
-  applications: () => columnsFrom(() => useSpaceColumns({ defaultLabel: "Défaut" })),
+  spaces: () => columnsFrom(() => useSpaceColumns({ defaultLabel: "Défaut" })),
   connections: () =>
     columnsFrom(() =>
       useConnectionColumns({

@@ -34,20 +34,20 @@ export function useEndUserColumns({
   const columns: DataColumn<EndUserInfo>[] = [
     {
       id: "name",
-      header: t("applications.endUserName"),
+      header: t("spaces.endUserName"),
       width: "minmax(100px,1.2fr)",
       cell: (user) => (
         <div className="flex min-w-0 items-center gap-2">
           <EndUserAvatar user={user} />
           <span className="truncate font-medium">
-            {endUserDisplayName(user, t("applications.anonymousUser"))}
+            {endUserDisplayName(user, t("spaces.anonymousUser"))}
           </span>
         </div>
       ),
     },
     {
       id: "email",
-      header: t("applications.endUserEmail"),
+      header: t("spaces.endUserEmail"),
       width: "minmax(100px,1.2fr)",
       tier: 2,
       cell: (user) => (
@@ -56,7 +56,7 @@ export function useEndUserColumns({
     },
     {
       id: "externalId",
-      header: t("applications.endUserExternalIdColumn"),
+      header: t("spaces.endUserExternalId"),
       width: "minmax(80px,1fr)",
       tier: 2,
       cell: (user) => (
@@ -67,7 +67,7 @@ export function useEndUserColumns({
     },
     {
       id: "createdAt",
-      header: t("applications.createdAtColumn"),
+      header: t("spaces.createdAtLabel"),
       width: "104px",
       tier: 2,
       align: "end",
@@ -88,8 +88,8 @@ export function useEndUserColumns({
       align: "end",
       cell: (user) => (
         <TableRowActions
-          menuLabel={t("applications.moreEndUserActions", {
-            name: endUserDisplayName(user, t("applications.anonymousUser")),
+          menuLabel={t("spaces.moreEndUserActions", {
+            name: endUserDisplayName(user, t("spaces.anonymousUser")),
           })}
           isPending={deletingUserId === user.id}
           pendingLabel={t("common:loading")}

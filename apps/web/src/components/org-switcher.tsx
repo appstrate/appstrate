@@ -335,26 +335,26 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                 {t("switcher.workspacesEmpty")}
               </p>
             ) : (
-              shownSpaces.map((app, index) => {
-                const isCurrent = app.id === currentSpaceId && !isExploringElsewhere;
+              shownSpaces.map((space, index) => {
+                const isCurrent = space.id === currentSpaceId && !isExploringElsewhere;
                 // One heading per group, printed on the first row of each: the
                 // personal space is a different KIND of place, not a space that
                 // sorts first.
                 const heading =
-                  index === 0 && app.personal
+                  index === 0 && space.personal
                     ? t("spaces.personal.switcherGroup", { ns: "settings" })
-                    : !app.personal && (index === 0 || shownSpaces[index - 1]?.personal)
+                    : !space.personal && (index === 0 || shownSpaces[index - 1]?.personal)
                       ? t("spaces.personal.teamGroup", { ns: "settings" })
                       : null;
                 return (
-                  <div key={`group-${app.id}`}>
+                  <div key={`group-${space.id}`}>
                     {heading && (
                       <p className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
                         {heading}
                       </p>
                     )}
                     <div
-                      key={app.id}
+                      key={space.id}
                       className={cn(
                         "hover:bg-accent flex items-center rounded-md",
                         isCurrent && "bg-primary-soft hover:bg-primary-soft",
@@ -365,18 +365,18 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                           orphaned personal one only managed): disabled, and says why. */}
                       <button
                         type="button"
-                        data-testid={`app-item-${app.id}`}
-                        disabled={!isSpaceEnterable(app)}
+                        data-testid={`space-item-${space.id}`}
+                        disabled={!isSpaceEnterable(space)}
                         title={
-                          isSpaceEnterable(app)
+                          isSpaceEnterable(space)
                             ? undefined
                             : t("spaces.requestAccess", { ns: "settings" })
                         }
-                        onClick={() => applyContext(exploredId ?? currentOrg.id, app.id)}
+                        onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
                         className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <span className="truncate text-sm font-medium">{spaceLabel(app, t)}</span>
-                        {!isSpaceEnterable(app) && (
+                        <span className="truncate text-sm font-medium">{spaceLabel(space, t)}</span>
+                        {!isSpaceEnterable(space) && (
                           <span className="text-muted-foreground ml-auto shrink-0 text-xs">
                             {t("switcher.spaceOnRequest")}
                           </span>

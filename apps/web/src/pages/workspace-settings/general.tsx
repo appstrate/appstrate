@@ -4,53 +4,53 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
-import { usePermissions } from "../../../hooks/use-permissions";
-import { ConfirmModal } from "../../../components/confirm-modal";
+import { usePermissions } from "../../hooks/use-permissions";
+import { ConfirmModal } from "../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
-import { useCurrentSpaceId } from "../../../hooks/use-current-space";
-import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
-import { SaveFeedback } from "../../../components/settings/save-feedback";
+import { useSpace, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { SaveFeedback } from "../../components/settings/save-feedback";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Label } from "@appstrate/ui/components/label";
 import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
-import { RoleCatalogState } from "../../../components/role-catalog-state";
-import { SpaceRoleSelect } from "../../../components/space-role-select";
-import { useSpaceRoleOptions, type SpaceRolePreset } from "../../../hooks/use-roles";
-import type { components } from "../../../api/client";
-import { SettingsGroup, SettingRow } from "../../../components/settings/setting-row";
-import { InlineTextSetting } from "../../../components/settings/inline-text-setting";
-import { ApiError } from "../../../api/errors";
-import { toastError } from "../../../lib/mutation-error";
+import { RoleCatalogState } from "../../components/role-catalog-state";
+import { SpaceRoleSelect } from "../../components/space-role-select";
+import { useSpaceRoleOptions, type SpaceRolePreset } from "../../hooks/use-roles";
+import type { components } from "../../api/client";
+import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
+import { InlineTextSetting } from "../../components/settings/inline-text-setting";
+import { ApiError } from "../../api/errors";
+import { toastError } from "../../lib/mutation-error";
 import {
   domainsChanged,
   spaceUpdateBody,
   visibilityChangeNeedsConfirmation,
   type SpaceSettingChange,
-} from "../../../lib/space-update-body";
+} from "../../lib/space-update-body";
 
 type SpaceVisibility = components["schemas"]["SpaceObject"]["visibility"];
 
-export function OrgSettingsAppGeneralPage() {
+export function WorkspaceSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const spaceId = useCurrentSpaceId();
-  const { data: application, isLoading, error } = useSpace(spaceId ?? "");
+  const { data: space, isLoading, error } = useSpace(spaceId ?? "");
 
-  if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
-  if (!application) return <ErrorState />;
+  if (!space) return <ErrorState />;
 
-  return <GeneralForm spaceId={spaceId} application={application} />;
+  return <GeneralForm spaceId={spaceId} space={space} />;
 }
 
 function GeneralForm({
   spaceId,
-  application,
+  space,
 }: {
   spaceId: string;
-  application: {
+  space: {
     name: string;
     isDefault: boolean;
     settings?: { allowedRedirectDomains?: string[] };
@@ -66,7 +66,7 @@ function GeneralForm({
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
-  const domains = application.settings?.allowedRedirectDomains ?? [];
+  const domains = space.settings?.allowedRedirectDomains ?? [];
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
   const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
@@ -86,8 +86,8 @@ function GeneralForm({
     />
   );
   const activeDomains = editedDomains ?? domains;
-  const activeVisibility = editedVisibility ?? application.visibility;
-  const activeDefaultRole = editedDefaultRole ?? application.default_role;
+  const activeVisibility = editedVisibility ?? space.visibility;
+  const activeDefaultRole = editedDefaultRole ?? space.default_role;
 
   // The assignable presets come from the org's role catalogue, which a space
   // admin may read without owning it.
@@ -154,25 +154,25 @@ function GeneralForm({
 
   return (
     <>
-      <SettingsGroup title={t("applications.settingsTitle")}>
-        <SettingRow variant="field" label={t("applications.nameLabel")} status={feedback("name")}>
+      <SettingsGroup title={t("spaces.settingsTitle")}>
+        <SettingRow variant="field" label={t("spaces.nameLabel")} status={feedback("name")}>
           <InlineTextSetting
-            value={application.name}
+            value={space.name}
             disabled={updateMutation.isPending}
-            aria-label={t("applications.nameLabel")}
-            placeholder={t("applications.namePlaceholder")}
+            aria-label={t("spaces.nameLabel")}
+            placeholder={t("spaces.namePlaceholder")}
             onCommit={(name) => save({ field: "name", value: name })}
           />
         </SettingRow>
 
-        {application.personal ? (
+        {space.personal ? (
           <p className="text-muted-foreground text-sm">{t("spaces.personal.settingsLocked")}</p>
         ) : (
           <>
             <SettingRow
               variant="field"
-              label={t("applications.redirectDomains")}
-              description={t("applications.redirectDomainsHint")}
+              label={t("spaces.redirectDomains")}
+              description={t("spaces.redirectDomainsHint")}
               status={feedback("domains")}
             >
               <div className="flex w-full flex-col gap-2">
@@ -196,12 +196,13 @@ function GeneralForm({
                         if (e.key === "Enter") e.currentTarget.blur();
                       }}
                       placeholder="example.com"
+                      aria-label={t("spaces.domainAriaLabel", { index: index + 1 })}
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      aria-label={t("btn.delete", { ns: "common" })}
+                      aria-label={t("spaces.removeDomain")}
                       onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
                     >
                       <X size={16} />
@@ -218,7 +219,7 @@ function GeneralForm({
                   onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
                 >
                   <Plus size={14} className="mr-1.5" />
-                  {t("applications.addDomain")}
+                  {t("spaces.addDomain")}
                 </Button>
               </div>
             </SettingRow>
@@ -236,7 +237,7 @@ function GeneralForm({
                 <RadioGroup
                   value={activeVisibility}
                   onValueChange={(value) => chooseVisibility(value as SpaceVisibility)}
-                  disabled={application.isDefault || updateMutation.isPending}
+                  disabled={space.isDefault || updateMutation.isPending}
                   aria-label={t("spaces.visibilityLabel")}
                 >
                   {SPACE_VISIBILITIES.map((value) => (
@@ -259,7 +260,7 @@ function GeneralForm({
                   ))}
                 </RadioGroup>
                 <p className="text-muted-foreground text-xs">{t("spaces.adminAccessHint")}</p>
-                {application.isDefault && (
+                {space.isDefault && (
                   <p className="text-muted-foreground text-xs">
                     {t("spaces.visibilityDefaultLocked")}
                   </p>
@@ -307,19 +308,19 @@ function GeneralForm({
           the CONTROL — a button that opens a confirm — which is what the row
           pattern says a destructive setting looks like, rather than a red-bordered
           card that reads as a different kind of screen. */}
-      {!application.isDefault && !application.personal && can("spaces:delete") && (
-        <SettingsGroup title={t("applications.dangerZone")}>
+      {!space.isDefault && !space.personal && can("spaces:delete") && (
+        <SettingsGroup title={t("spaces.dangerZone")}>
           <SettingRow
             variant="action"
-            label={t("applications.deleteTitle")}
-            description={t("applications.deleteDesc")}
+            label={t("spaces.deleteTitle")}
+            description={t("spaces.deleteDesc")}
           >
             <Button
               variant="destructive"
               disabled={deleteMutation.isPending}
               onClick={() => setConfirmOpen(true)}
             >
-              {deleteMutation.isPending ? t("applications.deleting") : t("btn.delete")}
+              {deleteMutation.isPending ? t("spaces.deleting") : t("btn.delete")}
             </Button>
           </SettingRow>
         </SettingsGroup>
@@ -338,9 +339,9 @@ function GeneralForm({
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={t("applications.deleteDialogTitle")}
+        title={t("spaces.deleteDialogTitle")}
         confirmLabel={t("btn.delete", { ns: "common" })}
-        description={t("applications.deleteConfirm", { name: application.name })}
+        description={t("spaces.deleteConfirm", { name: space.name })}
         isPending={deleteMutation.isPending}
         onConfirm={() => {
           deleteMutation.mutate(

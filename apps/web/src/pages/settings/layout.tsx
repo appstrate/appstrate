@@ -91,7 +91,7 @@ export function UnifiedSettingsLayout() {
   const navigate = useNavigate();
   const background = useBackgroundLocation();
   const { currentOrg, orgs, switchOrg } = useOrg();
-  const { data: applications = [] } = useSpaces();
+  const { data: spaces = [] } = useSpaces();
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
@@ -189,9 +189,9 @@ export function UnifiedSettingsLayout() {
     <ContextSelector
       value={spaceId ?? ""}
       label={label("unifiedSettings.workspaceSelector")}
-      disabled={applications.length === 0}
+      disabled={spaces.length === 0}
       // Listed is not enterable: a closed space shows, disabled.
-      options={applications.map((space) => ({
+      options={spaces.map((space) => ({
         id: space.id,
         name: spaceLabel(space, t),
         disabled: !isSpaceEnterable(space),

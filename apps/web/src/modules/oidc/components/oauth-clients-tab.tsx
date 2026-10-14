@@ -43,7 +43,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         {level === "space" && (
           <p className="text-muted-foreground max-w-xl text-sm">
-            {t("settings:oauthClients.introApp")}
+            {t("settings:oauthClients.introSpace")}
           </p>
         )}
         {can("oauth-clients:write") && (

@@ -24,7 +24,7 @@ import { formatDateField } from "../../lib/format-date";
 import { spaceLabel } from "../../lib/space-label";
 import { isSpaceEnterable } from "../../hooks/use-current-space";
 
-export interface ApplicationRow {
+export interface SpaceRow {
   id: string;
   name: string;
   isDefault: boolean;
@@ -46,40 +46,40 @@ export function useSpaceColumns({
   /** Empty and delete an orphaned personal space. Absent without the grant. */
   onSweep?: (spaceId: string) => void;
   actionsBusy?: boolean;
-}): DataColumn<ApplicationRow>[] {
+}): DataColumn<SpaceRow>[] {
   const { t } = useTranslation(["settings", "common"]);
 
   return [
     {
       id: "workspace",
-      header: t("applications.nameLabel"),
+      header: t("spaces.nameLabel"),
       width: "minmax(160px,1.6fr)",
-      cell: (app) => (
+      cell: (space) => (
         <span
           className="block truncate text-sm font-medium"
           // A `closed` space is listed so the caller knows it exists, not so they
           // can be dropped into it (pinning one 403s every space-scoped request,
           // same rule as the org switcher): its row is static and says why.
-          title={isSpaceEnterable(app) ? spaceLabel(app, t) : t("spaces.requestAccess")}
+          title={isSpaceEnterable(space) ? spaceLabel(space, t) : t("spaces.requestAccess")}
         >
-          {spaceLabel(app, t)}
+          {spaceLabel(space, t)}
         </span>
       ),
     },
     {
       id: "kind",
-      header: t("applications.defaultColumn"),
+      header: t("spaces.default"),
       width: "minmax(120px,0.8fr)",
       tier: 2,
-      cell: (app) =>
-        app.orphaned_at ? (
+      cell: (space) =>
+        space.orphaned_at ? (
           // The one state that asks the reader for a decision, so it is said
           // in words a hover does not hide: since when it has been orphaned is
           // in the created column's neighbour, not in a tooltip.
           <Badge variant="warning">{t("spaces.personal.orphanedBadge")}</Badge>
-        ) : app.personal ? (
+        ) : space.personal ? (
           <Badge variant="secondary">{t("spaces.personal.badge")}</Badge>
-        ) : app.isDefault ? (
+        ) : space.isDefault ? (
           <Badge variant="running">{defaultLabel}</Badge>
         ) : (
           <span className="text-muted-foreground text-xs">—</span>
@@ -87,19 +87,19 @@ export function useSpaceColumns({
     },
     {
       id: "created",
-      header: t("applications.createdColumn"),
+      header: t("spaces.createdAtLabel"),
       width: "132px",
       align: "end",
       // Tier 2, not 3: the settings dialog tops out around 800px and never
       // crosses the 56rem threshold, so tier 3 there means never drawn.
       tier: 2,
-      cell: (app) => (
+      cell: (space) => (
         <span className="text-muted-foreground text-xs">
-          {app.orphaned_at
+          {space.orphaned_at
             ? t("spaces.personal.orphanedSince", {
-                date: formatDateField(app.orphaned_at, "date"),
+                date: formatDateField(space.orphaned_at, "date"),
               })
-            : formatDateField(app.createdAt, "date")}
+            : formatDateField(space.createdAt, "date")}
         </span>
       ),
     },
@@ -108,16 +108,16 @@ export function useSpaceColumns({
       header: "",
       width: "48px",
       align: "end",
-      cell: (app) => {
+      cell: (space) => {
         // An orphan cannot be entered — its owner is gone — so it offers the
         // two acts that resolve it. Every other row has no menu: a click on it
         // opens its settings, which is its one deed.
-        const orphaned = Boolean(app.orphaned_at);
+        const orphaned = Boolean(space.orphaned_at);
         if (orphaned && (onConvert || onSweep)) {
           return (
-            <TableRowActions menuLabel={t("spaces.rowActions", { name: spaceLabel(app, t) })}>
+            <TableRowActions menuLabel={t("spaces.rowActions", { name: spaceLabel(space, t) })}>
               {onConvert && (
-                <DropdownMenuItem disabled={actionsBusy} onSelect={() => onConvert(app.id)}>
+                <DropdownMenuItem disabled={actionsBusy} onSelect={() => onConvert(space.id)}>
                   <FolderInput />
                   {t("spaces.personal.convert")}
                 </DropdownMenuItem>
@@ -127,7 +127,7 @@ export function useSpaceColumns({
                 <DropdownMenuItem
                   className="text-destructive focus:text-destructive"
                   disabled={actionsBusy}
-                  onSelect={() => onSweep(app.id)}
+                  onSelect={() => onSweep(space.id)}
                 >
                   <Trash2 />
                   {t("spaces.personal.sweep")}

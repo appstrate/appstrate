@@ -266,7 +266,7 @@ export function EndUserDetailModal({
       <ConfirmModal
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        title={t("applications.deleteEndUserTitle")}
+        title={t("spaces.deleteEndUserTitle")}
         confirmLabel={t("common:btn.delete")}
         description={t("spaces.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}

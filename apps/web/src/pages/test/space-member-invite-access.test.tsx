@@ -4,7 +4,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client.ts";
 import { RouteGate } from "../../components/route-gate.tsx";
-import { OrgSettingsSpaceMembersPage } from "../org-settings/space/members.tsx";
+import { WorkspaceSettingsMembersPage } from "../workspace-settings/members.tsx";
 import { spaceMemberRemoval } from "../org-settings/rbac-deeds.ts";
 import { orgStore } from "../../stores/org-store.ts";
 import { spaceStore } from "../../stores/space-store.ts";
@@ -134,7 +134,7 @@ function pageFor(
   try {
     const html = render(
       <RouteGate path="/workspace-settings/members">
-        <OrgSettingsSpaceMembersPage />
+        <WorkspaceSettingsMembersPage />
       </RouteGate>,
       { queryClient },
     );

@@ -142,7 +142,7 @@ function EndUsersPageContent() {
   const visibility = useColumnVisibility("end-users");
   const columns = visibleColumns(allColumns, visibility.hidden);
 
-  if (!spaceId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
 
   // Reading is the route's gate (`end-users:read`); creating and editing need
   // `end-users:write`, deleting `end-users:delete` (the row menu checks it).
@@ -153,7 +153,7 @@ function EndUsersPageContent() {
           <PageActionsMenu>
             <DropdownMenuItem data-page-action="create" onSelect={() => newEndUser.open()}>
               <Plus />
-              {t("applications.newEndUser")}
+              {t("spaces.newEndUser")}
             </DropdownMenuItem>
           </PageActionsMenu>
         </SettingsPageActions>
@@ -163,7 +163,7 @@ function EndUsersPageContent() {
         search={{
           value: search,
           onChange: setSearch,
-          placeholder: t("applications.searchEndUsers"),
+          placeholder: t("spaces.searchEndUsers"),
         }}
         filters={[]}
         columns={columnMenu(allColumns, visibility)}
@@ -177,8 +177,8 @@ function EndUsersPageContent() {
         rowKey={(user) => user.id}
         rowHref={(user) => endUserHref(location, user.id)}
         rowLabel={(user) =>
-          t("applications.openEndUser", {
-            name: endUserDisplayName(user, t("applications.anonymousUser")),
+          t("spaces.openEndUser", {
+            name: endUserDisplayName(user, t("spaces.anonymousUser")),
           })
         }
         isLoading={isLoading}
@@ -186,17 +186,17 @@ function EndUsersPageContent() {
         error={<ErrorState error={error} compact />}
         empty={
           search.trim() ? (
-            <EmptyState message={t("applications.noMatchingEndUsers")} icon={SearchX} compact />
+            <EmptyState message={t("spaces.noMatchingEndUsers")} icon={SearchX} compact />
           ) : (
             <EmptyState
-              message={t("applications.noEndUsers")}
-              hint={t("applications.noEndUsersHint")}
+              message={t("spaces.noEndUsers")}
+              hint={t("spaces.noEndUsersHint")}
               icon={Users}
               compact
             >
               {canWrite && (
                 <EmptyStateAction
-                  label={t("applications.newEndUser")}
+                  label={t("spaces.newEndUser")}
                   onClick={() => newEndUser.open()}
                 />
               )}
@@ -217,7 +217,7 @@ function EndUsersPageContent() {
           }}
           className="mt-3 w-full"
         >
-          {t("applications.loadMore")}
+          {t("spaces.loadMore")}
         </Button>
       )}
 
@@ -236,7 +236,7 @@ function EndUsersPageContent() {
       )}
 
       {selectedUserId && !selectedUser && (
-        <Modal open onClose={closeUser} title={t("applications.endUserDetail")}>
+        <Modal open onClose={closeUser} title={t("spaces.endUserDetail")}>
           {selectedUserLoading ? (
             <LoadingState />
           ) : (
@@ -248,9 +248,9 @@ function EndUsersPageContent() {
       <ConfirmModal
         open={pendingDelete !== null}
         onClose={() => setPendingDelete(null)}
-        title={t("applications.deleteEndUserTitle")}
+        title={t("spaces.deleteEndUserTitle")}
         confirmLabel={t("common:btn.delete")}
-        description={t("applications.deleteEndUserConfirm")}
+        description={t("spaces.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}
         onConfirm={async () => {
           if (!pendingDelete) return;
