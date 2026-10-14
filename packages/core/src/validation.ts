@@ -238,10 +238,14 @@ export function readAgentAppearance(manifest: Record<string, unknown>): {
 
 /** Prefix of an organization logo that is one emoji: `emoji:<grapheme>`. */
 export const ORG_LOGO_EMOJI_PREFIX = "emoji:";
-/** Prefix of an organization logo that is a base64 WebP image. */
-export const ORG_LOGO_WEBP_PREFIX = "data:image/webp;base64,";
-/** Longest organization logo accepted, in characters: a WebP of about 35 KiB. */
-export const ORG_LOGO_MAX_LENGTH = 48_000;
+/**
+ * Prefix of an organization logo that is an uploaded WebP image: `image:<version>`. The
+ * bytes live in object storage and are served by `GET /api/orgs/{orgId}/logo`; the
+ * version is a digest of those bytes, so it changes whenever the image does.
+ */
+export const ORG_LOGO_IMAGE_PREFIX = "image:";
+/** Largest organization logo image accepted, in bytes. */
+export const ORG_LOGO_MAX_BYTES = 36_000;
 
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.

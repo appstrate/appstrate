@@ -13066,7 +13066,7 @@
         "operationId": "updateOrganization",
         "tags": ["Organizations"],
         "summary": "Update organization",
-        "description": "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "description": "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes one emoji or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.",
         "parameters": [
           {
             "name": "orgId",
@@ -13094,8 +13094,8 @@
                   },
                   "logo": {
                     "type": ["string", "null"],
-                    "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial.",
-                    "maxLength": 48000
+                    "pattern": "^emoji:",
+                    "description": "`emoji:<grapheme>` (exactly one emoji), or `null` to clear the logo."
                   }
                 },
                 "additionalProperties": false
@@ -13171,6 +13171,159 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/orgs/{orgId}/logo": {
+      "get": {
+        "operationId": "getOrganizationLogo",
+        "tags": ["Organizations"],
+        "summary": "Get organization logo image",
+        "description": "The organization's logo image, for any member. Its `ETag` is the version carried by `logo` (`image:<version>`); a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The logo version the caller expects, from `logo`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The logo image.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The quoted logo version."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise."
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string",
+                  "enum": ["nosniff"]
+                }
+              }
+            },
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Cached copy is still current (`If-None-Match` matched). No body.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The quoted logo version."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "As on the `200`."
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "The organization's logo is not an image."
+          }
+        }
+      },
+      "put": {
+        "operationId": "uploadOrganizationLogo",
+        "tags": ["Organizations"],
+        "summary": "Upload organization logo image",
+        "description": "Replace the organization logo with a WebP image sent as the raw request body (`Content-Type: image/webp`, at most 36000 bytes, a RIFF container of form type `WEBP`). Requires `org:update`. `logo` becomes `image:<version>`.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 36000
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -14076,7 +14229,7 @@
                           },
                           "logo": {
                             "type": ["string", "null"],
-                            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+                            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial."
                           },
                           "role": {
                             "type": "string",
@@ -31296,7 +31449,7 @@
           },
           "logo": {
             "type": ["string", "null"],
-            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial."
           },
           "role": {
             "type": "string",
@@ -31419,7 +31572,7 @@
           },
           "logo": {
             "type": ["string", "null"],
-            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial."
+            "description": "Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial."
           },
           "createdAt": {
             "type": "string",

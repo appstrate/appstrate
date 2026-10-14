@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_LOGO_PROPERTY, ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import { ORG_LOGO_MAX_LENGTH } from "@appstrate/core/validation";
+import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
 const SPACE_ASSIGNMENTS_BODY = {
@@ -177,7 +177,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Update organization",
       description:
-        "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update organization name, slug and/or logo. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `logo` takes one emoji or `null`; an image is uploaded with `PUT /api/orgs/{orgId}/logo`, and replacing it here deletes its bytes.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -188,7 +188,12 @@ export const organizationsPaths = {
               properties: {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
-                logo: { ...ORG_LOGO_PROPERTY, maxLength: ORG_LOGO_MAX_LENGTH },
+                logo: {
+                  type: ["string", "null"],
+                  pattern: "^emoji:",
+                  description:
+                    "`emoji:<grapheme>` (exactly one emoji), or `null` to clear the logo.",
+                },
               },
               additionalProperties: false,
             },
@@ -225,6 +230,87 @@ export const organizationsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/orgs/{orgId}/logo": {
+    get: {
+      operationId: "getOrganizationLogo",
+      tags: ["Organizations"],
+      summary: "Get organization logo image",
+      description:
+        "The organization's logo image, for any member. Its `ETag` is the version carried by `logo` (`image:<version>`); a request whose `v` names that version is cacheable for good, any other revalidates with `If-None-Match`.",
+      parameters: [
+        { name: "orgId", in: "path", required: true, schema: { type: "string" } },
+        {
+          name: "v",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description: "The logo version the caller expects, from `logo`.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The logo image.",
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: { schema: { type: "string" }, description: "The quoted logo version." },
+            "Cache-Control": {
+              schema: { type: "string" },
+              description:
+                "`private, max-age=31536000, immutable` when `v` names the current version, `private, no-cache` otherwise.",
+            },
+            "X-Content-Type-Options": { schema: { type: "string", enum: ["nosniff"] } },
+          },
+          content: { "image/webp": { schema: { type: "string", format: "binary" } } },
+        },
+        "304": {
+          description: "Cached copy is still current (`If-None-Match` matched). No body.",
+          headers: {
+            ETag: { schema: { type: "string" }, description: "The quoted logo version." },
+            "Cache-Control": {
+              schema: { type: "string" },
+              description: "As on the `200`.",
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "The organization's logo is not an image.",
+        },
+      },
+    },
+    put: {
+      operationId: "uploadOrganizationLogo",
+      tags: ["Organizations"],
+      summary: "Upload organization logo image",
+      description: `Replace the organization logo with a WebP image sent as the raw request body (\`Content-Type: image/webp\`, at most ${ORG_LOGO_MAX_BYTES} bytes, a RIFF container of form type \`WEBP\`). Requires \`org:update\`. \`logo\` becomes \`image:<version>\`.`,
+      parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
+      requestBody: {
+        required: true,
+        content: {
+          "image/webp": {
+            schema: { type: "string", format: "binary", maxLength: ORG_LOGO_MAX_BYTES },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "Updated organization — same OrgDetail shape as GET /api/orgs/{orgId}",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/OrgDetail" },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

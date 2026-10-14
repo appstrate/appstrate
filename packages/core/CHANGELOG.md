@@ -15,10 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
   agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
   `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
-- **`ORG_LOGO_EMOJI_PREFIX`**, **`ORG_LOGO_WEBP_PREFIX`** and
-  **`ORG_LOGO_MAX_LENGTH`** (`@appstrate/core/validation`): the organization
-  logo's wire form — `emoji:<grapheme>` or a `data:image/webp;base64,` URL —
-  and its longest accepted value, 48 000 characters.
+- **`ORG_LOGO_EMOJI_PREFIX`**, **`ORG_LOGO_IMAGE_PREFIX`** and
+  **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the organization
+  logo's wire form — `emoji:<grapheme>` or `image:<version>`, the bytes of the
+  latter served by `GET /api/orgs/{orgId}/logo` — and the largest image
+  accepted, 36 000 bytes.
 
 ## [16.0.0] — 2026-10-14
 

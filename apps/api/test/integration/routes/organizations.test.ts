@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { ORG_LOGO_MAX_LENGTH } from "@appstrate/core/validation";
+import { ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
+import { downloadFile } from "@appstrate/db/storage";
+import { ORG_LOGO_BUCKET, orgLogoKey } from "../../../src/services/org-logo.ts";
 import { eq, and } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -493,7 +495,7 @@ describe("Organizations API", () => {
 
     describe("logo", () => {
       // A minimal WebP: the RIFF container header with the `WEBP` form type.
-      const webpBytes = new Uint8Array([
+      const webp = new Uint8Array([
         ...new TextEncoder().encode("RIFF"),
         4,
         0,
@@ -501,7 +503,6 @@ describe("Organizations API", () => {
         0,
         ...new TextEncoder().encode("WEBPVP8 "),
       ]);
-      const webp = `data:image/webp;base64,${btoa(String.fromCharCode(...webpBytes))}`;
 
       const patchLogo = (headers: Record<string, string>, orgId: string, logo: unknown) =>
         app.request(`/api/orgs/${orgId}`, {
@@ -509,46 +510,108 @@ describe("Organizations API", () => {
           headers: { ...headers, "Content-Type": "application/json" },
           body: JSON.stringify({ logo }),
         });
+      const putLogo = (
+        headers: Record<string, string>,
+        orgId: string,
+        image: Uint8Array,
+        type = "image/webp",
+      ) =>
+        app.request(`/api/orgs/${orgId}/logo`, {
+          method: "PUT",
+          headers: { ...headers, "Content-Type": type },
+          body: image,
+        });
+      const storedLogo = (orgId: string) =>
+        downloadFile(ORG_LOGO_BUCKET, orgLogoKey(orgId)).then((b) => (b ? [...b] : null));
 
-      it("lets the owner set an emoji, an image and null, and an admin none of them", async () => {
-        const ctx = await createTestContext({ orgSlug: "owner-logo-org" });
-        const owner = authHeaders(ctx);
+      it("stores an uploaded image in object storage and only its version in the row", async () => {
+        const ctx = await createTestContext({ orgSlug: "image-logo-org" });
 
-        const emoji = await patchLogo(owner, ctx.orgId, "emoji:🧠");
-        expect(emoji.status, await emoji.clone().text()).toBe(200);
-        expect(((await emoji.json()) as { logo: string | null }).logo).toBe("emoji:🧠");
+        const res = await putLogo(authHeaders(ctx), ctx.orgId, webp);
+        expect(res.status, await res.clone().text()).toBe(200);
+        const { logo } = (await res.json()) as { logo: string };
+        expect(logo).toMatch(/^image:[0-9a-f]{16}$/);
+        expect(await storedLogo(ctx.orgId)).toEqual([...webp]);
+      });
 
-        const image = await patchLogo(owner, ctx.orgId, webp);
-        expect(image.status, await image.clone().text()).toBe(200);
-        expect(((await image.json()) as { logo: string | null }).logo).toBe(webp);
+      it("serves the image to a member with its version as ETag, and 304s a match", async () => {
+        const ctx = await createTestContext({ orgSlug: "serve-logo-org" });
+        const put = await putLogo(authHeaders(ctx), ctx.orgId, webp);
+        const version = ((await put.json()) as { logo: string }).logo.slice("image:".length);
 
-        const cleared = await patchLogo(owner, ctx.orgId, null);
-        expect(cleared.status).toBe(200);
-        expect(((await cleared.json()) as { logo: string | null }).logo).toBeNull();
+        const member = await createTestUser();
+        await addOrgMember(ctx.orgId, member.id, "member");
+        const headers = { Cookie: member.cookie };
 
-        // `logo` rides the same PATCH as `name`, behind `org:update`.
-        const admin = await createTestUser();
-        await addOrgMember(ctx.orgId, admin.id, "admin");
-        const refused = await patchLogo(
-          { Cookie: admin.cookie, "X-Org-Id": ctx.orgId },
-          ctx.orgId,
-          "emoji:🚜",
-        );
+        const res = await app.request(`/api/orgs/${ctx.orgId}/logo?v=${version}`, { headers });
+        expect(res.status).toBe(200);
+        expect(res.headers.get("Content-Type")).toBe("image/webp");
+        expect(res.headers.get("ETag")).toBe(`"${version}"`);
+        expect(res.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+        expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([...webp]);
+
+        const stale = await app.request(`/api/orgs/${ctx.orgId}/logo?v=old`, { headers });
+        expect(stale.headers.get("Cache-Control")).toBe("private, no-cache");
+
+        const revalidated = await app.request(`/api/orgs/${ctx.orgId}/logo`, {
+          headers: { ...headers, "If-None-Match": `"${version}"` },
+        });
+        expect(revalidated.status).toBe(304);
+
+        const outsider = await createTestUser();
+        const refused = await app.request(`/api/orgs/${ctx.orgId}/logo`, {
+          headers: { Cookie: outsider.cookie },
+        });
         expect(refused.status).toBe(403);
       });
 
-      it("refuses anything but one emoji or a WebP image", async () => {
+      it("404s the image route when the logo is an emoji or unset", async () => {
+        const ctx = await createTestContext({ orgSlug: "no-image-logo-org" });
+        expect(
+          (await app.request(`/api/orgs/${ctx.orgId}/logo`, { headers: authHeaders(ctx) })).status,
+        ).toBe(404);
+        await patchLogo(authHeaders(ctx), ctx.orgId, "emoji:🧠");
+        expect(
+          (await app.request(`/api/orgs/${ctx.orgId}/logo`, { headers: authHeaders(ctx) })).status,
+        ).toBe(404);
+      });
+
+      it("deletes the stored image when an emoji or null replaces it", async () => {
+        const ctx = await createTestContext({ orgSlug: "replace-logo-org" });
+        const owner = authHeaders(ctx);
+
+        expect((await putLogo(owner, ctx.orgId, webp)).status).toBe(200);
+        const emoji = await patchLogo(owner, ctx.orgId, "emoji:🧠");
+        expect(emoji.status, await emoji.clone().text()).toBe(200);
+        expect(((await emoji.json()) as { logo: string | null }).logo).toBe("emoji:🧠");
+        expect(await storedLogo(ctx.orgId)).toBeNull();
+
+        expect((await putLogo(owner, ctx.orgId, webp)).status).toBe(200);
+        const cleared = await patchLogo(owner, ctx.orgId, null);
+        expect(((await cleared.json()) as { logo: string | null }).logo).toBeNull();
+        expect(await storedLogo(ctx.orgId)).toBeNull();
+      });
+
+      it("lets the owner change the logo, and an admin neither upload nor patch it", async () => {
+        const ctx = await createTestContext({ orgSlug: "owner-logo-org" });
+        const admin = await createTestUser();
+        await addOrgMember(ctx.orgId, admin.id, "admin");
+        const headers = { Cookie: admin.cookie, "X-Org-Id": ctx.orgId };
+
+        expect((await patchLogo(headers, ctx.orgId, "emoji:🚜")).status).toBe(403);
+        expect((await putLogo(headers, ctx.orgId, webp)).status).toBe(403);
+      });
+
+      it("refuses a patched logo that is not one emoji", async () => {
         const ctx = await createTestContext({ orgSlug: "bad-logo-org" });
-        const png = btoa("\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
         for (const logo of [
           "emoji:",
           "emoji:A",
           "emoji:🧠🚜",
           `emoji:${"x".repeat(5000)}`,
           `emoji:🧠${"\u0301".repeat(40)}`,
-          "data:image/webp;base64,not base64!",
-          `data:image/webp;base64,${png}`,
-          "data:image/png;base64,AAAA",
+          "image:abc",
+          "data:image/webp;base64,AAAA",
           "🧠",
         ]) {
           const res = await patchLogo(authHeaders(ctx), ctx.orgId, logo);
@@ -561,20 +624,25 @@ describe("Organizations API", () => {
         expect(org!.logo).toBeNull();
       });
 
-      it("accepts an image up to ORG_LOGO_MAX_LENGTH characters and refuses one past it", async () => {
+      it("refuses an upload that is not a WebP within ORG_LOGO_MAX_BYTES", async () => {
         const ctx = await createTestContext({ orgSlug: "logo-limit-org" });
-        // A RIFF/WEBP header in whole base64 quanta, padded with zero bytes:
-        // valid at every length, so only the length decides.
-        const header = `data:image/webp;base64,${btoa("RIFF\x04\0\0\0WEBP")}`;
-        const fill = Math.floor((ORG_LOGO_MAX_LENGTH - header.length) / 4) * 4;
-        const largest = `${header}${"A".repeat(fill)}`;
-        expect((await patchLogo(authHeaders(ctx), ctx.orgId, largest)).status).toBe(200);
-        expect((await patchLogo(authHeaders(ctx), ctx.orgId, `${largest}AAAA`)).status).toBe(400);
+        const owner = authHeaders(ctx);
+        const png = new TextEncoder().encode("\x89PNG\r\n\x1a\n\0\0\0\rIHDR");
+        const sized = (n: number) => {
+          const bytes = new Uint8Array(n);
+          bytes.set(webp);
+          return bytes;
+        };
+
+        expect((await putLogo(owner, ctx.orgId, png)).status).toBe(400);
+        expect((await putLogo(owner, ctx.orgId, webp, "image/png")).status).toBe(400);
+        expect((await putLogo(owner, ctx.orgId, sized(ORG_LOGO_MAX_BYTES))).status).toBe(200);
+        expect((await putLogo(owner, ctx.orgId, sized(ORG_LOGO_MAX_BYTES + 1))).status).toBe(400);
       });
 
       it("audits an image logo as changed, without its bytes", async () => {
         const ctx = await createTestContext({ orgSlug: "audit-logo-org" });
-        expect((await patchLogo(authHeaders(ctx), ctx.orgId, webp)).status).toBe(200);
+        expect((await putLogo(authHeaders(ctx), ctx.orgId, webp)).status).toBe(200);
 
         const rows = await db
           .select({ after: auditEvents.after })

@@ -35,6 +35,7 @@ import {
   cleanupExpiredFiles,
 } from "../../../src/services/files.ts";
 import { deleteOrganization } from "../../../src/services/organizations.ts";
+import { ORG_LOGO_BUCKET, orgLogoKey } from "../../../src/services/org-logo.ts";
 import { createEndUser, deleteEndUser } from "../../../src/services/end-users.ts";
 import { createSpace, deleteSpace } from "../../../src/services/spaces.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
@@ -373,6 +374,14 @@ describe("storage-deletion outbox", () => {
     const runKeys = new Set(runJobs.map((r) => r.storageKey));
     expect(runKeys.has(`${runId}.afps`)).toBe(true);
     expect(runKeys.has(`${runId}/manifest.json`)).toBe(true);
+
+    // The logo image, enqueued whether or not one was ever uploaded.
+    const logoJob = await db
+      .select()
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.bucket, ORG_LOGO_BUCKET));
+    expect(logoJob.map((j) => j.storageKey)).toEqual([orgLogoKey(scope.orgId)]);
+    expect(logoJob[0]!.reason).toBe("org_deleted");
   });
 
   it("deleteSpace keeps the org quota exact and queues all cascade-owned storage", async () => {

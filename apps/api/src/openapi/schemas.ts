@@ -115,7 +115,7 @@ const PACKAGE_HOME_PROPERTIES = {
 export const ORG_LOGO_PROPERTY = {
   type: ["string", "null"],
   description:
-    "Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial.",
+    "Organization logo: `emoji:<grapheme>` (one emoji), or `image:<version>` for an uploaded WebP image whose bytes `GET /api/orgs/{orgId}/logo` serves — the version changes with the image, so `?v=<version>` names one image for good. Null uses the organization initial.",
 } as const;
 
 /** The agent's identity tile, on the list item and on the detail. */

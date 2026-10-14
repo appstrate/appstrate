@@ -36,7 +36,17 @@ import { storableLogo } from "../../lib/org-logo";
 const ORGANIZATION_EMOJIS = ["⚡️", "🚜", "🏢", "🧠", "✨", "🔵", "🟣", "🟠"];
 const MAX_LOGO_SOURCE_BYTES = 5 * 1024 * 1024;
 
-async function normalizeOrganizationLogo(file: File): Promise<string> {
+function encodeWebp(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("logo_processing"))),
+      "image/webp",
+      0.82,
+    ),
+  );
+}
+
+async function normalizeOrganizationLogo(file: File): Promise<Blob> {
   if (!file.type.startsWith("image/")) throw new Error("logo_file_type");
   if (file.size > MAX_LOGO_SOURCE_BYTES) throw new Error("logo_file_size");
 
@@ -53,7 +63,7 @@ async function normalizeOrganizationLogo(file: File): Promise<string> {
       const context = canvas.getContext("2d");
       if (!context) throw new Error("logo_processing");
       context.drawImage(bitmap, sourceX, sourceY, crop, crop, 0, 0, size, size);
-      const logo = storableLogo(canvas.toDataURL("image/webp", 0.82));
+      const logo = storableLogo(await encodeWebp(canvas));
       if (logo) return logo;
     }
   } finally {
@@ -114,7 +124,27 @@ export function OrgSettingsGeneralPage() {
     },
   });
 
-  const logoWrite = fieldWriteState(updateNameMutation, "logo");
+  const uploadLogoMutation = $api.useMutation("put", "/api/orgs/{orgId}/logo", {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
+    },
+  });
+
+  // The logo is written by two requests: an image upload, or an emoji / removal patch.
+  // Each starts by clearing the other's state, so the feedback is the latest write's.
+  const logoWrite = uploadLogoMutation.isIdle
+    ? fieldWriteState(updateNameMutation, "logo")
+    : {
+        pending: uploadLogoMutation.isPending,
+        success: uploadLogoMutation.isSuccess,
+        error: uploadLogoMutation.isError,
+      };
+  const logoBusy = updateNameMutation.isPending || uploadLogoMutation.isPending || processingLogo;
+  const patchLogo = (logo: string | null) => {
+    if (!orgId) return;
+    uploadLogoMutation.reset();
+    updateNameMutation.mutate({ params: { path: { orgId } }, body: { logo } });
+  };
   const nameWrite = fieldWriteState(updateNameMutation, "name");
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
@@ -145,11 +175,7 @@ export function OrgSettingsGeneralPage() {
           status={<SaveFeedback {...logoWrite} pending={logoWrite.pending || processingLogo} />}
         >
           <div className="flex items-center gap-3">
-            <OrganizationAvatar
-              name={currentOrg.name}
-              logo={currentOrg.logo}
-              className="size-16 rounded-xl text-2xl"
-            />
+            <OrganizationAvatar org={currentOrg} className="size-16 rounded-xl text-2xl" />
             {canUpdateOrg && (
               <div className="flex flex-wrap gap-2">
                 <input
@@ -164,9 +190,11 @@ export function OrgSettingsGeneralPage() {
                     setProcessingLogo(true);
                     try {
                       const logo = await normalizeOrganizationLogo(file);
-                      updateNameMutation.mutate({
+                      uploadLogoMutation.mutate({
                         params: { path: { orgId } },
-                        body: { logo },
+                        body: logo,
+                        headers: { "Content-Type": "image/webp" },
+                        bodySerializer: (body) => body,
                       });
                     } catch {
                       toast.error(t("orgSettings.logoError"));
@@ -179,7 +207,7 @@ export function OrgSettingsGeneralPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={updateNameMutation.isPending || processingLogo}
+                  disabled={logoBusy}
                   onClick={() => logoInputRef.current?.click()}
                 >
                   <Upload />
@@ -187,12 +215,7 @@ export function OrgSettingsGeneralPage() {
                 </Button>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={updateNameMutation.isPending || processingLogo}
-                    >
+                    <Button type="button" variant="outline" size="sm" disabled={logoBusy}>
                       <Smile />
                       {t("orgSettings.logoEmoji")}
                     </Button>
@@ -207,13 +230,7 @@ export function OrgSettingsGeneralPage() {
                           size="icon"
                           className="text-lg"
                           aria-label={t("orgSettings.logoUseEmoji", { emoji })}
-                          onClick={() => {
-                            if (!orgId) return;
-                            updateNameMutation.mutate({
-                              params: { path: { orgId } },
-                              body: { logo: `${ORG_LOGO_EMOJI_PREFIX}${emoji}` },
-                            });
-                          }}
+                          onClick={() => patchLogo(`${ORG_LOGO_EMOJI_PREFIX}${emoji}`)}
                         >
                           {emoji}
                         </Button>
@@ -226,14 +243,8 @@ export function OrgSettingsGeneralPage() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={updateNameMutation.isPending || processingLogo}
-                    onClick={() => {
-                      if (!orgId) return;
-                      updateNameMutation.mutate({
-                        params: { path: { orgId } },
-                        body: { logo: null },
-                      });
-                    }}
+                    disabled={logoBusy}
+                    onClick={() => patchLogo(null)}
                   >
                     <Trash2 />
                     {t("orgSettings.logoRemove")}

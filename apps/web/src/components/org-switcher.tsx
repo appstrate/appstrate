@@ -150,8 +150,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             className="hover:bg-accent data-[state=open]:bg-accent flex h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-sm transition-colors"
           >
             <OrganizationAvatar
-              name={currentOrg.name}
-              logo={currentOrg.logo}
+              org={currentOrg}
               className="size-6 shrink-0 rounded-md text-[0.7rem]"
             />
             <span className="flex min-w-0 flex-1 items-center text-left">
@@ -182,8 +181,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             className="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent flex h-9 w-full items-center gap-2 rounded-md px-1.5 text-sm transition-colors"
           >
             <OrganizationAvatar
-              name={currentOrg.name}
-              logo={currentOrg.logo}
+              org={currentOrg}
               className="size-6 shrink-0 rounded-md text-[0.7rem]"
             />
             <span className="min-w-0 flex-1 truncate text-left">
@@ -259,11 +257,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                     onClick={() => setExploredOrgId(org.id)}
                     className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left"
                   >
-                    <OrganizationAvatar
-                      name={org.name}
-                      logo={org.logo}
-                      className="size-[30px] text-[0.82rem]"
-                    />
+                    <OrganizationAvatar org={org} className="size-[30px] text-[0.82rem]" />
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate text-sm font-medium">{org.name}</span>
                       <span className="text-muted-foreground text-xs">

@@ -56,11 +56,9 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
-import {
-  ORG_LOGO_EMOJI_PREFIX,
-  ORG_LOGO_MAX_LENGTH,
-  ORG_LOGO_WEBP_PREFIX,
-} from "@appstrate/core/validation";
+import { ORG_LOGO_EMOJI_PREFIX, ORG_LOGO_MAX_BYTES } from "@appstrate/core/validation";
+import { isWebp, logoImageVersion, readOrgLogoImage, setOrgLogo } from "../services/org-logo.ts";
+import { ifNoneMatchSatisfied } from "../lib/conditional-request.ts";
 
 export const createOrgSchema = z
   .object({
@@ -73,21 +71,15 @@ export const createOrgSchema = z
 const MAX_EMOJI_CODE_POINTS = 16;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** One emoji, or a base64 WebP image (a RIFF container whose form type is `WEBP`). */
-function isValidLogo(value: string): boolean {
-  if (value.startsWith(ORG_LOGO_EMOJI_PREFIX)) {
-    const emoji = value.slice(ORG_LOGO_EMOJI_PREFIX.length);
-    return (
-      [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
-      [...graphemes.segment(emoji)].length === 1 &&
-      /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(emoji)
-    );
-  }
-  if (!value.startsWith(ORG_LOGO_WEBP_PREFIX)) return false;
-  const payload = value.slice(ORG_LOGO_WEBP_PREFIX.length);
-  if (payload.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) return false;
-  const bytes = atob(payload);
-  return bytes.slice(0, 4) === "RIFF" && bytes.slice(8, 12) === "WEBP";
+/** `emoji:` followed by exactly one emoji. An image is uploaded by `PUT /:orgId/logo`. */
+function isEmojiLogo(value: string): boolean {
+  if (!value.startsWith(ORG_LOGO_EMOJI_PREFIX)) return false;
+  const emoji = value.slice(ORG_LOGO_EMOJI_PREFIX.length);
+  return (
+    [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
+    [...graphemes.segment(emoji)].length === 1 &&
+    /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(emoji)
+  );
 }
 
 export const updateOrgSchema = z
@@ -96,8 +88,10 @@ export const updateOrgSchema = z
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
     logo: z
       .string()
-      .max(ORG_LOGO_MAX_LENGTH)
-      .refine(isValidLogo, "Logo must be one emoji or a WebP image")
+      .refine(
+        isEmojiLogo,
+        "Logo must be one emoji; upload an image with PUT /api/orgs/{orgId}/logo",
+      )
       .nullable()
       .optional(),
   })
@@ -336,28 +330,77 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     }
   }
 
-  await updateOrganization(orgId, {
-    ...(data.name?.trim() ? { name: data.name.trim() } : {}),
-    ...(data.slug ? { slug: data.slug } : {}),
-    ...(data.logo !== undefined ? { logo: data.logo } : {}),
-  });
-
-  // An image logo is recorded as changed, never as its bytes.
   const { logo, ...renamed } = data;
+  if (renamed.name?.trim() || renamed.slug) {
+    await updateOrganization(orgId, {
+      ...(renamed.name?.trim() ? { name: renamed.name.trim() } : {}),
+      ...(renamed.slug ? { slug: renamed.slug } : {}),
+    });
+  }
+  if (logo !== undefined) {
+    await setOrgLogo(orgId, logo ? { emoji: logo.slice(ORG_LOGO_EMOJI_PREFIX.length) } : null);
+  }
+
   await recordAuditFromContext(c, {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: {
-      ...renamed,
-      ...(logo !== undefined
-        ? { logo: logo?.startsWith(ORG_LOGO_WEBP_PREFIX) ? "image" : logo }
-        : {}),
-    },
+    after: data,
     orgIdOverride: orgId,
   });
 
   // Bare updated resource — same OrgDetail serializer as GET /:orgId.
+  return c.json(await buildOrgDetail(c, orgId));
+});
+
+// GET /api/orgs/:orgId/logo — the logo image, revalidated by its version
+router.get("/:orgId/logo", async (c) => {
+  const orgId = c.req.param("orgId")!;
+  if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
+
+  const version = logoImageVersion((await getOrgById(orgId))?.logo ?? null);
+  const bytes = version ? await readOrgLogoImage(orgId) : null;
+  if (!version || !bytes) throw notFound("Organization has no logo image");
+
+  const etag = `"${version}"`;
+  c.header("ETag", etag);
+  // A URL naming the current version never changes content; any other URL revalidates.
+  c.header(
+    "Cache-Control",
+    c.req.query("v") === version ? "private, max-age=31536000, immutable" : "private, no-cache",
+  );
+  if (ifNoneMatchSatisfied(c.req.header("If-None-Match"), etag)) return c.body(null, 304);
+  c.header("Content-Type", "image/webp");
+  c.header("X-Content-Type-Options", "nosniff");
+  return c.body(new Uint8Array(bytes));
+});
+
+// PUT /api/orgs/:orgId/logo — replace the logo with a WebP image (raw bytes)
+router.put("/:orgId/logo", requirePermission("org", "update"), async (c) => {
+  const orgId = c.req.param("orgId")!;
+  if (c.req.header("Content-Type")?.split(";")[0]?.trim() !== "image/webp") {
+    throw invalidRequest("Logo must be sent as image/webp", "body");
+  }
+  if (Number(c.req.header("Content-Length") ?? 0) > ORG_LOGO_MAX_BYTES) {
+    throw invalidRequest(`Logo must be at most ${ORG_LOGO_MAX_BYTES} bytes`, "body");
+  }
+  const image = new Uint8Array(await c.req.arrayBuffer());
+  if (image.length > ORG_LOGO_MAX_BYTES) {
+    throw invalidRequest(`Logo must be at most ${ORG_LOGO_MAX_BYTES} bytes`, "body");
+  }
+  if (!isWebp(image)) throw invalidRequest("Logo must be a WebP image", "body");
+
+  await setOrgLogo(orgId, { image });
+
+  // An image is recorded as changed, never as its bytes.
+  await recordAuditFromContext(c, {
+    action: "org.updated",
+    resourceType: "org",
+    resourceId: orgId,
+    after: { logo: "image" },
+    orgIdOverride: orgId,
+  });
+
   return c.json(await buildOrgDetail(c, orgId));
 });
 
