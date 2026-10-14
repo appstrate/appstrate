@@ -16,6 +16,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the previous file as `/etc/appstrate-runner/env.previous`
   (`docs/architecture/FIRECRACKER.md` → Env vars).
 
+### Fixed
+
+- **A non-UUID organization id is refused like an unknown org, not with a
+  500** (#1969). An org id that is not a UUID in the path
+  (`/api/orgs/:orgId/*`), the `X-Org-Id` header or the realtime stream's
+  `?orgId=` reached a comparison with a `uuid` column, and Postgres refused
+  it as a 500. It now gets the answer of an org the caller does not belong to
+  (403; 401 on the realtime stream), without a query.
+
 ## [1.0.0-beta.67] - 2026-10-14
 
 ### Operators

@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { organizationMembers, organizations } from "@appstrate/db/schema";
 import { invalidRequest, forbidden } from "../lib/errors.ts";
-import { scopedWhere } from "../lib/db-helpers.ts";
+import { isUuid, scopedWhere } from "../lib/db-helpers.ts";
 
 /**
  * Middleware: resolve the organization for the request, verify membership, and
@@ -40,25 +40,29 @@ export function requireOrgContext() {
       throw invalidRequest("X-Org-Id header is required", "X-Org-Id");
     }
 
-    const rows = await db
-      .select({
-        role: organizationMembers.role,
-        slug: organizations.slug,
-        name: organizations.name,
-        // Piggyback the settings JSONB on the membership join so downstream
-        // per-request consumers (API-version middleware) don't issue a
-        // second organizations query on every authenticated request.
-        orgSettings: organizations.orgSettings,
-      })
-      .from(organizationMembers)
-      .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
-      .where(
-        scopedWhere(organizationMembers, {
-          orgId,
-          extra: [eq(organizationMembers.userId, user.id)],
-        }),
-      )
-      .limit(1);
+    // A non-UUID is never a member row, and comparing it to the uuid column
+    // raises 22P02: skip the query so it gets the non-member refusal below.
+    const rows = !isUuid(orgId)
+      ? []
+      : await db
+          .select({
+            role: organizationMembers.role,
+            slug: organizations.slug,
+            name: organizations.name,
+            // Piggyback the settings JSONB on the membership join so downstream
+            // per-request consumers (API-version middleware) don't issue a
+            // second organizations query on every authenticated request.
+            orgSettings: organizations.orgSettings,
+          })
+          .from(organizationMembers)
+          .innerJoin(organizations, eq(organizations.id, organizationMembers.orgId))
+          .where(
+            scopedWhere(organizationMembers, {
+              orgId,
+              extra: [eq(organizationMembers.userId, user.id)],
+            }),
+          )
+          .limit(1);
 
     if (!rows[0]) {
       throw forbidden("You are not a member of this organization");
