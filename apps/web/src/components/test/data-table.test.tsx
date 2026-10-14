@@ -173,9 +173,8 @@ describe("states", () => {
     expect([...html.matchAll(/<button /g)]).toHaveLength(ROWS.length);
     expect(html).toContain('aria-label="Ligne Alpha"');
     expect(html).toContain("absolute inset-0 cursor-pointer");
-    expect(html).toContain("hover:bg-muted/50");
     // The row itself shows the hand, so a name raised above the cover does too.
-    expect(html).toContain("hover:bg-muted/50 cursor-pointer");
+    expect(html).toContain("cursor-pointer transition-colors hover:bg-(--dt-surface-hover)");
   });
 
   it("replaces the head with the empty node — it would label nothing", () => {
@@ -226,6 +225,28 @@ describe("controls and the row's end", () => {
     expect(heads.find((head) => head.includes('column="name"'))).toContain("sticky");
     expect(heads.find((head) => head.includes('column="actions"'))).toContain("sticky");
     expect(heads.find((head) => head.includes('column="role"'))).not.toContain("sticky");
+  });
+
+  it("lets the name go before the row's end when the table runs out of room", () => {
+    const heads = html.match(/<th[^>]*>/g) ?? [];
+    const name = heads.find((head) => head.includes('column="name"'));
+    const end = heads.find((head) => head.includes('column="actions"'));
+    expect(name).toContain('data-data-table-held="start"');
+    expect(name).toContain("[[data-data-table-unheld]_&amp;]:static");
+    // The end carries the row's actions: only its own width releases it.
+    expect(end).toContain('data-data-table-held="end"');
+    expect(end).toContain("[[data-data-table-unheld-end]_&amp;]:static");
+    expect(end).not.toContain("[[data-data-table-unheld]_&amp;]:static");
+  });
+
+  it("lights a held cell with the row: same colour, same transition", () => {
+    const cells = html.match(/<td[^>]*data-data-table-column="(?:name|actions)"[^>]*>/g) ?? [];
+    expect(cells).toHaveLength(2 * ROWS.length);
+    for (const cell of cells) {
+      expect(cell).toContain("group-hover/row:bg-(--dt-surface-hover)");
+      expect(cell).toContain("transition-colors");
+    }
+    expect(html).toContain("cursor-pointer transition-colors hover:bg-(--dt-surface-hover)");
   });
 });
 
