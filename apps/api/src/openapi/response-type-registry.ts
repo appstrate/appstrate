@@ -72,6 +72,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgPackageItem",
   },
   {
+    specSchemaName: "IntegrationIndexItem",
+    sharedTypeName: "IntegrationIndexItem",
+    description: "IntegrationIndexItem",
+  },
+  {
     specSchemaName: "OrgPackageItemDetail",
     sharedTypeName: "OrgPackageItemDetail",
     description: "OrgPackageItemDetail",

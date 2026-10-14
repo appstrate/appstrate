@@ -230,7 +230,7 @@ export function OrgCatalogueModal({
   const all = ofKind.filter((item) => {
     if (active === "integration") {
       const row = integrationById.get(item.id);
-      if (row && integrationExecution(row) !== execution) return false;
+      if (row && integrationExecution(row.manifest.source.kind) !== execution) return false;
     }
     // Découvrir is the WHOLE catalogue, the way a store keeps showing what you
     // already own with a tick beside it. Were it the complement of the other
@@ -528,7 +528,7 @@ export function OrgCatalogueModal({
   });
   const protocolColumn = useCatalogueProtocolColumn((item) => {
     const row = integrationById.get(item.id);
-    return row ? integrationProtocol(row) : undefined;
+    return row ? integrationProtocol(row.manifest.source.kind) : undefined;
   });
   const actionsColumn = useCatalogueActionsColumn({
     isPending: activate.isPending || revoke.isPending,
@@ -707,7 +707,7 @@ export function OrgCatalogueModal({
           agents={library?.packages.agent ?? []}
           protocol={
             active === "integration" && integrationById.get(previewed.id)
-              ? integrationProtocol(integrationById.get(previewed.id)!)
+              ? integrationProtocol(integrationById.get(previewed.id)!.manifest.source.kind)
               : undefined
           }
           actionsMenu={

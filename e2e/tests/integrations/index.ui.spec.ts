@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The integrations page is an INDEX, driven from the browser (RBAC spec §6.8):
- * the integrations this space runs. A custom integration switched off here keeps
- * its placement — the space library still lists it — and leaves the index.
+ * The integrations page is an INDEX, driven from the browser (RBAC spec §6.8).
  *
- * The page reads every page of the management listing (`GET /api/integrations`)
- * and keeps the active rows, so the switched-off row is absent from a listing
- * that did carry it, not from a truncated one.
+ * It asks the index route the other three type pages ask — the active set of
+ * this space — so a package switched off here is absent because the SERVER
+ * left it out, not because the page filtered a wider listing. That distinction
+ * is invisible to a route test: only the rendered list shows which set reached
+ * the screen.
  *
- * The row and the search box read the same manifest projection the route emits
- * (`display_name`, `description`, `keywords`), so a keyword that appears nowhere
+ * The row and the search box read the projection the route emits (`name`,
+ * `description`, `keywords`, `source_kind`), so a keyword that appears nowhere
  * in the name still finds its integration.
  */
 
@@ -41,18 +41,22 @@ test("the integrations index shows what this space runs, and searches manifest k
   const row = (name: string) =>
     page.getByRole("row").filter({ hasText: `Test Integration ${name}` });
 
-  // The management listing carries both rows; the index shows the active one.
-  const listing = page.waitForResponse(
+  // The route the page asks is the assertion: the index, which leaves the
+  // switched-off integration out.
+  const indexRead = page.waitForResponse(
     (response) =>
       response.request().method() === "GET" &&
-      new URL(response.url()).pathname === "/api/integrations",
+      new URL(response.url()).pathname === "/api/packages/integrations",
   );
   // Custom integrations run in a sandbox: they sit under the « Locales » tab.
   await page.goto("/integrations?execution=local");
-  const listed = await listing;
+  const listed = await indexRead;
   expect(listed.status()).toBe(200);
-  const { data } = (await listed.json()) as { data: { id: string; active: boolean }[] };
-  expect(data.find((entry) => entry.id === `${scope}/${switchedOff}`)?.active).toBe(false);
+  const { data } = (await listed.json()) as { data: { id: string; source_kind: string }[] };
+  const ids = data.map((entry) => entry.id);
+  expect(ids).toContain(`${scope}/${running}`);
+  expect(ids).not.toContain(`${scope}/${switchedOff}`);
+  expect(data.find((entry) => entry.id === `${scope}/${running}`)?.source_kind).toBe("local");
 
   // The row carries the manifest's display name, not the bare package id.
   await expect(row(running)).toBeVisible();
