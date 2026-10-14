@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { MoreHorizontal } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -23,13 +24,11 @@ import { Spinner } from "./spinner";
 export function TableRowActions({
   menuLabel,
   isPending = false,
-  pendingLabel,
   renaming = false,
   children,
 }: {
   menuLabel?: string;
   isPending?: boolean;
-  pendingLabel?: string;
   /**
    * True while the row's name is in inline edit, started from this menu's
    * « Rename ». The menu holds focus until it has finished closing, so a field
@@ -39,10 +38,11 @@ export function TableRowActions({
   renaming?: boolean;
   children?: ReactNode;
 }) {
+  const { t } = useTranslation("common");
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
-      {isPending && <Spinner label={pendingLabel} />}
+      {isPending && <Spinner label={t("loading")} />}
       {children && menuLabel && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

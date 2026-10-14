@@ -27,6 +27,7 @@ import { DocumentRowActions } from "./document-row-actions";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
 import { filePreviewHref, runFileDirection } from "../lib/files";
+import { searchOf } from "../lib/url-search";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export function DocumentListPanel({
@@ -108,13 +109,8 @@ export function DocumentListPanel({
     const params = new URLSearchParams(location.search);
     if (id) params.set("preview", id);
     else params.delete("preview");
-    const search = params.toString();
     navigate(
-      {
-        pathname: location.pathname,
-        search: search ? `?${search}` : "",
-        hash: location.hash,
-      },
+      { pathname: location.pathname, search: searchOf(params), hash: location.hash },
       { replace: id === null },
     );
   };

@@ -56,6 +56,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 import type { PackageType } from "@appstrate/core/validation";
 import { asRecord, isPlainObject } from "@appstrate/core/safe-json";
 import { formatBytes } from "../../lib/format-bytes";
+import { matchesSearch } from "../../lib/strings";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { client, $api, ApiError } from "../../api/client";
 import { useModalParam } from "../../hooks/use-modal-param";
@@ -389,13 +390,9 @@ export function PackageFilesView({
     return [...bundle, ...runtimeSkills, ...localServers];
   }, [bundleEntries, localMcpIndexes, mcpServers, packageId, skillIndexes, skills]);
 
-  const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleFiles = useMemo(
-    () =>
-      normalizedQuery === ""
-        ? files
-        : files.filter((file) => file.treeEntry.path.toLocaleLowerCase().includes(normalizedQuery)),
-    [files, normalizedQuery],
+    () => files.filter((file) => matchesSearch(query, [file.treeEntry.path])),
+    [files, query],
   );
   const fileByPath = useMemo(
     () => new Map(visibleFiles.map((file) => [file.treeEntry.path, file])),

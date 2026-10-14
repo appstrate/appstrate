@@ -67,7 +67,7 @@ function useTypeText() {
     })[kind];
 }
 
-interface ProviderColumnsArgs {
+export interface ProviderColumnsArgs {
   registry: ProviderRegistryEntry[] | undefined;
   testingIds: ReadonlySet<string>;
   testResults: Record<string, TestResult | null>;
@@ -76,6 +76,7 @@ interface ProviderColumnsArgs {
   onRenamingChange: (id: string | null) => void;
   onTest: (id: string) => void;
   onRename: (pk: ModelProviderCredentialInfo, label: string) => Promise<void>;
+  /** Only the organization's page chooses models and sets the default. */
   onChooseModels?: (pk: ModelProviderCredentialInfo) => void;
   onChangeKey: (pk: ModelProviderCredentialInfo) => void;
   onReconnect: (pk: ModelProviderCredentialInfo) => void;
@@ -262,7 +263,6 @@ export function useProviderColumns({
             <TableRowActions
               menuLabel={t("providers.moreActions", { name: t("providers.type.system") })}
               isPending={testable.some((m) => modelTest.testingIds.has(m.id))}
-              pendingLabel={t("common:loading")}
             >
               {choices.length > 0 && (
                 <DropdownMenuSub>
@@ -354,7 +354,6 @@ export function useProviderColumns({
           <TableRowActions
             menuLabel={t("providers.moreActions", { name: pk.label })}
             isPending={isTesting}
-            pendingLabel={t("common:loading")}
             renaming={renamingId === pk.id}
           >
             {canRename && (

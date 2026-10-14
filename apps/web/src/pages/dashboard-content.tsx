@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePermissions } from "../hooks/use-permissions";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
@@ -24,6 +24,7 @@ import { AgentIdentityTile } from "../components/agent-identity";
 import { Badge } from "../components/status-badge";
 import { EmptyState } from "../components/page-states";
 import { Modal } from "../components/modal";
+import { useModalParam } from "../hooks/use-modal-param";
 import { PageHeader } from "../components/page-header";
 import { RunDuration } from "../components/run-duration";
 import { RunAgentButton } from "../components/run-agent-button";
@@ -71,9 +72,7 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
   const { t, i18n } = useTranslation("agents");
   const canChat = useCanReach()("/chat");
   const { copy } = useCopyToClipboard();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const isAiOpen = searchParams.get("assist") === "1";
+  const assist = useModalParam("assist");
   const date = new Intl.DateTimeFormat(i18n.language, {
     weekday: "long",
     day: "numeric",
@@ -81,21 +80,12 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
   }).format(new Date());
 
   const openChat = () => {
-    navigate("/chat", {
-      state: chatDraftNavigationState(t("dashboard.askAi.draft")),
-    });
+    assist.leave("/chat", chatDraftNavigationState(t("dashboard.askAi.draft")));
   };
 
   const copyCodingAgentSetup = async () => {
     if (await copy(CODING_AGENT_SETUP_PROMPT))
       toast.success(t("dashboard.askAi.codingAgentCopied"));
-  };
-
-  const setAiOpen = (open: boolean) => {
-    const next = new URLSearchParams(searchParams);
-    if (open) next.set("assist", "1");
-    else next.delete("assist");
-    setSearchParams(next, { replace: !open });
   };
 
   return (
@@ -109,7 +99,7 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
         titleClassName="text-3xl font-bold tracking-tight"
         breadcrumbs={[{ label: t("dashboard.breadcrumb") }]}
         actions={
-          <Button type="button" variant="outline" onClick={() => setAiOpen(true)}>
+          <Button type="button" variant="outline" onClick={() => assist.open()}>
             <Sparkles />
             {t("dashboard.askAi.action")}
           </Button>
@@ -120,10 +110,10 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
         </p>
       </PageHeader>
 
-      {isAiOpen && (
+      {assist.value !== null && (
         <Modal
           open
-          onClose={() => setAiOpen(false)}
+          onClose={assist.close}
           title={t("dashboard.askAi.title")}
           className="sm:max-w-xl"
         >

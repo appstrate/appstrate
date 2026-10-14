@@ -78,7 +78,6 @@ export function OAuthClientActions({
       <TableRowActions
         menuLabel={t("oauthClients.moreActions", { name: rowName })}
         isPending={isPending}
-        pendingLabel={t("common:loading")}
       >
         {canWrite && (
           <DropdownMenuItem onSelect={onEdit}>

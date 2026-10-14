@@ -134,7 +134,6 @@ export function useApiKeyColumns({
           <TableRowActions
             menuLabel={t("apiKeys.moreActions", { name: key.name })}
             isPending={revokingKeyId === key.id}
-            pendingLabel={t("common:loading")}
           >
             <DropdownMenuItem
               onSelect={() => revoke(key)}

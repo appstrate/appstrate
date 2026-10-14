@@ -22,6 +22,7 @@ import {
   type Path,
   type To,
 } from "react-router-dom";
+import { searchOf } from "../lib/url-search";
 
 /** History state key naming the modal whose opening pushed the entry. */
 const OPENED_BY = "openedModal";
@@ -59,8 +60,7 @@ export function modalParamStep(
   if (next === null) params.delete(name);
   else params.set(name, next);
   if (closing) params.delete(closing);
-  const query = params.toString();
-  const search = query ? `?${query}` : "";
+  const search = searchOf(params);
   if (next === null) return { back: false, search, replace: true, state: current.state };
   if (!open) return { back: false, search, replace: false, state: withOpener(current.state, name) };
   // The entry is the open modal's: replaced, and still an opening's own when it was one.
@@ -76,8 +76,7 @@ export function modalParamStep(
 function withoutParam(search: string, name: string): string {
   const params = new URLSearchParams(search);
   params.delete(name);
-  const query = params.toString();
-  return query ? `?${query}` : "";
+  return searchOf(params);
 }
 
 interface ModalNavigation {

@@ -21,7 +21,7 @@
  */
 
 import type { PackageType } from "@appstrate/core/validation";
-import type { CataloguePlacement, PlacementState } from "./catalogue-placement";
+import { placementIn, type CataloguePlacement, type PlacementState } from "./catalogue-placement";
 import type { ActivationGate, ActivationRefusal } from "./catalogue-gates";
 
 export interface SheetSpaceRow {
@@ -56,13 +56,7 @@ export function sheetSpaceRows(
       ]
     : spaces;
   return ordered.map((space) => {
-    const state: PlacementState | null = placement.activeIn.includes(space.id)
-      ? "active"
-      : placement.offeredIn.includes(space.id)
-        ? "offered"
-        : placement.inactiveIn.includes(space.id)
-          ? "inactive"
-          : null;
+    const state = placementIn(placement, space.id);
     const gate = gateOf(space.id, state !== "active");
     return {
       id: space.id,

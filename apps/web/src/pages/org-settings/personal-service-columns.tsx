@@ -95,7 +95,6 @@ export function usePersonalServiceColumns({
         canWriteModels ? (
           <TableRowActions
             menuLabel={t("providers.moreActions", { name: row.service.displayName })}
-            pendingLabel={t("common:loading")}
           >
             <DropdownMenuItem onSelect={() => onChooseModels(row)}>
               <ListChecks />

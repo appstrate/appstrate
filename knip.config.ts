@@ -317,9 +317,7 @@ const config: KnipConfig = {
    * still reported, which is the whole reason the `./components/*` wildcard
    * was dropped from the `packages/ui` entry list below.
    */
-  ignoreIssues: {
-    "packages/ui/src/components/*.tsx": ["exports"],
-  },
+  ignoreIssues: { "packages/ui/src/components/*.tsx": ["exports"] },
 
   /**
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists

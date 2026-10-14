@@ -59,7 +59,6 @@ interface PackageTabProps {
   /** What KIND it holds. Decides which columns can say anything at all. */
   holds: PackageType;
   extraActions?: ReactNode;
-  headerContent?: ReactNode;
 }
 
 export function PackageTab({
@@ -75,7 +74,6 @@ export function PackageTab({
   entity,
   holds,
   extraActions,
-  headerContent,
 }: PackageTabProps) {
   const view = usePackageViewStore((s) => s.view);
   const setView = usePackageViewStore((s) => s.setView);
@@ -89,9 +87,7 @@ export function PackageTab({
           variant="collection"
           breadcrumbs={breadcrumbs}
           actions={extraActions}
-        >
-          {headerContent}
-        </PageHeader>
+        />
       ) : null}
       <PackageCollection
         items={items}

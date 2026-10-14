@@ -41,7 +41,6 @@ export function DocumentRowActions({
     <TableRowActions
       menuLabel={hasMenu ? t("row.moreActions", { name: doc.name }) : undefined}
       isPending={isPending}
-      pendingLabel={t("common:loading")}
     >
       {hasMenu ? (
         <>

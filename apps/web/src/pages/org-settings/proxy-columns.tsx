@@ -121,7 +121,6 @@ export function useProxyColumns({
             <TableRowActions
               menuLabel={t("proxies.moreActions", { name: p.label })}
               isPending={isTesting || isSettingDefault}
-              pendingLabel={t("common:loading")}
             >
               {isCustom && onEdit && (
                 <DropdownMenuItem onSelect={() => onEdit(p)}>

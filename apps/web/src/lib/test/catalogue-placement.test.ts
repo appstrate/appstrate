@@ -11,8 +11,8 @@ import {
   cataloguePlacement,
   detailSpace,
   inPlacedTab,
-  pendingOfferCount,
   pendingShares,
+  placementIn,
 } from "../catalogue-placement.ts";
 import type { LibraryPackageItem } from "../../hooks/use-library.ts";
 
@@ -141,25 +141,20 @@ describe("what is an offer, and what is merely off", () => {
   });
 });
 
-describe("pendingOfferCount", () => {
-  it("counts placements, not packages: one offer per space is one decision", () => {
-    expect(
-      pendingOfferCount([
-        pkg([
-          { space_id: "spc_a", state: "none" },
-          { space_id: "spc_b", state: "none" },
-          { space_id: "spc_home", state: "active", via: "home" },
-        ]),
-        pkg([{ space_id: "spc_c", state: "inactive" }]),
-        // Not offers: off for a reason nobody has to decide on.
-        pkg([{ space_id: "spc_d", state: "none", via: "system" }], null),
-        pkg([{ space_id: "spc_home", state: "none", via: "home" }]),
+describe("placementIn", () => {
+  it("reads the state of each space the package is placed in, and null elsewhere", () => {
+    const placement = cataloguePlacement(
+      pkg([
+        { space_id: "spc_home", state: "active", via: "home" },
+        { space_id: "spc_a", state: "none" },
+        { space_id: "spc_b", state: "inactive" },
       ]),
-    ).toBe(2);
-  });
-
-  it("is zero with nothing offered", () => {
-    expect(pendingOfferCount([pkg([{ space_id: "spc_a", state: "active" }])])).toBe(0);
+      "spc_home",
+    );
+    expect(placementIn(placement, "spc_home")).toBe("active");
+    expect(placementIn(placement, "spc_a")).toBe("offered");
+    expect(placementIn(placement, "spc_b")).toBe("inactive");
+    expect(placementIn(placement, "spc_c")).toBeNull();
   });
 });
 
@@ -191,6 +186,7 @@ describe("pendingShares", () => {
           { space_id: "spc_b", state: "inactive" },
           { space_id: "spc_c", state: "none", via: "system" },
         ]),
+        pkg([{ space_id: "spc_home", state: "none", via: "home" }]),
       ]),
     ).toEqual([]);
   });

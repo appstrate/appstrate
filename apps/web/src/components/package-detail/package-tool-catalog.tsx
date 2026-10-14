@@ -14,6 +14,7 @@ import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
 import { Modal } from "../modal";
 import { useModalParam } from "../../hooks/use-modal-param";
+import { matchesSearch } from "../../lib/strings";
 
 export interface PackageTool {
   name: string;
@@ -100,10 +101,9 @@ export function PackageToolCatalog({
       ),
     ),
   ];
-  const needle = search.trim().toLocaleLowerCase();
   const rows = catalog.filter(
     (tool) =>
-      `${tool.name} ${tool.description ?? ""}`.toLocaleLowerCase().includes(needle) &&
+      matchesSearch(search, [tool.name, tool.description]) &&
       (auths.length === 0 || auths.some((key) => (tool.permissions?.[key]?.length ?? 0) > 0)) &&
       (!inventory ||
         ((exposures.length === 0 || exposures.includes(tool.inspection!.exposure)) &&

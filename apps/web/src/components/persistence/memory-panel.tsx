@@ -17,6 +17,7 @@ import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
+import { matchesSearch } from "../../lib/strings";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { useModalParam } from "../../hooks/use-modal-param";
 import {
@@ -222,16 +223,13 @@ function AgentMemoryCollection({
   // The entry read in the modal: `?memory=pinned:12`. One the list no longer holds shows nothing.
   const selected = allItems.find((item) => `${item.kind}:${item.id}` === memoryParam.value) ?? null;
 
-  const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredItems = allItems.filter((item) => {
     const scope = item.actor_type === "shared" ? "shared" : "mine";
     const scopeMatches = scopes.length === 0 || scopes.includes(scope);
     const typeMatches = types.length === 0 || types.includes(item.kind);
-    const queryMatches =
-      normalizedQuery === "" ||
-      item.key?.toLocaleLowerCase().includes(normalizedQuery) ||
-      memoryText(item.content).toLocaleLowerCase().includes(normalizedQuery);
-    return scopeMatches && typeMatches && queryMatches;
+    return (
+      scopeMatches && typeMatches && matchesSearch(query, [item.key, memoryText(item.content)])
+    );
   });
 
   const filters: FilterSpec[] = [

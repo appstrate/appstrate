@@ -12,6 +12,7 @@ import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
 import { agentSettingsHref } from "../../lib/settings-section-href";
+import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { AgentHealthSection } from "./agent-health-section";
 
@@ -103,8 +104,7 @@ function OperationalSummary({
     if (hash === "#runs") search.delete("agentRunStatus");
     if (hash === "#memory") search.delete("agentMemory");
     if (key && value) search.set(key, value);
-    const query = search.toString();
-    return { pathname: location.pathname, search: query ? `?${query}` : "", hash };
+    return { pathname: location.pathname, search: searchOf(search), hash };
   };
 
   return (

@@ -179,7 +179,6 @@ export function useMemberColumns({
               name: memberLabel(member),
             })}
             isPending={isRemoving}
-            pendingLabel={t("common:loading")}
           >
             <DropdownMenuItem
               onSelect={() => onRemove(member)}

@@ -308,7 +308,6 @@ export function ConnectionActionsCell({
         <TableRowActions
           menuLabel={t("integration.connection.moreActions", { name: connection.label })}
           isPending={disconnect.isPending || reconnecting}
-          pendingLabel={t("common:loading")}
           renaming={renaming}
         >
           {canRename && (

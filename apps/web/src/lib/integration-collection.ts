@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { IntegrationSummaryWire } from "../hooks/use-integrations";
+import { matchesSearch } from "./strings";
 
 export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 /**
@@ -57,15 +58,8 @@ export function integrationOrigin(integration: IntegrationSummaryWire): Integrat
 }
 
 function integrationMatchesQuery(integration: IntegrationSummaryWire, query: string): boolean {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return true;
-  const manifest = integration.manifest;
-  return (
-    integration.id.toLowerCase().includes(normalized) ||
-    (manifest.display_name?.toLowerCase().includes(normalized) ?? false) ||
-    (manifest.description?.toLowerCase().includes(normalized) ?? false) ||
-    (manifest.keywords?.some((keyword) => keyword.toLowerCase().includes(normalized)) ?? false)
-  );
+  const { display_name, description, keywords } = integration.manifest;
+  return matchesSearch(query, [integration.id, display_name, description, keywords]);
 }
 
 export function filterIntegrations(

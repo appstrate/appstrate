@@ -162,7 +162,6 @@ export function useIntegrationClientColumns({
           <TableRowActions
             menuLabel={t("integration.oauthClient.moreActions", { name: client.client_id })}
             isPending={pendingClientRef === client.client_ref}
-            pendingLabel={t("common:loading")}
           >
             {useHere && (
               <DropdownMenuItem

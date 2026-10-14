@@ -92,7 +92,6 @@ export function useEndUserColumns({
             name: endUserDisplayName(user, t("spaces.anonymousUser")),
           })}
           isPending={deletingUserId === user.id}
-          pendingLabel={t("common:loading")}
         >
           {canEdit && (
             <DropdownMenuItem onSelect={() => onEdit(user)}>

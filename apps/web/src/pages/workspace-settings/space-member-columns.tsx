@@ -132,7 +132,6 @@ export function useSpaceMemberColumns({
           <TableRowActions
             menuLabel={t("spaceMembers.moreActions", { name: spaceMemberLabel(member) })}
             isPending={isRemoving}
-            pendingLabel={t("common:loading")}
           >
             <DropdownMenuItem
               onSelect={() => onRemove(member)}

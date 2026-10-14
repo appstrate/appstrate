@@ -98,7 +98,6 @@ export function useInvitationColumns({
         <TableRowActions
           menuLabel={t("orgSettings.moreInvitationActions", { email: invitation.email })}
           isPending={isCanceling}
-          pendingLabel={t("common:loading")}
         >
           {canEdit && (
             <DropdownMenuItem onSelect={() => onEdit(invitation)}>

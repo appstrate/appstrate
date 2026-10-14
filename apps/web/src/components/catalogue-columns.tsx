@@ -13,7 +13,7 @@
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Switch } from "@appstrate/ui/components/switch";
-import type { CataloguePlacement } from "../lib/catalogue-placement";
+import { placementIn, type CataloguePlacement } from "../lib/catalogue-placement";
 import {
   ACTIVATION_REFUSAL_KEY,
   type ActivationGate,
@@ -261,13 +261,7 @@ export function useCatalogueSpaceColumns({
     cell: (item) => {
       const placement = placementOf(item);
       if (!placement) return <span className="text-muted-foreground/50">—</span>;
-      const state = placement.activeIn.includes(space.id)
-        ? "active"
-        : placement.offeredIn.includes(space.id)
-          ? "offered"
-          : placement.inactiveIn.includes(space.id)
-            ? "inactive"
-            : null;
+      const state = placementIn(placement, space.id);
       const gate = gateOf(item, space.id, state !== "active");
       return (
         // `relative z-10`: the row link paints an overlay over every cell, and

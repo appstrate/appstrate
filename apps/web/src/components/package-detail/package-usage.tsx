@@ -6,6 +6,7 @@ import { Layers } from "lucide-react";
 import { useAgents } from "../../hooks/use-packages";
 import type { CardItem } from "../../pages/package-list";
 import { packageDetailPath } from "../../lib/package-paths";
+import { matchesSearch } from "../../lib/strings";
 import { DataTable } from "../data-table";
 import { usePackageColumns } from "../package-columns";
 import { ListToolbar } from "../list-toolbar";
@@ -28,7 +29,6 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
       keywords: agent.keywords,
       runningRuns: agent.running_runs,
     }));
-  const needle = search.trim().toLocaleLowerCase();
   return (
     <>
       <ListToolbar
@@ -42,9 +42,7 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
         label={t("packages.usedBy")}
         columns={columns}
         rows={items.filter((item) =>
-          `${item.displayName} ${item.id} ${item.description ?? ""}`
-            .toLocaleLowerCase()
-            .includes(needle),
+          matchesSearch(search, [item.displayName, item.id, item.description]),
         )}
         rowKey={(item) => item.id}
         rowHref={(item) => packageDetailPath("agent", item.id)}

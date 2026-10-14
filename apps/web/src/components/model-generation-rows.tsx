@@ -10,6 +10,7 @@
 import { CircleSlash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { withStoredTemperature } from "../lib/temperature-options";
+import { formatNumber } from "../lib/format-number";
 import {
   Select,
   SelectContent,
@@ -44,7 +45,7 @@ export function GenerationSettingRows({
   inheritLabels?: { temperature?: string; reasoning?: string };
   onChange: (next: ModelGenerationSettings) => void;
 }) {
-  const { t, i18n } = useTranslation(["settings", "agents"]);
+  const { t } = useTranslation(["settings", "agents"]);
   const temperatureUnsupported = model?.generation?.temperature === "unsupported";
   const supportedReasoningLevels = MODEL_REASONING_LEVELS.filter(
     (level) => model?.generation?.reasoning.levels[level] === "supported",
@@ -65,7 +66,7 @@ export function GenerationSettingRows({
       { value: "1", label: t("detail.configuration.temperature.exploratory", { ns: "agents" }) },
     ],
     generation.temperature,
-    (value) => new Intl.NumberFormat(i18n.language).format(value),
+    formatNumber,
   );
   const unsupportedItem = (
     <SelectItem value={UNSUPPORTED}>

@@ -18,6 +18,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
+import { matchesSearch } from "../lib/strings";
 import { useScheduleViewStore } from "../stores/list-view-store";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -71,16 +72,11 @@ export function SchedulesListPage() {
   const query = list.search;
   const states = list.values("state", STATES);
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return (schedules ?? []).filter((schedule) => {
       const enabled = schedule.enabled ?? true;
       const key = enabled ? "enabled" : "disabled";
       if (states.length > 0 && !states.includes(key)) return false;
-      if (!q) return true;
-      return (
-        (schedule.name ?? "").toLowerCase().includes(q) ||
-        agentName(schedule.packageId).toLowerCase().includes(q)
-      );
+      return matchesSearch(query, [schedule.name, agentName(schedule.packageId)]);
     });
   }, [schedules, query, states, agentName]);
 

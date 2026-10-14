@@ -77,7 +77,6 @@ export function useRoleColumns({
           <TableRowActions
             menuLabel={t("roles.moreActions", { name: spaceRoleLabel(role, t) ?? role.name })}
             isPending={isDeleting}
-            pendingLabel={t("common:loading")}
           >
             {onPreview && (
               <DropdownMenuItem onSelect={() => onPreview(role)}>

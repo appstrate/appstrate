@@ -131,7 +131,6 @@ export function useCliSessionColumns({
           <TableRowActions
             menuLabel={t("orgCliSessions.moreActions", { device: deriveLabel(session, t) })}
             isPending={isPending}
-            pendingLabel={t("common:loading")}
           >
             <DropdownMenuItem
               onSelect={() => revoke(session)}

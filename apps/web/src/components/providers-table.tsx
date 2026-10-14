@@ -14,11 +14,18 @@ import { useConnectionTest } from "../hooks/use-connection-test";
 import {
   useProvidersRegistry,
   useTestModelProviderCredential,
-  type ModelProviderCredentialInfo,
 } from "../hooks/use-model-provider-credentials";
-import type { OrgModelInfo } from "../hooks/use-models";
-import { useProviderColumns } from "../pages/org-settings/provider-columns";
+import {
+  useProviderColumns,
+  type ProviderColumnsArgs,
+} from "../pages/org-settings/provider-columns";
 import type { ProviderRow } from "../lib/model-providers";
+
+/** What the page decides: the deeds a row's menu offers, and the type column. */
+type ProviderDeeds = Omit<
+  ProviderColumnsArgs,
+  "registry" | "testingIds" | "testResults" | "renamingId" | "onRenamingChange" | "onTest"
+>;
 
 export function ProvidersTable({
   label,
@@ -27,16 +34,8 @@ export function ProvidersTable({
   isLoading,
   error,
   empty,
-  showType,
-  canWriteModels,
-  onRename,
-  onChooseModels,
-  onChangeKey,
-  onReconnect,
-  onDelete,
-  onSetDefault,
-  onDeleteModel,
-}: {
+  ...deeds
+}: ProviderDeeds & {
   /** What the table holds, for its accessible name: the org's keys, the members', the caller's. */
   label: string;
   /** Each caller's table has its own column set, so each keeps its own widths. */
@@ -46,18 +45,8 @@ export function ProvidersTable({
   error: unknown;
   /** What an empty table says, and the deed it offers a caller who may. */
   empty: { message: string; hint?: string; action?: ReactNode };
-  /** Preferences: the caller's keys are of two kinds, the column says which. */
-  showType?: boolean;
-  canWriteModels: boolean;
-  onRename: (pk: ModelProviderCredentialInfo, label: string) => Promise<void>;
-  /** Only the organization's page chooses models and sets the default. */
-  onChooseModels?: (pk: ModelProviderCredentialInfo) => void;
-  onChangeKey: (pk: ModelProviderCredentialInfo) => void;
-  onReconnect: (pk: ModelProviderCredentialInfo) => void;
-  onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onSetDefault?: (m: OrgModelInfo) => void;
-  onDeleteModel?: (m: OrgModelInfo) => void;
 }) {
+  const { onChooseModels, canWriteModels } = deeds;
   const { testingIds, testResults, handleTest } = useConnectionTest(
     useTestModelProviderCredential(),
   );
@@ -72,15 +61,7 @@ export function ProvidersTable({
     renamingId,
     onRenamingChange: setRenamingId,
     onTest: handleTest,
-    onRename,
-    onChooseModels,
-    onChangeKey,
-    onReconnect,
-    onDelete,
-    onSetDefault,
-    onDeleteModel,
-    canWriteModels,
-    showType,
+    ...deeds,
   });
 
   return (

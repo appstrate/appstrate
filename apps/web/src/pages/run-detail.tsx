@@ -25,6 +25,7 @@ import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
 import { isPublishedFileLogEvent } from "../lib/files";
+import { searchOf } from "../lib/url-search";
 import { replayVersion } from "../lib/version-selector";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
@@ -84,6 +85,13 @@ export function RunDetailPage() {
     requestedJournalFilter === "errors"
       ? requestedJournalFilter
       : undefined;
+  // A tab of this run, the journal on `filter`; the rest of the query stays.
+  const openTab = (hash: "#journal" | "#results", filter?: JournalOverviewFilter) => {
+    const search = new URLSearchParams(location.search);
+    if (filter) search.set("journalFilter", filter);
+    else search.delete("journalFilter");
+    navigate({ pathname: location.pathname, search: searchOf(search), hash });
+  };
 
   // `useGlobalRunSync` (mounted in MainLayout) patches `run.status` directly
   // into the React Query cache from the LISTEN/NOTIFY stream, so reading
@@ -356,27 +364,8 @@ export function RunDetailPage() {
               structuredOutput={finalOutput}
               memoryChangeCount={runMemoryCount}
               modelFallback={modelFallback}
-              onOpenJournal={(filter) => {
-                const search = new URLSearchParams(location.search);
-                if (filter) search.set("journalFilter", filter);
-                else search.delete("journalFilter");
-                const query = search.toString();
-                navigate({
-                  pathname: location.pathname,
-                  search: query ? `?${query}` : "",
-                  hash: "#journal",
-                });
-              }}
-              onOpenResults={() => {
-                const search = new URLSearchParams(location.search);
-                search.delete("journalFilter");
-                const query = search.toString();
-                navigate({
-                  pathname: location.pathname,
-                  search: query ? `?${query}` : "",
-                  hash: "#results",
-                });
-              }}
+              onOpenJournal={(filter) => openTab("#journal", filter)}
+              onOpenResults={() => openTab("#results")}
             />
           </TabsContent>
 

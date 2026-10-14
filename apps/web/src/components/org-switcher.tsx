@@ -25,6 +25,7 @@ import { $api } from "../api/client";
 import { useSpaces } from "../hooks/use-spaces";
 import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
+import { matchesSearch } from "../lib/strings";
 import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { spaceStore } from "../stores/space-store";
@@ -105,14 +106,12 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   if (loading) return <Skeleton className="h-6 w-40" />;
   if (!currentOrg) return null;
 
-  const needle = query.trim().toLowerCase();
-  const matches = (name: string) => !needle || name.toLowerCase().includes(needle);
-  const shownOrgs = orgs.filter((o) => matches(o.name));
+  const shownOrgs = orgs.filter((o) => matchesSearch(query, [o.name]));
   // "Mon espace" sits above the team spaces, and is called by the reader's own
   // word rather than the French the server stored once (`spaceLabel`): the wire
   // deliberately never says whose space it is (RBAC spec §3.6).
   const shownSpaces = (exploredSpaces.data ?? [])
-    .filter((a) => matches(spaceLabel(a, t)))
+    .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
   /**

@@ -10,6 +10,7 @@ import { DataTable } from "./data-table";
 import { ListToolbar } from "./list-toolbar";
 import { EmptyState, EmptyStateAction, ErrorState } from "./page-states";
 import { packageDetailPath } from "../lib/package-paths";
+import { matchesSearch } from "../lib/strings";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "./table-row-actions";
 import { ConfirmModal } from "./confirm-modal";
@@ -53,7 +54,7 @@ export function VersionHistory({
 
   const rows = (versions ?? []).filter(
     (version) =>
-      version.version.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) &&
+      matchesSearch(search, [version.version]) &&
       (states.length === 0 || states.includes(version.yanked ? "yanked" : "published")),
   );
 

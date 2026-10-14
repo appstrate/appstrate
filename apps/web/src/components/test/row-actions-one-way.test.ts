@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
 
 const WEB_SRC = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-const ALLOWED_PROPS = new Set(["menuLabel", "isPending", "pendingLabel", "renaming"]);
+const ALLOWED_PROPS = new Set(["menuLabel", "isPending", "renaming"]);
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

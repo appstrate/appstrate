@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
 import { SectionCard } from "../section-card";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
+import { matchesSearch } from "../../lib/strings";
 import {
   usePackageList,
   useUploadPackage,
@@ -251,13 +252,9 @@ export function ResourceSection({
     </label>
   );
 
-  const matchesFilter = (id: string, name = "", description = "") => {
-    const needle = search.trim().toLocaleLowerCase();
-    return (
-      `${id} ${name} ${description}`.toLocaleLowerCase().includes(needle) &&
-      (selection.length === 0 || selection.includes(selectedMap.has(id) ? "selected" : "available"))
-    );
-  };
+  const matchesFilter = (id: string, name = "", description = "") =>
+    matchesSearch(search, [id, name, description]) &&
+    (selection.length === 0 || selection.includes(selectedMap.has(id) ? "selected" : "available"));
   const visibleItems = (items ?? []).filter((item) =>
     matchesFilter(item.id, item.name ?? "", item.description ?? ""),
   );
@@ -799,9 +796,8 @@ function ResourcePicker({
   const { t } = useTranslation(["agents", "common"]);
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const needle = search.trim().toLocaleLowerCase();
   const shown = items.filter((item) =>
-    `${item.id} ${item.name ?? ""} ${item.description ?? ""}`.toLocaleLowerCase().includes(needle),
+    matchesSearch(search, [item.id, item.name, item.description]),
   );
 
   return (

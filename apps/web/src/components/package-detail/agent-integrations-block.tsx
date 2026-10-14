@@ -23,6 +23,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant } from "../../hooks/use-permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 import type { ConnectionSet } from "../../lib/connection-set";
+import { matchesSearch } from "../../lib/strings";
 import { IntegrationConnectionPicker } from "../integration-connect/integration-connection-picker";
 import {
   describeResolution,
@@ -95,7 +96,6 @@ export function AgentIntegrationsBlock({
   const [states, setStates] = useState<string[]>([]);
   const details = useIntegrationDetails(entries.map((entry) => entry.id));
 
-  const normalizedSearch = search.trim().toLocaleLowerCase();
   const rows = entries
     .map((entry, index) => {
       const query = details[index]!;
@@ -115,11 +115,7 @@ export function AgentIntegrationsBlock({
     .filter((row) => {
       const state = row.spaceActive ? "active" : "inactive";
       const matchesState = states.length === 0 || states.includes(state);
-      const matchesSearch =
-        normalizedSearch === "" ||
-        row.entry.id.toLocaleLowerCase().includes(normalizedSearch) ||
-        row.displayName.toLocaleLowerCase().includes(normalizedSearch);
-      return matchesState && matchesSearch;
+      return matchesState && matchesSearch(search, [row.entry.id, row.displayName]);
     });
   type Row = (typeof rows)[number];
   const columns: DataColumn<Row>[] = [

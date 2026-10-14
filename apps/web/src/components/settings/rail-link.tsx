@@ -10,10 +10,9 @@ interface RailLinkItem {
   icon: LucideIcon;
 }
 
-function railItemClass(active: boolean, mobile: boolean): string {
+function railItemClass(active: boolean): string {
   return cn(
     "grid w-full grid-cols-[1rem_minmax(0,1fr)_auto] items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-    mobile && "min-h-11",
     active
       ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
       : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
@@ -25,25 +24,16 @@ export function RailLink({
   item,
   label,
   active,
-  mobile = false,
-  onNavigate,
   locked = false,
 }: {
   item: RailLinkItem;
   label: string;
   active: boolean;
-  mobile?: boolean;
-  onNavigate?: () => void;
   /** The entry stays, its content says what the role does not allow: a lock marks it. */
   locked?: boolean;
 }) {
   return (
-    <Link
-      to={item.to}
-      onClick={onNavigate}
-      aria-current={active ? "page" : undefined}
-      className={railItemClass(active, mobile)}
-    >
+    <Link to={item.to} aria-current={active ? "page" : undefined} className={railItemClass(active)}>
       <item.icon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>
       {locked && <Lock className="text-muted-foreground ml-auto size-3.5 shrink-0" aria-hidden />}
@@ -70,7 +60,7 @@ export function RailButton({
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
-      className={railItemClass(active, false)}
+      className={railItemClass(active)}
     >
       <Icon className="size-4 shrink-0" />
       <span className="truncate">{label}</span>

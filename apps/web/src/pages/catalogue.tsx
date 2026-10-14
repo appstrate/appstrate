@@ -24,6 +24,7 @@ import {
   type CatalogueReading,
 } from "../lib/catalogue-link";
 import { useCloseOverlay } from "../lib/modal-route";
+import { searchOf } from "../lib/url-search";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import { OverlayUnavailable } from "../components/overlay-unavailable";
 
@@ -50,8 +51,7 @@ export function CataloguePage() {
         // reading; the rest of the query does.
         const query = new URLSearchParams(location.search);
         if (nextReading !== reading) query.delete("state");
-        const search = query.toString();
-        return `/catalogue/${nextReading}/${nextType}${search ? `?${search}` : ""}`;
+        return `/catalogue/${nextReading}/${nextType}${searchOf(query)}`;
       }}
       onClose={close}
     />

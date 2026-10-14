@@ -32,23 +32,13 @@ import { SettingsHeading } from "./settings/settings-heading";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import type { ListState } from "../lib/list-params";
+import { matchesSearch } from "../lib/strings";
 import type { CardItem } from "../pages/package-list";
 
 /** Stable empties: a fresh literal in a default would remount the table set. */
 const NO_COLUMNS: DataColumn<CardItem>[] = [];
 const NO_IDS: string[] = [];
 const NO_FILTERS: FilterSpec[] = [];
-
-/** Name, description and keywords — everything a card puts on screen. */
-function matches(item: CardItem, query: string): boolean {
-  if (!query) return true;
-  const q = query.toLowerCase();
-  return (
-    item.displayName.toLowerCase().includes(q) ||
-    (item.description?.toLowerCase().includes(q) ?? false) ||
-    (item.keywords?.some((keyword) => keyword.toLowerCase().includes(q)) ?? false)
-  );
-}
 
 export interface PackageCollectionProps {
   items: CardItem[] | undefined;
@@ -87,14 +77,6 @@ export interface PackageCollectionProps {
   cardRun?: boolean;
   /** Drawn at the right end of the bar, where a list's actions always are. */
   actions?: ReactNode;
-  /**
-   * Filters the CALLER owns, cleared alongside the list's own.
-   *
-   * `list.reset` knows the dimensions it stores; a screen whose filters live in
-   * the URL (the catalogue's space and state) has some it cannot see, and
-   * "Réinitialiser" left those chips standing.
-   */
-  onResetFilters?: () => void;
   /** Above the bar: what this collection is. */
   header?: ReactNode;
   /** `CollectionTabs` for the bar's line, before the search. */
@@ -138,7 +120,6 @@ export function PackageCollection({
   extraFilters = NO_FILTERS,
   cardRun = true,
   actions,
-  onResetFilters,
   header,
   tabs,
   rowAction,
@@ -159,7 +140,8 @@ export function PackageCollection({
   const visibility = useColumnVisibility("packages");
 
   const shown = (items ?? []).filter((item) => {
-    if (!matches(item, query)) return false;
+    // Name, description and keywords — everything a card puts on screen.
+    if (!matchesSearch(query, [item.displayName, item.description, item.keywords])) return false;
     if (origins.length > 0 && !origins.includes(item.source ?? "local")) return false;
     if (!activityFilter) return true;
 
@@ -218,13 +200,9 @@ export function PackageCollection({
   // the bar and the count above and below it never move. An early return above
   // the toolbar would cost an empty list its bar and make it re-offer the
   // page's own actions as unlabelled icons.
-  const resetAll = () => {
-    list.reset();
-    onResetFilters?.();
-  };
   const emptyBody = filtering ? (
     <EmptyState message={t("list.noMatch")} icon={SearchX} compact>
-      <Button variant="outline" size="sm" onClick={resetAll}>
+      <Button variant="outline" size="sm" onClick={list.reset}>
         {t("toolbar.clearAll", { ns: "common" })}
       </Button>
     </EmptyState>
@@ -241,7 +219,7 @@ export function PackageCollection({
         tabs={tabs}
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={filters}
-        onReset={resetAll}
+        onReset={list.reset}
         // Only the table view has columns to choose from, and only the set the
         // list owns: a tick and a deed are not columns anyone hides.
         columns={view === "table" ? columnMenu(baseColumns, visibility) : undefined}

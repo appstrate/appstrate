@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import { runDetailPath } from "./package-paths";
+import { hrefWithSearch } from "./url-search";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
@@ -161,8 +162,7 @@ export function filePreviewHref(
 ): string {
   const params = new URLSearchParams(location.search);
   params.set("preview", id);
-  const search = params.toString();
-  return `${location.pathname}${search ? `?${search}` : ""}${location.hash}`;
+  return hrefWithSearch(location, params);
 }
 
 /** Files inside this window (or already past) get the amber "expiring" state. */

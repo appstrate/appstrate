@@ -66,7 +66,7 @@ export interface CataloguePlacement {
  */
 function stateOf(placement: LibraryPlacement): PlacementState {
   if (placement.state === "active") return "active";
-  return placement.state === "none" && placement.via === "shared" ? "offered" : "inactive";
+  return isPendingOffer(placement) ? "offered" : "inactive";
 }
 
 /** An offer nobody has taken up — the only placement that waits on a person. */
@@ -105,19 +105,16 @@ export function cataloguePlacement(
   };
 }
 
+/** Its state in one space, or `null` when it is not placed there. */
+export function placementIn(placement: CataloguePlacement, spaceId: string): PlacementState | null {
+  if (placement.activeIn.includes(spaceId)) return "active";
+  if (placement.offeredIn.includes(spaceId)) return "offered";
+  return placement.inactiveIn.includes(spaceId) ? "inactive" : null;
+}
+
 /** Is this row one of the two tabs' subject? */
 export function inPlacedTab(placement: CataloguePlacement): boolean {
   return !placement.unplaced;
-}
-
-/**
- * The one number the navigation carries: offers nobody has taken up.
- *
- * It counts PLACEMENTS, not packages — one package offered to three spaces is
- * three decisions, taken by three different people.
- */
-export function pendingOfferCount(packages: readonly LibraryPackageItem[]): number {
-  return pendingShares(packages).length;
 }
 
 /** One decision waiting: this package, shared with this space, by this person. */
@@ -131,9 +128,8 @@ export interface PendingShare {
 /**
  * Every decision waiting, across kinds — what "Partages en attente" lists.
  *
- * One entry per PLACEMENT, for the reason the count above gives: a package
- * shared with two of the reader's spaces asks two spaces to decide, and each
- * answer is its own switch.
+ * One entry per PLACEMENT, not per package: a package shared with two of the
+ * reader's spaces asks two spaces to decide, and each answer is its own switch.
  */
 export function pendingShares(packages: readonly LibraryPackageItem[]): PendingShare[] {
   return packages.flatMap((pkg) =>

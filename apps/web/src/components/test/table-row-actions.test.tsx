@@ -32,12 +32,12 @@ describe("TableRowActions", () => {
 
   it("shows pending state on the row and locks its menu", () => {
     const html = render(
-      <TableRowActions menuLabel="Plus d’actions" isPending pendingLabel="Enregistrement…">
+      <TableRowActions menuLabel="Plus d’actions" isPending>
         <DropdownMenuItem>Supprimer</DropdownMenuItem>
       </TableRowActions>,
     );
 
-    expect(html).toContain('aria-label="Enregistrement…"');
+    expect(html).toContain('aria-label="Chargement..."');
     expect(html.match(/disabled=""/g)).toHaveLength(1);
     expect(html).toContain('role="status"');
   });

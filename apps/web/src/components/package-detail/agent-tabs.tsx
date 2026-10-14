@@ -17,6 +17,7 @@ import { EmptyState, EmptyStateAction } from "../page-states";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { runStatusValues } from "@appstrate/core/run-status";
 import { readList, useLocalListParams } from "../../lib/list-params";
+import { matchesSearch } from "../../lib/strings";
 import { useRunStatusFilter } from "../../hooks/use-run-status-filter";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { NEW_SCHEDULE_PARAM } from "../new-schedule-modal";
@@ -86,15 +87,13 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
     return <EmptyState message={t("schedule.fileInputBlocked")} icon={Ban} compact />;
   }
 
-  const normalizedSearch = search.trim().toLocaleLowerCase();
   const filteredSchedules = (schedules ?? []).filter((schedule) => {
     const state = schedule.enabled ? "active" : "disabled";
     const matchesState = states.length === 0 || states.includes(state);
-    const matchesSearch =
-      normalizedSearch === "" ||
-      (schedule.name ?? schedule.id).toLocaleLowerCase().includes(normalizedSearch) ||
-      schedule.cron_expression.toLocaleLowerCase().includes(normalizedSearch);
-    return matchesState && matchesSearch;
+    return (
+      matchesState &&
+      matchesSearch(search, [schedule.name ?? schedule.id, schedule.cron_expression])
+    );
   });
   const filters: FilterSpec[] = [
     {
