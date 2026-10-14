@@ -379,6 +379,21 @@ describe("Organizations API", () => {
       expect(res.status).toBe(403);
     });
 
+    it("answers a non-UUID org id exactly as an unknown one (#1969)", async () => {
+      const ctx = await createTestContext();
+      const problem = async (path: string) => {
+        const { code, detail, title } = await expectProblem(
+          await app.request(path, { headers: { Cookie: ctx.cookie } }),
+          403,
+        );
+        return { code, detail, title };
+      };
+
+      expect(await problem("/api/orgs/members/settings")).toEqual(
+        await problem(`/api/orgs/${crypto.randomUUID()}/settings`),
+      );
+    });
+
     it("exposes storage usage with a null limit when no quota is configured (issue #945)", async () => {
       const ctx = await createTestContext();
       // Simulate stored files by bumping the transactional byte counter.
