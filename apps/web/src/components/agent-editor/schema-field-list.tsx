@@ -78,6 +78,12 @@ import {
 
 type SchemaMode = "input" | "output";
 
+/** Each list's two addresses: both lists can sit on one page. */
+const FIELD_PARAMS = {
+  input: { add: "newInputField", edit: "editInputField" },
+  output: { add: "newOutputField", edit: "editOutputField" },
+} as const satisfies Record<SchemaMode, { add: string; edit: string }>;
+
 const TYPE_OPTIONS: JSONSchema7TypeName[] = [
   "string",
   "number",
@@ -101,8 +107,8 @@ export function SchemaFieldList({
 }) {
   const { t } = useTranslation(["agents", "common"]);
   // Addresses like every modal: a field by its key, which survives a reload.
-  const adding = useModalParam(`new-field-${mode}`);
-  const editing = useModalTarget(`field-${mode}`, fields, (field) => field.key);
+  const adding = useModalParam(FIELD_PARAMS[mode].add);
+  const editing = useModalTarget(FIELD_PARAMS[mode].edit, fields, (field) => field.key);
   const target = editing.target;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),

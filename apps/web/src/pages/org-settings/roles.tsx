@@ -19,7 +19,7 @@ import {
   withRequiredReads,
 } from "../../lib/role-permission-dependencies";
 import { useCanPreviewRole, usePermissions } from "../../hooks/use-permissions";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import {
   spaceRoleDescription,
   spaceRoleLabel,
@@ -70,9 +70,9 @@ export function OrgSettingsRolesPage() {
   const canPreview = useCanPreviewRole();
   // Both modals have an address: `?role=<key>` (or `new`) and `?view-as`.
   // `?role=<key>` is only ever an existing role: `new` is a valid role key.
-  const roleParam = useModalParam("role");
+  const roleParam = useModalTarget("role", roles, (role) => role.key);
   const newRole = useModalParam("newRole");
-  const viewAsParam = useModalParam("view-as");
+  const viewAsParam = useModalParam("viewAs");
   // Tab and view are places too: `?tab=space&view=matrix` opens exactly that,
   // and Back undoes a switch. Each defaults to its first option, which is
   // then left out of the URL.
@@ -157,14 +157,8 @@ export function OrgSettingsRolesPage() {
   // The row opens the role: to edit it when it is yours to edit, to read it
   // otherwise. A preset's permissions are one click away, on the same gesture
   // as every row.
-  // Keeps the tab and view in the address, so closing the role lands back on them.
-  const roleHref = (role: RoleObject) => {
-    const params = new URLSearchParams(searchParams);
-    params.set("role", role.key);
-    return `?${params.toString()}`;
-  };
-  const requested = roleParam.value;
-  const target = requested ? roles?.find((role) => role.key === requested) : undefined;
+  const openRole = (role: RoleObject) => roleParam.open(role.key);
+  const target = roleParam.target;
   const editable = !!target && target.kind === "custom" && canWrite;
   const tableState = {
     isLoading,
@@ -240,7 +234,7 @@ export function OrgSettingsRolesPage() {
                   columns={presetColumns}
                   rows={presets}
                   rowKey={(role) => role.key}
-                  rowHref={roleHref}
+                  rowAction={openRole}
                   rowLabel={(role) => spaceRoleLabel(role, t) ?? role.name}
                   {...tableState}
                 />
@@ -253,7 +247,7 @@ export function OrgSettingsRolesPage() {
                   columns={customColumns}
                   rows={custom}
                   rowKey={(role) => role.id ?? role.key}
-                  rowHref={roleHref}
+                  rowAction={openRole}
                   rowLabel={(role) => role.name}
                   {...tableState}
                   empty={

@@ -21,7 +21,7 @@ import { useSpaces } from "../hooks/use-spaces";
 import { invitationUrl } from "../lib/invitation-url";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
-import { useModalParam } from "../hooks/use-modal-param";
+import { useModalTarget } from "../hooks/use-modal-param";
 import { ConfirmModal } from "./confirm-modal";
 import { DataTable } from "./data-table";
 import { Modal } from "./modal";
@@ -47,7 +47,6 @@ export function InvitationsTable({
   const { data: spaces } = useSpaces();
   const { options: roles } = useSpaceRoleOptions();
   const { copy } = useCopyToClipboard();
-  const editParam = useModalParam("invitation");
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   const canInvite = currentOrg?.id === orgId && can("members:invite");
@@ -57,9 +56,8 @@ export function InvitationsTable({
         invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
       )
     : invitations;
-  const editing = canEdit
-    ? visible.find((invitation) => invitation.id === editParam.value)
-    : undefined;
+  const editParam = useModalTarget("invitation", canEdit ? visible : undefined);
+  const editing = editParam.target;
   const canceling = visible.find((invitation) => invitation.id === cancelingId);
   const spaceName = (id: string) =>
     spaces?.find((space) => space.id === id)?.name ?? t("orgSettings.assignmentUnavailableSpace");

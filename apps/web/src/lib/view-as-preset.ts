@@ -5,7 +5,7 @@ import { memberRoleValue, type RoleObject } from "../hooks/use-roles";
 
 /**
  * What a role's own row asks the preview dialog to start from, carried in the
- * address (`?view-as=org:member`, `?view-as=space:viewer`) so the dialog opened
+ * address (`?viewAs=org:member`, `?viewAs=space:viewer`) so the dialog opened
  * from a row keeps a URL that reopens it pre-filled.
  */
 export type ViewAsPreset = { kind: "org"; role: ViewAsOrgRole } | { kind: "space"; key: string };

@@ -90,8 +90,8 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
   const { data: space, error: spaceError, refetch: refetchSpace } = useSpace(spaceId);
   const [memberToRemove, setMemberToRemove] = useState<SpaceMemberObject | null>(null);
   // Both modals have an address: `?add-member` and `?view-as`.
-  const addParam = useModalParam("add-member");
-  const viewAsParam = useModalParam("view-as");
+  const addParam = useModalParam("addMember");
+  const viewAsParam = useModalParam("viewAs");
   const canPreview = useCanPreviewRole();
 
   const addMember = useAddSpaceMember();

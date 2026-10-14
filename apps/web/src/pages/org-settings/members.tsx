@@ -9,7 +9,7 @@ import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { Modal } from "../../components/modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
@@ -42,7 +42,6 @@ export function OrgSettingsMembersPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
   const invite = useModalParam("invite");
-  const userParam = useModalParam("user");
 
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
   const canInvite = can("members:invite");
@@ -60,6 +59,7 @@ export function OrgSettingsMembersPage() {
   const { data: orgData, isLoading, error } = useOrgDetail();
 
   const members = orgData?.members ?? [];
+  const memberParam = useModalTarget("member", orgData?.members, (member) => member.userId);
   const invitations = orgData?.invitations ?? [];
 
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
@@ -127,7 +127,7 @@ export function OrgSettingsMembersPage() {
       : undefined,
   });
 
-  const openedUser = members.find((member) => member.userId === userParam.value);
+  const openedUser = memberParam.target;
 
   return (
     <>
@@ -172,7 +172,7 @@ export function OrgSettingsMembersPage() {
         columns={memberColumns}
         rows={members}
         rowKey={(member) => member.userId}
-        rowHref={(member) => `?user=${encodeURIComponent(member.userId)}`}
+        rowAction={(member) => memberParam.open(member.userId)}
         rowLabel={memberLabel}
         isLoading={isLoading}
         failure={error}
@@ -195,7 +195,7 @@ export function OrgSettingsMembersPage() {
           }
           isChangingOrgRole={changeRoleMutation.isPending}
           onChangeOrgRole={(role) => handleRoleChange(openedUser, role)}
-          onClose={userParam.close}
+          onClose={memberParam.close}
         />
       )}
 

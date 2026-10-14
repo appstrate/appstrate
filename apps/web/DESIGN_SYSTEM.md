@@ -541,7 +541,13 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     (`NEW_SCHEDULE_PARAM`, `NEW_API_KEY_PARAM`, `SHARE_PARAM`).
   - **An object that may not exist**: `useModalTarget(name, items)` resolves the
     id against the loaded list and drops the param for an unknown id, so a stale
-    link never leaves a modal on nothing. Create and edit are two params
+    link never leaves a modal on nothing. Pass `undefined` while the list loads,
+    never `[]`, or a deep link is dropped before it resolves. Never `find` the
+    object by `param.value` by hand.
+  - **One mechanism**: a modal's address is read and written by `useModalParam`
+    only, never by hand from `location.search`: it alone closes by going back
+    over the entry its opening pushed. A table row opens it with
+    `rowAction={(row) => param.open(row.id)}`, not with a `rowHref` to its URL. Create and edit are two params
     (`newProxy`, `editProxy`) sharing one form component; the host closes only
     the one that is open.
   - **Handing over** to another modal (`share` to `moveHome`): one navigation,
@@ -559,9 +565,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   - **Without a URL, and only these**: (1) the confirmation of an act
     (`ConfirmModal`, the re-authentication that confirms one, the activation
     closure, the deletion of a chat thread): reopening « Supprimer X » from a
-    link would be a trap; (2) the single display of a secret (`RevealedSecret`,
-    `SecretRevealModal`, the key just created): the secret is not there after a
-    reload; (3) the chat (`packages/module-chat`), whose message cards have no
+    link would be a trap; (2) what exists only in memory after an act: the
+    single display of a secret (`RevealedSecret`, `SecretRevealModal`, the key
+    just created), the connections a refused launch asks for
+    (`RunLaunchRecovery`), the models step of a provider whose key was just
+    typed (`ProviderAddFlow`): none of it is there after a reload; (3) the chat (`packages/module-chat`), whose message cards have no
     stable address; (4) what is not a modal, such as the notification bell, a
     popover that becomes a sheet on a phone. Each one is listed.
   - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
@@ -574,7 +582,7 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
     also fails when an entry matches no code. A modal mounted only while its
     `useModalParam` is set has its address, whatever local condition narrows it.
     Port the modal to `useModalParam` first; add an exception only for the four
-    cases above.
+    cases above. The same test fails on a parameter name that is not camelCase.
 - **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
   Escape, Back): the form is mounted only while its param is set (`{param.value !== null && <Form />}`,
   or the host returns `null`), so it reopens empty on a creation and on the stored values on an

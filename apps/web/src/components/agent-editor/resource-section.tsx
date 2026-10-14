@@ -51,7 +51,7 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
@@ -548,11 +548,11 @@ function SelectedResources({
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   const picker = useModalParam("add");
-  const toolsFor = useModalParam("tools");
   const byId = new Map((items ?? []).map((item) => [item.id, item] as const));
   const missing = new Set(missingIds);
   const rows = selectedEntries;
-  const toolsEntry = rows.find((entry) => entry.id === toolsFor.value);
+  const toolsFor = useModalTarget("tools", rows);
+  const toolsEntry = toolsFor.target;
   const isIntegration = type === "integration";
 
   const toolsSummary = (entry: ResourceEntry) =>

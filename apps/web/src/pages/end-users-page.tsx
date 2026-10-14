@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
 import { Plus, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
@@ -33,12 +32,9 @@ import { SettingsPageActions } from "../components/settings/settings-page-action
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserDisplayName, useEndUserColumns } from "./end-user-columns";
-import {
-  endUserEditReturn,
-  endUserHref,
-  endUsersHref,
-  withEndUserEditReturn,
-} from "./end-user-route";
+
+const END_USER_PARAM = "endUser";
+const EDIT_END_USER_PARAM = "editEndUser";
 
 export function EndUsersPage() {
   // Remount on space switch so cursor + loadedPages (and the rest of the
@@ -53,8 +49,6 @@ function EndUsersPageContent() {
   const { can } = usePermissions();
   const canWrite = can("end-users:write");
   const spaceId = useCurrentSpaceId();
-  const location = useLocation();
-  const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const newEndUser = useModalParam("newEndUser");
@@ -73,9 +67,11 @@ function EndUsersPageContent() {
 
   const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
   const hasMore = data?.hasMore ?? false;
-  const params = new URLSearchParams(location.search);
-  const selectedUserId = params.get("user");
-  const editSelectedUser = params.get("edit") === "1";
+  // The detail and the edition are two addresses of one modal: `?endUser=<id>`
+  // shows, `?editEndUser=<id>` edits, and switching hands one over to the other.
+  const detailParam = useModalParam(END_USER_PARAM);
+  const editParam = useModalParam(EDIT_END_USER_PARAM);
+  const selectedUserId = editParam.value ?? detailParam.value;
   const {
     data: selectedUserDetail,
     isLoading: selectedUserLoading,
@@ -115,20 +111,7 @@ function EndUsersPageContent() {
     ? (selectedUserDetail ?? endUsers.find((user) => user.id === selectedUserId) ?? null)
     : null;
 
-  const closeUser = () => {
-    navigate(endUsersHref(location), { replace: true });
-  };
-
-  const setEditMode = (id: string, editing: boolean) => {
-    if (!editing && endUserEditReturn(location.state) === "list") {
-      closeUser();
-      return;
-    }
-    navigate(endUserHref(location, id, editing), {
-      replace: true,
-      state: editing ? withEndUserEditReturn("detail") : undefined,
-    });
-  };
+  const closeUser = editParam.value !== null ? editParam.close : detailParam.close;
 
   const hideDeletedUser = (id: string) => {
     setDeletedUserIds((previous) => new Set(previous).add(id));
@@ -139,10 +122,7 @@ function EndUsersPageContent() {
     deletingUserId: deleteMutation.isPending
       ? (deleteMutation.variables?.params.path.id ?? null)
       : null,
-    onEdit: (user) =>
-      navigate(endUserHref(location, user.id, true), {
-        state: withEndUserEditReturn("list"),
-      }),
+    onEdit: (user) => editParam.open(user.id),
     onDelete: setPendingDelete,
   });
   const visibility = useColumnVisibility("end-users");
@@ -181,7 +161,7 @@ function EndUsersPageContent() {
         columns={columns}
         rows={filtered}
         rowKey={(user) => user.id}
-        rowHref={(user) => endUserHref(location, user.id)}
+        rowAction={(user) => detailParam.open(user.id)}
         rowLabel={(user) =>
           t("spaces.openEndUser", {
             name: endUserDisplayName(user, t("spaces.anonymousUser")),
@@ -230,12 +210,12 @@ function EndUsersPageContent() {
 
       {selectedUserId && selectedUser && (
         <EndUserDetailModal
-          key={`${selectedUserId}:${editSelectedUser ? "edit" : "detail"}`}
-          open
+          key={selectedUserId}
           onClose={closeUser}
           endUser={selectedUser}
-          initialEditing={canWrite && editSelectedUser}
-          onEditingChange={(editing) => setEditMode(selectedUserId, editing)}
+          editing={canWrite && editParam.value !== null}
+          onEdit={() => editParam.open(selectedUserId, END_USER_PARAM)}
+          onShowDetail={() => detailParam.open(selectedUserId, EDIT_END_USER_PARAM)}
           onDeleted={hideDeletedUser}
         />
       )}

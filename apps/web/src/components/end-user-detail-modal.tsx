@@ -20,11 +20,13 @@ import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib
 import { errorMessage } from "../lib/mutation-error";
 
 interface Props {
-  open: boolean;
   onClose: () => void;
   endUser: EndUserInfo | null;
-  initialEditing?: boolean;
-  onEditingChange?: (editing: boolean) => void;
+  /** The edition is its own address (`?editEndUser=<id>`); the host owns both. */
+  editing: boolean;
+  onEdit: () => void;
+  /** Leaves the edition for the detail it was entered from. */
+  onShowDetail: () => void;
   onDeleted?: (id: string) => void;
 }
 
@@ -51,11 +53,11 @@ function ReadOnlyField({ label, value }: { label: string; value: string | null |
 }
 
 export function EndUserDetailModal({
-  open,
   onClose,
   endUser,
-  initialEditing = false,
-  onEditingChange,
+  editing,
+  onEdit,
+  onShowDetail,
   onDeleted,
 }: Props) {
   const { t } = useTranslation(["settings", "common"]);
@@ -64,7 +66,9 @@ export function EndUserDetailModal({
   const updateMutation = useUpdateEndUser();
   const mounted = useRef(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [editing, setEditing] = useState(initialEditing);
+  // An edition reached from the detail returns to it; one opened from the list's
+  // deed, or straight from its address, closes.
+  const [enteredFromDetail] = useState(!editing);
 
   const [editName, setEditName] = useState(endUser?.name ?? "");
   const [editEmail, setEditEmail] = useState(endUser?.email ?? "");
@@ -87,19 +91,10 @@ export function EndUserDetailModal({
     setEditExternalId(endUser.externalId ?? "");
     setEditMetadata(metadataToEntries(endUser.metadata));
     updateMutation.reset();
-    setEditing(true);
-    onEditingChange?.(true);
+    onEdit();
   };
 
-  const stopEditing = () => {
-    setEditing(false);
-    onEditingChange?.(false);
-  };
-
-  const handleClose = () => {
-    setEditing(false);
-    onClose();
-  };
+  const stopEditing = enteredFromDetail ? onShowDetail : onClose;
 
   if (!endUser) return null;
 
@@ -128,8 +123,8 @@ export function EndUserDetailModal({
     return (
       <>
         <Modal
-          open={open}
-          onClose={handleClose}
+          open
+          onClose={onClose}
           preventClose={updateMutation.isPending}
           title={t("spaces.editEndUser")}
           actions={
@@ -196,8 +191,8 @@ export function EndUserDetailModal({
   return (
     <>
       <Modal
-        open={open}
-        onClose={handleClose}
+        open
+        onClose={onClose}
         title={endUser.name || endUser.email || t("spaces.endUserDetail")}
         actions={
           can("end-users:delete") || can("end-users:write") ? (
@@ -257,7 +252,7 @@ export function EndUserDetailModal({
             if (!mounted.current) return;
             setConfirmOpen(false);
             onDeleted?.(endUser.id);
-            handleClose();
+            onClose();
           } catch {
             // The mutation cache toasts the refusal and the dialog closes on it.
           }

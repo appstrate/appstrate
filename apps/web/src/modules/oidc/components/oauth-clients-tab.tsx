@@ -31,8 +31,8 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { data, isLoading, error } = useOAuthClients(level);
   const { can } = usePermissions();
   const canWrite = can("oauth-clients:write");
-  const newClient = useModalParam("newOAuthClient");
-  const editClient = useModalTarget("oauth-client", data, (client) => client.clientId);
+  const newClient = useModalParam("newOauthClient");
+  const editClient = useModalTarget("editOauthClient", data, (client) => client.clientId);
   const selectedClient = editClient.target ?? null;
 
   const columns = useOAuthClientColumns({

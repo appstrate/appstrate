@@ -33,7 +33,7 @@ interface ViewAsDialogProps {
   onClose: () => void;
   /** Space the trigger is about. Defaults to the space the user is in. */
   spaceId?: string;
-  /** The role whose row opened the dialog: it arrives chosen (`?view-as=<kind>:<key>`). */
+  /** The role whose row opened the dialog: it arrives chosen (`?viewAs=<kind>:<key>`). */
   preset?: ViewAsPreset | null;
 }
 

@@ -63,7 +63,7 @@ type CreatedSecret = { clientId: string; clientSecret: string };
 
 export function OAuthClientFormModal({ open, onClose, client, level }: Props) {
   const { t } = useTranslation(["settings", "common"]);
-  // The secret is shown once and has no address: the creation's one (`?newOAuthClient`)
+  // The secret is shown once and has no address: the creation's one (`?newOauthClient`)
   // goes away as it appears, so the secret lives here, not in the form.
   const [createdSecret, setCreatedSecret] = useState<CreatedSecret | null>(null);
   if (createdSecret) {
