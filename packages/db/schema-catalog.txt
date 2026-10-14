@@ -828,7 +828,7 @@ constraint org_members org_members_org_id_user_id_pk PRIMARY KEY (org_id, user_i
 constraint org_members org_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint org_models org_models_alias_bound CHECK (((NOT aliased) OR (credential_id IS NOT NULL)))
 constraint org_models org_models_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
-constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_id, provider_id) REFERENCES model_provider_credentials(id, provider_id) ON UPDATE CASCADE ON DELETE RESTRICT
+constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_id, provider_id) REFERENCES model_provider_credentials(id, provider_id) ON DELETE RESTRICT
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))

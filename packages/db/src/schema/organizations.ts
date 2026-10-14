@@ -488,11 +488,11 @@ export const orgModels = pgTable(
     providerId: text("provider_id").notNull(),
     /**
      * The bound credential, an organization one (`owner_user_id IS NULL`), API
-     * key or subscription; its provider is `providerId`
-     * (`org_models_credential_provider_fk`, ON UPDATE CASCADE). ON DELETE
-     * RESTRICT: deleting a credential a model still references is rejected so
-     * the API can surface a clear error. NULL: each member brings their own
-     * personal credential for `providerId`.
+     * key or subscription, whose provider is `providerId`
+     * (`org_models_credential_provider_fk`). ON DELETE RESTRICT: deleting a
+     * credential a model still references is rejected so the API can surface a
+     * clear error. NULL: each member brings their own personal credential for
+     * `providerId`.
      */
     credentialId: uuid("credential_id"),
     input: jsonb("input").$type<ModelInputModality[]>(),
@@ -539,8 +539,6 @@ export const orgModels = pgTable(
       columns: [table.credentialId, table.providerId],
       foreignColumns: [modelProviderCredentials.id, modelProviderCredentials.providerId],
       name: "org_models_credential_provider_fk",
-    })
-      .onDelete("restrict")
-      .onUpdate("cascade"),
+    }).onDelete("restrict"),
   ],
 );

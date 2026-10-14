@@ -56,7 +56,8 @@ export const connectionCalls = pgTable(
     // Both reads page on `id DESC`: a space's calls, and one connection's.
     index("idx_connection_calls_space_id").on(table.spaceId, table.id),
     index("idx_connection_calls_connection_id").on(table.connectionId, table.id),
-    // For a sweep by age (`created_at < cutoff`).
+    // The reads' `created_at` range filter (`services/connection-calls.ts`); the retention sweep of
+    // #1945 will delete by age through it.
     index("idx_connection_calls_created_at").on(table.createdAt),
     check("connection_calls_actor_type_valid", sql`actor_type IN ('user', 'end_user')`),
     check(

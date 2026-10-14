@@ -18,12 +18,7 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import {
-  modelProviderCredentials,
-  orgModels,
-  organizations,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { orgModels, organizations, spacePackages } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import {
@@ -1463,10 +1458,10 @@ describe("Models API", () => {
    */
   describe("dead credential — end-to-end recovery over HTTP", () => {
     /** A `needsReconnection` OAuth credential with one enabled model bound to it. */
-    async function seedDeadPair(label: string) {
+    async function seedDeadPair(label: string, providerId: string = TEST_OAUTH_PROVIDER_ID) {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
+        providerId,
         label: `${label} credential`,
         needsReconnection: true,
       });
@@ -1579,11 +1574,7 @@ describe("Models API", () => {
       // in the first place. "Reconnect this credential" would be misdirection
       // about a row the client cannot even see; the fix is to restore the
       // module. So this behaves exactly as it did before the flag existed.
-      const { cred, model } = await seedDeadPair("Orphaned provider");
-      await db
-        .update(modelProviderCredentials)
-        .set({ providerId: "@gone/provider" })
-        .where(eq(modelProviderCredentials.id, cred.id));
+      const { model } = await seedDeadPair("Orphaned provider", "@gone/provider");
 
       const list = await app.request("/api/models", { headers: authHeaders(ctx) });
       expect(((await list.json()) as any).data.find((m: any) => m.id === model.id)).toBeUndefined();

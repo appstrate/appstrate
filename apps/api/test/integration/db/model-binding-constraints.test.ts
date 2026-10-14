@@ -4,7 +4,7 @@
  * Invariants the model writers hold, stated by the database:
  *   - `org_models`: an alias is bound to a credential (`org_models_alias_bound`),
  *     and a bound model's provider is its credential's
- *     (`org_models_credential_provider_fk`: ON UPDATE CASCADE, ON DELETE RESTRICT);
+ *     (`org_models_credential_provider_fk`, which keeps ON DELETE RESTRICT);
  *   - `model_provider_pairings`: the owner is the organization or the minter
  *     (`model_provider_pairings_owner_is_minter`), a redeem ends with a
  *     credential or a failure, never both (`model_provider_pairings_outcome_single`),
@@ -93,17 +93,16 @@ describe("org_models — binding", () => {
     ).toContain("org_models_credential_provider_fk");
   });
 
-  it("carries a credential's provider to the models bound to it", async () => {
-    const [row] = await model({ providerId: "openai", credentialId });
-    await db
-      .update(modelProviderCredentials)
-      .set({ providerId: "@gone/provider" })
-      .where(eq(modelProviderCredentials.id, credentialId));
-    const [stored] = await db
-      .select({ providerId: orgModels.providerId })
-      .from(orgModels)
-      .where(eq(orgModels.id, row!.id));
-    expect(stored!.providerId).toBe("@gone/provider");
+  it("refuses rewriting the provider of a credential a model is bound to", async () => {
+    await model({ providerId: "openai", credentialId });
+    expect(
+      await refusal(
+        db
+          .update(modelProviderCredentials)
+          .set({ providerId: "anthropic" })
+          .where(eq(modelProviderCredentials.id, credentialId)),
+      ),
+    ).toContain("org_models_credential_provider_fk");
   });
 
   it("still refuses deleting a credential a model references", async () => {

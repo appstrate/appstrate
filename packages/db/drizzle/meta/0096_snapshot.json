@@ -1332,7 +1332,7 @@
           "columnsFrom": ["credential_id", "provider_id"],
           "columnsTo": ["id", "provider_id"],
           "onDelete": "restrict",
-          "onUpdate": "cascade"
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},

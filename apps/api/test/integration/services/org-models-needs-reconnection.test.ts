@@ -67,9 +67,11 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
     return { cred, model };
   }
 
-  async function seedApiKeyModel() {
+  /** `providerId`: one no module registers, as a module dropped from MODULES leaves it. */
+  async function seedApiKeyModel(providerId?: string) {
     const cred = await seedOrgModelProviderKey({
       orgId: ctx.orgId,
+      providerId,
       label: "OpenAI",
       apiShape: "openai-completions",
       baseUrl: "https://api.openai.com/v1",
@@ -162,16 +164,12 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("still drops a model whose credential has an unregistered providerId", async () => {
-    const { cred, model } = await seedApiKeyModel();
     // The credential ROW cannot be deleted while the model references it
     // (ON DELETE RESTRICT) — the reachable way to lose the provider is a
     // `providerId` with no registry entry (module removed from MODULES).
     // Without one there is no apiShape/baseUrl to render, so the row stays
     // dropped; recovering it is out of scope here.
-    await db
-      .update(modelProviderCredentials)
-      .set({ providerId: "@gone/provider" })
-      .where(eq(modelProviderCredentials.id, cred.id));
+    const { model } = await seedApiKeyModel("@gone/provider");
 
     const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id);
     expect(listed).toBeUndefined();
@@ -186,13 +184,9 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("refuses to resolve a model whose stored provider is not registered", async () => {
-    const { cred, model } = await seedApiKeyModel();
-    // A module dropped from MODULES leaves the credential, and the models bound to it
-    // (`org_models_credential_provider_fk`), naming a provider this instance does not register.
-    await db
-      .update(modelProviderCredentials)
-      .set({ providerId: "google-ai" })
-      .where(eq(modelProviderCredentials.id, cred.id));
+    // The row names its credential's provider: a module dropped from MODULES leaves both
+    // naming a provider this instance does not register.
+    const { model } = await seedApiKeyModel("google-ai");
 
     // `null` would let `resolveModel` fall through to another model, so the
     // stored provider id surfaces instead.
@@ -204,12 +198,8 @@ describe("org-models — dead OAuth credential is listed, not hidden", () => {
   });
 
   it("refuses to resolve an org default bound to an unregistered provider", async () => {
-    const { cred, model } = await seedApiKeyModel();
+    const { model } = await seedApiKeyModel("google-ai");
     await setDefaultModel(ctx.orgId, model.id);
-    await db
-      .update(modelProviderCredentials)
-      .set({ providerId: "google-ai" })
-      .where(eq(modelProviderCredentials.id, cred.id));
 
     // The org default must not cascade on to the system default.
     const err = await resolveModel(ctx.orgId, "@acme/agent", null, null).catch((e: unknown) => e);
