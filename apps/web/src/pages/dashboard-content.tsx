@@ -431,7 +431,7 @@ function DashboardScheduleRow({
         className="size-9"
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{schedule.name || schedule.id}</p>
+        <p className="truncate text-sm font-medium">{schedule.name || t("schedule.unnamed")}</p>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
           {agent?.display_name ?? schedule.packageId}
         </p>

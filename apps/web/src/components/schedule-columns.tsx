@@ -46,7 +46,9 @@ export function useScheduleColumns({
       cell: (schedule) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
+            <span className="truncate font-medium">
+              {schedule.name || t("schedule.unnamed", { ns: "agents" })}
+            </span>
             <CountBadge
               count={schedule.unread_count}
               label={t("dashboard.unreadRuns", { ns: "agents", count: schedule.unread_count })}

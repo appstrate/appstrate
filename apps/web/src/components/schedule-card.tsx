@@ -34,7 +34,9 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium">{schedule.name || t("schedule.unnamed")}</h2>
+          <h2 className="truncate text-sm font-medium">
+            {schedule.name || t("schedule.unnamed", { ns: "agents" })}
+          </h2>
           <p className="text-muted-foreground mt-1 truncate text-xs">
             {agentName ?? schedule.packageId}
           </p>
