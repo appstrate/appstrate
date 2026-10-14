@@ -54,6 +54,8 @@
   "btn.copyLink": "Copier le lien",
   "btn.copied": "Copié !",
   "btn.close": "Fermer",
+  "carousel.next": "Élément suivant",
+  "carousel.previous": "Élément précédent",
   "btn.done": "Terminé",
   "btn.download": "Télécharger",
   "error.generic": "Une erreur est survenue.",

@@ -26,10 +26,6 @@ import { permissionResourceLabel } from "../lib/permission-labels";
 /** The URL parameter that opens the modal. The created key has no URL of its own. */
 export const NEW_API_KEY_PARAM = "newApiKey";
 
-interface Props {
-  onKeyCreated?: (rawKey: string) => void;
-}
-
 type FormData = { name: string; expiresIn: string };
 
 function computeExpiresAt(expiresIn: string): string | null {
@@ -67,7 +63,7 @@ function buildResourceSummary(
     }));
 }
 
-export function ApiKeyCreateModal({ onKeyCreated }: Props) {
+export function ApiKeyCreateModal() {
   const { t } = useTranslation(["settings", "common"]);
   const param = useModalParam(NEW_API_KEY_PARAM);
   const { data: availableScopes } = useAvailableScopes();
@@ -126,7 +122,6 @@ export function ApiKeyCreateModal({ onKeyCreated }: Props) {
       onCreated={(key, scopes) => {
         setCreated({ key, scopes });
         param.close();
-        onKeyCreated?.(key);
       }}
     />
   );
