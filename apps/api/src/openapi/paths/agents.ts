@@ -275,7 +275,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Get shared diagnostics for an agent",
       description:
-        "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview, the launch header and the visual map. Diagnostics are ordered with blockers first and carry stable semantic targets plus correction destinations.",
+        "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview and the launch header. Diagnostics are ordered with blockers first and carry their correction destinations.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

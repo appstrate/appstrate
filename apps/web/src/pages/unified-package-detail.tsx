@@ -272,21 +272,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Every detail has a useful summary; explicit file/version deep links still win.
   const defaultTab: DetailTab = "overview";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
-  const openAgentSettings = (section: "map" | "files" | "model") => {
-    const search = new URLSearchParams(location.search);
-    if (section === "model") search.delete("agentSettings");
-    else search.set("agentSettings", section);
-    search.delete("agentConfig");
-    void navigate(
-      { pathname: location.pathname, search: search.toString(), hash: "settings" },
-      { replace: true },
-    );
-  };
-
   useEffect(() => {
     if (type !== "agent") return;
     const legacyTab = location.hash.replace(/^#/, "");
-    if (!["map", "files", "configuration", "versions", "diff"].includes(legacyTab)) return;
+    if (!["files", "configuration", "versions", "diff"].includes(legacyTab)) return;
     const search = new URLSearchParams(location.search);
     const section =
       legacyTab === "configuration"
@@ -647,7 +636,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   currentManifest={currentManifest}
                   currentContent={currentContent}
                   surface="summary"
-                  onOpenFiles={() => openAgentSettings("files")}
                   cardHeaders
                   contained
                 />

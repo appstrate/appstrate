@@ -16,7 +16,6 @@ import {
   Plug,
   SlidersHorizontal,
   Sparkles,
-  Workflow,
   Wrench,
 } from "lucide-react";
 import type { AgentDetail } from "@appstrate/shared-types";
@@ -25,7 +24,6 @@ import { RoleLimitNotice } from "../role-limit-notice";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePermissions } from "../../hooks/use-permissions";
 import { agentConnectionsTabVisible } from "../../lib/route-access";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { RailLink } from "../settings/rail-link";
 import { AgentOverviewTab } from "./agent-overview-tab";
 import { AgentConfigurationView, type ConfigurationSection } from "./agent-configuration-view";
@@ -40,7 +38,7 @@ import type { AgentDefinitionSection } from "../../pages/package-editor";
  * is not an editor section — it reads the bundle, and its rows open Explorer.
  */
 type AgentSettingsSection =
-  ConfigurationSection | AgentDefinitionSection | "bundle" | "map" | "files" | "versions";
+  ConfigurationSection | AgentDefinitionSection | "bundle" | "files" | "versions";
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>
@@ -58,8 +56,7 @@ const DEFINITION_SECTION_IDS: readonly AgentDefinitionSection[] = [
 ];
 
 /**
- * Explorer: two ways to SEE the package — the map (where its definition and
- * this space's setup meet) and its raw files. Then what is set HERE
+ * Explorer: the package's raw files and its versions. Then what is set HERE
  * (Configuration), then what the package IS for every space (Définition),
  * where it is changed.
  */
@@ -67,7 +64,6 @@ const SETTINGS_GROUPS = [
   {
     labelKey: "detail.settings.exploreGroup",
     items: [
-      { id: "map", icon: Workflow, labelKey: "detail.overview.map" },
       { id: "files", icon: FolderTree, labelKey: "detail.overview.explorer" },
       { id: "versions", icon: History, labelKey: "detail.settings.versions" },
     ],
@@ -104,7 +100,6 @@ const SETTINGS_SECTION_IDS: readonly AgentSettingsSection[] = [
   "inputs",
   "connections",
   "schedules",
-  "map",
   ...DEFINITION_SECTION_IDS,
   "bundle",
   "files",
@@ -141,20 +136,16 @@ export function AgentSettingsView({
   // Every section stays in the rail for every role; one the role does not open
   // is marked with a lock and its panel says why (`RoleLimitNotice`). Only a
   // section that does not apply to this agent at all leaves the rail.
-  // The map is served by the opt-in `agent-map` module: without it the
-  // section has nothing to show and leaves the rail.
-  const { features } = useAppConfig();
   const applies = (section: AgentSettingsSection) =>
     // A system agent has no history of its own to browse.
-    (section !== "versions" || detail.source !== "system") &&
-    (section !== "map" || !!features.agentMap);
+    section !== "versions" || detail.source !== "system";
   const visible = (section: AgentSettingsSection) => {
     if (section === "model" || section === "proxy" || section === "inputs") {
       return can("agents:configure");
     }
     if (section === "schedules") return can("schedules:read");
     if (section === "connections") return agentConnectionsTabVisible(can);
-    if (section === "map" || section === "files" || section === "bundle") {
+    if (section === "files" || section === "bundle") {
       return can("agents:read");
     }
     // A system agent has no history of its own to browse.
@@ -216,10 +207,6 @@ export function AgentSettingsView({
 
   const filesHref = (path: string) => sectionHref("files", path);
 
-  const openFiles = () => {
-    void navigate(sectionHref("files"));
-  };
-
   const isDefinitionSection = (DEFINITION_SECTION_IDS as readonly string[]).includes(activeSection);
   const body = !visible(activeSection) ? (
     <div className="p-6">
@@ -244,7 +231,7 @@ export function AgentSettingsView({
         onSection={(next) => void navigate(sectionHref(next))}
       />
     </Suspense>
-  ) : activeSection === "map" || activeSection === "files" ? (
+  ) : activeSection === "files" ? (
     <AgentOverviewTab
       packageId={packageId}
       detail={detail}
@@ -252,10 +239,9 @@ export function AgentSettingsView({
       isHistorical={isHistorical}
       currentManifest={currentManifest}
       currentContent={currentContent}
-      key={activeSection === "files" ? requestedFile : undefined}
-      surface={activeSection}
+      key={requestedFile}
+      surface="files"
       initialFilePath={requestedFile}
-      onOpenFiles={openFiles}
       fileEditHref={canEditDefinition ? fileEditHref : undefined}
       canEditFiles={canEditDefinition}
     />

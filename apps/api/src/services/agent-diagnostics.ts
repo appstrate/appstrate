@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Agent diagnostics are an application capability, not a property of the map.
+ * Agent diagnostics: one readiness and warning result for every surface.
  *
  * The run readiness gate remains authoritative for blocking bundle, dependency,
  * integration and configuration checks. This service enriches those errors
- * with stable routing metadata so Overview, the header and the future rich map
- * can consume the same result without each rebuilding readiness rules.
+ * with their correction destination so Overview and the header consume the
+ * same result without each rebuilding readiness rules.
  */
 
 import type { LoadedPackage } from "../types/index.ts";
@@ -21,7 +21,6 @@ import { resolveModelCascade } from "./org-models.ts";
 import { listPackageSchedules } from "./scheduler.ts";
 
 export type AgentDiagnosticSeverity = "blocking" | "warning";
-export type AgentDiagnosticNode = "agent" | "config" | "skills" | "toolbox" | "model" | "schedules";
 export type AgentDiagnosticDestination = "bundle" | "configuration" | "schedule";
 
 export interface AgentDiagnostic {
@@ -30,10 +29,6 @@ export interface AgentDiagnostic {
   title: string;
   explanation: string;
   field: string;
-  target: {
-    node: AgentDiagnosticNode | null;
-    item: string | null;
-  };
   correction: {
     destination: AgentDiagnosticDestination;
     section: string | null;
@@ -42,19 +37,6 @@ export interface AgentDiagnostic {
   /** A launch can open the existing connection recovery flow for this issue. */
   recoverable_on_launch: boolean;
 }
-
-/**
- * Contract for the future rich Map consumer:
- *
- * - `target.node` selects the semantic ReactFlow node, independently of its
- *   current coordinates or component implementation;
- * - `target.item` selects a row inside that node when one exists;
- * - `severity` drives the orange warning or red blocking marker;
- * - `?agentIssue=<code>#map` asks the map to reveal and center the matching
- *   target, while `?agentDiagnostics=all#map` opens its diagnostic mode;
- * - `correction` is the owner-surface link and must not be reconstructed from
- *   node ids in the renderer.
- */
 
 export interface AgentDiagnosticsResult {
   status: "healthy" | "warning" | "blocking";
@@ -87,7 +69,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       title: error.title ?? "Bundle issue",
       explanation: error.message,
       field: error.field,
-      target: { node: "agent", item: null },
       correction: { destination: "bundle", section: "prompt", params: {} },
       recoverable_on_launch: false,
     };
@@ -98,7 +79,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       title: error.title ?? "Skill unavailable",
       explanation: error.message,
       field: error.field,
-      target: { node: "skills", item: skillId },
       correction: { destination: "bundle", section: "skills", params: { skill: skillId } },
       recoverable_on_launch: false,
     };
@@ -111,7 +91,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       title: error.title ?? "Integration unavailable",
       explanation: error.message,
       field: error.field,
-      target: { node: "toolbox", item: integrationId },
       correction: {
         destination: section === "connections" ? "configuration" : "bundle",
         section,
@@ -125,7 +104,6 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
     title: error.title ?? "Configuration issue",
     explanation: error.message,
     field: error.field,
-    target: { node: "config", item: configKey },
     correction: {
       destination: "configuration",
       section: "inputs",
@@ -141,7 +119,7 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
  * verdicts already arrive, richer, through `resolveAgentConnectionReadiness`;
  * the resolver's errors are pushed last, so dropping that tail keeps the rest.
  */
-export async function collectBundleReadinessErrors(
+async function collectBundleReadinessErrors(
   params: Parameters<typeof collectAgentReadiness>[0],
 ): Promise<ValidationFieldError[]> {
   const { errors, resolutionErrors } = await collectAgentReadiness(params);
@@ -201,7 +179,6 @@ export async function getAgentDiagnostics(args: {
       title: "Model not configured",
       explanation: "No usable model is configured for this agent or organization.",
       field: "model",
-      target: { node: "model", item: null },
       correction: { destination: "configuration", section: "model", params: {} },
       recoverable_on_launch: false,
     });
@@ -220,7 +197,6 @@ export async function getAgentDiagnostics(args: {
       title: "Model unavailable",
       explanation: `The model set for this agent ('${packageConfig.modelId}') is no longer usable; the next run uses the default model '${fallback}' instead.`,
       field: "model",
-      target: { node: "model", item: null },
       correction: {
         destination: "configuration",
         section: "model",
@@ -244,7 +220,6 @@ export async function getAgentDiagnostics(args: {
         title: "Schedule uses another version",
         explanation: `Schedule '${schedule.name ?? schedule.id}' is pinned to '${schedule.version_override}' while this view inspects '${versionRef}'.`,
         field: `schedules.${schedule.id}.version`,
-        target: { node: "schedules" as const, item: schedule.id },
         correction: {
           destination: "schedule" as const,
           section: "version",

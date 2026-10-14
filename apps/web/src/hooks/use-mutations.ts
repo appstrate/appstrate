@@ -378,12 +378,6 @@ export function useCreatePackage(type: PackageType) {
   });
 }
 
-/**
- * `opts.redirect` (default true) keeps the editor's behaviour: a successful save
- * leaves the editor for the detail page. Callers that are ALREADY on the detail
- * page — the visual map's in-place edit dialogs — pass false, since navigating
- * would drop the URL hash and throw the user back to the default tab.
- */
 export function useUpdatePackage(type: PackageType, packageId: string) {
   const qc = useQueryClient();
   const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];

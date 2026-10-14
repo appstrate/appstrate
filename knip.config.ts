@@ -329,8 +329,6 @@ const config: KnipConfig = {
     "apps/web/src/test/render.tsx": ["exports"],
     "apps/web/src/components/package-detail/agent-tabs.tsx": ["exports"],
     "apps/api/src/lib/agent-appearance.ts": ["exports"],
-    /** The map's wire types, exported for the screens still to be built. */
-    "apps/web/src/modules/agent-map/use-agent-map.ts": ["types"],
   },
 
   /**

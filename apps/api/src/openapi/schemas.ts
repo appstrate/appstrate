@@ -2431,7 +2431,6 @@ export const schemas = {
             "title",
             "explanation",
             "field",
-            "target",
             "correction",
             "recoverable_on_launch",
           ],
@@ -2441,17 +2440,6 @@ export const schemas = {
             title: { type: "string" },
             explanation: { type: "string" },
             field: { type: "string" },
-            target: {
-              type: "object",
-              required: ["node", "item"],
-              properties: {
-                node: {
-                  type: ["string", "null"],
-                  enum: ["agent", "config", "skills", "toolbox", "model", "schedules", null],
-                },
-                item: { type: ["string", "null"] },
-              },
-            },
             correction: {
               type: "object",
               required: ["destination", "section", "params"],

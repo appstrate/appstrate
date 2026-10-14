@@ -181,7 +181,6 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
-  "concept.", // modules/agent-map/map-nodes.tsx — t(`agent-map:concept.${concept}.{title,body}`)
   "editor.runtimeTool.", // components/agent-editor/runtime-tools-group.tsx
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx
@@ -230,7 +229,6 @@ const DYNAMIC_KEY_PREFIXES = [
   "spaces.visibilityDesc.", // pages/org-settings/space/general.tsx — t(`spaces.visibilityDesc.${value}`)
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
-  "systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
   "validation.schema.", // hooks/use-schema-form-labels.ts — one key per JSON Schema keyword
   "viewAs.stopped.", // components/view-as-banner.tsx — t(`viewAs.stopped.${code}`)
 ];

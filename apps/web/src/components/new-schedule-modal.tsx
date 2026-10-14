@@ -9,8 +9,7 @@
  *
  * Opened from anywhere by the `newSchedule` URL parameter (`useModalParam`),
  * carrying the agent to preselect or `1` for none: the schedules list, an
- * agent's page and its settings all open the same modal. The agent map embeds
- * the form itself, its agent fixed.
+ * agent's page and its settings all open the same modal.
  */
 
 import { useState } from "react";
@@ -74,18 +73,13 @@ export function NewScheduleModalHost() {
   );
 }
 
-/**
- * The form itself. `fixedAgent` hides the agent selector: the agent map creates
- * a schedule for the agent it shows, never another one.
- */
-export function NewScheduleForm({
+/** The form itself. */
+function NewScheduleForm({
   initialAgentId,
-  fixedAgent = false,
   onCreated,
   onCancel,
 }: {
   initialAgentId?: string;
-  fixedAgent?: boolean;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
 }) {
@@ -96,23 +90,21 @@ export function NewScheduleForm({
 
   return (
     <div className="space-y-5">
-      {!fixedAgent && (
-        <Field>
-          <Label htmlFor="new-schedule-agent">{t("schedule.agent")}</Label>
-          <Select value={agentId ?? ""} onValueChange={setPicked}>
-            <SelectTrigger id="new-schedule-agent">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(agents ?? []).map((agent) => (
-                <SelectItem key={agent.id} value={agent.id}>
-                  {agent.display_name ?? agent.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-      )}
+      <Field>
+        <Label htmlFor="new-schedule-agent">{t("schedule.agent")}</Label>
+        <Select value={agentId ?? ""} onValueChange={setPicked}>
+          <SelectTrigger id="new-schedule-agent">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(agents ?? []).map((agent) => (
+              <SelectItem key={agent.id} value={agent.id}>
+                {agent.display_name ?? agent.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
       {agentId ? (
         // A new agent, a new form: its inputs and connections are another agent's.
         <ScheduleFields key={agentId} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />

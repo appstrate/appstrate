@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Shared visual map primitives. Agent and integration maps use the same renderers. */
-import { Children, useLayoutEffect, useRef, useState } from "react";
+/** Visual map primitives: the cards, rows and boundaries of an integration's structure map. */
+import { Children } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { ArrowUpRight, ChevronRight, Info, Pencil, Plus } from "lucide-react";
+import { ArrowUpRight, ChevronRight, Pencil, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -12,13 +12,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/component
 
 const PREVIEW_ROW_COUNT = 3;
 
-export type CardAction = { label: string; icon?: "plus" | "edit" | "open" } & (
+type CardAction = { label: string; icon?: "plus" | "edit" | "open" } & (
   { onClick: () => void; href?: never } | { href: string; onClick?: never }
 );
 
 // `nodrag nopan` stops a press on a control from panning the canvas or starting
 // a node drag. It is NOT what makes the control clickable — that requires the
-// node to stay `selectable` (see agent-map-view.tsx), without which React Flow
+// node to stay `selectable`, without which React Flow
 // sets `pointer-events: none` on the whole node.
 const ACTION_CLASS = "text-muted-foreground hover:text-foreground nodrag nopan transition-colors";
 
@@ -49,26 +49,22 @@ function CardActionButton({ action }: { action: CardAction }) {
  * Appstrate concept it projects rather than the widget.
  *
  * The map is most useful to someone still building a model of the platform, and
- * that reader has no other place to ask what a skill is, or why an integration
- * is not the same thing as an MCP server. Text lives in i18n under
- * `map.concept.<id>` so both languages carry it; paragraphs are split on blank
- * lines so an explanation can breathe.
+ * that reader has no other place to ask what a concept means. Paragraphs are
+ * split on blank lines so an explanation can breathe.
  */
 function ConceptTitle({
   concept,
   cardKey,
   children,
 }: {
-  concept: string | { title: string; body: string };
+  concept: { title: string; body: string };
   /** The card's stable key: the explanation opens at `?mapConcept=<cardKey>`. */
   cardKey: string;
   children: React.ReactNode;
 }) {
-  const { t } = useTranslation(["agents", "agent-map", "common"]);
+  const { t } = useTranslation(["common"]);
   const param = useModalParam("mapConcept");
-  const title =
-    typeof concept === "string" ? t(`agent-map:concept.${concept}.title`) : concept.title;
-  const body = typeof concept === "string" ? t(`agent-map:concept.${concept}.body`) : concept.body;
+  const { title, body } = concept;
   const explanation = t("common:map.explain", { concept: title });
   return (
     <>
@@ -108,8 +104,8 @@ type HandleSide = keyof typeof HANDLE_POSITION;
 
 /**
  * Card shell. Every card is always drawn, even empty, so the set of cards reads
- * as the inventory of what an agent manifest can hold and an empty one says
- * "you'd add it here".
+ * as the inventory of what the package can hold and an empty one says "you'd
+ * add it here".
  */
 export function MapCard({
   icon,
@@ -119,57 +115,46 @@ export function MapCard({
   children,
   targets,
   sources,
-  wide,
-  horizontal,
   relationId,
-  relationActive,
   onRelationActive,
   action,
   emptyLabel,
-  emptyAction,
 }: {
   icon: React.ReactNode;
   title: string;
-  /** i18n key suffix under `map.concept.` for the header's explanation dialog. */
-  concept?: string | { title: string; body: string };
-  /** Rows listed. Omitted by the prose cards (agent, model), which are never empty. */
+  /** The header's explanation dialog. */
+  concept?: { title: string; body: string };
+  /** Rows listed. Omitted by a card that is never empty. */
   count?: number;
   children: React.ReactNode;
-  /** Sides edges arrive on. The agent has two: `left` from its triggers, `top` from its input. */
+  /** Sides edges arrive on. */
   targets?: HandleSide[];
-  /** Sides edges leave from. The agent has two: `right` to its capabilities, `bottom` to its output. */
+  /** Sides edges leave from. */
   sources?: HandleSide[];
-  wide?: boolean;
-  /** A transverse band used only by memory beneath the three main zones. */
-  horizontal?: boolean;
   relationId?: string;
-  relationActive?: boolean;
   onRelationActive?: ((id: string | null) => void) | undefined;
   action?: CardAction | undefined;
   emptyLabel?: string;
-  emptyAction?: { label: string; onClick: () => void } | undefined;
 }) {
   const { t } = useTranslation(["common"]);
-  // A card is named in the URL by what it already has that is stable: its relation id
-  // (both maps give one to the cards that have rows) or, on the agent map, its concept.
-  // Never its position. The explanation and the full list open at `?mapConcept=` and
-  // `?mapCardList=`.
-  const cardKey = relationId ?? (typeof concept === "string" ? concept : undefined);
+  // A card is named in the URL by what it already has that is stable: its relation
+  // id (the map gives one to the cards that have rows). Never its position. The
+  // explanation and the full list open at `?mapConcept=` and `?mapCardList=`.
+  const cardKey = relationId;
   const listParam = useModalParam("mapCardList");
   const rows = Children.toArray(children);
-  const previewLimit = horizontal ? 4 : PREVIEW_ROW_COUNT;
+  const previewLimit = PREVIEW_ROW_COUNT;
   const hasOverflow = cardKey !== undefined && count !== undefined && rows.length > previewLimit;
   const preview = hasOverflow ? rows.slice(0, previewLimit) : rows;
   const resolvedEmptyAction =
-    emptyAction ??
-    (count === 0 && action && "onClick" in action
+    count === 0 && action && "onClick" in action
       ? { label: action.label, onClick: action.onClick }
-      : undefined);
+      : undefined;
 
   return (
     <>
       <div
-        className={`map-card border-border bg-card flex flex-col rounded-lg border shadow-sm transition-shadow ${relationActive ? "ring-primary ring-2 ring-offset-2" : ""} ${horizontal ? "w-[1130px]" : wide ? "h-[248px] w-[280px]" : "h-[206px] w-[210px]"}`}
+        className="map-card border-border bg-card flex h-[206px] w-[210px] flex-col rounded-lg border shadow-sm transition-shadow"
         onMouseEnter={() => relationId && onRelationActive?.(relationId)}
         onMouseLeave={(event) => {
           if (relationId && !event.currentTarget.contains(document.activeElement)) {
@@ -240,8 +225,8 @@ export function MapCard({
           ) : count === 0 && emptyLabel ? (
             <div className="text-muted-foreground px-2 py-1.5 text-[11px] italic">{emptyLabel}</div>
           ) : (
-            <div className={horizontal ? "grid grid-cols-4 gap-1" : undefined}>
-              {count !== undefined && !horizontal
+            <div>
+              {count !== undefined
                 ? Children.map(preview, (row) => (
                     <div className="[&:not(:last-child)]:after:bg-border/50 relative [&:not(:last-child)]:after:absolute [&:not(:last-child)]:after:right-1 [&:not(:last-child)]:after:bottom-0 [&:not(:last-child)]:after:left-1 [&:not(:last-child)]:after:h-px [&:not(:last-child)]:after:content-['']">
                       {row}
@@ -275,30 +260,25 @@ export function MapCard({
 
 /**
  * One list line. With `href` it becomes a link to the resource it describes, so
- * a flagged row is also the way to go fix it — the map is read-only about the
- * agent's definition, not a dead end. Routes are built client-side from the
- * package id: the server has no business knowing the SPA's URLs.
+ * a flagged row is also the way to go fix it: the map is read-only, not a dead
+ * end. Routes are built client-side from the package id: the server has no
+ * business knowing the SPA's URLs.
  */
 export function MapRow({
-  icon,
   label,
   sublabel,
   right,
-  dimmed,
   href,
   onClick,
 }: {
-  icon?: React.ReactNode;
   label: string;
   sublabel?: string | null;
   right?: React.ReactNode;
-  dimmed?: boolean;
   href?: string | undefined;
   onClick?: (() => void) | undefined;
 }) {
   const body = (
     <>
-      {icon && <span className="text-muted-foreground shrink-0">{icon}</span>}
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs font-medium">{label}</div>
         {sublabel && <div className="text-muted-foreground truncate text-[11px]">{sublabel}</div>}
@@ -306,7 +286,7 @@ export function MapRow({
       {right}
     </>
   );
-  const className = `flex items-center gap-2 rounded-md px-2 py-1 ${dimmed ? "opacity-50" : ""}`;
+  const className = "flex items-center gap-2 rounded-md px-2 py-1";
   if (onClick) {
     return (
       <button
@@ -327,123 +307,17 @@ export function MapRow({
   );
 }
 
-/**
- * A block of card content that is itself the way to edit what it shows.
- *
- * Degrades to a plain `div` when no handler is supplied — a read-only map (system
- * package, pinned version) must not offer a button that does nothing.
- */
-export function MapSectionButton({
-  onClick,
-  className,
-  children,
-}: {
-  onClick?: (() => void) | undefined;
-  className: string;
-  children: React.ReactNode;
-}) {
-  if (!onClick) return <div className={className}>{children}</div>;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${className} hover:bg-muted/40 nodrag nopan rounded-md transition-colors`}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function OverflowFadeText({ children }: { children: string }) {
-  const textRef = useRef<HTMLParagraphElement>(null);
-  const [truncated, setTruncated] = useState(false);
-
-  useLayoutEffect(() => {
-    const text = textRef.current;
-    if (!text) return;
-    const measure = () => setTruncated(text.scrollHeight > text.clientHeight + 1);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(text);
-    return () => observer.disconnect();
-  }, [children]);
-
-  return (
-    <div className="relative w-full overflow-hidden">
-      <p
-        ref={textRef}
-        className="text-muted-foreground line-clamp-4 text-[11px] whitespace-pre-wrap"
-      >
-        {children}
-      </p>
-      {truncated && (
-        <span
-          aria-hidden="true"
-          className="from-card pointer-events-none absolute inset-x-0 bottom-0 h-5 bg-gradient-to-t to-transparent"
-        />
-      )}
-    </div>
-  );
-}
-
 export function BoundaryNode({ data }: NodeProps) {
-  const boundary = data as { label: string; description: string; tooltip?: string };
+  const boundary = data as { label: string; description: string };
   const handleClass = "!size-1 !border-0 !bg-transparent";
   return (
     <div className="border-border bg-muted size-full rounded-xl border shadow-sm">
       <Handle id="s-bottom" type="source" position={Position.Bottom} className={handleClass} />
-      <Handle id="s-left" type="source" position={Position.Left} className={handleClass} />
       <Handle id="s-right" type="source" position={Position.Right} className={handleClass} />
-      <Handle
-        id="s-top-left"
-        type="source"
-        position={Position.Top}
-        style={{ left: "42%" }}
-        className={handleClass}
-      />
-      <Handle
-        id="s-top-right"
-        type="source"
-        position={Position.Top}
-        style={{ left: "58%" }}
-        className={handleClass}
-      />
       <Handle id="t-top" type="target" position={Position.Top} className={handleClass} />
       <Handle id="t-left" type="target" position={Position.Left} className={handleClass} />
-      <Handle id="t-right" type="target" position={Position.Right} className={handleClass} />
-      <Handle
-        id="t-bottom-left"
-        type="target"
-        position={Position.Bottom}
-        style={{ left: "42%" }}
-        className={handleClass}
-      />
-      <Handle
-        id="t-bottom-right"
-        type="target"
-        position={Position.Bottom}
-        style={{ left: "58%" }}
-        className={handleClass}
-      />
       <div className="border-border border-b px-5 py-3.5">
-        <div className="flex items-center gap-1.5">
-          <h3 className="text-[11px] font-semibold tracking-wide uppercase">{boundary.label}</h3>
-          {boundary.tooltip && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={boundary.tooltip}
-                  className={`${ACTION_CLASS} nodrag nopan`}
-                >
-                  <Info className="size-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{boundary.tooltip}</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
+        <h3 className="text-[11px] font-semibold tracking-wide uppercase">{boundary.label}</h3>
         <p className="text-muted-foreground mt-0.5 text-[10px] leading-relaxed">
           {boundary.description}
         </p>

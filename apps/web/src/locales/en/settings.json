@@ -632,7 +632,6 @@
   "models.credentialUnavailableHint": "This model's key can no longer be used: change it or reconnect the subscription.",
   "models.unpriced": "No pricing",
   "models.unpricedHint": "No rates are known for this model, so every run on it is recorded with a cost of $0.",
-  "models.empty": "No models configured",
   "source.builtIn": "Built-in",
   "source.custom": "Custom",
   "source.autoProvisioned": "Auto-provisioned",

@@ -27,16 +27,13 @@ export function HealthAction({
   children,
   to,
   onClick,
-  secondary = false,
 }: {
   children: ReactNode;
   to?: To;
   onClick?: () => void;
-  secondary?: boolean;
 }) {
   const className = cn(
-    "cursor-pointer rounded-none bg-transparent p-0 text-xs font-normal hover:bg-transparent hover:underline",
-    secondary ? "text-muted-foreground hover:text-foreground" : "text-primary hover:text-primary",
+    "text-primary hover:text-primary cursor-pointer rounded-none bg-transparent p-0 text-xs font-normal hover:bg-transparent hover:underline",
   );
   return to ? (
     <Link to={to} className={className}>

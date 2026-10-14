@@ -122,7 +122,6 @@ describe("the agent's overview when its model is no longer accessible", () => {
           title: "Model unavailable",
           explanation: "The model set for this agent ('mdl_x') is no longer usable; ...",
           field: "model",
-          target: { node: "model", item: null },
           correction: {
             destination: "configuration",
             section: "model",

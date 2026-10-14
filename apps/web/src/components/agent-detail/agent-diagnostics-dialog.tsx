@@ -2,7 +2,6 @@
 
 /** One diagnostic list for every Agent projection. */
 
-import { useAppConfig } from "../../hooks/use-app-config";
 import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { HealthIssueBadge } from "../health-card";
@@ -11,7 +10,6 @@ import type { AgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import {
   agentDiagnosticCorrectionTarget,
   agentDiagnosticKey,
-  agentDiagnosticLocateTarget,
   agentDiagnosticText,
 } from "../../lib/agent-diagnostics";
 
@@ -51,7 +49,6 @@ export function AgentDiagnosticsDialog({
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
-  const { features } = useAppConfig();
   if (!open || !result) return null;
 
   return (
@@ -89,20 +86,6 @@ export function AgentDiagnosticsDialog({
                   >
                     {t("detail.diagnostics.fix")}
                   </Link>
-                  {/* "Locate" opens the map, served by the opt-in agent-map module. */}
-                  {diagnostic.target.node && features.agentMap && (
-                    <Link
-                      to={agentDiagnosticLocateTarget(
-                        diagnostic,
-                        location.pathname,
-                        location.search,
-                      )}
-                      onClick={onClose}
-                      className="text-muted-foreground hover:text-foreground hover:underline"
-                    >
-                      {t("detail.diagnostics.locate")}
-                    </Link>
-                  )}
                 </div>
               </li>
             );

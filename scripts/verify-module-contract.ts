@@ -124,7 +124,6 @@ const MODULE_TENANT: Record<string, Tenant> = {
   mcp: "oss",
   "core-providers": "oss",
   firecracker: "oss",
-  "agent-map": "oss",
   "module-codex": "oss",
   "module-claude-code": "oss",
   "module-chat": "oss",
@@ -151,7 +150,6 @@ const DECLARER_ROOTS: Record<string, string> = {
   "module-chat": "packages/module-chat/src",
   "module-observability": "packages/module-observability/src",
   "module-ee": "packages/module-ee/src",
-  "agent-map": "apps/api/src/modules/agent-map",
 };
 
 // The two module tables are one roster written twice, and the compiler cannot
@@ -179,7 +177,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── extension — generic, must have >= 2 owners ──────────────────────────
   createRouter: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
   },
   publicPaths: { kind: "extension", owners: ["oidc", "mcp", "module-ee"] },
   permissionsContribution: {
@@ -192,11 +190,9 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
     owners: ["oidc", "module-ee", "module-codex", "module-claude-code"],
   },
   events: { kind: "extension", owners: ["webhooks", "mcp", "module-ee", "module-chat"] },
-  // `agent-map` joins the feature-flag owners: the visual map ships its own
-  // flag, and this branch is where it lands.
   features: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
   },
   modelProviders: {
     kind: "extension",
@@ -206,21 +202,15 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   openApiPaths: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
   },
   openApiComponentSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-ee", "module-chat", "agent-map"],
+    owners: ["oidc", "webhooks", "module-ee", "module-chat"],
   },
   openApiTags: {
     kind: "extension",
     owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
-  },
-  openApiExemptSchemas: {
-    kind: "extension",
-    owners: ["oidc", "agent-map"],
-    justification:
-      "verify-openapi step 7b is fail-closed on every component schema. Without this member a module-owned wire schema can only be exempted from the CORE response-type registry, so shipping a module route means editing a core file — the coupling the contract exists to remove.",
   },
   openApiSchemas: {
     kind: "extension",
