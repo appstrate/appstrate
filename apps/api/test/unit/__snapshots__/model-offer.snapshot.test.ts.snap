@@ -1,11 +1,12 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`model offer matches the reviewed snapshot for the pinned Pi SDK 1`] = `
-"pi-ai 1.0.4
+"pi-ai 1.1.0
 anthropic claude-fable-5 anthropic-messages ctx=1000000 max=128000 $=10/50/1/12.5 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh,max temp=supported temp+reasoning=unsupported adaptive
 anthropic claude-fable-5-1 anthropic-messages ctx=1000000 max=128000 $=10/50/0.25/12.5 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh,max temp=unsupported adaptive featured
 anthropic claude-haiku-4-5 anthropic-messages ctx=200000 max=64000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
 anthropic claude-haiku-4-5-20251001 anthropic-messages ctx=200000 max=64000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
+anthropic claude-haiku-5-5 anthropic-messages ctx=1000000 max=128000 $=0.1/0.5/0.01/0.125 >100000:0.5/2.5/0.05/0.625 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=unsupported adaptive
 anthropic claude-opus-4-5 anthropic-messages ctx=200000 max=64000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
 anthropic claude-opus-4-5-20251101 anthropic-messages ctx=200000 max=64000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
 anthropic claude-opus-4-6 anthropic-messages ctx=1000000 max=128000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=unsupported adaptive
@@ -37,6 +38,7 @@ groq openai/gpt-oss-20b openai-completions ctx=131072 max=65536 $=0.075/0.3/0.03
 groq openai/gpt-oss-safeguard-20b openai-completions ctx=131072 max=65536 $=0.075/0.3/0/0 caps=text,reasoning levels=low,medium,high temp=supported temp+reasoning=supported featured
 groq qwen/qwen3.6-27b openai-completions ctx=131072 max=16384 $=0.6/3/0.3/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported featured
 groq qwen/qwen3.8-27b openai-completions ctx=131042 max=16384 $=0.8/4/0/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported featured
+mistral codestral-2508 mistral-conversations ctx=256000 max=8192 $=0.3/0.9/0.03/0 caps=text levels=off temp=supported
 mistral codestral-latest mistral-conversations ctx=256000 max=4096 $=0.3/0.9/0.03/0 caps=text levels=off temp=supported
 mistral devstral-2512 mistral-conversations ctx=262144 max=- $=0.4/2/0.04/0 caps=text levels=off temp=supported
 mistral devstral-latest mistral-conversations ctx=262144 max=- $=0.4/2/0.04/0 caps=text levels=off temp=supported
@@ -44,12 +46,18 @@ mistral devstral-medium-2507 mistral-conversations ctx=128000 max=- $=0.4/2/0.04
 mistral devstral-medium-latest mistral-conversations ctx=262144 max=- $=0.4/2/0.04/0 caps=text levels=off temp=supported
 mistral devstral-small-2505 mistral-conversations ctx=128000 max=- $=0.1/0.3/0.01/0 caps=text levels=off temp=supported
 mistral devstral-small-2507 mistral-conversations ctx=128000 max=- $=0.1/0.3/0.01/0 caps=text levels=off temp=supported
+mistral glm-5-2 mistral-conversations ctx=1048576 max=131072 $=1.4/4.4/0.14/0 caps=text,reasoning levels=off,high,max off=disables temp=supported temp+reasoning=supported
 mistral labs-devstral-small-2512 mistral-conversations ctx=256000 max=- $=unpriced caps=text,image levels=off temp=supported
-mistral magistral-medium-latest mistral-conversations ctx=128000 max=16384 $=2/5/0.2/0 caps=text,reasoning levels=off,minimal,low,medium,high off=unsent temp=supported temp+reasoning=supported
-mistral ministral-3b-latest mistral-conversations ctx=128000 max=- $=0.04/0.04/0.004/0 caps=text levels=off temp=supported
-mistral ministral-8b-latest mistral-conversations ctx=128000 max=- $=0.1/0.1/0.01/0 caps=text levels=off temp=supported
+mistral labs-leanstral-1-5-1 mistral-conversations ctx=262144 max=128000 $=unpriced caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
+mistral magistral-medium-latest mistral-conversations ctx=262144 max=16384 $=2/5/0.2/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
+mistral ministral-14b-2512 mistral-conversations ctx=262144 max=- $=0.2/0.2/0.02/0 caps=text,image levels=off temp=supported
+mistral ministral-3b-2512 mistral-conversations ctx=131072 max=- $=0.1/0.1/0.01/0 caps=text,image levels=off temp=supported
+mistral ministral-3b-latest mistral-conversations ctx=131072 max=128000 $=0.04/0.04/0.004/0 caps=text,image levels=off temp=supported
+mistral ministral-8b-2512 mistral-conversations ctx=262144 max=- $=0.15/0.15/0.015/0 caps=text,image levels=off temp=supported
+mistral ministral-8b-latest mistral-conversations ctx=262144 max=128000 $=0.1/0.1/0.01/0 caps=text,image levels=off temp=supported
 mistral mistral-large-2411 mistral-conversations ctx=131072 max=16384 $=2/6/0.2/0 caps=text levels=off temp=supported
 mistral mistral-large-2512 mistral-conversations ctx=262144 max=- $=0.5/1.5/0.05/0 caps=text,image levels=off temp=supported
+mistral mistral-large-4 mistral-conversations ctx=524288 max=262144 $=0.68/2.09/0.07/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
 mistral mistral-large-latest mistral-conversations ctx=262144 max=- $=0.5/1.5/0.05/0 caps=text,image levels=off temp=supported
 mistral mistral-medium-2505 mistral-conversations ctx=131072 max=- $=0.4/2/0.04/0 caps=text,image levels=off temp=supported
 mistral mistral-medium-2508 mistral-conversations ctx=262144 max=- $=0.4/2/0.04/0 caps=text,image levels=off temp=supported
@@ -58,17 +66,18 @@ mistral mistral-medium-3.5 mistral-conversations ctx=262144 max=- $=1.5/7.5/0/0 
 mistral mistral-medium-latest mistral-conversations ctx=262144 max=- $=1.5/7.5/0.15/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
 mistral mistral-nemo mistral-conversations ctx=128000 max=- $=0.15/0.15/0.015/0 caps=text levels=off temp=supported
 mistral mistral-small-2506 mistral-conversations ctx=128000 max=16384 $=0.1/0.3/0.01/0 caps=text,image levels=off temp=supported
-mistral mistral-small-2603 mistral-conversations ctx=256000 max=- $=0.15/0.6/0.015/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
-mistral mistral-small-latest mistral-conversations ctx=256000 max=- $=0.15/0.6/0.015/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
+mistral mistral-small-2603 mistral-conversations ctx=262144 max=256000 $=0.15/0.6/0.015/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
+mistral mistral-small-latest mistral-conversations ctx=262144 max=256000 $=0.15/0.6/0.015/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
 mistral open-mistral-7b mistral-conversations ctx=8000 max=- $=0.25/0.25/0.025/0 caps=text levels=off temp=supported
 mistral open-mistral-nemo mistral-conversations ctx=128000 max=- $=0.15/0.15/0.015/0 caps=text levels=off temp=supported
 mistral open-mixtral-8x22b mistral-conversations ctx=64000 max=- $=2/6/0.2/0 caps=text levels=off temp=supported
 mistral open-mixtral-8x7b mistral-conversations ctx=32000 max=- $=0.7/0.7/0.07/0 caps=text levels=off temp=supported
 mistral pixtral-12b mistral-conversations ctx=128000 max=- $=0.15/0.15/0.015/0 caps=text,image levels=off temp=supported
 mistral pixtral-large-latest mistral-conversations ctx=128000 max=- $=2/6/0.2/0 caps=text,image levels=off temp=supported
-mistral voxtral-small-latest mistral-conversations ctx=32000 max=- $=0.1/0.3/0.01/0 caps=text levels=off temp=supported
-mistral zai-glm-5-2 mistral-conversations ctx=1000000 max=131072 $=1.4/4.4/0.14/0 caps=text,reasoning levels=off,high,max off=disables temp=supported temp+reasoning=supported featured
-mistral zai-glm-5-3 mistral-conversations ctx=1000000 max=131072 $=1.4/4.4/0.14/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported featured
+mistral voxtral-small-2507 mistral-conversations ctx=32768 max=32000 $=0.1/0.4/0.01/0 caps=text levels=off temp=supported
+mistral voxtral-small-latest mistral-conversations ctx=32768 max=32000 $=0.1/0.3/0.01/0 caps=text levels=off temp=supported
+mistral zai-glm-5-2 mistral-conversations ctx=1048576 max=131072 $=1.4/4.4/0.14/0 caps=text,reasoning levels=off,high,max off=disables temp=supported temp+reasoning=supported featured
+mistral zai-glm-5-3 mistral-conversations ctx=1048576 max=131072 $=1.4/4.4/0.14/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported featured
 moonshot kimi-k2.6 openai-completions ctx=262144 max=- $=0.95/4/0.16/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported featured
 moonshot kimi-k2.7-code openai-completions ctx=262144 max=- $=0.95/4/0.19/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported featured
 moonshot kimi-k2.7-code-highspeed openai-completions ctx=262144 max=- $=1.9/8/0.38/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
@@ -108,7 +117,7 @@ openai gpt-6-astra openai-responses ctx=272000 max=128000 $=10/50/1/12.5 >272000
 openai gpt-6-luna openai-responses ctx=272000 max=128000 $=0.1/0.5/0.01/0.125 >272000:0.2/0.75/0.02/0.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=unsupported
 openai gpt-6-sol openai-responses ctx=272000 max=128000 $=2/10/0.2/2.5 >272000:4/15/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=unsupported
 openai gpt-6.1-sol openai-responses ctx=272000 max=128000 $=2/10/0.1/2.5 >272000:4/15/0.2/5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=unsupported
-openai gpt-daybreak-blue-latest openai-responses ctx=1050000 max=128000 $=4/20/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=unsupported
+openai gpt-daybreak-blue-latest openai-responses ctx=1050000 max=128000 $=4/20/0.4/5 >272000:8/30/0.8/10 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=unsupported
 openai gpt-daybreak-red-latest openai-responses ctx=400000 max=128000 $=12.5/75/1.25/15.625 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=unsupported
 openai gpt-realtime-2.1 openai-responses ctx=128000 max=32000 $=4/24/0.4/0 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh temp=unsupported
 openai o1 openai-responses ctx=200000 max=100000 $=15/60/7.5/0 caps=text,image,reasoning levels=low,medium,high temp=unsupported
@@ -118,23 +127,23 @@ openai o3-mini openai-responses ctx=200000 max=100000 $=1.1/4.4/0.55/0 caps=text
 openai o3-pro openai-responses ctx=200000 max=100000 $=20/80/0/0 caps=text,image,reasoning levels=low,medium,high temp=unsupported
 openai o4-mini openai-responses ctx=200000 max=100000 $=1.1/4.4/0.275/0 caps=text,image,reasoning levels=low,medium,high temp=unsupported
 openrouter ~anthropic/claude-fable-latest openai-completions ctx=1000000 max=128000 $=10/50/0.25/12.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter ~anthropic/claude-haiku-latest openai-completions ctx=200000 max=64000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter ~anthropic/claude-haiku-latest openai-completions ctx=1000000 max=128000 $=0.1/0.5/0.01/0.125 >100000:0.5/2.5/0.05/0.625 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
 openrouter ~anthropic/claude-opus-latest openai-completions ctx=1000000 max=128000 $=4/20/0.2/5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter ~anthropic/claude-sonnet-latest openai-completions ctx=1000000 max=128000 $=2/10/0.2/2.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter ~deepseek/deepseek-flash-latest openai-completions ctx=1048576 max=943718 $=0.003/2.4/0.003/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
-openrouter ~deepseek/deepseek-pro-latest openai-completions ctx=1048576 max=393216 $=0.1901/4.2/0.19/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
-openrouter ~deepseek/deepseek-v4-flash-latest openai-completions ctx=1048576 max=943718 $=0.0152/1.28/0.0152/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
+openrouter ~anthropic/claude-sonnet-latest openai-completions ctx=1000000 max=128000 $=2/10/0.1/2.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter ~deepseek/deepseek-flash-latest openai-completions ctx=1048576 max=943718 $=0.019/0.424/0.009/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
+openrouter ~deepseek/deepseek-pro-latest openai-completions ctx=1048576 max=393216 $=0.2856/4.2/0.2/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
+openrouter ~deepseek/deepseek-v4-flash-latest openai-completions ctx=1048576 max=943718 $=0.018/1.28/0.018/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
 openrouter ~google/gemini-flash-latest openai-completions ctx=1048576 max=65536 $=0.75/3.75/0.075/0.041667 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-openrouter ~google/gemini-pro-latest openai-completions ctx=1048576 max=65536 $=2/12/0.2/0.375 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-openrouter ~moonshotai/kimi-latest openai-completions ctx=1048576 max=131072 $=0.7884/13/0.45/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
-openrouter ~openai/gpt-astra-latest openai-completions ctx=1050000 max=128000 $=10/50/1/12.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter ~openai/gpt-luna-latest openai-completions ctx=1050000 max=128000 $=0.1/0.5/0.01/0.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter ~google/gemini-pro-latest openai-completions ctx=1048576 max=65536 $=2/12/0.2/0.375 >200000:4/18/0.4/0.375 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
+openrouter ~moonshotai/kimi-latest openai-completions ctx=1048576 max=131072 $=0.49/13/0.45/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
+openrouter ~openai/gpt-astra-latest openai-completions ctx=1050000 max=128000 $=10/50/1/12.5 >272000:20/75/2/25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter ~openai/gpt-luna-latest openai-completions ctx=1050000 max=128000 $=0.1/0.5/0.01/0.125 >272000:0.2/0.75/0.02/0.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
 openrouter ~openai/gpt-mini-latest openai-completions ctx=400000 max=128000 $=0.75/4.5/0.075/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter ~openai/gpt-sol-latest openai-completions ctx=1050000 max=128000 $=2/10/0.1/2.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter ~openai/gpt-terra-latest openai-completions ctx=1050000 max=128000 $=2/12/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter ~x-ai/grok-latest openai-completions ctx=500000 max=450000 $=2/6/0.5/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter ~z-ai/glm-flash-latest openai-completions ctx=1048576 max=131072 $=0.0352/0.5/0.0232/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
-openrouter ~z-ai/glm-latest openai-completions ctx=1048576 max=131072 $=0.03/12/0.03/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported
+openrouter ~openai/gpt-sol-latest openai-completions ctx=1050000 max=128000 $=2/10/0.1/2.5 >272000:4/15/0.2/5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter ~openai/gpt-terra-latest openai-completions ctx=1050000 max=128000 $=2/12/0.2/2.5 >272000:4/18/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter ~x-ai/grok-latest openai-completions ctx=500000 max=450000 $=2/6/0.5/0 >200000:4/12/1/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter ~z-ai/glm-flash-latest openai-completions ctx=1048576 max=131072 $=0.04/0.5/0.025/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
+openrouter ~z-ai/glm-latest openai-completions ctx=1048576 max=943718 $=0.062/3.39/0.06/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported
 openrouter aion-labs/aion-2.0 openai-completions ctx=131072 max=32768 $=0.8/1.6/0.2/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter aion-labs/aion-3.0 openai-completions ctx=131072 max=32768 $=3/6/0.75/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter aion-labs/aion-3.0-mini openai-completions ctx=131072 max=32768 $=0.7/1.4/0.18/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
@@ -148,6 +157,7 @@ openrouter amazon/nova-pro-v1 openai-completions ctx=300000 max=5120 $=0.8/3.2/0
 openrouter anthropic/claude-fable-5:batch openai-completions ctx=1000000 max=128000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
 openrouter anthropic/claude-fable-5.1:batch openai-completions ctx=1000000 max=128000 $=5/25/0.125/6.25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
 openrouter anthropic/claude-haiku-4.5:batch openai-completions ctx=200000 max=64000 $=0.5/2.5/0.05/0.625 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter anthropic/claude-haiku-5.5:batch openai-completions ctx=1000000 max=128000 $=0.05/0.25/0.005/0.0625 >100000:0.25/1.25/0.025/0.3125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-opus-4.1:batch openai-completions ctx=200000 max=32000 $=7.5/37.5/0.75/9.375 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-opus-4.5:batch openai-completions ctx=200000 max=64000 $=2.5/12.5/0.25/3.125 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-opus-4.6:batch openai-completions ctx=1000000 max=128000 $=2.5/12.5/0.25/3.125 caps=text,image,reasoning levels=off,low,medium,high,max off=disables temp=supported temp+reasoning=supported
@@ -155,19 +165,19 @@ openrouter anthropic/claude-opus-4.7:batch openai-completions ctx=1000000 max=12
 openrouter anthropic/claude-opus-4.8:batch openai-completions ctx=1000000 max=128000 $=2.5/12.5/0.25/3.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-opus-5:batch openai-completions ctx=1000000 max=128000 $=2.5/12.5/0.25/3.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-opus-5.5:batch openai-completions ctx=1000000 max=128000 $=2/10/0.1/2.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter anthropic/claude-sonnet-4.5:batch openai-completions ctx=1000000 max=64000 $=1.5/7.5/0.15/1.875 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter anthropic/claude-sonnet-4.5:batch openai-completions ctx=1000000 max=64000 $=1.5/7.5/0.15/1.875 >200000:3/11.25/0.3/3.75 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-sonnet-4.6:batch openai-completions ctx=1000000 max=128000 $=1.5/7.5/0.15/1.875 caps=text,image,reasoning levels=off,low,medium,high,max off=disables temp=supported temp+reasoning=supported
 openrouter anthropic/claude-sonnet-5:batch openai-completions ctx=1000000 max=128000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter anthropic/claude-sonnet-5.5:batch openai-completions ctx=1000000 max=128000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter anthropic/claude-sonnet-5.5:batch openai-completions ctx=1000000 max=128000 $=1/5/0.05/1.25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
 openrouter apodex/apodex-1.1-mini:free openai-completions ctx=262144 max=235929 $=0/0/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter arcee-ai/trinity-large-thinking openai-completions ctx=262144 max=80000 $=0.25/0.8/0.06/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter auto openai-completions ctx=2000000 max=30000 $=unpriced caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter bytedance-seed/seed-1.6 openai-completions ctx=262144 max=32768 $=0.25/2/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter bytedance-seed/seed-1.6-flash openai-completions ctx=262144 max=32768 $=0.075/0.3/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter bytedance-seed/seed-1.6 openai-completions ctx=262144 max=32768 $=0.25/2/0/0 >128000:0.5/4/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter bytedance-seed/seed-1.6-flash openai-completions ctx=262144 max=32768 $=0.075/0.3/0/0 >128000:0.1/0.8/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter bytedance-seed/seed-2-1-turbo openai-completions ctx=262144 max=235929 $=0.5/2.5/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter bytedance-seed/seed-2.0-code openai-completions ctx=262144 max=131072 $=0.5/3/0/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter bytedance-seed/seed-2.0-lite openai-completions ctx=262144 max=131072 $=0.25/2/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter bytedance-seed/seed-2.0-mini openai-completions ctx=262144 max=131072 $=0.1/0.4/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter bytedance-seed/seed-2.0-code openai-completions ctx=262144 max=131072 $=0.5/3/0/0 >128000:1/6/0/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter bytedance-seed/seed-2.0-lite openai-completions ctx=262144 max=131072 $=0.25/2/0/0 >128000:0.5/4/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter bytedance-seed/seed-2.0-mini openai-completions ctx=262144 max=131072 $=0.1/0.4/0/0 >128000:0.2/0.8/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter cohere/command-a-plus openai-completions ctx=192000 max=64000 $=0.3/1.5/0.15/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter cohere/command-r-08-2024 openai-completions ctx=128000 max=4000 $=0.15/0.6/0/0 caps=text levels=off temp=supported
 openrouter cohere/command-r-plus-08-2024 openai-completions ctx=128000 max=4000 $=2.5/10/0/0 caps=text levels=off temp=supported
@@ -177,11 +187,11 @@ openrouter deepseek/deepseek-chat-v3-0324 openai-completions ctx=128000 max=1152
 openrouter deepseek/deepseek-chat-v3.1 openai-completions ctx=163840 max=32768 $=0.25/0.95/0.13/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-r1 openai-completions ctx=64000 max=16000 $=0.7/2.5/0/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-r1-0528 openai-completions ctx=163840 max=32768 $=0.5/2.15/0.35/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-openrouter deepseek/deepseek-v3.1-terminus openai-completions ctx=131072 max=65536 $=0.3/1/0.135/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter deepseek/deepseek-v3.1-terminus openai-completions ctx=163840 max=147456 $=0.27/1/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-v3.2 openai-completions ctx=163840 max=147456 $=0.259/0.42/0.135/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-v3.2-exp openai-completions ctx=163840 max=147456 $=0.27/0.41/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-v4-flash openai-completions ctx=1048576 max=943718 $=0.03/1.28/0.03/0 caps=text,reasoning levels=off,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter deepseek/deepseek-v4-flash-0731 openai-completions ctx=1048576 max=943718 $=0.0152/1.28/0.0152/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
+openrouter deepseek/deepseek-v4-flash-0731 openai-completions ctx=1048576 max=943718 $=0.018/1.28/0.018/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-v4-flash-vision-exp openai-completions ctx=1048576 max=262144 $=0.2156/0.6468/0.00686/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-v4-pro openai-completions ctx=1024000 max=384000 $=0.2088/0.4176/0.0174/0 caps=text,reasoning levels=off,high,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter deepseek/deepseek-v4-pro-0813 openai-completions ctx=1048576 max=393216 $=0.66/1.98/0.022/0 caps=text,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
@@ -193,18 +203,18 @@ openrouter google/gemini-2.5-flash openai-completions ctx=1048576 max=65535 $=0.
 openrouter google/gemini-2.5-flash-lite openai-completions ctx=1048576 max=65535 $=0.1/0.4/0.01/0.083333 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemini-2.5-flash-lite:batch openai-completions ctx=1048576 max=65535 $=0.05/0.2/0.01/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemini-2.5-flash:batch openai-completions ctx=1048576 max=65535 $=0.15/1.25/0.03/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter google/gemini-2.5-pro openai-completions ctx=1048576 max=65536 $=1.25/10/0.125/0.375 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-openrouter google/gemini-2.5-pro-preview openai-completions ctx=1048576 max=65536 $=1.25/10/0.125/0.375 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-openrouter google/gemini-2.5-pro:batch openai-completions ctx=1048576 max=65536 $=0.625/5/0.125/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-2.5-pro openai-completions ctx=1048576 max=65536 $=1.25/10/0.125/0.375 >200000:2.5/15/0.25/0.375 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-2.5-pro-preview openai-completions ctx=1048576 max=65536 $=1.25/10/0.125/0.375 >200000:2.5/15/0.25/0.375 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-2.5-pro:batch openai-completions ctx=1048576 max=65536 $=0.625/5/0.125/0 >200000:1.25/7.5/0.25/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3-flash-preview openai-completions ctx=1048576 max=65536 $=0.5/3/0.05/0.083333 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemini-3-flash-preview:batch openai-completions ctx=1048576 max=65536 $=0.25/1.5/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemini-3-pro-image openai-completions ctx=65536 max=32768 $=2/12/0.2/0.375 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3.1-flash-lite openai-completions ctx=1048576 max=65536 $=0.25/1.5/0.025/0.083333 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemini-3.1-flash-lite-preview openai-completions ctx=1048576 max=65536 $=0.25/1.5/0.025/0.083333 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemini-3.1-flash-lite:batch openai-completions ctx=1048576 max=65536 $=0.125/0.75/0.0125/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter google/gemini-3.1-pro-preview openai-completions ctx=1048576 max=65536 $=2/12/0.2/0.375 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-openrouter google/gemini-3.1-pro-preview-customtools openai-completions ctx=1048576 max=65536 $=2/12/0.2/0.375 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-openrouter google/gemini-3.1-pro-preview:batch openai-completions ctx=1048576 max=65536 $=1/6/0/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-3.1-pro-preview openai-completions ctx=1048576 max=65536 $=2/12/0.2/0.375 >200000:4/18/0.4/0.375 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-3.1-pro-preview-customtools openai-completions ctx=1048576 max=65536 $=2/12/0.2/0.375 >200000:4/18/0.4/0.375 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-3.1-pro-preview:batch openai-completions ctx=1048576 max=65536 $=1/6/0/0 >200000:2/9/0/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3.5-flash openai-completions ctx=1048576 max=65536 $=1.5/9/0.15/0.083333 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3.5-flash-lite openai-completions ctx=1048576 max=65536 $=0.3/2.5/0.03/0.083333 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3.5-flash-lite:batch openai-completions ctx=1048576 max=65536 $=0.15/1.25/0.015/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
@@ -215,6 +225,7 @@ openrouter google/gemini-3.7-flash openai-completions ctx=1048576 max=65536 $=0.
 openrouter google/gemini-3.7-flash:batch openai-completions ctx=1048576 max=65536 $=0.375/1.875/0.0375/0.041667 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3.8-flash openai-completions ctx=1048576 max=65536 $=0.75/3.75/0.075/0.041667 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
 openrouter google/gemini-3.8-flash:batch openai-completions ctx=1048576 max=65536 $=0.375/1.875/0.0375/0.041667 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
+openrouter google/gemini-nano-banana-2.1 openai-completions ctx=65536 max=58982 $=1.5/7.5/0/0 caps=text,image,reasoning levels=off,minimal,high off=disables temp=supported temp+reasoning=supported
 openrouter google/gemma-3-12b-it openai-completions ctx=131072 max=16384 $=0.05/0.15/0/0 caps=text,image levels=off temp=supported
 openrouter google/gemma-3-27b-it openai-completions ctx=131072 max=117964 $=0.08/0.45/0.04/0 caps=text,image levels=off temp=supported
 openrouter google/gemma-4-26b-a4b-it openai-completions ctx=262144 max=235929 $=0.0765/0.255/0.0425/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
@@ -229,15 +240,14 @@ openrouter inclusionai/ling-3.0-flash-fin openai-completions ctx=262144 max=3276
 openrouter inclusionai/ling-3.0-flash-sante:free openai-completions ctx=262144 max=32768 $=0/0/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter inclusionai/ling-3.0-flash-vl openai-completions ctx=262144 max=32768 $=0.021/0.0616/0.0042/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter inclusionai/ling-3.1-flash openai-completions ctx=262144 max=32768 $=unpriced caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter kwaipilot/kat-coder-pro-v2.5 openai-completions ctx=262144 max=235929 $=0.74/2.96/0.15/0 caps=text levels=off temp=supported
 openrouter liquid/lfm-2.5-2.6b:free openai-completions ctx=65536 max=8192 $=0/0/0/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter meituan/longcat-2.0 openai-completions ctx=1048756 max=262144 $=0.3/1.2/0.006/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter meta-llama/llama-3.1-70b-instruct openai-completions ctx=131072 max=16384 $=0.4/0.4/0/0 caps=text levels=off temp=supported
 openrouter meta-llama/llama-3.1-8b-instruct openai-completions ctx=131072 max=117964 $=0.05/0.08/0.025/0 caps=text levels=off temp=supported
 openrouter meta-llama/llama-3.3-70b-instruct openai-completions ctx=131072 max=16384 $=0.22/0.5/0.11/0 caps=text levels=off temp=supported
-openrouter meta-llama/llama-4-maverick openai-completions ctx=128000 max=16384 $=0.1875/0.6525/0/0 caps=text,image levels=off temp=supported
+openrouter meta-llama/llama-4-maverick openai-completions ctx=128000 max=16384 $=0.1875/0.6525/0.05/0 caps=text,image levels=off temp=supported
 openrouter meta-llama/llama-4-scout openai-completions ctx=327680 max=16384 $=0.1/0.3/0/0 caps=text,image levels=off temp=supported
-openrouter meta/muse-glimmer-30b openai-completions ctx=131072 max=117964 $=0.35/1.5/0.04/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter meta/muse-glimmer-30b openai-completions ctx=131072 max=16384 $=0.3/1.2/0.04/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
 openrouter meta/muse-spark-1.1 openai-completions ctx=1048576 max=943718 $=1.25/4.25/0.15/0 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh temp=supported temp+reasoning=supported
 openrouter meta/muse-spark-1.2 openai-completions ctx=1048576 max=943718 $=1.25/4.25/0.15/0 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh temp=supported temp+reasoning=supported
 openrouter meta/muse-spark-1.2-contributor openai-completions ctx=1048576 max=943718 $=0.1/0.2/0.002/0 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh temp=supported temp+reasoning=supported
@@ -260,6 +270,7 @@ openrouter mistralai/mistral-large openai-completions ctx=128000 max=102400 $=2/
 openrouter mistralai/mistral-large-2407 openai-completions ctx=131072 max=104857 $=2/6/0.2/0 caps=text levels=off temp=supported
 openrouter mistralai/mistral-large-2512 openai-completions ctx=262144 max=209715 $=0.5/1.5/0.05/0 caps=text,image levels=off temp=supported
 openrouter mistralai/mistral-large-2512:batch openai-completions ctx=262144 max=209715 $=0.25/0.75/0.025/0 caps=text,image levels=off temp=supported
+openrouter mistralai/mistral-large-4-0 openai-completions ctx=524288 max=262144 $=0.68/2.09/0.07/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
 openrouter mistralai/mistral-medium-3 openai-completions ctx=131072 max=104857 $=0.4/2/0.04/0 caps=text,image levels=off temp=supported
 openrouter mistralai/mistral-medium-3-5 openai-completions ctx=262144 max=209715 $=1.5/7.5/0/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
 openrouter mistralai/mistral-medium-3-5:batch openai-completions ctx=262144 max=209715 $=0.75/3.75/0/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
@@ -277,18 +288,18 @@ openrouter moonshotai/kimi-k2 openai-completions ctx=131072 max=98304 $=0.57/2.3
 openrouter moonshotai/kimi-k2-0905 openai-completions ctx=262144 max=98304 $=0.6/2.5/0/0 caps=text levels=off temp=supported
 openrouter moonshotai/kimi-k2-thinking openai-completions ctx=262144 max=235929 $=0.6/2.5/0/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter moonshotai/kimi-k2.5 openai-completions ctx=262144 max=4096 $=0.41/2.06/0.07/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter moonshotai/kimi-k2.6 openai-completions ctx=262144 max=235929 $=0.95/4/0.16/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter moonshotai/kimi-k2.6 openai-completions ctx=262144 max=235929 $=0.465/2.45/0.0975/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter moonshotai/kimi-k2.7-code openai-completions ctx=262144 max=235929 $=0.6712/3.35/0.18/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
-openrouter moonshotai/kimi-k3 openai-completions ctx=1048576 max=131072 $=1.29/14/0.43/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
+openrouter moonshotai/kimi-k3 openai-completions ctx=1048576 max=131072 $=0.5/15/0.45/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
 openrouter moonshotai/kimi-k3:batch openai-completions ctx=1048576 max=16384 $=2.28/11.4/0.228/0 caps=text,image,reasoning levels=off,low,high,max off=disables temp=supported temp+reasoning=supported
 openrouter nex-agi/nex-n2.5-pro openai-completions ctx=262144 max=235929 $=0.075/0.25/0.015/0 caps=text,image,reasoning levels=off,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter nvidia/nemotron-3-nano-30b-a3b openai-completions ctx=262144 max=235929 $=0.05/0.2/0.03/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter nvidia/nemotron-3-nano-30b-a3b openai-completions ctx=262144 max=32768 $=0.05/0.2/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free openai-completions ctx=256000 max=65536 $=0/0/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter nvidia/nemotron-3-super-120b-a12b openai-completions ctx=262144 max=235929 $=0.08/0.45/0/0 caps=text,reasoning levels=off,low,medium off=disables temp=supported temp+reasoning=supported
 openrouter nvidia/nemotron-3-super-120b-a12b:free openai-completions ctx=262144 max=235929 $=0/0/0/0 caps=text,reasoning levels=off,low,medium off=disables temp=supported temp+reasoning=supported
 openrouter nvidia/nemotron-3-ultra-550b-a55b openai-completions ctx=262144 max=16384 $=0.5/2.2/0.1/0 caps=text,reasoning levels=off,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter nvidia/nemotron-3-ultra-550b-a55b:free openai-completions ctx=1000000 max=65536 $=0/0/0/0 caps=text,reasoning levels=off,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter nvidia/nemotron-3.5-lightning openai-completions ctx=262144 max=32768 $=0.06/0.16/0.03/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter nvidia/nemotron-3.5-lightning openai-completions ctx=262144 max=131072 $=0.049/0.14/0.0245/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter nvidia/nemotron-3.5-lightning:free openai-completions ctx=1000000 max=65536 $=0/0/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter openai/gpt-3.5-turbo openai-completions ctx=16385 max=4096 $=0.5/1.5/0/0 caps=text levels=off temp=supported
 openrouter openai/gpt-3.5-turbo-0613 openai-completions ctx=4095 max=3685 $=1/2/0/0 caps=text levels=off temp=supported
@@ -331,44 +342,44 @@ openrouter openai/gpt-5.2-pro openai-completions ctx=400000 max=128000 $=21/168/
 openrouter openai/gpt-5.2-pro:batch openai-completions ctx=400000 max=128000 $=10.5/84/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
 openrouter openai/gpt-5.2:batch openai-completions ctx=400000 max=128000 $=0.875/7/0.0875/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter openai/gpt-5.3-codex openai-completions ctx=400000 max=128000 $=1.75/14/0.175/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.4 openai-completions ctx=1050000 max=128000 $=2.5/15/0.25/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.4 openai-completions ctx=1050000 max=128000 $=2.5/15/0.25/0 >272000:5/22.5/0.5/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter openai/gpt-5.4-mini openai-completions ctx=400000 max=128000 $=0.75/4.5/0.075/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter openai/gpt-5.4-mini:batch openai-completions ctx=400000 max=128000 $=0.375/2.25/0.0375/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter openai/gpt-5.4-nano openai-completions ctx=400000 max=128000 $=0.2/1.25/0.02/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter openai/gpt-5.4-nano:batch openai-completions ctx=400000 max=128000 $=0.1/0.625/0.01/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.4-pro openai-completions ctx=1050000 max=128000 $=30/180/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.4-pro:batch openai-completions ctx=1050000 max=128000 $=15/90/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.4:batch openai-completions ctx=1050000 max=128000 $=1.25/7.5/0.125/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.5 openai-completions ctx=1050000 max=128000 $=5/30/0.5/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.5-pro openai-completions ctx=1050000 max=128000 $=30/180/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.5-pro:batch openai-completions ctx=1050000 max=128000 $=15/90/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.5:batch openai-completions ctx=1050000 max=128000 $=2.5/15/0.25/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-luna openai-completions ctx=1050000 max=128000 $=0.2/1.2/0.02/0.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-luna-pro openai-completions ctx=1050000 max=128000 $=0.2/1.2/0.02/0.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-luna-pro:batch openai-completions ctx=1050000 max=128000 $=0.1/0.6/0.01/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-luna:batch openai-completions ctx=1050000 max=128000 $=0.1/0.6/0.01/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-sol openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-sol-pro openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-sol-pro:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-sol:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-terra openai-completions ctx=1050000 max=128000 $=2/12/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-terra-pro openai-completions ctx=1050000 max=128000 $=2/12/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-terra-pro:batch openai-completions ctx=1050000 max=128000 $=1/6/0.1/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-5.6-terra:batch openai-completions ctx=1050000 max=128000 $=1/6/0.1/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-astra openai-completions ctx=1050000 max=128000 $=10/50/1/12.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-astra-pro openai-completions ctx=1050000 max=128000 $=10/50/1/12.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-astra-pro:batch openai-completions ctx=1050000 max=128000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-astra:batch openai-completions ctx=1050000 max=128000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-luna openai-completions ctx=1050000 max=128000 $=0.1/0.5/0.01/0.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-luna-pro openai-completions ctx=1050000 max=128000 $=0.1/0.5/0.01/0.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-luna-pro:batch openai-completions ctx=1050000 max=128000 $=0.05/0.25/0.005/0.0625 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-luna:batch openai-completions ctx=1050000 max=128000 $=0.05/0.25/0.005/0.0625 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-sol openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-sol-pro openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-sol-pro:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6-sol:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter openai/gpt-6.1-sol openai-completions ctx=1050000 max=128000 $=2/10/0.1/2.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
-openrouter openai/gpt-6.1-sol-pro openai-completions ctx=1050000 max=128000 $=2/10/0.1/2.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.4-pro openai-completions ctx=1050000 max=128000 $=30/180/0/0 >272000:60/270/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.4-pro:batch openai-completions ctx=1050000 max=128000 $=15/90/0/0 >272000:30/135/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.4:batch openai-completions ctx=1050000 max=128000 $=1.25/7.5/0.125/0 >272000:2.5/11.25/0.25/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.5 openai-completions ctx=1050000 max=128000 $=5/30/0.5/0 >272000:10/45/1/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.5-pro openai-completions ctx=1050000 max=128000 $=30/180/0/0 >272000:60/270/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.5-pro:batch openai-completions ctx=1050000 max=128000 $=15/90/0/0 >272000:30/135/0/0 caps=text,image,reasoning levels=medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.5:batch openai-completions ctx=1050000 max=128000 $=2.5/15/0.25/0 >272000:5/22.5/0.5/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-luna openai-completions ctx=1050000 max=128000 $=0.2/1.2/0.02/0.25 >272000:0.4/1.8/0.04/0.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-luna-pro openai-completions ctx=1050000 max=128000 $=0.2/1.2/0.02/0.25 >272000:0.4/1.8/0.04/0.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-luna-pro:batch openai-completions ctx=1050000 max=128000 $=0.1/0.6/0.01/0 >272000:0.2/0.9/0.02/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-luna:batch openai-completions ctx=1050000 max=128000 $=0.1/0.6/0.01/0 >272000:0.2/0.9/0.02/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-sol openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 >272000:4/15/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-sol-pro openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 >272000:4/15/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-sol-pro:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 >272000:2/7.5/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-sol:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 >272000:2/7.5/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-terra openai-completions ctx=1050000 max=128000 $=2/12/0.2/2.5 >272000:4/18/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-terra-pro openai-completions ctx=1050000 max=128000 $=2/12/0.2/2.5 >272000:4/18/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-terra-pro:batch openai-completions ctx=1050000 max=128000 $=1/6/0.1/0 >272000:2/9/0.2/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-5.6-terra:batch openai-completions ctx=1050000 max=128000 $=1/6/0.1/0 >272000:2/9/0.2/0 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-astra openai-completions ctx=1050000 max=128000 $=10/50/1/12.5 >272000:20/75/2/25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-astra-pro openai-completions ctx=1050000 max=128000 $=10/50/1/12.5 >272000:20/75/2/25 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-astra-pro:batch openai-completions ctx=1050000 max=128000 $=5/25/0.5/6.25 >272000:10/37.5/1/12.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-astra:batch openai-completions ctx=1050000 max=128000 $=5/25/0.5/6.25 >272000:10/37.5/1/12.5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-luna openai-completions ctx=1050000 max=128000 $=0.1/0.5/0.01/0.125 >272000:0.2/0.75/0.02/0.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-luna-pro openai-completions ctx=1050000 max=128000 $=0.1/0.5/0.01/0.125 >272000:0.2/0.75/0.02/0.25 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-luna-pro:batch openai-completions ctx=1050000 max=128000 $=0.05/0.25/0.005/0.0625 >272000:0.1/0.375/0.01/0.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-luna:batch openai-completions ctx=1050000 max=128000 $=0.05/0.25/0.005/0.0625 >272000:0.1/0.375/0.01/0.125 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-sol openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 >272000:4/15/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-sol-pro openai-completions ctx=1050000 max=128000 $=2/10/0.2/2.5 >272000:4/15/0.4/5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-sol-pro:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 >272000:2/7.5/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6-sol:batch openai-completions ctx=1050000 max=128000 $=1/5/0.1/1.25 >272000:2/7.5/0.2/2.5 caps=text,image,reasoning levels=off,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
+openrouter openai/gpt-6.1-sol openai-completions ctx=1050000 max=128000 $=2/10/0.1/2.5 >272000:4/15/0.2/5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+openrouter openai/gpt-6.1-sol-pro openai-completions ctx=1050000 max=128000 $=2/10/0.1/2.5 >272000:4/15/0.2/5 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
 openrouter openai/gpt-audio openai-completions ctx=128000 max=16384 $=2.5/10/0/0 caps=text levels=off temp=supported
 openrouter openai/gpt-audio-mini openai-completions ctx=128000 max=16384 $=0.6/2.4/0/0 caps=text levels=off temp=supported
 openrouter openai/gpt-chat-latest openai-completions ctx=400000 max=128000 $=5/30/0.5/0 caps=text,image levels=off temp=supported
@@ -399,11 +410,11 @@ openrouter poolside/laguna-xs-2.1:free openai-completions ctx=262144 max=32768 $
 openrouter prism-ml/ternary-bonsai-2-27b openai-completions ctx=262144 max=32768 $=0.075/0.5/0.0375/0 caps=text,image,reasoning levels=off,medium,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen-2.5-72b-instruct openai-completions ctx=32768 max=16384 $=0.36/0.4/0/0 caps=text levels=off temp=supported
 openrouter qwen/qwen-2.5-7b-instruct openai-completions ctx=32768 max=29491 $=0.1/0.2/0/0 caps=text levels=off temp=supported
-openrouter qwen/qwen-plus openai-completions ctx=1000000 max=32768 $=0.26/0.78/0.052/0.325 caps=text levels=off temp=supported
-openrouter qwen/qwen-plus-2025-07-28 openai-completions ctx=1000000 max=32768 $=0.26/0.78/0/0 caps=text levels=off temp=supported
+openrouter qwen/qwen-plus openai-completions ctx=1000000 max=32768 $=0.26/0.78/0.052/0.325 >256000:0.78/2.34/0.156/0.975 caps=text levels=off temp=supported
+openrouter qwen/qwen-plus-2025-07-28 openai-completions ctx=1000000 max=32768 $=0.26/0.78/0/0 >256000:0.78/2.34/0/0 caps=text levels=off temp=supported
 openrouter qwen/qwen3-14b openai-completions ctx=40960 max=16384 $=0.12/0.24/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3-235b-a22b openai-completions ctx=131072 max=8192 $=0.455/1.82/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3-235b-a22b-2507 openai-completions ctx=262144 max=235929 $=0.0875/0.35/0.0175/0 caps=text levels=off temp=supported
+openrouter qwen/qwen3-235b-a22b-2507 openai-completions ctx=262144 max=16384 $=0.09/0.55/0/0 caps=text levels=off temp=supported
 openrouter qwen/qwen3-235b-a22b-thinking-2507 openai-completions ctx=131072 max=117964 $=0.23/2.3/0/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter qwen/qwen3-30b-a3b openai-completions ctx=40960 max=16384 $=0.12/0.5/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3-30b-a3b-instruct-2507 openai-completions ctx=128000 max=32000 $=0.04815/0.19305/0/0 caps=text levels=off temp=supported
@@ -412,11 +423,11 @@ openrouter qwen/qwen3-32b openai-completions ctx=40960 max=16384 $=0.08/0.28/0/0
 openrouter qwen/qwen3-8b openai-completions ctx=131072 max=8192 $=0.117/0.455/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3-coder openai-completions ctx=262144 max=65536 $=0.3/1/0.1/0 caps=text levels=off temp=supported
 openrouter qwen/qwen3-coder-30b-a3b-instruct openai-completions ctx=262144 max=235929 $=0.07/0.28/0/0 caps=text levels=off temp=supported
-openrouter qwen/qwen3-coder-flash openai-completions ctx=1000000 max=65536 $=0.195/0.975/0.039/0.24375 caps=text levels=off temp=supported
+openrouter qwen/qwen3-coder-flash openai-completions ctx=1000000 max=65536 $=0.195/0.975/0.039/0.24375 >32000:0.325/1.625/0.065/0.40625 >128000:0.52/2.6/0.104/0.65 caps=text levels=off temp=supported
 openrouter qwen/qwen3-coder-next openai-completions ctx=262144 max=235929 $=0.12/0.8/0.07/0 caps=text levels=off temp=supported
-openrouter qwen/qwen3-coder-plus openai-completions ctx=1000000 max=65536 $=0.65/3.25/0.13/0.8125 caps=text levels=off temp=supported
-openrouter qwen/qwen3-max openai-completions ctx=262144 max=65536 $=0.78/3.9/0.156/0.975 caps=text levels=off temp=supported
-openrouter qwen/qwen3-max-thinking openai-completions ctx=262144 max=65536 $=0.78/3.9/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3-coder-plus openai-completions ctx=1000000 max=65536 $=0.65/3.25/0.13/0.8125 >32000:1.17/5.85/0.234/1.4625 >128000:1.95/9.75/0.39/2.4375 caps=text levels=off temp=supported
+openrouter qwen/qwen3-max openai-completions ctx=262144 max=65536 $=0.78/3.9/0.156/0.975 >32000:1.56/7.8/0.312/1.95 >128000:1.95/9.75/0.39/2.4375 caps=text levels=off temp=supported
+openrouter qwen/qwen3-max-thinking openai-completions ctx=262144 max=65536 $=0.78/3.9/0/0 >32000:1.56/7.8/0/0 >128000:1.95/9.75/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3-next-80b-a3b-instruct openai-completions ctx=262144 max=235929 $=0.1/1.1/0.07/0 caps=text levels=off temp=supported
 openrouter qwen/qwen3-next-80b-a3b-thinking openai-completions ctx=131072 max=32768 $=0.15/1.2/0/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter qwen/qwen3-vl-235b-a22b-instruct openai-completions ctx=131072 max=32768 $=0.21/1.9/0.1/0 caps=text,image levels=off temp=supported
@@ -429,20 +440,20 @@ openrouter qwen/qwen3-vl-8b-thinking openai-completions ctx=131072 max=32768 $=0
 openrouter qwen/qwen3.5-122b-a10b openai-completions ctx=262144 max=65536 $=0.26/2.08/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.5-27b openai-completions ctx=262144 max=65536 $=0.195/1.56/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.5-35b-a3b openai-completions ctx=262144 max=235929 $=0.15/1/0.05/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.5-397b-a17b openai-completions ctx=262144 max=235929 $=0.55/3.5/0.225/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.5-397b-a17b openai-completions ctx=262144 max=81920 $=0.45/3/0.22/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.5-9b openai-completions ctx=256000 max=32768 $=0.1/0.15/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.5-flash-02-23 openai-completions ctx=1000000 max=65536 $=0.065/0.26/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.5-plus-02-15 openai-completions ctx=1000000 max=65536 $=0.26/1.56/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.5-plus-20260420 openai-completions ctx=1000000 max=65536 $=0.3/1.8/0/0.375 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.6-27b openai-completions ctx=262144 max=262140 $=0.32/3.25/0.03/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.5-plus-02-15 openai-completions ctx=1000000 max=65536 $=0.26/1.56/0/0 >256000:0.325/1.95/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.5-plus-20260420 openai-completions ctx=1000000 max=65536 $=0.3/1.8/0/0.375 >256000:0.375/2.25/0/0.46875 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.6-27b openai-completions ctx=262144 max=65536 $=0.3/2/0.03/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.6-35b-a3b openai-completions ctx=262144 max=235929 $=0.15/1/0.05/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.6-flash openai-completions ctx=1000000 max=65536 $=0.1875/1.125/0/0.234375 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.6-max-preview openai-completions ctx=262144 max=65536 $=1.027/6.162/0/1.28375 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.6-plus openai-completions ctx=1000000 max=65536 $=0.325/1.95/0/0.40625 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.7-flash openai-completions ctx=1000000 max=65536 $=0.03/0.13/0.006/0.038 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.6-flash openai-completions ctx=1000000 max=65536 $=0.1875/1.125/0/0.234375 >256000:0.75/3/0/0.9375 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.6-max-preview openai-completions ctx=262144 max=65536 $=1.027/6.162/0/1.28375 >128000:1.58/9.48/0/1.975 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.6-plus openai-completions ctx=1000000 max=65536 $=0.325/1.95/0/0.40625 >256000:1.3/3.9/0/1.625 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.7-flash openai-completions ctx=1000000 max=65536 $=0.03/0.13/0.006/0.038 >32000:0.1/0.4/0.02/0.125 >256000:0.2/0.8/0.04/0.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.7-max openai-completions ctx=1000000 max=131072 $=1.475/4.425/0.295/1.84375 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.7-plus openai-completions ctx=1000000 max=131072 $=0.32/1.28/0.064/0.4 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter qwen/qwen3.8-2.4t-a95b openai-completions ctx=1000000 max=131072 $=2/6/0.25/0 caps=text,reasoning levels=low,medium,xhigh temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.7-plus openai-completions ctx=1000000 max=131072 $=0.32/1.28/0.064/0.4 >256000:0.96/3.84/0.192/1.2 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter qwen/qwen3.8-2.4t-a95b openai-completions ctx=1048576 max=131072 $=2/6/0.25/0 caps=text,reasoning levels=low,medium,xhigh temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.8-27b openai-completions ctx=1000000 max=131072 $=0.425/2.55/0.085/0.53125 caps=text,image,reasoning levels=off,low,medium,xhigh off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.8-flash openai-completions ctx=1000000 max=131072 $=0.15/0.47/0.016/0.2 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter qwen/qwen3.8-max-0902 openai-completions ctx=1000000 max=131072 $=2/6/0.25/2.5 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh temp=supported temp+reasoning=supported
@@ -451,8 +462,8 @@ openrouter qwen/qwen3.8-omni-flash openai-completions ctx=1000000 max=131072 $=0
 openrouter rekaai/reka-edge openai-completions ctx=16384 max=14745 $=0.1/0.1/0/0 caps=text,image levels=off temp=supported
 openrouter relace/relace-search openai-completions ctx=256000 max=128000 $=1/3/0/0 caps=text levels=off temp=supported
 openrouter sakana/fugu-max openai-completions ctx=1000000 max=128000 $=2/6/0.25/0 caps=text,image,reasoning levels=high,xhigh,max temp=supported temp+reasoning=supported
-openrouter sakana/fugu-ultra openai-completions ctx=1000000 max=128000 $=5/30/0.5/0 caps=text,image,reasoning levels=high,xhigh,max temp=supported temp+reasoning=supported
-openrouter sakana/fugu-ultra-v2 openai-completions ctx=1000000 max=128000 $=5/30/0.5/0 caps=text,image,reasoning levels=high,xhigh,max temp=supported temp+reasoning=supported
+openrouter sakana/fugu-ultra openai-completions ctx=1000000 max=128000 $=5/30/0.5/0 >272000:10/45/1/0 caps=text,image,reasoning levels=high,xhigh,max temp=supported temp+reasoning=supported
+openrouter sakana/fugu-ultra-v2 openai-completions ctx=1000000 max=128000 $=5/30/0.5/0 >272000:10/45/1/0 caps=text,image,reasoning levels=high,xhigh,max temp=supported temp+reasoning=supported
 openrouter sakana/sakana-namazu openai-completions ctx=262144 max=65536 $=0.95/4/0.15/0 caps=text,image,reasoning levels=off,high off=disables temp=supported temp+reasoning=supported
 openrouter sao10k/l3.1-euryale-70b openai-completions ctx=131072 max=16384 $=0.85/0.85/0/0 caps=text levels=off temp=supported
 openrouter stepfun/step-3.5-flash openai-completions ctx=262144 max=65536 $=0.1/0.3/0/0 caps=text,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
@@ -460,7 +471,7 @@ openrouter stepfun/step-3.7-flash openai-completions ctx=256000 max=230400 $=0.2
 openrouter tencent/hy3 openai-completions ctx=262144 max=128000 $=0.0825/0.33/0.020625/0 caps=text,reasoning levels=off,low,high off=disables temp=supported temp+reasoning=supported
 openrouter tencent/hy3-preview openai-completions ctx=262144 max=235929 $=0.18/0.6/0.06/0 caps=text,reasoning levels=off,low,high off=disables temp=supported temp+reasoning=supported
 openrouter tencent/hy4-preview openai-completions ctx=1048576 max=64000 $=0.7506/2.2509/0.0378/0 caps=text,reasoning levels=off,low,high off=disables temp=supported temp+reasoning=supported
-openrouter thinkingmachines/inkling openai-completions ctx=524288 max=262144 $=0.95/4.05/0.16/0 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=supported
+openrouter thinkingmachines/inkling openai-completions ctx=524288 max=471859 $=1/4.05/0.17/0 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=supported
 openrouter thinkingmachines/inkling-small openai-completions ctx=524288 max=262144 $=0.45/1.2/0.1/0 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=supported
 openrouter thinkingmachines/inkling-small:free openai-completions ctx=1048576 max=262144 $=0/0/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=supported
 openrouter thinkingmachines/inkling:free openai-completions ctx=1048576 max=262144 $=0/0/0/0 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=supported
@@ -470,13 +481,13 @@ openrouter unbiased/pareto-26.10-preview openai-completions ctx=1048576 max=1310
 openrouter upstage/solar-mini4 openai-completions ctx=524288 max=131072 $=0.05/0.2/0.005/0 caps=text,reasoning levels=off,minimal,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
 openrouter upstage/solar-pro-3 openai-completions ctx=131072 max=117964 $=0.15/0.6/0.015/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter upstage/solar-pro4 openai-completions ctx=524288 max=131072 $=0.09/0.36/0.018/0 caps=text,reasoning levels=off,minimal,low,medium,high,xhigh,max off=disables temp=supported temp+reasoning=supported
-openrouter x-ai/grok-4.20 openai-completions ctx=2000000 max=1800000 $=1.25/2.5/0.2/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter x-ai/grok-4.3 openai-completions ctx=1000000 max=900000 $=1.25/2.5/0.2/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter x-ai/grok-4.3:batch openai-completions ctx=1000000 max=900000 $=1/2/0.16/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter x-ai/grok-4.5 openai-completions ctx=500000 max=450000 $=2/6/0.3/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
-openrouter x-ai/grok-4.6 openai-completions ctx=500000 max=450000 $=2/6/0.5/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter x-ai/grok-4.7 openai-completions ctx=500000 max=450000 $=2/6/0.5/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
-openrouter x-ai/grok-build-0.1 openai-completions ctx=256000 max=230400 $=1/2/0.2/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
+openrouter x-ai/grok-4.20 openai-completions ctx=2000000 max=1800000 $=1.25/2.5/0.2/0 >200000:2.5/5/0.4/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter x-ai/grok-4.3 openai-completions ctx=1000000 max=900000 $=1.25/2.5/0.2/0 >200000:2.5/5/0.4/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter x-ai/grok-4.3:batch openai-completions ctx=1000000 max=900000 $=1/2/0.16/0 >200000:2/4/0.32/0 caps=text,image,reasoning levels=off,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter x-ai/grok-4.5 openai-completions ctx=500000 max=450000 $=2/6/0.3/0 >200000:4/12/0.6/0 caps=text,image,reasoning levels=low,medium,high temp=supported temp+reasoning=supported
+openrouter x-ai/grok-4.6 openai-completions ctx=500000 max=450000 $=2/6/0.5/0 >200000:4/12/1/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter x-ai/grok-4.7 openai-completions ctx=500000 max=450000 $=2/6/0.5/0 >200000:4/12/1/0 caps=text,image,reasoning levels=low,medium,high,xhigh temp=supported temp+reasoning=supported
+openrouter x-ai/grok-build-0.1 openai-completions ctx=256000 max=230400 $=1/2/0.2/0 >200000:2/4/0.4/0 caps=text,image,reasoning levels=minimal,low,medium,high temp=supported temp+reasoning=supported
 openrouter xiaomi/mimo-v2.5 openai-completions ctx=1048576 max=131072 $=0.14/0.28/0.0028/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter xiaomi/mimo-v2.5-pro openai-completions ctx=1048576 max=131072 $=0.435/0.87/0.0036/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter xiaomi/mimo-v2.6-flash openai-completions ctx=1048576 max=131072 $=0.14/0.28/0.0028/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
@@ -491,9 +502,9 @@ openrouter z-ai/glm-4.7 openai-completions ctx=202752 max=131072 $=0.6/2.2/0.11/
 openrouter z-ai/glm-4.7-flash openai-completions ctx=131072 max=117964 $=0.0605/0.4/0/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter z-ai/glm-5 openai-completions ctx=198000 max=128000 $=0.6/1.9/0.119/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
 openrouter z-ai/glm-5-turbo openai-completions ctx=202752 max=131072 $=1.2/4/0.24/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter z-ai/glm-5.1 openai-completions ctx=202752 max=131072 $=1.4/4.4/0.26/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
-openrouter z-ai/glm-5.2 openai-completions ctx=1048576 max=131072 $=0.032/12/0.032/0 caps=text,reasoning levels=off,high,xhigh off=disables temp=supported temp+reasoning=supported
-openrouter z-ai/glm-5.3 openai-completions ctx=1048576 max=943718 $=0.07/7/0.065/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported
+openrouter z-ai/glm-5.1 openai-completions ctx=200000 max=128000 $=0.966/3.036/0.1794/0 caps=text,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=supported
+openrouter z-ai/glm-5.2 openai-completions ctx=1048576 max=131072 $=0.171/7.2/0.162/0 caps=text,reasoning levels=off,high,xhigh off=disables temp=supported temp+reasoning=supported
+openrouter z-ai/glm-5.3 openai-completions ctx=1048576 max=943718 $=0.062/3.39/0.06/0 caps=text,reasoning levels=low,high,max temp=supported temp+reasoning=supported
 openrouter z-ai/glm-5.3-flash openai-completions ctx=1048575 max=943717 $=0.15/0.5/0.03/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
 openrouter z-ai/glm-5.3-flash:batch openai-completions ctx=1048576 max=131072 $=0.06/0.2/0.012/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
 openrouter z-ai/glm-5.3-flashx openai-completions ctx=1048576 max=131072 $=0.37/1.25/0.09/0 caps=text,image,reasoning levels=low,high,max temp=supported temp+reasoning=supported
@@ -546,7 +557,7 @@ opencode-go mimo-v2.5-pro openai-completions ctx=1048576 max=128000 $=0.435/0.87
 opencode-go mimo-v2.6-flash openai-completions ctx=1048576 max=131072 $=0.14/0.28/0.0028/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=unsent temp=supported temp+reasoning=supported
 opencode-go mimo-v2.6-pro openai-completions ctx=1048576 max=131072 $=0.435/0.87/0.003625/0 caps=text,image,reasoning levels=off,minimal,low,medium,high off=unsent temp=supported temp+reasoning=supported
 opencode-go minimax-m2.7 openai-completions ctx=204800 max=131072 $=0.3/1.2/0.06/0.375 caps=text,reasoning levels=off,minimal,low,medium,high off=unsent temp=supported temp+reasoning=supported featured
-opencode-go space-bunny-free openai-completions ctx=1048576 max=524288 $=unpriced caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
+opencode-go space-bunny openai-completions ctx=1048576 max=524288 $=0.15/0.6/0.03/0 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=supported temp+reasoning=supported
 codex gpt-5.3-codex-spark openai-codex-responses ctx=128000 max=- $=1.75/14/0.175/0 caps=text,reasoning levels=off,minimal,low,medium,high,xhigh off=disables temp=unsupported
 codex gpt-5.5 openai-codex-responses ctx=272000 max=128000 $=5/30/0.5/0 >272000:10/45/1/0 caps=text,image,reasoning levels=off,minimal,low,medium,high,xhigh off=disables temp=unsupported
 codex gpt-5.6-luna openai-codex-responses ctx=272000 max=128000 $=0.2/1.2/0.02/0.25 >272000:0.4/1.8/0.04/0.5 caps=text,image,reasoning levels=off,minimal,low,medium,high,xhigh,max off=disables temp=unsupported featured
@@ -558,8 +569,9 @@ codex gpt-6-sol openai-codex-responses ctx=272000 max=128000 $=2/10/0.2/2.5 >272
 codex gpt-6.1-sol openai-codex-responses ctx=272000 max=128000 $=2/10/0.1/2.5 >272000:4/15/0.2/5 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh,max temp=unsupported
 claude-code claude-fable-5 anthropic-messages ctx=1000000 max=128000 $=10/50/1/12.5 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh,max temp=supported temp+reasoning=unsupported adaptive
 claude-code claude-fable-5-1 anthropic-messages ctx=1000000 max=128000 $=10/50/0.25/12.5 caps=text,image,reasoning levels=minimal,low,medium,high,xhigh,max temp=unsupported adaptive featured
-claude-code claude-haiku-4-5 anthropic-messages ctx=200000 max=64000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported featured
+claude-code claude-haiku-4-5 anthropic-messages ctx=200000 max=64000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
 claude-code claude-haiku-4-5-20251001 anthropic-messages ctx=200000 max=64000 $=1/5/0.1/1.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
+claude-code claude-haiku-5-5 anthropic-messages ctx=1000000 max=128000 $=0.1/0.5/0.01/0.125 >100000:0.5/2.5/0.05/0.625 caps=text,image,reasoning levels=low,medium,high,xhigh,max temp=unsupported adaptive featured
 claude-code claude-opus-4-5 anthropic-messages ctx=200000 max=64000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
 claude-code claude-opus-4-5-20251101 anthropic-messages ctx=200000 max=64000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=off,minimal,low,medium,high off=disables temp=supported temp+reasoning=unsupported
 claude-code claude-opus-4-6 anthropic-messages ctx=1000000 max=128000 $=5/25/0.5/6.25 caps=text,image,reasoning levels=off,minimal,low,medium,high,max off=disables temp=supported temp+reasoning=unsupported adaptive

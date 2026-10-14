@@ -43,6 +43,13 @@ let client: Redis | null = null;
 let redisUrl: string | null = null;
 
 /**
+ * Recording deletions scheduled by {@link releaseRecording} and not yet fired.
+ * Held so {@link closeResumableStore} can cancel them: a release that fires
+ * after the close runs its `delete` against a client that has already quit.
+ */
+const pendingReleases = new Set<ReturnType<typeof setTimeout>>();
+
+/**
  * Retention for a turn's recorded bytes (both stores default to 24h).
  *
  * A day of retention buys nothing: the only window in which anything reads a
@@ -197,6 +204,14 @@ export async function closeResumableStore(): Promise<void> {
   client = null;
   redisUrl = null;
   createClient = createResumableRedis;
+  // Cancel the deletions still waiting out their grace. Each one holds the
+  // context it was scheduled on, so one firing after this point sends its
+  // command through the client `quit()` is about to end ("Connection is
+  // closed") — up to ten seconds after the module went down, inside whatever
+  // runs next in the process. The TTL removes what this cancels, as it always
+  // has for whatever a release misses.
+  for (const timer of pendingReleases) clearTimeout(timer);
+  pendingReleases.clear();
   if (!open) return;
   // `quit()` drains in-flight commands, and it does NOT need a deadline of its
   // own: ioredis only sends the QUIT command on a client whose connection is
@@ -216,7 +231,9 @@ export async function closeResumableStore(): Promise<void> {
  * has nothing to wait for. The timer is `unref`'d so a process draining on
  * shutdown does not stay up for pending deletions — the TTL is the backstop for
  * anything this misses, exactly as it was for everything before this existed.
- * A failed delete is logged and otherwise dropped for the same reason.
+ * A failed delete is logged and otherwise dropped for the same reason. A
+ * release still pending when the store closes is cancelled, never run late
+ * against the closed client (see {@link closeResumableStore}).
  */
 export function releaseRecording(
   streamId: string,
@@ -225,11 +242,13 @@ export function releaseRecording(
   const graceMs = opts.graceMs ?? RECORDING_RELEASE_GRACE_MS;
   const context = opts.context ?? getResumableContext();
   const timer = setTimeout(() => {
+    pendingReleases.delete(timer);
     context.delete(streamId).catch((err: unknown) => {
       logger.warn("chat resumable recording release failed", { streamId, err: String(err) });
     });
   }, graceMs);
   timer.unref?.();
+  pendingReleases.add(timer);
 }
 
 /**
