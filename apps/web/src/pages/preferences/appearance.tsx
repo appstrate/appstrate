@@ -21,16 +21,18 @@ export function PreferencesAppearancePage() {
   return (
     <SettingsGroup title={t("preferences.interface")}>
       <SettingRow variant="field" label={t("preferences.theme")}>
-        <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="light">{t("preferences.themeLight")}</SelectItem>
-            <SelectItem value="dark">{t("preferences.themeDark")}</SelectItem>
-            <SelectItem value="system">{t("preferences.themeSystem")}</SelectItem>
-          </SelectContent>
-        </Select>
+        {(labelId) => (
+          <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
+            <SelectTrigger aria-labelledby={labelId}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="light">{t("preferences.themeLight")}</SelectItem>
+              <SelectItem value="dark">{t("preferences.themeDark")}</SelectItem>
+              <SelectItem value="system">{t("preferences.themeSystem")}</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </SettingRow>
 
       <SettingRow
@@ -44,19 +46,23 @@ export function PreferencesAppearancePage() {
           />
         }
       >
-        <Select
-          value={i18n.language}
-          onValueChange={(lng) => updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })}
-          disabled={updateLanguage.isPending}
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
-            <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
-          </SelectContent>
-        </Select>
+        {(labelId) => (
+          <Select
+            value={i18n.language}
+            onValueChange={(lng) =>
+              updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })
+            }
+            disabled={updateLanguage.isPending}
+          >
+            <SelectTrigger aria-labelledby={labelId}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
+              <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </SettingRow>
     </SettingsGroup>
   );

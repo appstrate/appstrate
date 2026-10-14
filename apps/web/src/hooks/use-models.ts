@@ -17,6 +17,7 @@ import {
   useCreateModelProviderCredential,
 } from "./use-model-provider-credentials";
 import { agentModelKeys, packageKeys } from "../lib/query-keys";
+import { invalidateAgentDiagnostics } from "./use-agent-diagnostics";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgModel). */
@@ -153,6 +154,7 @@ export function useSetAgentModel(packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: agentModelKeys.all });
       qc.invalidateQueries({ queryKey: packageKeys.family("agents") });
+      void invalidateAgentDiagnostics(qc);
     },
   });
 }

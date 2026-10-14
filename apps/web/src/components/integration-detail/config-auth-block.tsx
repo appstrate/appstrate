@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { CopyBlock } from "../copy-block";
+import { SettingValue } from "../settings/setting-row";
 import {
   useIntegrationClients,
   useIntegrationDetail,
@@ -49,9 +50,10 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
 }
 
 /**
- * Per-auth admin configuration: what the auth is for, the OAuth clients table
- * (one table for the space's, the organization's and the system's clients) and
- * the redirect URI to register at the provider.
+ * Per-auth admin configuration: what the auth is for, what its manifest pins (the RFC 8707
+ * resource, the addresses its credential may reach), the OAuth clients table (one table for the
+ * space's, the organization's and the system's clients) and the redirect URI to register at the
+ * provider.
  */
 export function ConfigAuthBlock({
   packageId,
@@ -64,6 +66,7 @@ export function ConfigAuthBlock({
 }) {
   const { t } = useTranslation("settings");
   const isOAuth = status.type === "oauth2";
+  const authorizedUris = authDecl.authorized_uris ?? [];
 
   return (
     <section data-testid={`auth-config-${status.auth_key}`}>
@@ -74,6 +77,22 @@ export function ConfigAuthBlock({
             : "integration.presentation.credentialsDescription",
         )}
       </p>
+      {(status.resource || authorizedUris.length > 0) && (
+        <dl className="mb-6">
+          {status.resource && (
+            <SettingValue label={t("integration.auth.resource")}>
+              <CopyBlock value={status.resource} />
+            </SettingValue>
+          )}
+          {authorizedUris.length > 0 && (
+            <SettingValue label={t("integration.structure.addresses")}>
+              {authorizedUris.map((uri) => (
+                <CopyBlock key={uri} value={uri} />
+              ))}
+            </SettingValue>
+          )}
+        </dl>
+      )}
       {isOAuth && (
         <ClientsTable
           packageId={packageId}

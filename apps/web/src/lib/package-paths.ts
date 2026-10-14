@@ -21,9 +21,14 @@ export function packageListPath(type: PackageType | string): string {
   return `/${PACKAGE_TYPE_ROUTE_SEGMENT[type as PackageType]}`;
 }
 
-/** /{type}s/{id}/edit */
-export function packageEditPath(type: PackageType | string, packageId: string): string {
-  return `${packageDetailPath(type, packageId)}/edit`;
+/** /agents/{id}/runs/{runId} */
+export function runDetailPath(packageId: string, runId: string): string {
+  return `${packageDetailPath("agent", packageId)}/runs/${runId}`;
+}
+
+/** /schedules/{id} */
+export function scheduleDetailPath(scheduleId: string): string {
+  return `/schedules/${scheduleId}`;
 }
 
 /** /{type}s/new */

@@ -146,7 +146,9 @@ export function EditorShell({
               {error}
             </div>
           )}
-          {children}
+          <div inert={isPending} aria-busy={isPending} className="space-y-4">
+            {children}
+          </div>
         </div>
         {embeddedFooter}
       </div>

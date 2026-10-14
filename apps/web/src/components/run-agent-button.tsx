@@ -184,12 +184,7 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={runParam.close}
           agent={detail}
-          onSubmit={(input) => {
-            // The form leaves the history entry before the launch leaves the
-            // page: Back from the run lands on this page, not on the form again.
-            runParam.close();
-            launcher.launch({ input, version: runVersion });
-          }}
+          onSubmit={(input) => launcher.launch({ input, version: runVersion }, { replace: true })}
           isPending={launcher.isPending}
         />
       )}

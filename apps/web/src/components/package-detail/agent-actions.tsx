@@ -14,6 +14,7 @@ import {
 } from "../../hooks/use-mutations";
 import { useSetPackageActive } from "../../hooks/use-library";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { usePermissions } from "../../hooks/use-permissions";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
@@ -39,6 +40,7 @@ export function AgentActions({
   downloadBundle,
   onCreateVersion,
   onFork,
+  unsavedReason,
 }: {
   packageId: string;
   isOwned: boolean;
@@ -49,8 +51,11 @@ export function AgentActions({
   downloadBundle?: (v?: string) => void;
   onCreateVersion: () => void;
   onFork?: () => void;
+  /** Set while the page holds unsaved definition edits a version or run would not carry. */
+  unsavedReason?: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  const { can } = usePermissions();
   const newSchedule = useModalParam(NEW_SCHEDULE_PARAM);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
@@ -79,7 +84,8 @@ export function AgentActions({
   const activeHere = detail.active;
   // Not the full run verdict: the options modal picks the model and the version.
   const refusal = agentLaunchRefusal(detail);
-  const runBlockedReason = refusal ? t(refusal) : undefined;
+  const runBlockedReason = refusal ? t(refusal) : unsavedReason;
+  const canRunWithOptions = can("agents:run") && !runBlockedReason;
 
   const handleConfirm = () => {
     if (!confirmState) return;
@@ -119,9 +125,8 @@ export function AgentActions({
         hasPublishedVersion={(detail.version_count ?? 0) > 0}
         isActiveHere={activeHere}
         onCreateVersion={onCreateVersion}
+        createVersionBlockedReason={unsavedReason}
         onFork={onFork}
-        // The definition is edited in Paramètres › Définition.
-        showEdit={false}
         runningRuns={detail.running_runs}
         // Under the same run visibility as the list the item would clear.
         hasRuns={detail.last_run !== null}
@@ -173,11 +178,11 @@ export function AgentActions({
         {...(runBlockedReason ? { runBlockedReason } : {})}
       />
       <RunWithOptionsModal
-        open={runOptions.value !== null}
+        open={runOptions.value !== null && canRunWithOptions}
         onClose={runOptions.close}
         agent={detail}
         isPending={launcher.isPending}
-        onSubmit={(submit) => launcher.launch(launchFromOptions(submit), runOptions.close)}
+        onSubmit={(submit) => launcher.launch(launchFromOptions(submit), { replace: true })}
       />
       <RunLaunchRecovery
         launcher={launcher}

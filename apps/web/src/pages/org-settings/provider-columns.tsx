@@ -81,6 +81,8 @@ interface ProviderColumnsArgs {
   onReconnect: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onSetDefault?: (m: OrgModelInfo) => void;
+  /** The instance's own aliases (`source: "custom"`): absent when the caller may not delete. */
+  onDeleteModel?: (m: OrgModelInfo) => void;
   /** Resolved once by the page: a deed absent here 403s if clicked. */
   canWriteModels: boolean;
   /** Preferences lists personal keys of two kinds, a key or a subscription: it says which. */
@@ -101,6 +103,7 @@ export function useProviderColumns({
   onReconnect,
   onDelete,
   onSetDefault,
+  onDeleteModel,
   canWriteModels,
   showType = false,
 }: ProviderColumnsArgs): DataColumn<ProviderRow>[] {
@@ -249,10 +252,12 @@ export function useProviderColumns({
         const pk = row.credential;
         const isTesting = testingIds.has(row.id);
         if (row.kind === "system") {
-          const choices = row.models.filter((m) => !m.is_default);
+          const choices = canWriteModels ? row.models.filter((m) => !m.is_default) : [];
           // An alias has no test: its result would describe the backing it hides.
-          const testable = row.models.filter((m) => !m.aliased);
-          if (!canWriteModels || (choices.length === 0 && testable.length === 0)) return null;
+          const testable = canWriteModels ? row.models.filter((m) => !m.aliased) : [];
+          // An alias the organization added is its own row: it is deleted by id.
+          const deletable = onDeleteModel ? row.models.filter((m) => m.source !== "built-in") : [];
+          if (choices.length + testable.length + deletable.length === 0) return null;
           return (
             <TableRowActions
               menuLabel={t("providers.moreActions", { name: t("providers.type.system") })}
@@ -270,11 +275,17 @@ export function useProviderColumns({
                       <DropdownMenuItem
                         key={m.id}
                         onSelect={() => onSetDefault?.(m)}
-                        // The server refuses a default it cannot run: a dead credential.
-                        disabled={m.needs_reconnection}
+                        // The server refuses a dead credential and a switched-off alias; it
+                        // resolves a switched-off built-in model.
+                        disabled={m.needs_reconnection || (m.source !== "built-in" && !m.enabled)}
                         data-testid={`set-default-model-${m.id}`}
                       >
                         {m.label}
+                        {!m.enabled && (
+                          <span className="text-muted-foreground ml-auto text-xs">
+                            {t("providers.state.disabled")}
+                          </span>
+                        )}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuSubContent>
@@ -298,6 +309,28 @@ export function useProviderColumns({
                     ))}
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
+              )}
+              {deletable.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger className="text-destructive focus:text-destructive">
+                      <Trash2 />
+                      {t("btn.delete", { ns: "common" })}
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      {deletable.map((m) => (
+                        <DropdownMenuItem
+                          key={m.id}
+                          onSelect={() => onDeleteModel?.(m)}
+                          data-testid={`delete-model-${m.id}`}
+                        >
+                          {m.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </>
               )}
             </TableRowActions>
           );

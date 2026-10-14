@@ -22,6 +22,8 @@ interface RowExtras {
   /** The upstream id starred as the organization's default. */
   defaultId?: string | null;
   onDefaultChange?: (id: string) => void;
+  /** The key needs reconnecting: the server refuses any of its models as the default. */
+  defaultUnavailable?: boolean;
   /** The row that cannot be unticked: the organization's default model keeps its access. */
   lockedId?: string | null;
   /** The rows already saved, whose finer settings open in the model form. */
@@ -44,6 +46,8 @@ function PickRow({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const locked = extras.lockedId === row.id;
+  const isDefault = extras.defaultId === row.id;
+  const starBlocked = extras.defaultUnavailable === true && !isDefault;
   return (
     <div className="flex items-center gap-2 px-3 py-2">
       <span title={locked ? t("models.choice.defaultLocked") : undefined} className="inline-flex">
@@ -82,19 +86,20 @@ function PickRow({
           variant="ghost"
           size="icon"
           className="size-7 shrink-0"
-          aria-pressed={extras.defaultId === row.id}
+          aria-pressed={isDefault}
           aria-label={
-            extras.defaultId === row.id
+            isDefault
               ? t("models.choice.isDefault", { name: row.label ?? row.id })
               : t("models.choice.setDefault", { name: row.label ?? row.id })
           }
-          title={t("models.default")}
+          title={starBlocked ? t("credentials.unavailableHint") : t("models.default")}
+          disabled={starBlocked}
           onClick={() => extras.onDefaultChange?.(row.id)}
         >
           <Star
             className={cn(
               "size-4",
-              extras.defaultId === row.id ? "fill-warning text-warning" : "text-muted-foreground",
+              isDefault ? "fill-warning text-warning" : "text-muted-foreground",
             )}
           />
         </Button>

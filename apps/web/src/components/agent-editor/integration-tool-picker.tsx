@@ -533,11 +533,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
               description: tool.description,
               permissions: tool.policy?.required_scopes,
             }))}
-            selection={{
-              values: selectedTools,
-              onToggle: toggleTool,
-              testIdPrefix: `integ-tool-${packageId}-`,
-            }}
+            selection={{ values: selectedTools, onToggle: toggleTool }}
           />
         </div>
       )}

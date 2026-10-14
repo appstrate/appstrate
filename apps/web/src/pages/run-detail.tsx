@@ -126,7 +126,7 @@ export function RunDetailPage() {
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
     // and projected here into the per-turn table instead (`TurnsTable` in
-    // `run-execution-tab.tsx`, opened from the overview's Usage card).
+    // `run-detail/run-turns-detail.tsx`, opened from the overview's Usage card).
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
@@ -321,13 +321,10 @@ export function RunDetailPage() {
             // Re-run the SAME definition the original run executed, as far as
             // this caller may: `version_ref` is "draft" or a concrete semver,
             // and only an author replays a draft (see `replayVersion`).
-            // The form leaves the history entry before the launch leaves the
-            // page: Back from the new run lands on this one, not on the form.
-            rerun.close();
-            launcher.launch({
-              input,
-              version: replayVersion(run.version_ref, agent.home_writable),
-            });
+            launcher.launch(
+              { input, version: replayVersion(run.version_ref, agent.home_writable) },
+              { replace: true },
+            );
           }}
           isPending={launcher.isPending}
           initialInput={(run.input as Record<string, unknown>) ?? undefined}

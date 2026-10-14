@@ -13,6 +13,7 @@ import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { useSpaces } from "./use-spaces";
 import { mergeSpaceLibraries } from "../lib/merge-space-libraries";
+import { hasFullOrgAccess } from "../lib/org-role";
 
 /**
  * Wire shape from the OpenAPI spec (`GET /api/library`) — the organization
@@ -54,13 +55,15 @@ function useLibrary(options: { enabled?: boolean } = {}) {
  * merged from the library of each space they are a member of
  * (`lib/merge-space-libraries`). One screen, graded by the rule the server
  * already applies: nobody is shown a space they cannot enter.
+ *
+ * `enabled: false` reads nothing, for a surface the caller cannot open.
  */
-export function useCatalogueLibrary() {
+export function useCatalogueLibrary({ enabled = true }: { enabled?: boolean } = {}) {
   const scope = useOrgOnlyScope();
   const { orgRole } = usePermissions();
-  const isOrgAdmin = orgRole === "owner" || orgRole === "admin";
-  const org = useLibrary({ enabled: isOrgAdmin });
-  const { data: spaces } = useSpaces(!isOrgAdmin);
+  const isOrgAdmin = hasFullOrgAccess(orgRole);
+  const org = useLibrary({ enabled: enabled && isOrgAdmin });
+  const { data: spaces } = useSpaces(enabled && !isOrgAdmin);
   const perSpace = useQueries({
     queries: (isOrgAdmin ? [] : (spaces ?? []))
       // A space the caller is listed in but cannot enter (`closed`) has no
@@ -70,7 +73,7 @@ export function useCatalogueLibrary() {
         ...$api.queryOptions("get", "/api/spaces/{spaceId}/library", {
           params: { path: { spaceId: space.id }, header: scope.header },
         }),
-        enabled: scope.enabled,
+        enabled: enabled && scope.enabled,
       })),
   });
   // Merged on every render rather than memoised: a handful of spaces, a few

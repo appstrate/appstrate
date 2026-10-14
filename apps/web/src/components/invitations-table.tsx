@@ -56,7 +56,9 @@ export function InvitationsTable({
         invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
       )
     : invitations;
-  const editing = visible.find((invitation) => invitation.id === editParam.value);
+  const editing = canEdit
+    ? visible.find((invitation) => invitation.id === editParam.value)
+    : undefined;
   const canceling = visible.find((invitation) => invitation.id === cancelingId);
   const spaceName = (id: string) =>
     spaces?.find((space) => space.id === id)?.name ?? t("orgSettings.assignmentUnavailableSpace");

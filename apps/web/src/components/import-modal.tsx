@@ -11,7 +11,6 @@ import { ApiError } from "../api/errors";
 import { errorMessage, onMutationError } from "../lib/mutation-error";
 
 interface ImportModalProps {
-  open: boolean;
   onClose: () => void;
   /**
    * Stay where you are and hand the result back, instead of opening the
@@ -26,7 +25,7 @@ const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
 type FormData = { file: File | null; githubUrl: string };
 
-export function ImportModal({ open, onClose, onImported }: ImportModalProps) {
+export function ImportModal({ onClose, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
@@ -168,7 +167,7 @@ export function ImportModal({ open, onClose, onImported }: ImportModalProps) {
 
   return (
     <Modal
-      open={open}
+      open
       onClose={handleClose}
       title={t("import.title")}
       actions={

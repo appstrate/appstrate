@@ -23,6 +23,7 @@ import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useDocumentViewStore } from "../stores/list-view-store";
 import { useCanReach } from "../hooks/use-can-reach";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
 
@@ -71,7 +72,8 @@ function DocumentsCollection({
   const setView = useDocumentViewStore((state) => state.setView);
   const searchPlaceholder = useSearchPlaceholder(t("page.title"));
   const { storage, limitBytes: limit } = useOrgStorage();
-  const signature = `${effectivePurpose ?? ""}|${search}`;
+  const query = useDebouncedValue(search);
+  const signature = `${effectivePurpose ?? ""}|${query}`;
 
   // Search and purpose changes clear pagination without remounting the toolbar:
   // remounting drops search focus and closes the purpose multi-select.
@@ -83,7 +85,7 @@ function DocumentsCollection({
   const cursor = paging.signature === signature ? paging.cursor : undefined;
 
   const { data, isLoading, error } = useFiles({
-    search: search || undefined,
+    search: query || undefined,
     purpose: effectivePurpose,
     startingAfter: cursor,
     limit: 25,
@@ -107,7 +109,7 @@ function DocumentsCollection({
     return out;
   }, [paging, signature, currentPage]);
 
-  const filtering = purposes.length > 0 || search.trim() !== "";
+  const filtering = purposes.length > 0 || query.trim() !== "";
   const countLabel = hasMore
     ? t("page.countLoaded", { count: files.length })
     : t("page.count", { count: files.length });

@@ -9,7 +9,7 @@ import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import type { PackageType } from "./use-packages";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateLibraries } from "./use-library";
-import { packageDetailPath, splitPackageRef } from "../lib/package-paths";
+import { packageDetailPath, runDetailPath, splitPackageRef } from "../lib/package-paths";
 import i18n from "../i18n";
 import {
   packageKeys,
@@ -57,7 +57,6 @@ export function useSaveInputSettings(packageId: string) {
 
 function useRunAgent(packageId: string) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
     mutationFn: async (launch: RunLaunch) => {
@@ -104,10 +103,18 @@ function useRunAgent(packageId: string) {
     onSuccess: (data) => {
       // Stale, not refetched: every launch leaves for the run's own page.
       qc.invalidateQueries({ queryKey: paginatedRunsKeys.all, refetchType: "none" });
-      navigate(`/agents/${packageId}/runs/${data.id}`);
       toastWarnings({ kind: "run" }, packageId, data.warnings);
     },
   });
+}
+
+interface LaunchOptions {
+  /**
+   * The launch comes from a form addressed in the URL (`?run=`, `?rerun=`):
+   * the run page replaces the form's history entry, so Back does not reopen
+   * it, and a refused launch leaves the form open with what was typed.
+   */
+  replace?: boolean;
 }
 
 /**
@@ -120,35 +127,42 @@ function useRunAgent(packageId: string) {
  */
 export function useRunLauncher(packageId: string) {
   const runAgent = useRunAgent(packageId);
+  const navigate = useNavigate();
   const [refusal, setRefusal] = useState<LaunchRefusal | null>(null);
   // What `retry` sends: the refused launch, as `retryLaunch` replays it.
-  const replay = useRef<{ launch: RunLaunch; onSuccess?: () => void }>({ launch: {} });
+  const replay = useRef<{ launch: RunLaunch; options: LaunchOptions }>({
+    launch: {},
+    options: {},
+  });
   const [isPending, setIsPending] = useState(false);
   const [flight] = useState(() => launchFlight(setIsPending));
 
-  const send = (launch: RunLaunch, onSuccess?: () => void) => {
-    flight.run(() => runAgent.mutateAsync(launch), {
-      onSuccess: () => {
-        setRefusal(null);
-        onSuccess?.();
+  const send = (launch: RunLaunch, options: LaunchOptions = {}) => {
+    flight.run(
+      () =>
+        runAgent.mutateAsync(launch).then((run) => {
+          navigate(runDetailPath(packageId, run.id), { replace: options.replace });
+        }),
+      {
+        onSuccess: () => setRefusal(null),
+        // The mutation cache reports every failure; this picks up the 409.
+        onError: (err) => {
+          const refused = launchRefusal(err);
+          if (!refused) return;
+          setRefusal(refused);
+          replay.current = { launch: retryLaunch(launch, refused.errors), options };
+        },
       },
-      // The mutation cache reports every failure; this picks up the 409.
-      onError: (err) => {
-        const refused = launchRefusal(err);
-        if (!refused) return;
-        setRefusal(refused);
-        replay.current = { launch: retryLaunch(launch, refused.errors), onSuccess };
-      },
-    });
+    );
   };
 
   return {
     isPending,
     missingErrors: refusal?.errors ?? null,
     missingVersion: refusal?.version,
-    /** `onSuccess` also fires when the recovery retry of this launch succeeds. */
+    /** `options` also apply when the recovery retry of this launch succeeds. */
     launch: send,
-    retry: () => send(replay.current.launch, replay.current.onSuccess),
+    retry: () => send(replay.current.launch, replay.current.options),
     dismiss: () => {
       // A retry still in flight must not reopen the modal.
       flight.forget();
@@ -208,6 +222,7 @@ export function useImportPackage({
       // pre-import index and the pre-import `inline` bodies until the query
       // goes stale.
       invalidatePackageFiles(qc);
+      if (data.type === "integration") void invalidateIntegrationQueries(qc);
       // Non-blocking import-time warnings — surface each one as a sonner
       // warning toast so publishers see them immediately after a successful import.
       if (data.warnings && data.warnings.length > 0) {
@@ -239,6 +254,7 @@ export function useImportFromGithub() {
       qc.invalidateQueries({ queryKey: packageKeys.all });
       // Same reason as `useImportPackage`: the draft artifact was replaced.
       invalidatePackageFiles(qc);
+      if (data.type === "integration") void invalidateIntegrationQueries(qc);
       navigate(packageDetailPath(data.type, data.packageId));
     },
   });

@@ -33,7 +33,7 @@ import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
-import { resolveVersionRef } from "./agent-version-resolver.ts";
+import { resolveVersionRefs } from "./agent-version-resolver.ts";
 import { isPackageActiveHere } from "./space-packages.ts";
 
 interface Finding {
@@ -191,8 +191,12 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
         });
       }
     }
-    for (const sc of agentSchedules) {
-      const label = await resolveVersionRef(agent.id, sc.versionOverride);
+    const scheduleLabels = await resolveVersionRefs(
+      agent.id,
+      agentSchedules.map((sc) => sc.versionOverride),
+    );
+    for (const [i, sc] of agentSchedules.entries()) {
+      const label = scheduleLabels[i];
       if (!label) continue;
       consumers.push({
         label,

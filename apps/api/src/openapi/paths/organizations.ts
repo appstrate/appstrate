@@ -5,6 +5,7 @@ import { ORG_LOGO_PROPERTY, ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
+import { ORG_LOGO_MAX_LENGTH } from "@appstrate/core/validation";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
 const SPACE_ASSIGNMENTS_BODY = {
@@ -187,7 +188,7 @@ export const organizationsPaths = {
               properties: {
                 name: { type: "string", minLength: 1 },
                 slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
-                logo: { ...ORG_LOGO_PROPERTY, maxLength: 180000 },
+                logo: { ...ORG_LOGO_PROPERTY, maxLength: ORG_LOGO_MAX_LENGTH },
               },
               additionalProperties: false,
             },

@@ -35,6 +35,7 @@ export function ProvidersTable({
   onReconnect,
   onDelete,
   onSetDefault,
+  onDeleteModel,
 }: {
   /** What the table holds, for its accessible name: the org's keys, the members', the caller's. */
   label: string;
@@ -55,6 +56,7 @@ export function ProvidersTable({
   onReconnect: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
   onSetDefault?: (m: OrgModelInfo) => void;
+  onDeleteModel?: (m: OrgModelInfo) => void;
 }) {
   const { testingIds, testResults, handleTest } = useConnectionTest(
     useTestModelProviderCredential(),
@@ -76,6 +78,7 @@ export function ProvidersTable({
     onReconnect,
     onDelete,
     onSetDefault,
+    onDeleteModel,
     canWriteModels,
     showType,
   });

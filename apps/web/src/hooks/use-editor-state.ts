@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef, useCallback, type FormEvent } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { formatBytes } from "../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
@@ -19,6 +27,34 @@ export interface EditorState {
   /** The draft version this editor is based on: its detail's `ETag`. */
   etag?: string | null;
   operations?: PackageFileWriteOperation[];
+}
+
+/**
+ * Told by an editor whether it holds unsaved edits, so the page hosting it can
+ * hold back what would act on the stored definition instead (publish, run).
+ */
+export const EditorDirtyReportContext = createContext<(dirty: boolean) => void>(() => {});
+
+export function useReportEditorDirty(isDirty: boolean) {
+  const report = useContext(EditorDirtyReportContext);
+  useEffect(() => {
+    report(isDirty);
+    return () => report(false);
+  }, [report, isDirty]);
+}
+
+/**
+ * The editor state once `sent` is saved as `etag`: edits made while the save
+ * was in flight stay, and so does any file operation staged after `sent`'s.
+ */
+export function settleSavedState(
+  current: EditorState,
+  sent: EditorState,
+  etag: string | null | undefined,
+): EditorState {
+  const saved = sent.operations ?? [];
+  const pending = (current.operations ?? []).filter((operation) => !saved.includes(operation));
+  return { ...current, etag, operations: pending.length > 0 ? pending : undefined };
 }
 
 interface UseEditorStateOptions {
@@ -70,6 +106,7 @@ export function useEditorState({
   const updatePkg = useUpdatePackage(packageType, packageId ?? "");
   const isDirty = preparingFiles || JSON.stringify(state) !== JSON.stringify(initialSnapshot);
   const { blocker, allowNavigation } = useUnsavedChanges(isDirty);
+  useReportEditorDirty(isDirty);
   const updateManifest = useCallback(
     (patch: Record<string, unknown>) =>
       setState((current) => ({ ...current, manifest: { ...current.manifest, ...patch } })),
@@ -88,14 +125,14 @@ export function useEditorState({
     }
     saving.current = true;
     setError(null);
+    const sent = state;
     try {
       const updated = await updatePkg.mutateAsync({
-        etag: state.etag ?? "",
-        body: packageUpdateBody(state),
+        etag: sent.etag ?? "",
+        body: packageUpdateBody(sent),
       });
-      const saved = { ...state, operations: undefined, etag: updated.etag };
-      setState(saved);
-      setInitialSnapshot(saved);
+      setState((current) => settleSavedState(current, sent, updated.etag));
+      setInitialSnapshot(settleSavedState(sent, sent, updated.etag));
     } catch (cause) {
       const failure = cause as Error;
       const key = packageFilesErrorKey(failure);

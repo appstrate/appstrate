@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   Activity,
   ArrowRight,
@@ -13,10 +15,10 @@ import {
   Tags,
   Trophy,
 } from "lucide-react";
-import type { EnrichedRun } from "@appstrate/shared-types";
+import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import { FILE_URI_PREFIX } from "@appstrate/core/file-uri";
-import { RunTurnsDetail } from "../run-execution-tab";
-import type { RunTurnRow } from "../log-utils";
+import { RunTurnsDetail } from "./run-turns-detail";
+import { journalLevel, type RunTurnRow } from "../log-utils";
 import { RunCostReadout } from "../run-cost-readout";
 import { Modal } from "../modal";
 import { useFiles, type FileDto } from "../../hooks/use-files";
@@ -38,6 +40,9 @@ import { useModalParam } from "../../hooks/use-modal-param";
 import type { RunModelFallback } from "../../lib/run-model-fallback";
 import { RunWarnings } from "./run-warnings";
 import { formatNumber } from "../../lib/format-number";
+import { scheduleDetailPath } from "../../lib/package-paths";
+import { readRunContext } from "../run-context";
+import { ContextGaugeReadout } from "./run-context-gauge";
 
 export function RunSnapshotInspector({
   run,
@@ -77,12 +82,9 @@ export function RunSnapshotInspector({
     run.runner_name ??
     (run.runOrigin === "remote" ? t("run.infoRunnerRemote") : t("run.infoRunnerPlatform"));
   const toolCallCount = logs.filter((entry) => entry.kind === "tool").length;
-  const warningCount = logs.filter((entry) => entry.level === "warn").length;
-  const errorCount = logs.filter(
-    (entry) =>
-      entry.level === "error" ||
-      (entry.kind === "tool" && ["failed", "interrupted"].includes(entry.status)),
-  ).length;
+  // Counted by the journal's own levels: each count opens its filter there.
+  const warningCount = logs.filter((entry) => journalLevel(entry) === "warn").length;
+  const errorCount = logs.filter((entry) => journalLevel(entry) === "error").length;
   const structuredFieldCount = Object.keys(structuredOutput ?? {}).length;
   // What ended the run, and what it lost on the way (`RunWarnings`), is part of
   // its story, so it is told here, not in a banner over every tab: a failure or a timeout opens the overview as its
@@ -137,15 +139,25 @@ export function RunSnapshotInspector({
               <SnapshotFacts columns four>
                 <SnapshotFact label={t("run.sourceAgent")} value={agentExecuted} />
                 {!run.package_ephemeral && (
-                  <SnapshotFact
-                    label={t("run.infoVersion")}
-                    value={run.version_ref === "draft" ? t("run.draft") : `v${run.version_ref}`}
-                  />
+                  <SnapshotFact label={t("run.infoVersion")} value={versionText(run, t)} />
                 )}
                 <SnapshotFact
                   label={t("run.infoTriggerType")}
                   value={t(`run.triggerType.${getRunTriggerType(run)}`)}
                 />
+                {run.scheduleId && (
+                  <SnapshotFact
+                    label={t("run.triggerType.schedule")}
+                    value={
+                      <Link
+                        className="text-primary hover:underline"
+                        to={scheduleDetailPath(run.scheduleId)}
+                      >
+                        {run.schedule_name || t("schedule.unnamed")}
+                      </Link>
+                    }
+                  />
+                )}
                 {triggerActor && (
                   <SnapshotFact label={t("run.infoTriggeredBy")} value={triggerActor} />
                 )}
@@ -178,6 +190,10 @@ export function RunSnapshotInspector({
                 {run.proxy_label && (
                   <SnapshotFact label={t("run.infoProxy")} value={run.proxy_label} />
                 )}
+                <SnapshotFact
+                  label={t("run.infoRunId")}
+                  value={<span className="font-mono text-xs break-all">{run.id}</span>}
+                />
               </SnapshotFacts>
             </DetailSectionCard>
 
@@ -264,6 +280,13 @@ export function RunSnapshotInspector({
               bodyClassName="flex flex-col p-0"
             >
               <div className="flex-1 p-4">
+                {/* Live metrics patch the totals until the run settles. */}
+                {(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status) && (
+                  <p className="bg-primary/15 text-primary mb-3 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                    <span className="bg-primary size-1.5 animate-pulse rounded-full" aria-hidden />
+                    {t("run.usageLive")}
+                  </p>
+                )}
                 <SnapshotFacts columns>
                   {(run.cost != null || run.cost_pricing_status != null) && (
                     <SnapshotFact
@@ -298,6 +321,12 @@ export function RunSnapshotInspector({
                     <SnapshotFact
                       label={t("run.usageCacheRead")}
                       value={formatNumber(usage.cache_read_input_tokens)}
+                    />
+                  )}
+                  {readRunContext(turns) && (
+                    <SnapshotFact
+                      label={t("run.usageContext")}
+                      value={<ContextGaugeReadout turns={turns} status={run.status} />}
                     />
                   )}
                 </SnapshotFacts>
@@ -372,19 +401,24 @@ export function RunSnapshotInspector({
               </DetailSectionCard>
             )}
 
-            {run.package_ephemeral && (run.inline_prompt || run.inline_manifest) && (
+            {run.package_ephemeral && (
               <DetailSectionCard title={t("run.technicalDetails")} icon={Code2}>
-                <SnapshotFacts>
-                  {run.inline_prompt && (
-                    <SnapshotFact label={t("run.tabPrompt")} value={run.inline_prompt} />
-                  )}
-                  {run.inline_manifest && (
-                    <SnapshotFact
-                      label={t("run.tabManifest")}
-                      value={JSON.stringify(run.inline_manifest, null, 2)}
-                    />
-                  )}
-                </SnapshotFacts>
+                {/* Compaction clears an inline run's prompt and manifest. */}
+                {run.inline_prompt || run.inline_manifest ? (
+                  <SnapshotFacts>
+                    {run.inline_prompt && (
+                      <SnapshotFact label={t("run.tabPrompt")} value={run.inline_prompt} />
+                    )}
+                    {run.inline_manifest && (
+                      <SnapshotFact
+                        label={t("run.tabManifest")}
+                        value={JSON.stringify(run.inline_manifest, null, 2)}
+                      />
+                    )}
+                  </SnapshotFacts>
+                ) : (
+                  <p className="text-muted-foreground text-sm">{t("runs.detailsExpired")}</p>
+                )}
               </DetailSectionCard>
             )}
           </div>
@@ -594,6 +628,17 @@ function countDocumentReferences(value: unknown): number {
 
   visit(value);
   return references.size;
+}
+
+/**
+ * The version a run executed: a concrete semver, or the draft — named with the
+ * published version it was edited from, when there is one.
+ */
+function versionText(run: EnrichedRun, t: TFunction<"agents">): string {
+  if (run.version_ref !== "draft") return `v${run.version_ref}`;
+  return run.version_label && run.version_label !== "draft"
+    ? `${t("run.draft")} (v${run.version_label} ${t("run.versionModified")})`
+    : t("run.draft");
 }
 
 /** A scalar as text; an array or an object as the payload itself, never a summary of it. */

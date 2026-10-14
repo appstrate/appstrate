@@ -17,7 +17,7 @@
  * the row reads like every other one, and the depth is one click away. What
  * must be seen to act (a reason the control is disabled) stays in `description`.
  */
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -71,18 +71,28 @@ export function SettingRow({
   description?: ReactNode;
   /** The long explanation, folded under the description behind "Voir les détails". */
   details?: ReactNode;
-  /** The control. Its kind decides the row's shape. */
-  children: ReactNode;
+  /**
+   * The control. Its kind decides the row's shape. A function receives the label's id,
+   * for a control the label does not name by itself (`aria-labelledby` on a select).
+   */
+  children: ReactNode | ((labelId: string) => ReactNode);
   /** What the write says about itself: a `SaveFeedback`, under a field, beside a toggle or an action. */
   status?: ReactNode;
   className?: string;
 }) {
+  const labelId = useId();
+  const control = typeof children === "function" ? children(labelId) : children;
+  const labelText = (
+    <div id={labelId} className="text-sm font-medium">
+      {label}
+    </div>
+  );
   const explanation = (description || details) && (
     <RowExplanation description={description} details={details} />
   );
   const copy = (
     <div className="min-w-0">
-      <div className="text-sm font-medium">{label}</div>
+      {labelText}
       {explanation}
     </div>
   );
@@ -96,7 +106,7 @@ export function SettingRow({
         className={cn(status ? "pb-5" : "pb-8", "last:pb-0", className)}
       >
         {copy}
-        <div className="mt-3 flex w-full items-center gap-2">{children}</div>
+        <div className="mt-3 flex w-full items-center gap-2">{control}</div>
         {status && <div className="mt-1.5">{status}</div>}
       </div>
     );
@@ -110,8 +120,8 @@ export function SettingRow({
         className={cn("pb-8 last:pb-0", className)}
       >
         <div className="flex items-center gap-2">
-          {children}
-          <div className="text-sm font-medium">{label}</div>
+          {control}
+          {labelText}
           {status}
         </div>
         {explanation}
@@ -127,7 +137,7 @@ export function SettingRow({
     >
       {copy}
       <div className="flex shrink-0 items-center gap-2">
-        {children}
+        {control}
         {status}
       </div>
     </div>

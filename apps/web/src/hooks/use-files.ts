@@ -9,6 +9,7 @@ import { triggerBlobDownload } from "../lib/blob-download";
 import { invalidateRunDetails } from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
+import { useCopyToClipboard } from "./use-copy-to-clipboard";
 
 /** Wire shape of a single file (OpenAPI list-item schema). */
 export type FileDto =
@@ -145,28 +146,32 @@ export function useFileDownload() {
 }
 
 /**
- * Copy a text file's content to the clipboard (the Artifact frame's "copy").
- * Same authenticated read as the download, parsed as text; `true` once the
- * clipboard holds it, so the caller can say so.
+ * Copy a text file's content to the clipboard (the Artifact frame's "copy"):
+ * the download's authenticated read, parsed as text, then `useCopyToClipboard`,
+ * whose `copied` the caller shows. A failed read is said here; a refused
+ * clipboard, there.
  */
 export function useFileTextCopy() {
   const { t } = useTranslation("files");
-  return useCallback(
+  const { copied, copy } = useCopyToClipboard();
+  const copyFile = useCallback(
     async (id: string) => {
+      let text: string;
       try {
         const { data } = await client.GET("/api/files/{id}/content", {
           params: { path: { id } },
           parseAs: "text",
         });
-        await navigator.clipboard.writeText(data ?? "");
-        return true;
+        text = data ?? "";
       } catch {
         toast.error(t("artifact.copyFailed"));
-        return false;
+        return;
       }
+      await copy(text);
     },
-    [t],
+    [t, copy],
   );
+  return { copied, copy: copyFile };
 }
 
 /**

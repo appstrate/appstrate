@@ -37,6 +37,7 @@ import {
   integrationConnectionShares,
   integrationConnections,
   integrationPins,
+  organizations,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -108,6 +109,20 @@ describe("Me API (/api/me)", () => {
       expect(found).toBeDefined();
       expect(found?.name).toBe("Acme");
       expect(found?.role).toBe("owner");
+    });
+
+    it("carries each org's logo, as GET /api/orgs does", async () => {
+      const ctx = await createTestContext({ orgSlug: "logo-me-org" });
+      await db
+        .update(organizations)
+        .set({ logo: "emoji:🧠" })
+        .where(eq(organizations.id, ctx.orgId));
+
+      const res = await app.request("/api/me/orgs", { headers: { Cookie: ctx.cookie } });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ id: string; logo: string | null }> };
+      expect(body.data.find((o) => o.id === ctx.orgId)?.logo).toBe("emoji:🧠");
     });
 
     it("returns every org the user is a member of", async () => {

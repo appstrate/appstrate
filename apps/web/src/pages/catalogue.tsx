@@ -23,10 +23,9 @@ import {
   isCatalogueReading,
   type CatalogueReading,
 } from "../lib/catalogue-link";
-import { modalReturnTarget, useBackgroundLocation } from "../lib/modal-route";
+import { useCloseOverlay } from "../lib/modal-route";
 import { useOverlayBreadcrumb } from "../hooks/use-overlay-breadcrumb";
-import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
-import { UnavailableState } from "../components/route-gate";
+import { OverlayUnavailable } from "../components/overlay-unavailable";
 
 export function CataloguePage() {
   // Découvrir by default: it is the reading everybody needs — what exists,
@@ -35,26 +34,12 @@ export function CataloguePage() {
   const { reading = "discover", type = CATALOGUE_KINDS[0] } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const background = useBackgroundLocation();
+  const close = useCloseOverlay();
   const { t } = useTranslation("common");
   useOverlayBreadcrumb([{ label: t("nav.catalogue") }]);
 
-  const close = () => {
-    const target = modalReturnTarget(background);
-    navigate(target.to, { replace: true, state: target.state });
-  };
-
   // A reading or a kind the catalogue does not have is an address that does not exist.
-  if (!isCatalogueReading(reading) || !isCatalogueKind(type)) {
-    return (
-      <Dialog open onOpenChange={(open) => !open && close()}>
-        <DialogContent aria-describedby={undefined}>
-          <DialogTitle className="sr-only">{t("access.unavailable")}</DialogTitle>
-          <UnavailableState />
-        </DialogContent>
-      </Dialog>
-    );
-  }
+  if (!isCatalogueReading(reading) || !isCatalogueKind(type)) return <OverlayUnavailable />;
 
   return (
     <OrgCatalogueModal

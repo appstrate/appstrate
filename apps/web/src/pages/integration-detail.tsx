@@ -600,8 +600,6 @@ export function IntegrationDetailPage() {
               downloadVersion={version}
               onDownload={downloadPackage}
               onFork={() => fork.open()}
-              // The definition is edited in Paramètres › Définition.
-              showEdit={false}
               canDeactivate={active}
               onDeactivate={() => setConfirmDeactivate(true)}
               activationPending={setActive.isPending}

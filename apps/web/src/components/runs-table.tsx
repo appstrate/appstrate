@@ -6,6 +6,7 @@ import { PlayCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
 import { EmptyState } from "./page-states";
+import { runDetailPath } from "../lib/package-paths";
 
 export function RunsTable({
   runs,
@@ -57,9 +58,7 @@ export function RunsTable({
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`
       // would 404: that row stays static rather than leading nowhere.
-      rowHref={(run) =>
-        run.packageId == null ? undefined : `/agents/${run.packageId}/runs/${run.id}`
-      }
+      rowHref={(run) => (run.packageId == null ? undefined : runDetailPath(run.packageId, run.id))}
       rowLabel={(run) =>
         t("runs.rowLabel", { number: run.runNumber ?? "?", agent: agentName(run) })
       }

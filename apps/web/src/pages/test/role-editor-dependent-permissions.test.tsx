@@ -20,6 +20,7 @@ import {
 
 await i18nReady;
 await i18n.changeLanguage("fr");
+const t = i18n.getFixedT("fr", "settings");
 
 function entry(permission: string, requires_one_of: string[] = []): RoleVocabularyEntry {
   return {
@@ -70,7 +71,9 @@ describe("a read a selected action depends on", () => {
     const locked = lockedReads(selected, vocabulary);
     expect([...locked.keys()]).toEqual(["schedules:read"]);
     expect(locked.has("schedules:write")).toBe(false);
-    expect(dependentsLabel("schedules:read", locked.get("schedules:read")!)).toBe("delete, write");
+    expect(dependentsLabel(locked.get("schedules:read")!, t)).toBe(
+      "Supprimer des planifications, Créer et modifier des planifications",
+    );
   });
 
   it("cannot be unticked while it is locked", () => {
@@ -89,11 +92,11 @@ describe("a read a selected action depends on", () => {
     expect([...withRequiredReads(unticked, vocabulary)]).toEqual(["schedules:read"]);
   });
 
-  it("names a dependent of another resource in full", () => {
+  it("names a dependent of another resource by its label", () => {
     const selected = withRequiredReads(new Set(["agents:run"]), vocabulary);
     expect([...selected].sort()).toEqual(["agents:run", "runs:read"]);
     const locked = lockedReads(selected, vocabulary);
-    expect(dependentsLabel("runs:read", locked.get("runs:read")!)).toBe("agents:run");
+    expect(dependentsLabel(locked.get("runs:read")!, t)).toBe("Lancer les agents");
   });
 
   it("is free again once the action is unticked", () => {

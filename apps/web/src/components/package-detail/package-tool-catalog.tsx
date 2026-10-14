@@ -49,7 +49,6 @@ export function PackageToolCatalog({
   selection?: {
     values: ReadonlySet<string>;
     onToggle: (name: string) => void;
-    testIdPrefix: string;
   };
 }) {
   const { t } = useTranslation("agents");
@@ -117,12 +116,7 @@ export function PackageToolCatalog({
       header: t("packageTools.name"),
       width: inventory ? "minmax(200px,2fr)" : "minmax(160px,1fr)",
       cell: (tool) => (
-        <div
-          className="flex items-start gap-2"
-          data-testid={
-            selection ? `${selection.testIdPrefix}${tool.name}` : `integration-tool-${tool.name}`
-          }
-        >
+        <div className="flex items-start gap-2">
           {selection && (
             <Checkbox
               className="mt-0.5"

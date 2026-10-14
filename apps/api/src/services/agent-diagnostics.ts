@@ -13,16 +13,25 @@ import type { LoadedPackage } from "../types/index.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ApiError, type ValidationFieldError } from "../lib/errors.ts";
-import { getSpacePackageSettings } from "./space-packages.ts";
+import { getSpacePackageSettings, isPackageActiveHere } from "./space-packages.ts";
 import { collectBundleReadinessErrors } from "./agent-readiness.ts";
 import {
   VERSION_SELECTOR_PUBLISHED,
   resolveAgentRunVersion,
-  resolveVersionRef,
+  resolveVersionRefs,
   versionRefOf,
 } from "./agent-version-resolver.ts";
-import { resolveAgentConnectionReadiness } from "./integration-pins-service.ts";
-import { requireBoundModel, resolveModelCascade, type ResolvedModel } from "./org-models.ts";
+import {
+  agentNotActiveError,
+  resolveDefinitionConnectionReadiness,
+} from "./integration-pins-service.ts";
+import {
+  requireBoundModel,
+  resolveModelCascade,
+  type BoundModel,
+  type ResolvedModel,
+} from "./org-models.ts";
+import { ModelCredentialMissingError, modelCredentialIsPresent } from "./run-context-builder.ts";
 import { listPackageScheduleRows } from "./scheduler.ts";
 
 export type AgentDiagnosticSeverity = "blocking" | "warning";
@@ -63,7 +72,6 @@ const CONNECTION_CODES = new Set([
 ]);
 
 function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severity"> {
-  const configKey = error.field.match(/^config\.(.+)$/)?.[1] ?? null;
   const skillId = error.field.match(/^dependencies\.skills\.(.+)$/)?.[1] ?? null;
   const integrationId = error.field.match(/^integrations\.(.+)$/)?.[1] ?? null;
   const connectionIssue = CONNECTION_CODES.has(error.code);
@@ -104,29 +112,55 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
       recoverable_on_launch: connectionIssue,
     };
   }
+  if (error.field === "agent") {
+    return {
+      code: error.code,
+      title: error.title ?? "Agent not active",
+      explanation: error.message,
+      field: error.field,
+      correction: { destination: "configuration", section: "activation", params: {} },
+      recoverable_on_launch: false,
+    };
+  }
   return {
     code: error.code,
     title: error.title ?? "Configuration issue",
     explanation: error.message,
     field: error.field,
-    correction: {
-      destination: "configuration",
-      section: "inputs",
-      params: configKey ? { field: configKey } : {},
-    },
+    correction: { destination: "configuration", section: null, params: {} },
     recoverable_on_launch: false,
   };
 }
 
-/** The launch's own refusal of a model no credential of the payer serves, else `null`. */
-function unboundModelRefusal(model: ResolvedModel, payerUserId: string | null): ApiError | null {
-  try {
-    requireBoundModel(model, payerUserId);
-    return null;
-  } catch (err) {
-    if (err instanceof ApiError) return err;
-    throw err;
+/**
+ * The launch's refusal of its resolved model, under the launch's code, else
+ * `null`: none resolved, no credential of the payer serves it, or its
+ * credential carries no secret.
+ */
+function modelRefusal(
+  model: ResolvedModel | null,
+  payerUserId: string | null,
+): { code: string; title: string; message: string } | null {
+  if (!model) {
+    return {
+      code: "model_not_configured",
+      title: "Model not configured",
+      message: "No usable model is configured for this agent or organization.",
+    };
   }
+  let bound: BoundModel;
+  try {
+    bound = requireBoundModel(model, payerUserId);
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    return { code: err.code, title: "Model credential required", message: err.message };
+  }
+  if (modelCredentialIsPresent(bound)) return null;
+  return {
+    code: "model_credential_missing",
+    title: "Model credential missing",
+    message: new ModelCredentialMissingError(bound.label).message,
+  };
 }
 
 export async function getAgentDiagnostics(args: {
@@ -151,23 +185,22 @@ export async function getAgentDiagnostics(args: {
   canReadSchedules: boolean;
 }): Promise<AgentDiagnosticsResult> {
   const { scope, principal, canConnect, canConfigureIntegrations, payerUserId } = args;
-  const versionRef = args.version;
-  const { agent, overrideVersionLabel } = await resolveAgentRunVersion(args.agent, versionRef);
+  const { agent, overrideVersionLabel } = await resolveAgentRunVersion(args.agent, args.version);
   const inspectedRef = versionRefOf(overrideVersionLabel);
   const packageConfig = await getSpacePackageSettings(scope, agent.id);
 
   // Connections are reported by their dedicated bulk service, so the bundle
   // pass leaves them out instead of resolving them twice.
-  const [readinessErrors, connections, modelCascade, schedules] = await Promise.all([
+  const [active, readinessErrors, connections, modelCascade, schedules] = await Promise.all([
+    isPackageActiveHere(scope, agent.id),
     collectBundleReadinessErrors({ agent, orgId: scope.orgId, spaceId: scope.spaceId }),
     args.canReadIntegrations
-      ? resolveAgentConnectionReadiness({
+      ? resolveDefinitionConnectionReadiness({
           scope,
-          agentPackageId: agent.id,
+          agent,
           principal,
           canConnect,
           canConfigureIntegrations,
-          version: versionRef,
         })
       : null,
     resolveModelCascade(scope.orgId, agent.id, packageConfig.modelId, payerUserId),
@@ -181,34 +214,26 @@ export async function getAgentDiagnostics(args: {
   const connectionErrors = (connections?.errors ?? []).filter(
     (error) => !readinessFields.has(error.field),
   );
-  const blocking: AgentDiagnostic[] = [...readinessErrors, ...connectionErrors].map((error) => ({
-    ...routeError(error),
-    severity: "blocking",
-  }));
+  // The activation verdict is the run doors' own, whatever the caller may read
+  // of the connections: a switched-off agent is refused at launch either way.
+  const blocking: AgentDiagnostic[] = [
+    ...(active ? [] : [agentNotActiveError(agent.id)]),
+    ...readinessErrors,
+    ...connectionErrors,
+  ].map((error) => ({ ...routeError(error), severity: "blocking" }));
 
-  // The launch's two model refusals, under its codes.
-  const modelRefusal = modelCascade ? unboundModelRefusal(modelCascade.model, payerUserId) : null;
-  if (!modelCascade) {
+  const refusal = modelRefusal(modelCascade?.model ?? null, payerUserId);
+  if (refusal) {
     blocking.push({
-      code: "model_not_configured",
+      code: refusal.code,
       severity: "blocking",
-      title: "Model not configured",
-      explanation: "No usable model is configured for this agent or organization.",
-      field: "model",
-      correction: { destination: "configuration", section: "model", params: {} },
-      recoverable_on_launch: false,
-    });
-  } else if (modelRefusal) {
-    blocking.push({
-      code: modelRefusal.code,
-      severity: "blocking",
-      title: "Model credential required",
-      explanation: modelRefusal.message,
+      title: refusal.title,
+      explanation: refusal.message,
       field: "model",
       correction: {
         destination: "configuration",
         section: "model",
-        params: { model: modelCascade.model.label },
+        params: modelCascade ? { model: modelCascade.model.label } : {},
       },
       recoverable_on_launch: false,
     });
@@ -238,15 +263,13 @@ export async function getAgentDiagnostics(args: {
 
   // Compared as the versions each would run: an unpinned schedule runs the
   // latest published version, and `1.2.0` and `published` may name the same one.
-  const scheduleRefs = await Promise.all(
-    schedules
-      .filter((schedule) => schedule.enabled)
-      .map(async (schedule) => ({
-        schedule,
-        ref: await resolveVersionRef(agent.id, schedule.version_override),
-      })),
+  const enabledSchedules = schedules.filter((schedule) => schedule.enabled);
+  const scheduleRefs = await resolveVersionRefs(
+    agent.id,
+    enabledSchedules.map((schedule) => schedule.version_override),
   );
-  for (const { schedule, ref } of scheduleRefs) {
+  for (const [i, schedule] of enabledSchedules.entries()) {
+    const ref = scheduleRefs[i] ?? null;
     if (ref === inspectedRef) continue;
     const name = schedule.name ?? schedule.id;
     const runs = ref ?? schedule.version_override ?? VERSION_SELECTOR_PUBLISHED;

@@ -13,7 +13,7 @@ import type { components } from "../../api/client.ts";
 import { DashboardContent, type DashboardData } from "../dashboard-content.tsx";
 import { orgStore } from "../../stores/org-store.ts";
 import { render } from "../../test/render.tsx";
-import { makeRun } from "../../components/test/run-fixture.tsx";
+import { makeRun } from "../../test/run-fixture.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
@@ -81,5 +81,18 @@ describe("the dashboard", () => {
     expect(html).toContain("Rapporteur");
     expect(html).not.toContain("Planifications à venir");
     expect(html).not.toContain("Agents récents");
+  });
+
+  it("says on an agent's card how many of its runs are unread", () => {
+    const agent = {
+      id: "@acme/reporter",
+      display_name: "Rapporteur",
+      source: "local",
+    } as unknown as DashboardData["agents"][number];
+    const html = asOrgMember(
+      READER,
+      <DashboardContent {...content({ agents: [agent], unreadCounts: { [agent.id]: 3 } })} />,
+    );
+    expect(html).toContain('aria-label="3 runs non lus"');
   });
 });

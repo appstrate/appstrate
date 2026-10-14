@@ -6291,7 +6291,7 @@ export interface components {
             id?: string;
             name?: string;
             slug?: string;
-            /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
+            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
             logo?: string | null;
             /** Format: date-time */
             createdAt?: string;
@@ -6508,7 +6508,7 @@ export interface components {
             id: string;
             name: string;
             slug: string;
-            /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
+            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
             logo: string | null;
             /** @enum {string} */
             role: "owner" | "admin" | "member" | "guest";
@@ -16932,6 +16932,7 @@ export interface operations {
                      *           "id": "org_abc123",
                      *           "name": "Acme Corp",
                      *           "slug": "acme",
+                     *           "logo": null,
                      *           "role": "owner",
                      *           "permissions": [
                      *             "org:read",
@@ -16950,6 +16951,8 @@ export interface operations {
                             id: string;
                             name: string;
                             slug: string;
+                            /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
+                            logo: string | null;
                             /**
                              * @description Org role for member callers; `end_user` for OIDC end-user JWTs.
                              * @enum {string}
@@ -19380,7 +19383,7 @@ export interface operations {
                 "application/json": {
                     name?: string;
                     slug?: string;
-                    /** @description Organization logo as `emoji:<grapheme>` or a normalized square WebP data URL. Null uses the organization initial. */
+                    /** @description Organization logo: `emoji:<grapheme>` (one emoji), or a `data:image/webp;base64,` URL whose bytes open with a RIFF header of form type `WEBP`. Null uses the organization initial. */
                     logo?: string | null;
                 };
             };

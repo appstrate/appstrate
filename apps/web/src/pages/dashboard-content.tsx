@@ -33,7 +33,8 @@ import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";
-import { packageDetailPath } from "../lib/package-paths";
+import { packageDetailPath, runDetailPath, scheduleDetailPath } from "../lib/package-paths";
+import { RunProvenanceBadges } from "../components/run-cells";
 import { toast } from "sonner";
 
 const CODING_AGENT_SETUP_URL = "https://raw.githubusercontent.com/appstrate/skills/main/README.md";
@@ -47,6 +48,8 @@ export interface DashboardData {
   runTotal: number;
   schedules: EnrichedSchedule[];
   agentName: (run: EnrichedRun) => string;
+  /** Unread run notifications per agent id. */
+  unreadCounts?: Record<string, number>;
 }
 
 function SectionHeading({ title, href, action }: { title: string; href: string; action: string }) {
@@ -199,7 +202,15 @@ function MetricCard({
   );
 }
 
-function DashboardAgentCard({ agent, className }: { agent: AgentListItem; className?: string }) {
+function DashboardAgentCard({
+  agent,
+  unreadCount,
+  className,
+}: {
+  agent: AgentListItem;
+  unreadCount: number | undefined;
+  className?: string;
+}) {
   const { t } = useTranslation("agents");
   const href = packageDetailPath("agent", agent.id);
 
@@ -229,6 +240,14 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
               aria-label={t("dashboard.systemAgent")}
             />
           )}
+          {!!unreadCount && (
+            <span
+              className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium"
+              aria-label={t("dashboard.unreadRuns", { count: unreadCount })}
+            >
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
           {agent.running_runs ? <Badge status="running" /> : null}
           <RunAgentButton
             packageId={agent.id}
@@ -257,7 +276,15 @@ function DashboardAgentCard({ agent, className }: { agent: AgentListItem; classN
   );
 }
 
-function RecentAgents({ agents, className }: { agents: AgentListItem[]; className?: string }) {
+function RecentAgents({
+  agents,
+  unreadCounts,
+  className,
+}: {
+  agents: AgentListItem[];
+  unreadCounts: Record<string, number> | undefined;
+  className?: string;
+}) {
   const { t } = useTranslation("agents");
   const rootRef = useRef<HTMLDivElement>(null);
   const [canScrollBack, setCanScrollBack] = useState(false);
@@ -310,7 +337,12 @@ function RecentAgents({ agents, className }: { agents: AgentListItem[]; classNam
       <ScrollArea ref={rootRef} className="w-full [&_[data-radix-scroll-area-scrollbar]]:hidden">
         <div className="flex w-max gap-3 pb-1">
           {agents.map((agent) => (
-            <DashboardAgentCard key={agent.id} agent={agent} className="w-[19rem] shrink-0" />
+            <DashboardAgentCard
+              key={agent.id}
+              agent={agent}
+              unreadCount={unreadCounts?.[agent.id]}
+              className="w-[19rem] shrink-0"
+            />
           ))}
         </div>
       </ScrollArea>
@@ -379,6 +411,7 @@ function DashboardRunRow({
               #{run.runNumber}
             </span>
           )}
+          <RunProvenanceBadges run={run} />
         </div>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
           {run.started_at ? formatDateField(run.started_at) : t("dashboard.runPending")}
@@ -396,7 +429,7 @@ function DashboardRunRow({
 
   return run.packageId ? (
     <Link
-      to={`/agents/${run.packageId}/runs/${run.id}`}
+      to={runDetailPath(run.packageId, run.id)}
       state={{ runNumber: run.runNumber }}
       className={className}
     >
@@ -442,7 +475,7 @@ function DashboardScheduleRow({
   const { t } = useTranslation("agents");
   return (
     <Link
-      to={`/schedules/${schedule.id}`}
+      to={scheduleDetailPath(schedule.id)}
       className="hover:bg-muted/40 flex min-h-[74px] items-center gap-3 px-4 py-3 transition-colors first:rounded-t-xl last:rounded-b-xl"
     >
       <AgentIdentityTile
@@ -582,7 +615,7 @@ export function DashboardContent(data: DashboardData) {
             href="/agents"
             action={t("dashboard.allAgents")}
           />
-          <RecentAgents agents={data.agents} />
+          <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
         </section>
       )}
 

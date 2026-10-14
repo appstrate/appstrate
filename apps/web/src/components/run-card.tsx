@@ -2,13 +2,15 @@
 
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { FileInput, FileOutput, Shield } from "lucide-react";
+import { Shield } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { cn } from "@appstrate/ui/cn";
-import { Badge, MetaBadge } from "./status-badge";
+import { Badge } from "./status-badge";
+import { DocumentCounts, RunProvenanceBadges } from "./run-cells";
 import { RunDuration } from "./run-duration";
 import { RunTrigger } from "./run-trigger";
 import { formatDateField } from "../lib/format-date";
+import { runDetailPath } from "../lib/package-paths";
 import { runErrorText } from "../lib/run-error";
 import { useFiles } from "../hooks/use-files";
 import { FilePreview } from "./file-preview";
@@ -45,7 +47,7 @@ function ProducedFile({ runId }: { runId: string }) {
 /** A second, genuinely card-shaped reading of the rows already fetched by RunList. */
 export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: string }) {
   const { t } = useTranslation("agents");
-  const href = run.packageId ? `/agents/${run.packageId}/runs/${run.id}` : undefined;
+  const href = run.packageId ? runDetailPath(run.packageId, run.id) : undefined;
 
   const content = (
     <>
@@ -73,17 +75,7 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
             )}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {run.package_ephemeral === true && <MetaBadge label={t("runs.inlineBadge")} />}
-            {run.packageId == null && run.package_ephemeral !== true && (
-              <MetaBadge
-                label={t("runs.deletedAgentBadge")}
-                title={t("runs.deletedAgentTitle")}
-                italic
-              />
-            )}
-            {run.runOrigin === "remote" && (
-              <MetaBadge label={t("runs.remoteBadge")} title={t("runs.remoteBadgeTitle")} />
-            )}
+            <RunProvenanceBadges run={run} />
           </div>
         </div>
         <Badge status={run.status} unread={run.unread} />
@@ -103,24 +95,7 @@ export function RunCard({ run, agentName }: { run: EnrichedRun; agentName: strin
       <div className="text-muted-foreground mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 pt-4 text-xs">
         <RunTrigger run={run} />
         {run.proxy_label && <Shield size={12} aria-label={run.proxy_label} />}
-        {run.file_counts.input > 0 && (
-          <span
-            className="flex items-center gap-1"
-            title={t("run.inputFiles", { count: run.file_counts.input })}
-          >
-            <FileInput size={12} />
-            {run.file_counts.input}
-          </span>
-        )}
-        {run.file_counts.output > 0 && (
-          <span
-            className="flex items-center gap-1"
-            title={t("run.outputFiles", { count: run.file_counts.output })}
-          >
-            <FileOutput size={12} />
-            {run.file_counts.output}
-          </span>
-        )}
+        <DocumentCounts run={run} />
         <span className="ml-auto">
           <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
         </span>

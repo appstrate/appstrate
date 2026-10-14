@@ -16,8 +16,8 @@
  * the explored one is the highlighted row with the chevron into column two.
  */
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useOverlayPath } from "../lib/modal-route";
+import { Link } from "react-router-dom";
+import { useLandAfterOrgSwitch } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
@@ -25,7 +25,6 @@ import { $api } from "../api/client";
 import { useSpaces } from "../hooks/use-spaces";
 import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
-import { isUnder } from "../lib/route-access";
 import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
 import { spaceStore } from "../stores/space-store";
@@ -67,9 +66,7 @@ function ColumnHeader({
 
 export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const overlayPath = useOverlayPath();
+  const landAfterOrgSwitch = useLandAfterOrgSwitch();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const { data: spaces } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
@@ -124,24 +121,16 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
    * enters it as soon as that organization's listing proves it enterable,
    * instead of landing on its default.
    *
-   * A new organization also means the current URL may not exist there (an agent
-   * id, a run number), so the landing is the root of the product you are in.
-   * Settings are the exception: their routes describe a page type, not a
-   * resource id, so they remain valid when the context changes.
+   * A new organization also means the current page may not exist there (an
+   * agent id, a run number): `useLandAfterOrgSwitch` moves it.
    */
   const applyContext = (orgId: string, spaceId: string) => {
-    const orgChanged = orgId !== currentOrg.id;
-    if (orgChanged) {
+    if (orgId !== currentOrg.id) {
       spaceStore.getState().remember(orgId, spaceId);
       switchOrg(orgId);
+      landAfterOrgSwitch();
     } else switchSpace(spaceId);
     setOpen(false);
-    const settingsRoute =
-      overlayPath !== null &&
-      (isUnder(overlayPath, "/org-settings") || isUnder(overlayPath, "/workspace-settings"));
-    if (orgChanged && !settingsRoute) {
-      navigate(location.pathname.startsWith("/chat") ? "/chat" : "/", { replace: true });
-    }
   };
 
   return (

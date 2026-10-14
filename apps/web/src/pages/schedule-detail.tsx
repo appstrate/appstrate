@@ -15,13 +15,14 @@ import { FactGrid } from "../components/package-manifest/manifest-fact";
 import { ListToolbar } from "../components/list-toolbar";
 import { useLocalListParams } from "../lib/list-params";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
 import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
 import { JsonView } from "../components/json-view";
+import { ActorLabel } from "../components/actor-label";
+import { Badge } from "@appstrate/ui/components/badge";
 import { RunList } from "../components/run-list";
 import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
@@ -32,10 +33,11 @@ import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { isQueryInFlight } from "../lib/query-state";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { ScheduleSettings, ScheduleToggleItem } from "../components/schedule-settings";
+import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
 import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
-import { Trash2, Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
+import { scheduleDetailPath } from "../lib/package-paths";
+import { Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
 
 type ScheduleTab = "details" | "runs" | "settings";
 const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
@@ -77,7 +79,10 @@ export function ScheduleDetailPage() {
           }
           breadcrumbs={[
             { label: t("schedule.breadcrumbList"), href: "/schedules" },
-            { label: schedule.name || t("schedule.unnamed"), href: `/schedules/${schedule.id}` },
+            {
+              label: schedule.name || t("schedule.unnamed"),
+              href: scheduleDetailPath(schedule.id),
+            },
             {
               label:
                 activeTab === "details"
@@ -99,22 +104,11 @@ export function ScheduleDetailPage() {
                 </DisabledReasonTooltip>
               )}
               {can("schedules:write") && mayWrite && (
-                <PageActionsMenu>
-                  <ScheduleToggleItem schedule={schedule} />
-                  {can("schedules:delete") && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => setConfirmOpen(true)}
-                        disabled={deleteSchedule.isPending}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 size={14} />
-                        {t("schedule.delete")}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </PageActionsMenu>
+                <ScheduleActionsMenu
+                  schedule={schedule}
+                  onDelete={() => setConfirmOpen(true)}
+                  deletePending={deleteSchedule.isPending}
+                />
               )}
             </>
           }
@@ -229,7 +223,28 @@ function ScheduleParams({
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground text-xs">{t("schedule.paramActor")}</dt>
-            <dd className="mt-1 text-sm break-words">{schedule.actor_name || "–"}</dd>
+            <dd className="mt-1 inline-flex flex-wrap items-center gap-1.5 text-sm break-words">
+              {schedule.actor_name ? (
+                <>
+                  <ActorLabel
+                    actor_type={schedule.actor_type}
+                    actor_name={schedule.actor_name}
+                    iconSize="size-3.5"
+                  />
+                  {schedule.actor_type && (
+                    <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                      {t(
+                        schedule.actor_type === "end_user"
+                          ? "actorSelect.badgeEndUser"
+                          : "actorSelect.badgeMember",
+                      )}
+                    </Badge>
+                  )}
+                </>
+              ) : (
+                "–"
+              )}
+            </dd>
           </div>
           <div className="min-w-0">
             <dt className="text-muted-foreground text-xs">{t("run.infoVersion")}</dt>

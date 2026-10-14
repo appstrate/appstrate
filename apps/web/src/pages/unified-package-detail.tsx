@@ -21,7 +21,11 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import { useHomeSpaceName } from "../hooks/use-permissions";
-import { canReadRuns, packageSightPermissions } from "@appstrate/core/permissions";
+import {
+  canReadRuns,
+  packagePermission,
+  packageSightPermissions,
+} from "@appstrate/core/permissions";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
@@ -56,6 +60,7 @@ import { RoleLimitNotice } from "../components/role-limit-notice";
 import { useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 import { agentDiagnosticText } from "../lib/agent-diagnostics";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
+import { EditorDirtyReportContext } from "../hooks/use-editor-state";
 
 type DetailTab = "overview" | "runs" | "settings" | "memory" | "api" | "usedBy";
 
@@ -272,6 +277,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const defaultTab: DetailTab = fullRead ? "overview" : tabReads.runs ? "runs" : "api";
   const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
   const newVersion = useModalParam("newVersion");
+  const [editorDirty, setEditorDirty] = useState(false);
   // ── Loading / Error ──
   if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading)) return <LoadingState />;
   if (error || !detail) return <ResourceErrorState error={error} />;
@@ -387,6 +393,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
   const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
+  // The triggers' own verdicts, which also bound their `?newVersion` / `?fork` URLs.
+  const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
+  const canFork = can(packagePermission(type, "write")) && !isOwned;
+  // Publishing or running reads the stored draft, not the edits held on screen.
+  const unsavedReason = editorDirty ? t("detail.unsavedBlocksAction") : undefined;
+
   // Versions live in Paramètres › Explorer for every type.
   const versionsProps = {
     // Restoring writes the draft, deleting removes a version: both are judged
@@ -394,10 +406,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     canRestore: !isBuiltIn && !!homeWritable,
     canDelete: !isBuiltIn && !!homeDeletable,
     // The page's « Créer une version » (PackageActionsDropdown's `isMutable`).
-    onCreate:
-      !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned
-        ? () => newVersion.open()
-        : undefined,
+    onCreate: canCreateVersion ? () => newVersion.open() : undefined,
     latestVersion: latestVersionForDiff,
     currentManifest,
     currentContent,
@@ -407,353 +416,355 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const versionLabel = isHistoricalVersion ? versionDetail?.version : undefined;
 
   return (
-    <div>
-      <SharedHeader
-        detail={unifiedForHeader}
-        isHistoricalVersion={isHistoricalVersion}
-        // The server's own flag, as for the publish dialog below. For a
-        // package it is authoring state, only whoever can publish the draft has
-        // a use for it; an agent's header names its draft to whoever reads it,
-        // and only when it differs from the last published version.
-        hasUnarchivedChanges={
-          type === "agent" ? hasArchivableChanges : hasTimestampChanges && !!homeWritable
-        }
-        latestPublishedVersion={versionInfo?.latest_published_version}
-        activeSubpage={{
-          label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
-        }}
-        statusBadges={
-          // The readiness verdict reads the agent's content: shown to whoever may read it.
-          type === "agent" && fullRead ? (
-            <AgentReadinessBadge packageId={packageId} versionLabel={versionLabel} />
-          ) : undefined
-        }
-        actionsLeft={
-          type === "agent" ? (
-            // The page's one launch verdict, shared with the empty runs list.
-            <AgentRunButton
-              packageId={packageId}
-              versionLabel={versionLabel}
-              variant="outline"
-              size="sm"
-              className="bg-card"
-            />
-          ) : undefined
-        }
-        actionsRight={
-          type === "agent" ? (
-            <AgentActions
-              packageId={packageId}
-              isOwned={isOwned}
-              isHistoricalVersion={isHistoricalVersion}
-              downloadVersion={downloadVersion}
-              downloadPackage={downloadPackage}
-              downloadBundle={downloadBundle}
-              onCreateVersion={() => newVersion.open()}
-              onFork={() => fork.open()}
-            />
-          ) : (
-            <div className="flex items-center gap-2">
-              <PackageActionsDropdown
+    <EditorDirtyReportContext.Provider value={setEditorDirty}>
+      <div>
+        <SharedHeader
+          detail={unifiedForHeader}
+          isHistoricalVersion={isHistoricalVersion}
+          // The server's own flag, as for the publish dialog below. For a
+          // package it is authoring state, only whoever can publish the draft has
+          // a use for it; an agent's header names its draft to whoever reads it,
+          // and only when it differs from the last published version.
+          hasUnarchivedChanges={
+            type === "agent" ? hasArchivableChanges : hasTimestampChanges && !!homeWritable
+          }
+          latestPublishedVersion={versionInfo?.latest_published_version}
+          activeSubpage={{
+            label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
+          }}
+          statusBadges={
+            // The readiness verdict reads the agent's content: shown to whoever may read it.
+            type === "agent" && fullRead ? (
+              <AgentReadinessBadge packageId={packageId} versionLabel={versionLabel} />
+            ) : undefined
+          }
+          actionsLeft={
+            type === "agent" ? (
+              // The page's one launch verdict, shared with the empty runs list.
+              <AgentRunButton
                 packageId={packageId}
-                type={type}
+                versionLabel={versionLabel}
+                variant="outline"
+                size="sm"
+                className="bg-card"
+                unsavedReason={unsavedReason}
+              />
+            ) : undefined
+          }
+          actionsRight={
+            type === "agent" ? (
+              <AgentActions
+                packageId={packageId}
                 isOwned={isOwned}
-                isBuiltIn={isBuiltIn}
                 isHistoricalVersion={isHistoricalVersion}
-                homeSpaceId={homeSpaceId}
-                homeWritable={homeWritable}
-                homeDeletable={homeDeletable}
-                homeShareable={homeShareable}
                 downloadVersion={downloadVersion}
-                onDownload={downloadPackage}
+                downloadPackage={downloadPackage}
+                downloadBundle={downloadBundle}
                 onCreateVersion={() => newVersion.open()}
                 onFork={() => fork.open()}
-                // The definition is edited in Paramètres › Définition.
-                showEdit={false}
-                canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
-                onDeletePackage={() => {
-                  if (!pkgDetail) return;
-                  const nameStr = pkgDetail.name || pkgDetail.id;
-                  const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
-                  setConfirmAction({
-                    type: "deletePackage",
-                    description: t("packages.deleteConfirm", {
-                      type: typeLabel,
-                      name: nameStr,
-                      ns: "settings",
-                    }),
-                  });
-                }}
-                // ONE pair of doors, for every family: a skill or an MCP
-                // server is switched on and off in a space exactly like an
-                // agent, through `POST` / `DELETE /api/spaces/{id}/packages`.
-                // Switching off keeps the placement and its settings.
-                canActivate={isActiveInCurrentSpace === false}
-                onActivate={() => {
-                  if (!currentSpaceId) return;
-                  setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
-                }}
-                canDeactivate={isActiveInCurrentSpace === true}
-                onDeactivate={() => {
-                  setConfirmAction({
-                    type: "deactivatePackage",
-                    description: t("packages.deactivateConfirm", {
-                      name: displayName,
-                      ns: "settings",
-                    }),
-                  });
-                }}
-                activationPending={setActive.isPending}
+                unsavedReason={unsavedReason}
               />
-            </div>
-          )
-        }
-      />
+            ) : (
+              <div className="flex items-center gap-2">
+                <PackageActionsDropdown
+                  packageId={packageId}
+                  type={type}
+                  isOwned={isOwned}
+                  isBuiltIn={isBuiltIn}
+                  isHistoricalVersion={isHistoricalVersion}
+                  homeSpaceId={homeSpaceId}
+                  homeWritable={homeWritable}
+                  homeDeletable={homeDeletable}
+                  homeShareable={homeShareable}
+                  downloadVersion={downloadVersion}
+                  onDownload={downloadPackage}
+                  onCreateVersion={() => newVersion.open()}
+                  createVersionBlockedReason={unsavedReason}
+                  onFork={() => fork.open()}
+                  canDeletePackage={!!pkgDetail && pkgDetail.agents.length === 0}
+                  onDeletePackage={() => {
+                    if (!pkgDetail) return;
+                    const nameStr = pkgDetail.name || pkgDetail.id;
+                    const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
+                    setConfirmAction({
+                      type: "deletePackage",
+                      description: t("packages.deleteConfirm", {
+                        type: typeLabel,
+                        name: nameStr,
+                        ns: "settings",
+                      }),
+                    });
+                  }}
+                  // ONE pair of doors, for every family: a skill or an MCP
+                  // server is switched on and off in a space exactly like an
+                  // agent, through `POST` / `DELETE /api/spaces/{id}/packages`.
+                  // Switching off keeps the placement and its settings.
+                  canActivate={isActiveInCurrentSpace === false}
+                  onActivate={() => {
+                    if (!currentSpaceId) return;
+                    setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+                  }}
+                  canDeactivate={isActiveInCurrentSpace === true}
+                  onDeactivate={() => {
+                    setConfirmAction({
+                      type: "deactivatePackage",
+                      description: t("packages.deactivateConfirm", {
+                        name: displayName,
+                        ns: "settings",
+                      }),
+                    });
+                  }}
+                  activationPending={setActive.isPending}
+                />
+              </div>
+            )
+          }
+        />
 
-      <VersionBanners
-        isHistorical={isHistoricalVersion}
-        versionDetail={versionDetail}
-        activeUrl={packageDetailPath(type, packageId)}
-      />
+        <VersionBanners
+          isHistorical={isHistoricalVersion}
+          versionDetail={versionDetail}
+          activeUrl={packageDetailPath(type, packageId)}
+        />
 
-      {type === "agent" && <ModelRequiredAlert packageId={packageId} />}
+        {type === "agent" && <ModelRequiredAlert packageId={packageId} />}
 
-      {/* Placed here, switched off. The page renders in full — reading and
+        {/* Placed here, switched off. The page renders in full — reading and
           configuring an agent is not running it — and says the one thing that
           would otherwise turn a click into a 404. */}
-      {agentDetail && !agentDetail.active && <AgentInactiveAlert packageId={packageId} />}
+        {agentDetail && !agentDetail.active && <AgentInactiveAlert packageId={packageId} />}
 
-      {/* Nothing has ever been published and the working copy is not this
+        {/* Nothing has ever been published and the working copy is not this
           reader's: what the page renders below is the author's work in
           progress. Saying it is what makes the greyed-out Run button legible
           — and the page renders at all precisely because reading a definition
           is not running it. True of every package type: the server answers
           `definition` for all four from one function. */}
-      {definition === "draft" && !homeWritable && (
-        <Alert className="mb-4">
-          <AlertDescription>{t("detail.draftReadOnly")}</AlertDescription>
-        </Alert>
-      )}
+        {definition === "draft" && !homeWritable && (
+          <Alert className="mb-4">
+            <AlertDescription>{t("detail.draftReadOnly")}</AlertDescription>
+          </Alert>
+        )}
 
-      {!isOwned && type !== "agent" && (
-        <Alert variant="info" className="mb-4">
-          <Info />
-          <AlertDescription className="flex flex-wrap items-center gap-x-3">
-            <span>{t("ownership.readOnly")}</span>
-            {forkedFrom && (
-              <span className="text-muted-foreground">
-                {t("ownership.forkedFrom")}
-                <Link
-                  to={packageDetailPath(type, forkedFrom)}
-                  className="text-primary hover:underline"
-                >
-                  {forkedFrom}
-                </Link>
-              </span>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-      {isOwned && forkedFrom && (
-        <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
-          <span className="text-muted-foreground">
-            {t("ownership.forkedFrom")}
-            <Link to={packageDetailPath(type, forkedFrom)} className="text-primary hover:underline">
-              {forkedFrom}
-            </Link>
-          </span>
-        </div>
-      )}
+        {!isOwned && type !== "agent" && (
+          <Alert variant="info" className="mb-4">
+            <Info />
+            <AlertDescription className="flex flex-wrap items-center gap-x-3">
+              <span>{t("ownership.readOnly")}</span>
+              {forkedFrom && (
+                <span className="text-muted-foreground">
+                  {t("ownership.forkedFrom")}
+                  <Link
+                    to={packageDetailPath(type, forkedFrom)}
+                    className="text-primary hover:underline"
+                  >
+                    {forkedFrom}
+                  </Link>
+                </span>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+        {isOwned && forkedFrom && (
+          <div className="border-border/50 bg-muted/30 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
+            <span className="text-muted-foreground">
+              {t("ownership.forkedFrom")}
+              <Link
+                to={packageDetailPath(type, forkedFrom)}
+                className="text-primary hover:underline"
+              >
+                {forkedFrom}
+              </Link>
+            </span>
+          </div>
+        )}
 
-      {type === "agent" && agentDetail && (
-        <div className="overflow-visible" data-agent-detail-surface>
-          <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)}>
-            <DetailTabsList>
-              {agentTabs.map((item) => (
-                <DetailTabsTrigger key={item.id} value={item.id}>
-                  {item.label}
-                </DetailTabsTrigger>
-              ))}
-            </DetailTabsList>
+        {type === "agent" && agentDetail && (
+          <div className="overflow-visible" data-agent-detail-surface>
+            <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)}>
+              <DetailTabsList>
+                {agentTabs.map((item) => (
+                  <DetailTabsTrigger key={item.id} value={item.id}>
+                    {item.label}
+                  </DetailTabsTrigger>
+                ))}
+              </DetailTabsList>
 
-            <TabsContent
-              value="overview"
-              className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-            >
-              {fullRead ? (
-                <AgentOverviewTab
+              <TabsContent
+                value="overview"
+                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+              >
+                {fullRead ? (
+                  <AgentOverviewTab
+                    packageId={packageId}
+                    detail={agentDetail}
+                    version={versionLabel}
+                    isHistorical={isHistoricalVersion}
+                  />
+                ) : (
+                  // Without `agents:read` the summary's fields (manifest, prompt,
+                  // authoring history) are not served: say what the role allows.
+                  <div className="space-y-4">
+                    <RoleLimitNotice>{t("detail.roleLimit.overview")}</RoleLimitNotice>
+                    {tabReads.runs && (
+                      <Button variant="outline" size="sm" onClick={() => setTab("runs")}>
+                        {t("detail.roleLimit.seeRuns")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent
+                value="runs"
+                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+              >
+                {tabReads.runs ? (
+                  <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
+                ) : (
+                  <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
+                )}
+              </TabsContent>
+              <TabsContent
+                value="settings"
+                className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
+              >
+                <AgentSettingsView
+                  versions={versionsProps}
                   packageId={packageId}
                   detail={agentDetail}
                   version={versionLabel}
                   isHistorical={isHistoricalVersion}
+                  inputWrapperOverride={historicalInputWrapper}
                   currentManifest={currentManifest}
                   currentContent={currentContent}
-                  surface="summary"
                 />
-              ) : (
-                // Without `agents:read` the summary's fields (manifest, prompt,
-                // authoring history) are not served: say what the role allows.
-                <div className="space-y-4">
-                  <RoleLimitNotice>{t("detail.roleLimit.overview")}</RoleLimitNotice>
-                  {tabReads.runs && (
-                    <Button variant="outline" size="sm" onClick={() => setTab("runs")}>
-                      {t("detail.roleLimit.seeRuns")}
-                    </Button>
-                  )}
-                </div>
+              </TabsContent>
+              <TabsContent
+                value="memory"
+                className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
+              >
+                {tabReads.memory ? (
+                  <AgentMemoryTab packageId={packageId} />
+                ) : (
+                  <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
+                )}
+              </TabsContent>
+              <TabsContent
+                value="api"
+                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
+              >
+                <AgentApiTab packageId={packageId} />
+              </TabsContent>
+            </Tabs>
+          </div>
+        )}
+
+        {type !== "agent" && (
+          <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
+            <DetailTabsList>
+              {tabDefs.map((td) => (
+                <DetailTabsTrigger key={td.id} value={td.id}>
+                  {td.label}
+                </DetailTabsTrigger>
+              ))}
+            </DetailTabsList>
+            {/* Non-Agent tab content */}
+            {/* Both follow the version being viewed: the explorer through
+          `versionLabel`, the overview through the manifest picked above. */}
+            <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+              {pkgDetail && (
+                <PackageOverview
+                  type={type}
+                  description={unifiedForHeader.description}
+                  content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
+                  manifest={effectiveManifest}
+                  version={unifiedForHeader.version}
+                  historical={isHistoricalVersion}
+                  agentCount={pkgDetail.agents.length}
+                  onOpenFiles={() => setTab("settings")}
+                  onOpenUsage={() => setTab("usedBy")}
+                />
               )}
             </TabsContent>
-            <TabsContent
-              value="runs"
-              className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-            >
-              {tabReads.runs ? (
-                <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
+
+            {(type === "skill" || type === "mcp-server") && (
+              <TabsContent
+                value="settings"
+                className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
+              >
+                <PackageSettingsView
+                  versions={versionsProps}
+                  type={type}
+                  packageId={packageId}
+                  detail={pkgDetail}
+                  version={versionLabel}
+                />
+              </TabsContent>
+            )}
+
+            <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+              {!tabReads.usedBy ? (
+                <RoleLimitNotice>{t("detail.roleLimit.usedBy")}</RoleLimitNotice>
               ) : (
-                <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
+                pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
               )}
-            </TabsContent>
-            <TabsContent
-              value="settings"
-              className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-            >
-              <AgentSettingsView
-                versions={versionsProps}
-                packageId={packageId}
-                detail={agentDetail}
-                version={versionLabel}
-                isHistorical={isHistoricalVersion}
-                inputWrapperOverride={historicalInputWrapper}
-                currentManifest={currentManifest}
-                currentContent={currentContent}
-              />
-            </TabsContent>
-            <TabsContent
-              value="memory"
-              className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-            >
-              {tabReads.memory ? (
-                <AgentMemoryTab packageId={packageId} />
-              ) : (
-                <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
-              )}
-            </TabsContent>
-            <TabsContent
-              value="api"
-              className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-            >
-              <AgentApiTab packageId={packageId} />
             </TabsContent>
           </Tabs>
-        </div>
-      )}
+        )}
 
-      {type !== "agent" && (
-        <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
-          <DetailTabsList>
-            {tabDefs.map((td) => (
-              <DetailTabsTrigger key={td.id} value={td.id}>
-                {td.label}
-              </DetailTabsTrigger>
-            ))}
-          </DetailTabsList>
-          {/* Non-Agent tab content */}
-          {/* Both follow the version being viewed: the explorer through
-          `versionLabel`, the overview through the manifest picked above. */}
-          <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-            {pkgDetail && (
-              <PackageOverview
-                type={type}
-                description={unifiedForHeader.description}
-                content={isHistoricalVersion ? versionDetail?.content : pkgDetail.content}
-                manifest={effectiveManifest}
-                version={unifiedForHeader.version}
-                historical={isHistoricalVersion}
-                agentCount={pkgDetail.agents.length}
-                onOpenFiles={() => setTab("settings")}
-                onOpenUsage={() => setTab("usedBy")}
-              />
-            )}
-          </TabsContent>
+        {/* Mounted only while open: any way of closing a form modal abandons its input. */}
+        {newVersion.value !== null && canCreateVersion && (
+          <CreateVersionModal
+            onClose={newVersion.close}
+            type={type}
+            packageId={packageId}
+            hasUnarchivedChanges={hasTimestampChanges}
+            etag={(agentDetail ?? pkgDetail)?.etag}
+          />
+        )}
 
-          {(type === "skill" || type === "mcp-server") && (
-            <TabsContent
-              value="settings"
-              className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-            >
-              <PackageSettingsView
-                versions={versionsProps}
-                type={type}
-                packageId={packageId}
-                detail={pkgDetail}
-                version={versionLabel}
-              />
-            </TabsContent>
-          )}
+        {fork.value !== null && canFork && (
+          <ForkPackageModal
+            open
+            onClose={fork.close}
+            packageId={packageId}
+            defaultName={name ?? ""}
+            type={type}
+          />
+        )}
 
-          <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
-            {!tabReads.usedBy ? (
-              <RoleLimitNotice>{t("detail.roleLimit.usedBy")}</RoleLimitNotice>
-            ) : (
-              pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
-            )}
-          </TabsContent>
-        </Tabs>
-      )}
-
-      {/* Mounted only while open: any way of closing a form modal abandons its input. */}
-      {newVersion.value !== null && (
-        <CreateVersionModal
-          open
-          onClose={newVersion.close}
-          type={type}
-          packageId={packageId}
-          hasUnarchivedChanges={hasTimestampChanges}
-          etag={(agentDetail ?? pkgDetail)?.etag}
-        />
-      )}
-
-      {fork.value !== null && (
-        <ForkPackageModal
-          open
-          onClose={fork.close}
-          packageId={packageId}
-          defaultName={name ?? ""}
-          type={type}
-        />
-      )}
-
-      <ConfirmModal
-        open={!!confirmAction}
-        onClose={() => setConfirmAction(null)}
-        title={
-          confirmAction?.type === "deactivatePackage"
-            ? t("detail.deactivateTitle")
-            : t("detail.deletePackageTitle")
-        }
-        description={confirmAction?.description ?? ""}
-        isPending={deletePkgMutation.isPending || setActive.isPending}
-        confirmLabel={
-          confirmAction?.type === "deactivatePackage"
-            ? t("packages.deactivate", { ns: "settings" })
-            : t("btn.delete", { ns: "common" })
-        }
-        onConfirm={() => {
-          if (!confirmAction) return;
-          const close = () => setConfirmAction(null);
-          if (confirmAction.type === "deactivatePackage") {
-            if (!currentSpaceId) return;
-            setActive.mutate(
-              { spaceId: currentSpaceId, packageId, active: false },
-              {
-                onSuccess: close,
-              },
-            );
-          } else {
-            deletePkgMutation.mutate(packageId, { onSuccess: close });
+        <ConfirmModal
+          open={!!confirmAction}
+          onClose={() => setConfirmAction(null)}
+          title={
+            confirmAction?.type === "deactivatePackage"
+              ? t("detail.deactivateTitle")
+              : t("detail.deletePackageTitle")
           }
-        }}
-      />
-    </div>
+          description={confirmAction?.description ?? ""}
+          isPending={deletePkgMutation.isPending || setActive.isPending}
+          confirmLabel={
+            confirmAction?.type === "deactivatePackage"
+              ? t("packages.deactivate", { ns: "settings" })
+              : t("btn.delete", { ns: "common" })
+          }
+          onConfirm={() => {
+            if (!confirmAction) return;
+            const close = () => setConfirmAction(null);
+            if (confirmAction.type === "deactivatePackage") {
+              if (!currentSpaceId) return;
+              setActive.mutate(
+                { spaceId: currentSpaceId, packageId, active: false },
+                {
+                  onSuccess: close,
+                },
+              );
+            } else {
+              deletePkgMutation.mutate(packageId, { onSuccess: close });
+            }
+          }}
+        />
+      </div>
+    </EditorDirtyReportContext.Provider>
   );
 }

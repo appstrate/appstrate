@@ -7,6 +7,7 @@ import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
 import { ErrorState, LoadingState } from "../components/page-states";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
+import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { DashboardContent } from "./dashboard-content";
 
 export function DashboardPage() {
@@ -25,11 +26,14 @@ export function DashboardPage() {
   });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const agentName = useRunAgentName();
-  const { data: schedules, isLoading: schedulesLoading, error: schedulesError } = useAllSchedules();
+  const { data: unreadCounts } = useUnreadCountsByAgent();
+  // The schedules feed one section, drawn once they arrive: their failure is
+  // not the dashboard's.
+  const { data: schedules } = useAllSchedules();
 
   // A disabled query is not loading, so an unresolved permission set must be.
-  const isLoading = !ready || runsLoading || agentsLoading || schedulesLoading;
-  const error = runsError || agentsError || schedulesError;
+  const isLoading = !ready || runsLoading || agentsLoading;
+  const error = runsError || agentsError;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;
@@ -80,6 +84,7 @@ export function DashboardPage() {
           runTotal: runsData?.total ?? runs.length,
           schedules: upcomingSchedules,
           agentName,
+          unreadCounts,
         }}
       />
     </div>

@@ -55,16 +55,13 @@ import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
 import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
-import { useSpaceMemberColumns } from "./space-member-columns";
+import { spaceMemberLabel, useSpaceMemberColumns } from "./space-member-columns";
+import { memberLabel } from "../../lib/billing-managers";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
 import { errorMessage } from "../../lib/mutation-error";
 
 /** Owners and admins reach every space by role; a space-member row adds nothing. */
 const FULL_ACCESS_ORG_ROLES: ReadonlySet<string> = new Set(ORG_ROLES_WITH_FULL_ACCESS);
-
-function memberLabel(member: SpaceMemberObject): string {
-  return member.name || member.email || member.userId;
-}
 
 export function WorkspaceSettingsMembersPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -121,7 +118,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
     const onSuccess = () =>
       toast.success(
         t("spaceMembers.roleUpdated", {
-          name: memberLabel(member),
+          name: spaceMemberLabel(member),
           role: roleOptions.find((option) => option.value === value)?.label ?? value,
         }),
       );
@@ -147,10 +144,10 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           toast.success(
             result.access_after === "implicit"
               ? t("spaceMembers.removedImplicit", {
-                  name: memberLabel(member),
+                  name: spaceMemberLabel(member),
                   role: t(`roles.preset.${space?.default_role}`),
                 })
-              : t("spaceMembers.removedNone", { name: memberLabel(member) }),
+              : t("spaceMembers.removedNone", { name: spaceMemberLabel(member) }),
           );
         },
       },
@@ -287,7 +284,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
             ? t(
                 removalRestoresDefault ? "spaceMembers.resetConfirm" : "spaceMembers.removeConfirm",
                 {
-                  name: memberLabel(memberToRemove),
+                  name: spaceMemberLabel(memberToRemove),
                   role: t(`roles.preset.${space?.default_role}`),
                 },
               )
@@ -430,9 +427,7 @@ function AddSpaceMemberModal({
           const candidate = candidates.find((member) => member.userId === userId);
           toast.success(
             t("spaceMembers.added", {
-              name: canReadDirectory
-                ? candidate?.displayName || candidate?.email || userId
-                : email.trim(),
+              name: canReadDirectory ? (candidate ? memberLabel(candidate) : userId) : email.trim(),
               role: roleOptions.find((option) => option.value === effectiveRole)?.label,
             }),
           );
@@ -536,7 +531,7 @@ function AddSpaceMemberModal({
                     <SelectGroup>
                       {candidates.map((member) => (
                         <SelectItem key={member.userId} value={member.userId}>
-                          {member.displayName || member.email || member.userId}
+                          {memberLabel(member)}
                         </SelectItem>
                       ))}
                     </SelectGroup>

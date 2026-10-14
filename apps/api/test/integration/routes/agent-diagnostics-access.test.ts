@@ -28,7 +28,7 @@ import {
   seedSchedule,
   seedSpaceMember,
 } from "../../helpers/seed.ts";
-import { activatePackage } from "../../../src/services/space-packages.ts";
+import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
@@ -143,6 +143,23 @@ describe("agent overview reads — access", () => {
       const agentsOnly = await codes(await keyHolding(["agents:read"]), agent);
       expect(agentsOnly).not.toContain("not_connected");
       expect(agentsOnly).toContain("model_not_configured");
+    });
+
+    it("reports a switched-off agent to every reader, as the launch refuses it", async () => {
+      await deactivatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+      const res = await diagnostics(await keyHolding(["agents:read"]));
+      expect(res.status, await res.clone().text()).toBe(200);
+      const body = (await res.json()) as DiagnosticsBody & { can_launch: boolean };
+      expect(body.can_launch).toBe(false);
+      expect(body.diagnostics[0]).toMatchObject({
+        code: "agent_not_active",
+        field: "agent",
+        correction: { destination: "configuration", section: "activation", params: {} },
+      });
+      // Once, whoever may also read the connections.
+      expect((await codes(authHeaders(ctx))).filter((c) => c === "agent_not_active")).toHaveLength(
+        1,
+      );
     });
 
     it("compares a schedule by the version it runs, not by its selector", async () => {

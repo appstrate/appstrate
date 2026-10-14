@@ -432,9 +432,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
   const locked = lockedReads(selected, entries);
   const requiredBy = (permission: string) => {
     const dependents = locked.get(permission);
-    return dependents
-      ? t("roles.requiredBy", { actions: dependentsLabel(permission, dependents) })
-      : null;
+    return dependents ? t("roles.requiredBy", { actions: dependentsLabel(dependents, t) }) : null;
   };
   // Named by the server against its own vocabulary, and listed as it sends
   // them. NOT intersected with the selection: `selected` is seeded from the

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure, React-free helpers for the files surfaces (run tab + gallery).
+ * Pure, React-free helpers for the files surfaces (the run page + the Fichiers page).
  * Kept here (not in a component) so the grouping / icon / href logic is
  * unit-testable in isolation.
  */
@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
+import { runDetailPath } from "./package-paths";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
@@ -33,8 +34,8 @@ export type RunFileDirection = "output" | "input";
 /**
  * Where a file stands RELATIVE TO the run being viewed: a file that run
  * produced ("output"), or one it consumed ("input"). The single rule every
- * run-scoped surface reads — the tile badge, the Fichiers tab filter, the
- * Outcome list ({@link producedRunFiles}) — so a badge and a filter can never
+ * run-scoped surface reads — the tile badge, the overview's input card, the
+ * Résultats list ({@link producedRunFiles}) — so a badge and a list can never
  * disagree about the same row.
  *
  * The ownership question itself is `isFileProducedByRun`
@@ -142,12 +143,11 @@ export function mimeIconFor(mime: string): LucideIcon {
 /**
  * In-app run-page URL for a file's producing run, or `undefined` when the
  * file has no run container or no package id (e.g. an inline run's ephemeral
- * shadow). `packageId` keeps its `@scope/name` slashes literal to match the
- * Hono route; only the run id is percent-encoded.
+ * shadow).
  */
 export function fileRunHref(file: FileLike): string | undefined {
   if (!file.runId || !file.packageId) return undefined;
-  return `/agents/${file.packageId}/runs/${encodeURIComponent(file.runId)}`;
+  return runDetailPath(file.packageId, file.runId);
 }
 
 /**

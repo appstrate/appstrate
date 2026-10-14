@@ -135,6 +135,7 @@ router.get("/orgs", async (c) => {
           id: org.id,
           name: org.name,
           slug: org.slug,
+          logo: org.logo,
           // End-users have no org role — surface a stable string instead
           // of `undefined` so the consumer doesn't have to special-case it.
           role: "end_user" as const,
@@ -174,6 +175,7 @@ router.get("/orgs", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
+            logo: o.logo,
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,

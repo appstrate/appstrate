@@ -440,6 +440,8 @@ function MemoryCollectionRow({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(event) => {
+        // Only the row's own focus: a key on its "…" menu belongs to the menu.
+        if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen();

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Pencil, Power, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../../../components/confirm-modal";
@@ -33,8 +34,11 @@ export function OAuthClientActions({
   const [rotateConfirmOpen, setRotateConfirmOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
-  function handleUpdate(body: { disabled?: boolean; isFirstParty?: boolean }) {
-    updateMutation.mutate({ params: { path: { clientId: client.clientId } }, body });
+  function handleUpdate(body: { disabled: boolean } | { isFirstParty: boolean }, done: string) {
+    updateMutation.mutate(
+      { params: { path: { clientId: client.clientId } }, body },
+      { onSuccess: () => toast.success(done) },
+    );
   }
 
   function handleRotate() {
@@ -55,6 +59,7 @@ export function OAuthClientActions({
       {
         onSuccess: () => {
           setDeleteConfirmOpen(false);
+          toast.success(t("oauthClients.deleted"));
         },
       },
     );
@@ -83,7 +88,16 @@ export function OAuthClientActions({
         )}
         {canWrite && (
           <DropdownMenuItem
-            onSelect={() => handleUpdate({ isFirstParty: !client.isFirstParty })}
+            onSelect={() =>
+              handleUpdate(
+                { isFirstParty: !client.isFirstParty },
+                t(
+                  client.isFirstParty
+                    ? "oauthClients.firstPartyDisabled"
+                    : "oauthClients.firstPartyEnabled",
+                ),
+              )
+            }
             disabled={updateMutation.isPending}
           >
             <ShieldCheck />
@@ -95,7 +109,12 @@ export function OAuthClientActions({
         {canWrite && (
           <>
             <DropdownMenuItem
-              onSelect={() => handleUpdate({ disabled: !client.disabled })}
+              onSelect={() =>
+                handleUpdate(
+                  { disabled: !client.disabled },
+                  t(client.disabled ? "oauthClients.enabled" : "oauthClients.disabled"),
+                )
+              }
               disabled={updateMutation.isPending}
             >
               <Power />

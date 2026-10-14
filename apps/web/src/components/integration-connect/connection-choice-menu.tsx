@@ -131,9 +131,14 @@ export function ConnectionChoiceMenu({
   // « Choisir » picked before any tick: the mode is on, the boxes are what is left to do.
   const [choosing, setChoosing] = useState(false);
   const open = controlledOpen ?? ownOpen;
+  // Closing ends it, whoever closes the menu: the caller may, through `open`.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) setChoosing(false);
+  }
   const onOpenChange = (next: boolean) => {
     setOwnOpen(next);
-    if (!next) setChoosing(false);
     onControlledOpenChange?.(next);
   };
 

@@ -12,7 +12,6 @@ import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/format-date";
 import { agentSettingsHref } from "../../lib/settings-section-href";
-import { PackageFilesView } from "../package-files/package-files-view";
 import { OperationalStat } from "../operational-stat";
 import { AgentHealthSection } from "./agent-health-section";
 
@@ -20,26 +19,35 @@ export function AgentOverviewTab({
   packageId,
   detail,
   version,
-  isHistorical = false,
-  currentManifest,
-  currentContent,
-  surface,
-  fileEditHref,
-  initialFilePath,
-  canEditFiles = false,
+  isHistorical,
 }: {
   packageId: string;
   detail: AgentDetail;
-  version?: string | undefined;
-  isHistorical?: boolean | undefined;
-  currentManifest?: Record<string, unknown> | undefined;
-  currentContent?: string | null | undefined;
-  surface: "summary" | "files";
-  fileEditHref?: (path: string) => string | undefined;
-  /** Explorer › Fichiers opened on this bundle file, when a link sent the reader to it. */
-  initialFilePath?: string;
-  /** The reader may change the draft's files in Explorer › Fichiers. */
-  canEditFiles?: boolean;
+  version: string | undefined;
+  isHistorical: boolean;
+}) {
+  const { t } = useTranslation("agents");
+  if (isHistorical) {
+    return (
+      <div className="p-3">
+        <p className="text-muted-foreground rounded-lg border p-4 text-sm">
+          {t("detail.overview.historicalUnavailable")}
+        </p>
+      </div>
+    );
+  }
+  return <OperationalSummary packageId={packageId} detail={detail} version={version} />;
+}
+
+/** The live counters, read only where they are shown. */
+function OperationalSummary({
+  packageId,
+  detail,
+  version,
+}: {
+  packageId: string;
+  detail: AgentDetail;
+  version: string | undefined;
 }) {
   const { t, i18n } = useTranslation("agents");
   const location = useLocation();
@@ -73,31 +81,6 @@ export function AgentOverviewTab({
     pinnedSuccess && memoriesSuccess
       ? memoryDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
       : undefined;
-
-  if (surface === "files") {
-    return (
-      <PackageFilesView
-        type="agent"
-        packageId={packageId}
-        initialVersion={version}
-        currentManifest={currentManifest}
-        currentContent={currentContent}
-        editHref={fileEditHref}
-        initialPath={initialFilePath}
-        editable={canEditFiles}
-      />
-    );
-  }
-
-  if (isHistorical) {
-    return (
-      <div className="p-3">
-        <p className="text-muted-foreground rounded-lg border p-4 text-sm">
-          {t("detail.overview.historicalUnavailable")}
-        </p>
-      </div>
-    );
-  }
 
   const activity = runActivity.data;
   const failedRunCount = activity ? activity.failed + activity.timeout : undefined;

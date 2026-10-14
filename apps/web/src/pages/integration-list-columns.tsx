@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../components/data-table";
 import { IntegrationIcon } from "../components/integration-icon";
-import type { IntegrationSummaryWire } from "../hooks/use-integrations";
 import {
-  integrationOrigin,
-  integrationProtocol,
-  localServerRef,
-  integrationStatus,
-} from "../lib/integration-collection";
+  useCatalogueOriginColumn,
+  useCatalogueProtocolColumn,
+} from "../components/catalogue-columns";
+import type { IntegrationSummaryWire } from "../hooks/use-integrations";
+import { useOrg } from "../hooks/use-org";
+import { integrationProtocol, localServerRef } from "../lib/integration-collection";
 
 /** One comparable integration fact per column. */
 export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[] {
   const { t } = useTranslation("settings");
+  const origin = useCatalogueOriginColumn<IntegrationSummaryWire>(useOrg().currentOrg?.name ?? "");
+  // Remote tab only: API or MCP.
+  const protocol = useCatalogueProtocolColumn<IntegrationSummaryWire>(integrationProtocol);
 
   return [
     {
@@ -30,33 +32,8 @@ export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[
         </div>
       ),
     },
-    {
-      id: "origin",
-      header: t("integrations.col.origin"),
-      width: "104px",
-      tier: 2,
-      cell: (integration) => (
-        <span className="text-muted-foreground text-xs">
-          {t(
-            integrationOrigin(integration) === "system"
-              ? "integrations.origin.system"
-              : "integrations.origin.custom",
-          )}
-        </span>
-      ),
-    },
-    {
-      // Remote tab only: API or MCP. A local integration is always MCP.
-      id: "protocol",
-      header: t("integrations.col.protocol"),
-      width: "88px",
-      tier: 3,
-      cell: (integration) => (
-        <span className="text-muted-foreground text-xs">
-          {t(`integrations.protocol.${integrationProtocol(integration)}`)}
-        </span>
-      ),
-    },
+    origin,
+    protocol,
     {
       // Local tab only: the server package the sandbox runs.
       id: "server",
@@ -81,21 +58,6 @@ export function useIntegrationListColumns(): DataColumn<IntegrationSummaryWire>[
         <span className="text-muted-foreground truncate font-mono text-xs">
           {integration.manifest.version ?? "—"}
         </span>
-      ),
-    },
-    {
-      id: "status",
-      header: t("integrations.col.status"),
-      width: "96px",
-      tier: 2,
-      cell: (integration) => (
-        <Badge variant={integration.active ? "success" : "secondary"}>
-          {t(
-            integrationStatus(integration) === "active"
-              ? "integrations.badge.active"
-              : "integrations.badge.inactive",
-          )}
-        </Badge>
       ),
     },
   ];

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 import { $api, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useOrgScope } from "./use-org-scope";
@@ -31,4 +31,14 @@ export function useAgentDiagnostics(agentPackageId: string | undefined, version?
       { enabled: canRead && scope.enabled && Boolean(agentPackageId) },
     ),
   );
+}
+
+/**
+ * Every agent's diagnostics, after a write to what they report on: its model,
+ * its schedules, its versions.
+ */
+export function invalidateAgentDiagnostics(qc: QueryClient): Promise<void> {
+  return qc.invalidateQueries({
+    predicate: (query) => query.queryKey[1] === "/api/agents/{scope}/{name}/diagnostics",
+  });
 }

@@ -151,7 +151,6 @@ export const ROUTE_ACCESS = {
   },
   "/workspace-settings/auth": {
     feature: "oidc",
-    teamSpaceOnly: true,
     anyOf: ["space-settings:write"],
     operations: ["getSpaceSmtpConfig"],
   },
@@ -190,13 +189,23 @@ export type RoutePath = keyof typeof ROUTE_ACCESS;
 export const isUnder = (path: string, prefix: string) =>
   path === prefix || path.startsWith(`${prefix}/`);
 
+/** What a settings page configures, and the API scope its requests carry. */
+export type SettingsScope = "organization" | "workspace" | "account";
+
+/** Each settings scope's index, the prefix of its pages. */
+export const SETTINGS_INDEX = {
+  organization: "/org-settings",
+  workspace: "/workspace-settings",
+  account: "/preferences",
+} as const satisfies Record<SettingsScope, RoutePath>;
+
+const SETTINGS_PREFIXES = Object.values(SETTINGS_INDEX);
+
+export const isSettingsPath = (path: string) =>
+  SETTINGS_PREFIXES.some((prefix) => isUnder(path, prefix));
+
 /** The routed modals: mounted over the screen they were opened from, never in the main tree. */
-export const OVERLAY_PREFIXES = [
-  "/org-settings",
-  "/workspace-settings",
-  "/preferences",
-  "/catalogue",
-] as const;
+export const OVERLAY_PREFIXES = [...SETTINGS_PREFIXES, "/catalogue"];
 
 export const isOverlayPath = (path: string) =>
   OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix));

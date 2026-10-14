@@ -27,6 +27,7 @@ import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
 import {
   formatTimestamp,
+  journalLevel,
   levelColors,
   type ExecutionEntry,
   type ToolExecutionStatus,
@@ -207,15 +208,8 @@ interface LogViewerProps {
 }
 
 export type JournalOverviewFilter = "tools" | "warnings" | "errors";
-type JournalLevelFilter = "info" | "warn" | "error";
+type JournalLevelFilter = ReturnType<typeof journalLevel>;
 type JournalTypeFilter = "message" | "tool_call" | "tool_result" | "diagnostic";
-
-function journalLevel(entry: ExecutionEntry): JournalLevelFilter {
-  if (entry.kind === "tool" && entry.status === "failed") return "error";
-  if (entry.level === "error") return "error";
-  if (entry.level === "warn") return "warn";
-  return "info";
-}
 
 function journalType(entry: ExecutionEntry): JournalTypeFilter {
   if (entry.kind === "agent") return "message";
@@ -299,7 +293,8 @@ export function LogViewer({
   const activeFilterCount = levelFilters.length + typeFilters.length + displayFilters.length;
   const hasActiveQueryOrFilters = normalizedQuery !== "" || activeFilterCount > 0;
   const filters: FilterSpec[] = [
-    ...(availableLevels.length > 1
+    // A filter in force stays on screen, so it can be cleared.
+    ...(availableLevels.length > 1 || levelFilters.length > 0
       ? [
           {
             id: "level",
@@ -313,7 +308,7 @@ export function LogViewer({
           },
         ]
       : []),
-    ...(availableTypes.length > 1
+    ...(availableTypes.length > 1 || typeFilters.length > 0
       ? [
           {
             id: "type",

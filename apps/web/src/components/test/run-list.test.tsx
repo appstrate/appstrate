@@ -10,7 +10,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { paginatedRunsKeys } from "../../lib/query-keys.ts";
 import { render } from "../../test/render.tsx";
 import { RunList } from "../run-list.tsx";
-import { makeRun } from "./run-fixture.tsx";
+import { makeRun } from "../../test/run-fixture.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");

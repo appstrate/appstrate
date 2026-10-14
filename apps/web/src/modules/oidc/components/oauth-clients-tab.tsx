@@ -30,6 +30,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { data, isLoading, error } = useOAuthClients(level);
   const { can } = usePermissions();
+  const canWrite = can("oauth-clients:write");
   const newClient = useModalParam("newOAuthClient");
   const editClient = useModalTarget("oauth-client", data, (client) => client.clientId);
   const selectedClient = editClient.target ?? null;
@@ -41,12 +42,14 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   return (
     <div>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        {level === "space" && (
-          <p className="text-muted-foreground max-w-xl text-sm">
-            {t("settings:oauthClients.introSpace")}
-          </p>
-        )}
-        {can("oauth-clients:write") && (
+        <p className="text-muted-foreground max-w-xl text-sm">
+          {t(
+            level === "space"
+              ? "settings:oauthClients.introSpace"
+              : "settings:oauthClients.introOrg",
+          )}
+        </p>
+        {canWrite && (
           <SettingsPageActions>
             <PageActionsMenu>
               <DropdownMenuItem data-page-action="create" onSelect={() => newClient.open()}>
@@ -64,9 +67,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         columns={columns}
         rows={data ?? []}
         rowKey={(client) => client.clientId}
-        rowAction={
-          can("oauth-clients:write") ? (client) => editClient.open(client.clientId) : undefined
-        }
+        rowAction={canWrite ? (client) => editClient.open(client.clientId) : undefined}
         rowLabel={(client) =>
           t("settings:oauthClients.editClient", { name: client.name ?? client.clientId })
         }
@@ -75,7 +76,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         error={<ErrorState error={error} compact />}
         empty={
           <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
-            {can("oauth-clients:write") && (
+            {canWrite && (
               <EmptyStateAction
                 label={t("settings:oauthClients.createBtn")}
                 onClick={() => newClient.open()}
@@ -86,7 +87,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
       />
 
       <OAuthClientFormModal
-        open={newClient.value !== null || selectedClient !== null}
+        open={canWrite && (newClient.value !== null || selectedClient !== null)}
         onClose={selectedClient ? editClient.close : newClient.close}
         client={selectedClient}
         level={level}

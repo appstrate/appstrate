@@ -9,7 +9,7 @@ import { DocumentListPanel } from "../document-list-panel.tsx";
 import { ListFooter } from "../list-toolbar.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
-import { makeRun } from "./run-fixture.tsx";
+import { makeRun } from "../../test/run-fixture.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");

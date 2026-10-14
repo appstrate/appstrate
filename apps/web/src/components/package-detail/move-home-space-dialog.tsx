@@ -29,20 +29,18 @@ export const MOVE_HOME_PARAM = "moveHome";
  * deletion answers when it still homes packages.
  */
 export function MoveHomeSpaceDialog({
-  open,
   onClose,
   packageId,
   type,
   homeSpaceId,
 }: {
-  open: boolean;
   onClose: () => void;
   packageId: string;
   type: PackageType;
   homeSpaceId: string | null | undefined;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: spaces } = useSpaces(open);
+  const { data: spaces } = useSpaces();
   const move = useMovePackageHome(type);
   const [target, setTarget] = useState("");
   // Checked by default: that is what the move has always done, so opening this
@@ -80,7 +78,7 @@ export function MoveHomeSpaceDialog({
 
   return (
     <Modal
-      open={open}
+      open
       onClose={close}
       title={t("packages.moveHomeTitle")}
       actions={

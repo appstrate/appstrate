@@ -11,10 +11,13 @@ import { blockingIntegrationIds, useAgentConnectionReadiness } from "../../hooks
 export function AgentRunButton({
   packageId,
   versionLabel,
+  unsavedReason,
   ...look
 }: {
   packageId: string;
   versionLabel: string | undefined;
+  /** Set while the page holds unsaved definition edits a run would not carry. */
+  unsavedReason?: string;
 } & Pick<ComponentProps<typeof RunAgentButton>, "variant" | "size" | "className" | "inputDialog">) {
   const { t } = useTranslation("agents");
   const { data: detail } = usePackageDetail("agent", packageId);
@@ -31,8 +34,8 @@ export function AgentRunButton({
       packageId={packageId}
       detail={detail}
       version={versionLabel}
-      disabled={blocker !== null}
-      disabledTitle={blocker ? t(blocker) : undefined}
+      disabled={blocker !== null || !!unsavedReason}
+      disabledTitle={blocker ? t(blocker) : unsavedReason}
       // A connection gap warns, it does not block: the launch answers it (409 modal).
       connectionWarning={blocker === null && connectionGap}
       showLabel

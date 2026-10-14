@@ -6,7 +6,7 @@
  * query and keeps its button disabled while it is in flight.
  */
 
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import type { useConnectionDeleteImpact } from "../../hooks/use-me-connections";
 import { errorDetail } from "../../lib/mutation-error";
@@ -49,36 +49,61 @@ export function ConnectionDeleteImpact({
       <AlertDescription>
         {(data.pins.length > 0 || data.schedules.length > 0) && (
           <ul className="mt-1 list-disc space-y-1 pl-5">
-            {data.pins.map((pin) => (
-              <li key={`${pin.agent_package_id}|${pin.integration_package_id}`}>
-                <span className="font-medium">{pin.agent_display_name}</span>
-                {" : "}
-                {pin.connection_count > 1
+            {data.pins.map((pin) => {
+              const effect =
+                pin.connection_count > 1
                   ? t("connections.impact.shrinks", {
                       count: pin.connection_count - 1,
                       from: pin.connection_count,
                     })
-                  : t("connections.impact.agentResets")}
-                {pin.schedules_disabled_count > 0 &&
-                  `. ${t("connections.impact.disablesSchedules", {
-                    count: pin.schedules_disabled_count,
-                  })}`}
-              </li>
-            ))}
+                  : t("connections.impact.agentResets");
+              return (
+                <li key={`${pin.agent_package_id}|${pin.integration_package_id}`}>
+                  <Trans
+                    t={t}
+                    i18nKey="connections.impact.agentLine"
+                    values={{
+                      effect:
+                        pin.schedules_disabled_count > 0
+                          ? t("connections.impact.effectThenSchedules", {
+                              effect,
+                              schedules: t("connections.impact.disablesSchedules", {
+                                count: pin.schedules_disabled_count,
+                              }),
+                            })
+                          : effect,
+                    }}
+                    components={{
+                      name: <span className="font-medium">{pin.agent_display_name}</span>,
+                    }}
+                  />
+                </li>
+              );
+            })}
             {data.schedules.map((schedule) => (
               <li key={`${schedule.scheduleId}|${schedule.integration_package_id}`}>
-                <span className="font-medium">
-                  {schedule.schedule_name ?? t("connections.scheduleImpact.unnamed")}
-                </span>
-                {` (${schedule.agent_display_name}) : `}
-                {schedule.disables
-                  ? t("connections.impact.scheduleDisables")
-                  : schedule.connection_count > 1
-                    ? t("connections.impact.shrinks", {
-                        count: schedule.connection_count - 1,
-                        from: schedule.connection_count,
-                      })
-                    : t("connections.impact.scheduleResets")}
+                <Trans
+                  t={t}
+                  i18nKey="connections.impact.scheduleLine"
+                  values={{
+                    agent: schedule.agent_display_name,
+                    effect: schedule.disables
+                      ? t("connections.impact.scheduleDisables")
+                      : schedule.connection_count > 1
+                        ? t("connections.impact.shrinks", {
+                            count: schedule.connection_count - 1,
+                            from: schedule.connection_count,
+                          })
+                        : t("connections.impact.scheduleResets"),
+                  }}
+                  components={{
+                    name: (
+                      <span className="font-medium">
+                        {schedule.schedule_name ?? t("connections.scheduleImpact.unnamed")}
+                      </span>
+                    ),
+                  }}
+                />
               </li>
             ))}
           </ul>

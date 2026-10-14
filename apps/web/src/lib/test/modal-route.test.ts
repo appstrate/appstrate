@@ -2,7 +2,13 @@
 
 import { describe, expect, it } from "bun:test";
 import type { Location } from "react-router-dom";
-import { isPage, modalReturnTarget, pageLocation } from "../modal-route";
+import {
+  isPage,
+  modalReturnTarget,
+  orgSwitchLanding,
+  overlayCloseStep,
+  pageLocation,
+} from "../modal-route";
 
 const at = (pathname: string, rest: Partial<Location> = {}): Location => ({
   pathname,
@@ -94,5 +100,32 @@ describe("routed modal return target", () => {
       to: { pathname: "/", search: "", hash: "" },
       state: null,
     });
+  });
+});
+
+describe("closing an overlay", () => {
+  it("goes back to the page it was opened from, past the pages opened inside it", () => {
+    // /agents (3) → /org-settings/general (4) → /org-settings/members (5).
+    expect(overlayCloseStep(3, 4)).toBe(-1);
+    expect(overlayCloseStep(3, 5)).toBe(-2);
+  });
+
+  it("replaces when the background has no entry behind the overlay", () => {
+    // A pasted link or a reload: the dashboard stands in, with no entry.
+    expect(overlayCloseStep(null, 0)).toBeNull();
+    // The page under it was swapped by an organization switch.
+    expect(overlayCloseStep(null, 4)).toBeNull();
+    expect(overlayCloseStep(4, 4)).toBeNull();
+    expect(overlayCloseStep(3, null)).toBeNull();
+  });
+});
+
+describe("organization switch", () => {
+  it("lands the page on its product's root, whatever resource it named", () => {
+    expect(orgSwitchLanding("/agents/@acme/triage/runs/run_1")).toBe("/");
+    expect(orgSwitchLanding("/")).toBe("/");
+    expect(orgSwitchLanding("/chat/c_1")).toBe("/chat");
+    expect(orgSwitchLanding("/chat")).toBe("/chat");
+    expect(orgSwitchLanding("/chatroom")).toBe("/");
   });
 });

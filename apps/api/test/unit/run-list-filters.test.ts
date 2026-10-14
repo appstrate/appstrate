@@ -25,6 +25,8 @@ describe("run list filters", () => {
   it("bounds the free-text search", () => {
     expect(() => parseRunListFilters({ q: "x".repeat(201) })).toThrow();
     expect(parseRunListFilters({ q: "x".repeat(200) }).search).toHaveLength(200);
+    // Measured as sent, the bound the OpenAPI `maxLength` states.
+    expect(() => parseRunListFilters({ q: ` ${"x".repeat(200)}` })).toThrow();
   });
   it("binds literal wildcard characters rather than interpolating SQL", () => {
     const query = new PgDialect().sqlToQuery(runSearchCondition("50%_off"));

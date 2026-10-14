@@ -63,6 +63,15 @@ interface RuntimeExecutionEntry extends ExecutionEntryBase {
 export type ExecutionEntry =
   AgentExecutionEntry | ToolExecutionEntry | ExplicitLogExecutionEntry | RuntimeExecutionEntry;
 
+/** An entry's level in the journal: a tool call that did not complete is an error. */
+export function journalLevel(entry: ExecutionEntry): "info" | "warn" | "error" {
+  if (entry.kind === "tool" && (entry.status === "failed" || entry.status === "interrupted"))
+    return "error";
+  if (entry.level === "error") return "error";
+  if (entry.level === "warn") return "warn";
+  return "info";
+}
+
 /**
  * One settled assistant turn, projected from a `data.event === "turn"` run-log
  * row (emitted by `buildTurnProgress` in `@appstrate/afps-runtime`).
@@ -107,7 +116,7 @@ function readNumber(value: unknown, fallback: number): number {
 
 /**
  * Project the raw run logs into the per-turn breakdown rendered by
- * `TurnsTable` (`run-execution-tab.tsx`). Pure and total: rows that are not
+ * `TurnsTable` (`run-detail/run-turns-detail.tsx`). Pure and total: rows that are not
  * turn breadcrumbs, or whose payload is malformed/absent, are skipped rather
  * than throwing.
  *
@@ -270,7 +279,7 @@ export function buildLogEntries(
       // Per-turn breadcrumbs are a structured series, not narration: a heavy
       // run emits ~108 of them and they would drown the agent's own log lines.
       // They are rendered as a table instead (`buildTurnRows` → `TurnsTable`
-      // in `run-execution-tab.tsx`).
+      // in `run-detail/run-turns-detail.tsx`).
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";

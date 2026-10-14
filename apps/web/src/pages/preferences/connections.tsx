@@ -202,7 +202,7 @@ function ConnectionRow({
   // Connected at
   rows.push({
     label: t("connections.connectedAtLabel"),
-    value: conn.connected_at ? formatDateField(conn.connected_at) : "—",
+    value: formatDateField(conn.connected_at),
   });
 
   // Scopes

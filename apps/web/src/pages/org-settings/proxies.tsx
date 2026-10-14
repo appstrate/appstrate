@@ -37,7 +37,10 @@ export function OrgSettingsProxiesPage() {
   const newProxy = useModalParam("newProxy");
   const editParam = useModalTarget("editProxy", proxies);
   const editProxy = editParam.target ?? null;
-  const proxyModalOpen = newProxy.value !== null || editProxy !== null;
+  // Opened by its trigger's rule too, not just by the URL: a built-in proxy is not editable.
+  const proxyModalOpen =
+    canWrite &&
+    (newProxy.value !== null || (editProxy !== null && editProxy.source !== "built-in"));
   const closeProxyModal = editProxy ? editParam.close : newProxy.close;
   const createMutation = useCreateProxy();
   const updateMutation = useUpdateProxy();

@@ -22,7 +22,7 @@ import { fetchOrgsAs, useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useSpaces } from "../hooks/use-spaces";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
-import { modalReturnTarget, useBackgroundLocation } from "../lib/modal-route";
+import { useCloseOverlay } from "../lib/modal-route";
 import { enterViewAs, toViewAsPersona } from "../stores/view-as-store";
 import { viewAsRefusalCode } from "../lib/view-as-refusal";
 import type { ViewAsPreset } from "../lib/view-as-preset";
@@ -62,7 +62,7 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
   const { switchSpace } = useSpaceSwitcher();
   const { data: spaces } = useSpaces();
   const navigate = useNavigate();
-  const background = useBackgroundLocation();
+  const closeOverlay = useCloseOverlay();
 
   const [orgRole, setOrgRole] = useState<ViewAsOrgRole>(
     preset?.kind === "org" ? preset.role : "member",
@@ -168,8 +168,8 @@ export function ViewAsDialog({ onClose, spaceId, preset }: ViewAsDialogProps) {
     // looking at the app. Back to the screen the overlay covered, unless the
     // space changed under it (that screen belongs to the other space): home.
     abandoned.current = true;
-    const target = modalReturnTarget(movesSpace ? null : background);
-    navigate(target.to, { replace: true, state: target.state });
+    if (movesSpace) navigate("/", { replace: true });
+    else closeOverlay();
   };
 
   return (

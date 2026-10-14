@@ -6,6 +6,7 @@
  */
 
 import type { components } from "../api/client";
+import { permissionLabel } from "./permission-labels";
 
 export type RoleVocabularyEntry =
   components["schemas"]["RoleVocabularyGroup"]["permissions"][number];
@@ -43,15 +44,10 @@ export function lockedReads(
   return locked;
 }
 
-/**
- * What a locked read's note names: its dependents' actions, and in full a dependent of
- * another resource (`agents:run` holding a runs read).
- */
-export function dependentsLabel(read: string, dependents: readonly RoleVocabularyEntry[]): string {
-  const resource = read.slice(0, read.indexOf(":") + 1);
-  return dependents
-    .map((dependent) =>
-      dependent.permission.startsWith(resource) ? dependent.action : dependent.permission,
-    )
-    .join(", ");
+/** What a locked read's note names: its dependents, by their labels. */
+export function dependentsLabel(
+  dependents: readonly RoleVocabularyEntry[],
+  t: (key: string) => string,
+): string {
+  return dependents.map((dependent) => permissionLabel(dependent.permission, t)).join(", ");
 }

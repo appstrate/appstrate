@@ -53,6 +53,7 @@ import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import { turnModelLabel, turnModelSentenceKey } from "./turn-model.ts";
 import { FileAttachment, InertAttachmentChip, ATTACHMENT_IMAGE_CLASS } from "./file-attachment.tsx";
 import { isImageMime } from "@appstrate/core/mime";
+import { takesDraft } from "./composer-draft.ts";
 
 export function Thread({
   composerSlot,
@@ -61,6 +62,8 @@ export function Thread({
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
 }) {
+  // Held above the welcome and footer composers: the draft seeds the conversation once.
+  const draftSeededRef = React.useRef(false);
   return (
     <ThreadPrimitive.Root
       // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
@@ -79,7 +82,11 @@ export function Thread({
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
       <AuiIf condition={(s) => s.thread.isEmpty}>
-        <ThreadWelcome composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
+        <ThreadWelcome
+          composerSlot={composerSlot}
+          initialComposerDraft={initialComposerDraft}
+          draftSeededRef={draftSeededRef}
+        />
       </AuiIf>
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
@@ -97,7 +104,11 @@ export function Thread({
 
           <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
             <ScrollToBottom />
-            <Composer slot={composerSlot} initialDraft={initialComposerDraft} />
+            <Composer
+              slot={composerSlot}
+              initialDraft={initialComposerDraft}
+              draftSeededRef={draftSeededRef}
+            />
             <Disclaimer />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
@@ -118,9 +129,11 @@ const WELCOME_SUGGESTION_KEYS = [
 function ThreadWelcome({
   composerSlot,
   initialComposerDraft,
+  draftSeededRef,
 }: {
   composerSlot?: React.ReactNode;
   initialComposerDraft?: string;
+  draftSeededRef: React.RefObject<boolean>;
 }) {
   const { can, t } = useChatHost();
   const canWrite = can("chat:write");
@@ -134,7 +147,11 @@ function ThreadWelcome({
             {t(canWrite ? "welcome.hint" : "welcome.readOnly")}
           </p>
         </div>
-        <Composer slot={composerSlot} initialDraft={initialComposerDraft} />
+        <Composer
+          slot={composerSlot}
+          initialDraft={initialComposerDraft}
+          draftSeededRef={draftSeededRef}
+        />
         {canWrite && (
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
             {WELCOME_SUGGESTION_KEYS.map((key) => (
@@ -279,15 +296,23 @@ function ComposerAttachmentError() {
   );
 }
 
-function Composer({ slot, initialDraft }: { slot?: React.ReactNode; initialDraft?: string }) {
+function Composer({
+  slot,
+  initialDraft,
+  draftSeededRef,
+}: {
+  slot?: React.ReactNode;
+  initialDraft?: string;
+  draftSeededRef: React.RefObject<boolean>;
+}) {
   const { can, t } = useChatHost();
   const composer = unstable_useComposerInput();
-  const seeded = React.useRef(false);
   React.useEffect(() => {
-    if (seeded.current || !initialDraft || composer.value) return;
-    seeded.current = true;
+    if (!takesDraft(initialDraft, { seeded: draftSeededRef.current, typed: composer.value }))
+      return;
+    draftSeededRef.current = true;
     composer.setText(initialDraft);
-  }, [composer, initialDraft]);
+  }, [composer, initialDraft, draftSeededRef]);
   // Sending, stopping and attaching all guard on `chat:write`.
   if (!can("chat:write")) {
     return (

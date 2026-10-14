@@ -17,6 +17,7 @@ import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts
 import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
+import { asRecord } from "./safe-json.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -217,6 +218,30 @@ export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
 
 /** Appstrate vendor-extension key for an agent's presentation: `color`, read by Appstrate surfaces only. */
 export const AGENT_UI_META_KEY = "dev.appstrate/ui";
+
+/**
+ * An agent's identity tile: the AFPS manifest `icon`, and the `color` held
+ * under `_meta[AGENT_UI_META_KEY]`. A field that is not a string is left out.
+ */
+export function readAgentAppearance(manifest: Record<string, unknown>): {
+  icon?: string;
+  color?: string;
+} {
+  const icon = typeof manifest.icon === "string" ? manifest.icon : undefined;
+  const ui = asRecord(asRecord(manifest._meta)[AGENT_UI_META_KEY]);
+  const color = typeof ui.color === "string" ? ui.color : undefined;
+  return {
+    ...(icon ? { icon } : {}),
+    ...(color ? { color } : {}),
+  };
+}
+
+/** Prefix of an organization logo that is one emoji: `emoji:<grapheme>`. */
+export const ORG_LOGO_EMOJI_PREFIX = "emoji:";
+/** Prefix of an organization logo that is a base64 WebP image. */
+export const ORG_LOGO_WEBP_PREFIX = "data:image/webp;base64,";
+/** Longest organization logo accepted, in characters: a WebP of about 35 KiB. */
+export const ORG_LOGO_MAX_LENGTH = 48_000;
 
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.

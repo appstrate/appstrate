@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { DynamicIcon } from "lucide-react/dynamic";
 import { asRecord } from "@appstrate/core/safe-json";
-import { AGENT_UI_META_KEY } from "@appstrate/core/validation";
+import { AGENT_UI_META_KEY, readAgentAppearance } from "@appstrate/core/validation";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -53,12 +53,6 @@ function iconLabel(name: string): string {
     .join(" ");
 }
 
-function manifestColor(manifest: Record<string, unknown>): string | undefined {
-  const meta = asRecord(manifest._meta);
-  const ui = asRecord(meta[AGENT_UI_META_KEY]);
-  return typeof ui.color === "string" ? ui.color : undefined;
-}
-
 export function AgentAppearanceFields({
   manifest,
   onChange,
@@ -67,8 +61,7 @@ export function AgentAppearanceFields({
   onChange: (patch: Record<string, unknown>) => void;
 }) {
   const { t } = useTranslation("agents");
-  const icon = typeof manifest.icon === "string" ? manifest.icon : undefined;
-  const color = manifestColor(manifest);
+  const { icon, color } = readAgentAppearance(manifest);
   const resolved = resolveAgentIdentity(icon, color);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [iconQuery, setIconQuery] = useState("");

@@ -31,6 +31,7 @@ import type { components } from "../../api/schema";
 import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/format-date";
+import { memberLabel } from "../../lib/billing-managers";
 import type { OrgRole } from "@appstrate/shared-types";
 import { TableRowActions } from "../../components/table-row-actions";
 
@@ -66,7 +67,7 @@ export function useMemberColumns({
       header: t("orgSettings.memberColumn"),
       width: "minmax(130px,1.4fr)",
       cell: (member) => {
-        const name = member.displayName || member.email || member.userId;
+        const name = memberLabel(member);
         return (
           <span className="block truncate text-sm font-medium" title={name}>
             {name}
@@ -112,7 +113,10 @@ export function useMemberColumns({
               onValueChange={(v) => onChangeRole(member, v as OrgRole)}
               disabled={isChangingRole}
             >
-              <SelectTrigger className="h-7 w-full text-xs">
+              <SelectTrigger
+                className="h-7 w-full text-xs"
+                aria-label={t("orgSettings.memberRoleAriaLabel", { name: memberLabel(member) })}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -159,7 +163,7 @@ export function useMemberColumns({
       tier: 3,
       cell: (member) => (
         <span className="text-muted-foreground text-xs">
-          {member.joinedAt ? formatDateField(member.joinedAt, "date") : "—"}
+          {formatDateField(member.joinedAt, "date")}
         </span>
       ),
     },
@@ -172,7 +176,7 @@ export function useMemberColumns({
         canRemove(member) ? (
           <TableRowActions
             menuLabel={t("orgSettings.moreMemberActions", {
-              name: member.displayName || member.email || member.userId,
+              name: memberLabel(member),
             })}
             isPending={isRemoving}
             pendingLabel={t("common:loading")}

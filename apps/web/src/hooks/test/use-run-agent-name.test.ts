@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "bun:test";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import { makeRun } from "../../test/run-fixture.ts";
 import { resolveRunAgentName, type RunAgentNaming } from "../use-run-agent-name.ts";
 
 /** The bundle is not loaded here: `t` returns the key, which is enough to assert WHICH label was picked. */
@@ -23,7 +24,12 @@ const naming = (over: Partial<RunAgentNaming> = {}): RunAgentNaming => ({
 });
 
 const run = (over: Partial<EnrichedRun> = {}) =>
-  ({ packageId: "@acme/reporter", agent_name: "reporter", ...over }) as unknown as EnrichedRun;
+  makeRun({
+    packageId: "@acme/reporter",
+    agent_name: "reporter",
+    package_ephemeral: false,
+    ...over,
+  });
 
 describe("resolveRunAgentName", () => {
   it("uses the agent's live display name", () => {

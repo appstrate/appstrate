@@ -11,7 +11,8 @@
  *   themselves, each with what the server lets the caller do with it (`allowed_actions`).
  *
  * A model's own deeds (test, delete, its finer settings) are in its form, opened from « Choose the
- * models »; the instance's models are tested from its row.
+ * models »; the instance's models are tested from its row, and the aliases the organization added
+ * to it deleted there.
  *
  * The tab lives in the URL (`?tab=personal`), like the roles page's.
  */
@@ -215,6 +216,7 @@ export function OrgSettingsModelsPage() {
                 { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
               )
             }
+            onDeleteModel={canDeleteModels ? setDeletingModel : undefined}
           />
         </div>
       )}
@@ -264,7 +266,7 @@ export function OrgSettingsModelsPage() {
         </>
       )}
 
-      {addProvider.value !== null && (
+      {canWriteCredentials && addProvider.value !== null && (
         <ProviderAddFlow credentials={credentials ?? []} onClose={addProvider.close} />
       )}
 
@@ -313,7 +315,7 @@ export function OrgSettingsModelsPage() {
         onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
       />
 
-      {/* Over the model form, which closes with it once the model is gone. */}
+      {/* Over the model form (or the instance's row), which closes with it once the model is gone. */}
       <ConfirmModal
         open={deletingModel !== null}
         onClose={() => setDeletingModel(null)}

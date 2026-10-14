@@ -114,6 +114,32 @@ describe("ModelPickList, the default model's access", () => {
   });
 });
 
+describe("ModelPickList, the default star of a key that needs reconnecting", () => {
+  const starred = (options: Partial<Parameters<typeof ModelPickList>[0]>) =>
+    list({
+      selectedIds: [FROM_ENDPOINT.id, FROM_CATALOG.id],
+      defaultId: FROM_ENDPOINT.id,
+      onDefaultChange: () => {},
+      ...options,
+    });
+
+  it("refuses the star to every other model, as the server would (model_needs_reconnection)", () => {
+    const html = starred({ defaultUnavailable: true });
+    const star = (pressed: boolean) =>
+      html.match(new RegExp(`<button[^>]*aria-pressed="${pressed}"[^>]*>`))![0];
+    expect(star(false)).toContain(' disabled=""');
+    expect(star(false)).toContain(`title="${settingsFr["credentials.unavailableHint"]}"`);
+    // The current default keeps its star.
+    expect(star(true)).not.toContain(' disabled=""');
+  });
+
+  it("offers the star on a healthy key", () => {
+    const html = starred({});
+    expect(html).not.toContain(' disabled=""');
+    expect(html).not.toContain(settingsFr["credentials.unavailableHint"]);
+  });
+});
+
 describe("ModelPickList — a catalog, in two groups", () => {
   const CURATED = pickRow({ id: "claude-opus-5", origin: "catalog", featured: true });
   const REST = pickRow({ id: "claude-3-opus-20240229", origin: "catalog" });

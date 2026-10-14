@@ -4,12 +4,63 @@
  * A modal's open state, kept in the URL.
  *
  * A modal has an address: support can say "open this", a reload lands on it,
- * and Back closes it. Closing replaces rather than pushes, like the OAuth
- * client editor, so Back after a close does not reopen it. The hash rides
- * along: it holds the tab the modal was opened from.
+ * and Back closes it. Opening pushes an entry and closing goes back over it, so
+ * Back after a close does not reopen it; a modal the address opened (a pasted
+ * link, a reload) has no entry of its own to go back over, so its close
+ * replaces. The hash rides along: it holds the tab the modal was opened from.
  */
 import { useCallback, useEffect } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+
+/** History state key naming the modal whose opening pushed the entry. */
+const OPENED_BY = "openedModal";
+
+function openedBy(state: unknown): unknown {
+  return typeof state === "object" && state !== null
+    ? (state as Record<string, unknown>)[OPENED_BY]
+    : undefined;
+}
+
+function withOpener(state: unknown, name: string | undefined): unknown {
+  const { [OPENED_BY]: _, ...rest } =
+    typeof state === "object" && state !== null ? (state as Record<string, unknown>) : {};
+  return name === undefined ? rest : { ...rest, [OPENED_BY]: name };
+}
+
+type ModalStep = { back: true } | { back: false; search: string; replace: boolean; state: unknown };
+
+/**
+ * The navigation that sets modal `name` to `next` (`null` closes it) from the
+ * current entry. `closing` names the modal this one replaces: two never stack,
+ * and one navigation does both.
+ */
+export function modalParamStep(
+  current: { search: string; state: unknown },
+  name: string,
+  next: string | null,
+  closing?: string,
+): ModalStep {
+  const opener = openedBy(current.state);
+  if (next === null && opener === name) return { back: true };
+  const params = new URLSearchParams(current.search);
+  const handover = closing !== undefined && params.has(closing);
+  const open = params.has(name) || handover;
+  if (next === null) params.delete(name);
+  else params.set(name, next);
+  if (closing) params.delete(closing);
+  const query = params.toString();
+  const search = query ? `?${query}` : "";
+  if (next === null) return { back: false, search, replace: true, state: current.state };
+  if (!open) return { back: false, search, replace: false, state: withOpener(current.state, name) };
+  // The entry is the open modal's: replaced, and still an opening's own when it was one.
+  const pushed = opener === name || (handover && opener === closing);
+  return {
+    back: false,
+    search,
+    replace: true,
+    state: withOpener(current.state, pushed ? name : undefined),
+  };
+}
 
 export function useModalParam(name: string) {
   const location = useLocation();
@@ -21,18 +72,17 @@ export function useModalParam(name: string) {
   // props.
   const set = useCallback(
     (next: string | null, closing?: string) => {
-      const out = new URLSearchParams(location.search);
-      if (next === null) out.delete(name);
-      else out.set(name, next);
-      // Handing over to another modal: two never stack, and one navigation does both.
-      if (closing) out.delete(closing);
-      const search = out.toString();
+      const step = modalParamStep(location, name, next, closing);
+      if (step.back) {
+        navigate(-1);
+        return;
+      }
       navigate(
-        { pathname: location.pathname, search: search ? `?${search}` : "", hash: location.hash },
-        { replace: next === null },
+        { pathname: location.pathname, search: step.search, hash: location.hash },
+        { replace: step.replace, state: step.state },
       );
     },
-    [location.search, location.pathname, location.hash, name, navigate],
+    [location, name, navigate],
   );
   const open = useCallback((value = "1", closing?: string) => set(value, closing), [set]);
   const close = useCallback(() => set(null), [set]);

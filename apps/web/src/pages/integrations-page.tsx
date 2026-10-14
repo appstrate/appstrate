@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
+ * placed here but switched off, or merely offered, is in the space library.
+ */
+
 import { useMemo } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/collection-tabs";
@@ -17,6 +21,7 @@ import { ErrorState, EmptyState, EmptyStateAction } from "../components/page-sta
 import { IntegrationIcon } from "../components/integration-icon";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import { SpaceLibraryHint } from "../components/space-library-hint";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_EXECUTIONS,
@@ -24,25 +29,28 @@ import {
   INTEGRATION_PROTOCOLS,
   integrationExecution,
   type IntegrationExecution,
-  INTEGRATION_STATUSES,
   filterIntegrations,
   integrationOrigin,
-  integrationStatus,
-  isOrganizationIntegration,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useAllIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
+import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useIntegrationViewStore } from "../stores/list-view-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
 
-function IntegrationCard({ integration }: { integration: IntegrationSummaryWire }) {
+function IntegrationCard({
+  integration,
+  orgName,
+}: {
+  integration: IntegrationSummaryWire;
+  orgName: string;
+}) {
   const { t } = useTranslation("settings");
   const manifest = integration.manifest;
   const origin = integrationOrigin(integration);
-  const status = integrationStatus(integration);
 
   return (
     <Link
@@ -58,13 +66,10 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
             {manifest.display_name ?? integration.id}
           </h3>
           <p className="text-muted-foreground truncate text-xs">
-            {t(origin === "system" ? "integrations.origin.system" : "integrations.origin.custom")}
+            {origin === "system" ? t("catalogue.sourceSystem") : orgName}
             {manifest.version ? ` · ${manifest.version}` : ""}
           </p>
         </div>
-        <Badge variant={status === "active" ? "success" : "secondary"}>
-          {t(status === "active" ? "integrations.badge.active" : "integrations.badge.inactive")}
-        </Badge>
       </div>
       {manifest.description && (
         <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{manifest.description}</p>
@@ -76,16 +81,18 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const orgName = useOrg().currentOrg?.name ?? "";
   const { data, isLoading, error } = useAllIntegrations();
   const navigate = useNavigate();
-  const list = useListParams(["status", "origin", "protocol"]);
+  const list = useListParams(["origin", "protocol"]);
   const view = useIntegrationViewStore((state) => state.view);
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const creation = useCreationHandoff("integration", can("integrations:write"));
+  const canCreate = can("integrations:write");
+  const canBrowse = can("integrations:install");
+  const creation = useCreationHandoff("integration", canCreate);
 
-  const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
   // The execution is a tab, not a filter: it splits the collection in two
   // kinds of object, and the columns that make sense differ between them.
@@ -101,25 +108,20 @@ export function IntegrationsPage() {
   );
   const query = list.search;
 
-  const organizationIntegrations = useMemo(
-    () => (data ?? []).filter(isOrganizationIntegration),
-    [data],
-  );
+  const active = useMemo(() => (data ?? []).filter((integration) => integration.active), [data]);
   const shown = useMemo(
     () =>
-      filterIntegrations(organizationIntegrations, {
+      filterIntegrations(active, {
         query,
-        statuses,
         origins,
         executions: [execution],
         protocols,
       }),
-    [organizationIntegrations, query, statuses, origins, execution, protocols],
+    [active, query, origins, execution, protocols],
   );
-  const filtering =
-    query.trim() !== "" || statuses.length > 0 || origins.length > 0 || protocols.length > 0;
+  const filtering = query.trim() !== "" || origins.length > 0 || protocols.length > 0;
   const countOf = (value: IntegrationExecution) =>
-    organizationIntegrations.filter((row) => integrationExecution(row) === value).length;
+    active.filter((row) => integrationExecution(row) === value).length;
 
   const allColumns = useIntegrationListColumns().filter((column) =>
     execution === "local" ? column.id !== "protocol" : column.id !== "server",
@@ -129,9 +131,10 @@ export function IntegrationsPage() {
     <EmptyState
       icon={filtering ? SearchX : Boxes}
       compact
-      message={filtering ? t("integrations.empty.filtered") : t("integrations.empty.organization")}
+      message={filtering ? t("integrations.empty.filtered") : t("integrations.empty.space")}
+      hint={filtering ? undefined : <SpaceLibraryHint type="integration" />}
     >
-      {!filtering && can("integrations:write") && (
+      {!filtering && canCreate && (
         <EmptyStateAction label={t("integrations.create")} onClick={creation.open} />
       )}
     </EmptyState>
@@ -145,22 +148,25 @@ export function IntegrationsPage() {
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
         actions={
-          <PageActionsMenu>
-            {can("integrations:install") && (
-              <DropdownMenuItem asChild data-page-action="catalogue">
-                <Link to={catalogueHref("integration")}>
-                  <LibraryBig />
-                  {t("catalogue.browse")}
-                </Link>
-              </DropdownMenuItem>
-            )}
-            {can("integrations:write") && (
-              <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
-                <Plus />
-                {t("integrations.create")}
-              </DropdownMenuItem>
-            )}
-          </PageActionsMenu>
+          // A reader has no deed here: no menu, rather than an empty one.
+          (canBrowse || canCreate) && (
+            <PageActionsMenu>
+              {canBrowse && (
+                <DropdownMenuItem asChild data-page-action="catalogue">
+                  <Link to={catalogueHref("integration")}>
+                    <LibraryBig />
+                    {t("catalogue.browse")}
+                  </Link>
+                </DropdownMenuItem>
+              )}
+              {canCreate && (
+                <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
+                  <Plus />
+                  {t("integrations.create")}
+                </DropdownMenuItem>
+              )}
+            </PageActionsMenu>
+          )
         }
       >
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
@@ -185,23 +191,13 @@ export function IntegrationsPage() {
         search={{ value: query, onChange: list.setSearch, placeholder: searchPlaceholder }}
         filters={[
           {
-            id: "status",
-            label: t("integrations.filter.status"),
-            values: statuses,
-            onChange: list.setValues("status"),
-            options: [
-              { value: "active", label: t("integrations.badge.active") },
-              { value: "inactive", label: t("integrations.badge.inactive") },
-            ],
-          },
-          {
             id: "origin",
             label: t("integrations.filter.origin"),
             values: origins,
             onChange: list.setValues("origin"),
             options: [
-              { value: "system", label: t("integrations.origin.system") },
-              { value: "custom", label: t("integrations.origin.custom") },
+              { value: "custom", label: t("catalogue.sourceOrg", { name: orgName }) },
+              { value: "system", label: t("catalogue.sourceSystem") },
             ],
           },
           ...(execution === "remote"
@@ -244,7 +240,9 @@ export function IntegrationsPage() {
         <CardGrid
           items={shown}
           itemKey={(integration) => integration.id}
-          renderCard={(integration) => <IntegrationCard integration={integration} />}
+          renderCard={(integration) => (
+            <IntegrationCard integration={integration} orgName={orgName} />
+          )}
           isLoading={isLoading}
           isError={Boolean(error)}
           error={<ErrorState error={error} compact />}

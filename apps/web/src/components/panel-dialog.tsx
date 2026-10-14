@@ -14,25 +14,25 @@
  * scrolling as such.
  */
 import { useEffect, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
+import { Button } from "@appstrate/ui/components/button";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
-import { useIsMobile } from "@appstrate/ui/use-mobile";
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
+import { ErrorBoundary } from "./error-boundary";
 
 interface PanelDialogProps {
   /** Announced to screen readers; the visible heading lives in `rail`. */
   title: string;
-  rail: ReactNode;
   /**
-   * Phone-sized stand-in for the rail, dropped at the top of the content pane.
-   * Two panes side by side do not survive 390px, and a rail that eats 45% of
-   * the width to list sections you are not reading is worse than a control that
-   * collapses to one line.
+   * The sections. Below `md` two panes do not fit: the rail moves into a sheet
+   * opened from a Menu button at the top of the content.
    */
-  mobileNav?: ReactNode;
-  /** On a phone, render as a shell surface below the two-line mobile header, not a dialog. */
-  mobileAsSurface?: boolean;
+  rail: ReactNode;
   /**
    * A band at the top of the content pane that STAYS while the pane scrolls.
    *
@@ -48,16 +48,36 @@ interface PanelDialogProps {
   onClose: () => void;
 }
 
-export function PanelDialog({
-  title,
-  rail,
-  mobileNav,
-  mobileAsSurface = false,
-  contentHeader,
-  children,
-  onClose,
-}: PanelDialogProps) {
-  const isMobile = useIsMobile();
+/** The rail on a phone. Remounted on every navigation, so picking an entry closes it. */
+function PhoneNavigation({ title, rail }: { title: string; rail: ReactNode }) {
+  const { t } = useTranslation("common");
+  const { pathname } = useLocation();
+  return (
+    <Sheet key={pathname}>
+      <SheetTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="mb-6 h-11 w-full justify-between bg-transparent px-3 md:hidden"
+        >
+          <span className="truncate">{t("panelDialog.menu")}</span>
+          <ChevronDown className="size-4 shrink-0" />
+        </Button>
+      </SheetTrigger>
+      <SheetContent
+        side="left"
+        aria-describedby={undefined}
+        className="bg-sidebar flex w-[min(20rem,85vw)] flex-col gap-0 p-0"
+      >
+        <SheetTitle className="sr-only">{title}</SheetTitle>
+        <ScrollArea className="min-h-0 flex-1">{rail}</ScrollArea>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function PanelDialog({ title, rail, contentHeader, children, onClose }: PanelDialogProps) {
+  const { pathname } = useLocation();
   // Whether the pane has scrolled past its own top. Read off the scroll
   // container itself — the `ScrollArea` viewport, which is not reachable from
   // here by ref, found by walking up from a sentinel.
@@ -98,23 +118,12 @@ export function PanelDialog({
       </div>
       {/* Only a handle on the scrolling pane. */}
       <div ref={attach} aria-hidden className="-mt-12 h-px" />
-      {/* `pr-10` clears the dialog's own close button, which is absolutely
-          positioned top-right and would otherwise sit on the selector. */}
-      {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
-      {children}
+      <PhoneNavigation title={title} rail={rail} />
+      {/* A page that crashes takes only the pane down: the rail stays, and
+          picking another entry clears the error. */}
+      <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
     </div>
   );
-
-  if (mobileAsSurface && isMobile) {
-    return (
-      <section
-        aria-label={title}
-        className="bg-background fixed inset-x-0 top-24 bottom-0 z-30 flex min-w-0 flex-col overflow-hidden"
-      >
-        <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
-      </section>
-    );
-  }
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -138,8 +147,7 @@ export function PanelDialog({
             full screen and the rail is gone. A settings table was therefore at
             its most cramped on a tablet rather than on a phone, and clipped 72
             pixels there — the widest overflow measured anywhere in the app.
-            Below `md` the nav becomes the select at the top of the content,
-            which is the same answer the phone already gave. */}
+            Below `md` the rail moves into the phone's sheet. */}
         <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-md:hidden">
           {rail}
         </aside>

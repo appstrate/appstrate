@@ -56,7 +56,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
-import { useModalParam } from "../../hooks/use-modal-param";
+import { useModalParam, useModalTarget } from "../../hooks/use-modal-param";
 import type { JSONSchema7, JSONSchema7TypeName } from "@appstrate/core/form";
 import { toLiveSlug, toSlug } from "../../lib/strings";
 import { Modal } from "../modal";
@@ -105,15 +105,14 @@ export function SchemaFieldList({
   onChange: (fields: SchemaField[]) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  // The field being edited, by id, or "new" — an address like every modal.
-  const editing = useModalParam(`field-${mode}`);
+  // Addresses like every modal: a field by its key, which survives a reload.
+  const adding = useModalParam(`new-field-${mode}`);
+  const editing = useModalTarget(`field-${mode}`, fields, (field) => field.key);
+  const target = editing.target;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor),
   );
-  const target =
-    editing.value === "new" ? blankField() : fields.find((field) => field._id === editing.value);
-
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -132,7 +131,7 @@ export function SchemaFieldList({
         {/* The list's one "Actions" menu, white like every table's, as the
             skills and integrations sections have it. */}
         <PageActionsMenu>
-          <DropdownMenuItem onSelect={() => editing.open("new")}>
+          <DropdownMenuItem onSelect={() => adding.open()}>
             <Plus />
             {t("editor.fieldAdd")}
           </DropdownMenuItem>
@@ -141,7 +140,7 @@ export function SchemaFieldList({
 
       {fields.length === 0 ? (
         <EmptyState message={t("editor.fieldEmpty")} icon={Braces} compact>
-          <EmptyStateAction label={t("editor.fieldAdd")} onClick={() => editing.open("new")} />
+          <EmptyStateAction label={t("editor.fieldAdd")} onClick={() => adding.open()} />
         </EmptyState>
       ) : (
         <div className="border-border overflow-hidden rounded-lg border">
@@ -168,7 +167,7 @@ export function SchemaFieldList({
                       key={field._id}
                       field={field}
                       mode={mode}
-                      onEdit={() => editing.open(field._id)}
+                      onEdit={() => editing.open(field.key)}
                       onRemove={() => onChange(fields.filter((f) => f._id !== field._id))}
                     />
                   ))}
@@ -179,23 +178,30 @@ export function SchemaFieldList({
         </div>
       )}
 
-      {target && (
+      {adding.value !== null ? (
         <FieldModal
-          key={target._id}
           mode={mode}
-          field={target}
-          isNew={editing.value === "new"}
-          takenKeys={fields.filter((f) => f._id !== target._id).map((f) => f.key)}
-          onClose={editing.close}
+          takenKeys={fields.map((f) => f.key)}
+          onClose={adding.close}
           onSave={(next) => {
-            onChange(
-              editing.value === "new"
-                ? [...fields, next]
-                : fields.map((f) => (f._id === next._id ? next : f)),
-            );
-            editing.close();
+            onChange([...fields, next]);
+            adding.close();
           }}
         />
+      ) : (
+        target && (
+          <FieldModal
+            key={target._id}
+            mode={mode}
+            field={target}
+            takenKeys={fields.filter((f) => f._id !== target._id).map((f) => f.key)}
+            onClose={editing.close}
+            onSave={(next) => {
+              onChange(fields.map((f) => (f._id === next._id ? next : f)));
+              editing.close();
+            }}
+          />
+        )
       )}
     </section>
   );
@@ -269,23 +275,22 @@ function FieldRow({
   );
 }
 
+/** Edits `field`, or a new one when there is none. */
 function FieldModal({
   mode,
   field,
-  isNew,
   takenKeys,
   onClose,
   onSave,
 }: {
   mode: SchemaMode;
-  field: SchemaField;
-  isNew: boolean;
+  field?: SchemaField;
   takenKeys: string[];
   onClose: () => void;
   onSave: (field: SchemaField) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const [draft, setDraft] = useState<SchemaField>(field);
+  const [draft, setDraft] = useState<SchemaField>(() => field ?? blankField());
   const [advanced, setAdvanced] = useState(false);
   const set = (patch: Partial<SchemaField>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -309,7 +314,7 @@ function FieldModal({
     <Modal
       open
       onClose={onClose}
-      title={isNew ? t("editor.fieldNew") : t("editor.fieldEditTitle", { name: field.key })}
+      title={field ? t("editor.fieldEditTitle", { name: field.key }) : t("editor.fieldNew")}
       className="sm:max-w-xl"
       actions={
         <>

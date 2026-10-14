@@ -14,11 +14,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowRight, Lock, Pause, Play, Unplug } from "lucide-react";
+import { ArrowRight, Lock, Pause, Play, Trash2, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
-import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
+import { PageActionsMenu } from "./page-actions-menu";
+import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { AgentDetailSplit } from "./agent-detail/agent-detail-split";
 import { SettingsHeading } from "./settings/settings-heading";
 import { SectionRail } from "./settings/section-rail";
@@ -46,7 +48,6 @@ import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
 import { useSaveAfterPause } from "../hooks/use-save-after-pause";
-import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import {
   changedInputValues,
   formatInputValue,
@@ -119,9 +120,9 @@ function useFiredFacts(packageId: string, version: string, runsAsViewer: boolean
 }
 
 /**
- * `useUpdateSchedule` for this schedule, shared by every section ({@link armedScheduleWrite}).
- * A write refused over connections is the refusal panel's to say, not an « Erreur
- * d'enregistrement » under the field.
+ * `useUpdateSchedule` for this schedule ({@link armedScheduleWrite}): the settings' fields and
+ * moves, and the detail page's enable/disable. A write refused over connections is the refusal
+ * panel's to say, not an « Erreur d'enregistrement » under the field.
  */
 function useScheduleWrite(schedule: Schedule): Save {
   const update = useUpdateSchedule();
@@ -145,23 +146,50 @@ function useScheduleWrite(schedule: Schedule): Save {
   return { ...update, mutate, isError: update.isError && !refused };
 }
 
-/** The detail page's enable/disable deed, through the same write: arming re-sends the named connections. */
-export function ScheduleToggleItem({ schedule }: { schedule: Schedule }) {
-  const { t } = useTranslation("agents");
-  const update = useScheduleWrite(schedule);
+/**
+ * The detail page's deeds. The enable/disable write is held here rather than by its menu item:
+ * the item unmounts with the menu, and the write's refusal would go unsaid.
+ */
+export function ScheduleActionsMenu({
+  schedule,
+  onDelete,
+  deletePending,
+}: {
+  schedule: Schedule;
+  onDelete: () => void;
+  deletePending: boolean;
+}) {
+  const { t } = useTranslation(["agents"]);
+  const { can } = usePermissions();
+  const toggle = useScheduleWrite(schedule);
   return (
-    <DropdownMenuItem
-      onSelect={() =>
-        update.mutate(
-          { id: schedule.id, enabled: !schedule.enabled },
-          { onError: toastScheduleConnectionChoice },
-        )
-      }
-      disabled={update.isPending}
-    >
-      {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
-      {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-    </DropdownMenuItem>
+    <PageActionsMenu>
+      <DropdownMenuItem
+        onSelect={() =>
+          toggle.mutate(
+            { id: schedule.id, enabled: !schedule.enabled },
+            { onError: toastScheduleConnectionChoice },
+          )
+        }
+        disabled={toggle.isPending}
+      >
+        {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
+        {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+      </DropdownMenuItem>
+      {can("schedules:delete") && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={onDelete}
+            disabled={deletePending}
+            className="text-destructive focus:text-destructive"
+          >
+            <Trash2 size={14} />
+            {t("schedule.delete")}
+          </DropdownMenuItem>
+        </>
+      )}
+    </PageActionsMenu>
   );
 }
 
@@ -290,6 +318,9 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   const requested = new URLSearchParams(location.search).get("scheduleSettings");
   const active = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
   const update = useScheduleWrite(schedule);
+  // Moves write through their own: a field saved while a move is in flight
+  // would take over the move's answer.
+  const moveWrite = useScheduleWrite(schedule);
 
   return (
     <AgentDetailSplit
@@ -324,9 +355,17 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
         ) : (
           <>
             {active.id !== "connections" && (
-              <RefusedWriteAnswer schedule={schedule} update={update} />
+              <>
+                <RefusedWriteAnswer schedule={schedule} update={update} />
+                <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
+              </>
             )}
-            <SectionBody section={active.id} schedule={schedule} update={update} />
+            <SectionBody
+              section={active.id}
+              schedule={schedule}
+              update={update}
+              moveWrite={moveWrite}
+            />
           </>
         )}
       </section>
@@ -334,19 +373,18 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   );
 }
 
-function SectionBody({
-  section,
-  schedule,
-  update,
-}: {
-  section: ScheduleSettingsSection;
+interface SectionWrites {
   schedule: Schedule;
   update: Save;
-}) {
+  moveWrite: Save;
+}
+
+function SectionBody({ section, ...writes }: SectionWrites & { section: ScheduleSettingsSection }) {
+  const { schedule, update, moveWrite } = writes;
   if (section === "general") return <GeneralSection schedule={schedule} update={update} />;
   if (section === "recurrence") return <RecurrenceSection schedule={schedule} update={update} />;
-  if (section === "identity") return <IdentitySection schedule={schedule} update={update} />;
-  return <AgentBoundSection section={section} schedule={schedule} update={update} />;
+  if (section === "identity") return <IdentitySection schedule={schedule} moveWrite={moveWrite} />;
+  return <AgentBoundSection section={section} {...writes} />;
 }
 
 // ─── Général ─────────────────────────────────────────────
@@ -428,11 +466,11 @@ function RecurrenceSection({ schedule, update }: { schedule: Schedule; update: S
 
 // ─── Identité ────────────────────────────────────────────
 
-function IdentitySection({ schedule, update }: { schedule: Schedule; update: Save }) {
+function IdentitySection({ schedule, moveWrite }: { schedule: Schedule; moveWrite: Save }) {
   const { t } = useTranslation(["agents"]);
   const stored = storedActor(schedule);
   const [actor, setActor] = useState<ActorValue>(stored);
-  const move = useScheduleMove(schedule, update);
+  const move = useScheduleMove(schedule, moveWrite);
 
   return (
     <>
@@ -444,7 +482,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
             const nextActor = next ?? stored;
             setActor(nextActor);
             // Back on the stored identity nothing moves, and a refusal spoken for another is stale.
-            if (sameActor(nextActor, stored)) return update.reset();
+            if (sameActor(nextActor, stored)) return moveWrite.reset();
             move.request({ actor: nextActor }, (err) => {
               // A connection choice is answered with the picked identity; any other refusal
               // changed nothing.
@@ -455,7 +493,7 @@ function IdentitySection({ schedule, update }: { schedule: Schedule; update: Sav
       </SettingRow>
       {/* A refusal puts the field back and is toasted: no « Erreur d'enregistrement » under a
           field that shows the stored value. */}
-      <SaveFeedback pending={update.isPending} success={update.isSuccess} error={false} />
+      <SaveFeedback pending={moveWrite.isPending} success={moveWrite.isSuccess} error={false} />
     </>
   );
 }
@@ -466,11 +504,8 @@ function AgentBoundSection({
   section,
   schedule,
   update,
-}: {
-  section: "inputs" | "execution" | "connections";
-  schedule: Schedule;
-  update: Save;
-}) {
+  moveWrite,
+}: SectionWrites & { section: "inputs" | "execution" | "connections" }) {
   const { deps, error, denied } = useScheduleFormDeps(schedule.packageId);
   if (error) return <ErrorState error={error} />;
   if (denied) return <NoAccessState />;
@@ -479,8 +514,16 @@ function AgentBoundSection({
   if (section === "inputs")
     return <InputsSection key={schedule.id} schedule={schedule} deps={deps} update={update} />;
   if (section === "execution")
-    return <ExecutionSection key={schedule.id} schedule={schedule} deps={deps} update={update} />;
-  return <ConnectionsSection schedule={schedule} update={update} />;
+    return (
+      <ExecutionSection
+        key={schedule.id}
+        schedule={schedule}
+        deps={deps}
+        update={update}
+        moveWrite={moveWrite}
+      />
+    );
+  return <ConnectionsSection schedule={schedule} update={update} moveWrite={moveWrite} />;
 }
 
 // ─── Entrées ─────────────────────────────────────────────
@@ -565,15 +608,7 @@ function InputsSection({
 
 // ─── Exécution ───────────────────────────────────────────
 
-function ExecutionSection({
-  schedule,
-  deps,
-  update,
-}: {
-  schedule: Schedule;
-  deps: Deps;
-  update: Save;
-}) {
+function ExecutionSection({ schedule, deps, update, moveWrite }: SectionWrites & { deps: Deps }) {
   const { t } = useTranslation(["agents"]);
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => ({
     ...(schedule.model_id_override ? { model_id_override: schedule.model_id_override } : {}),
@@ -597,13 +632,20 @@ function ExecutionSection({
   );
   const storedVersion = schedule.version_override ?? VERSION_INHERIT;
   const [version, setVersion] = useState(storedVersion);
-  const move = useScheduleMove(schedule, update);
+  const move = useScheduleMove(schedule, moveWrite);
 
   return (
     <>
       <SettingRow
         label={t("run.overrides.versionLabel")}
         description={t("schedule.settings.versionHint")}
+        status={
+          <SaveFeedback
+            pending={moveWrite.isPending}
+            success={moveWrite.isSuccess}
+            error={moveWrite.isError}
+          />
+        }
       >
         <PackageVersionSelect
           type="agent"
@@ -648,20 +690,20 @@ function ExecutionSection({
 
 // ─── Connexions ──────────────────────────────────────────
 
-function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: Save }) {
+function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
   const { t } = useTranslation(["agents"]);
   const actor = storedActor(schedule);
   const version = firedVersion(schedule.version_override);
-  const integrations = usePackageDetail("agent", schedule.packageId, { version }).data?.dependencies
-    .integrations;
+  const fired = usePackageDetail("agent", schedule.packageId, { version });
+  const integrations = fired.data?.dependencies.integrations;
   const actorName = useActorName(actor);
   const picks = schedule.connection_overrides ?? {};
   // A write refused over connections, from any section, unless it moved the actor: those
   // candidates are another identity's.
-  const refused = refusedScheduleWrite(update.error, update.variables, {
-    actor,
-    picks: schedule.connection_overrides ?? null,
-  });
+  const stored = { actor, picks: schedule.connection_overrides ?? null };
+  const refused =
+    refusedScheduleWrite(update.error, update.variables, stored) ??
+    refusedScheduleWrite(moveWrite.error, moveWrite.variables, stored);
   const choices = refusalForActor(refused?.choices, refused, actor);
   // The pickers judge the VIEWER's connections: the agent's table speaks only
   // for a schedule that runs as the viewer. Another actor's connections are
@@ -673,9 +715,12 @@ function ConnectionsSection({ schedule, update }: { schedule: Schedule; update: 
       withConnectionOverride({ connection_overrides: picks }, integrationId, connectionIds),
       integrations?.map((i) => i.id),
     ).connection_overrides;
+    // The pick answers the refusal, whichever write it came from.
+    moveWrite.reset();
     update.mutate({ id: schedule.id, connection_overrides: next ?? null });
   };
 
+  if (fired.error) return <ErrorState error={fired.error} />;
   if (!integrations) return <LoadingState />;
   if (integrations.length === 0) {
     return (

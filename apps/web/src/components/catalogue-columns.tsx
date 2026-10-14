@@ -21,6 +21,7 @@ import {
 } from "../lib/catalogue-gates";
 import type { DataColumn } from "./data-table";
 import { CatalogueRowMenu } from "./catalogue-row";
+import { MetaBadge } from "./status-badge";
 import type { CardItem } from "../pages/package-list";
 import type { IntegrationProtocol } from "../lib/integration-collection";
 
@@ -82,7 +83,8 @@ export function useCatalogueSelectColumn({
 
 /**
  * Where the package comes FROM, in two words on one line: who provides it, and
- * which space governs its draft.
+ * which space governs its draft. The one origin column of every package table:
+ * the lists, the integrations, the catalogue.
  *
  * They are different facts — Acme provides it, the space "Default" decides
  * who may edit it — and a column each would cost the tier-3 budget a whole
@@ -93,11 +95,10 @@ export function useCatalogueSelectColumn({
  * A system package has no home space: it is shipped into every space rather
  * than living in one, so there is nothing to name under it.
  */
-export function useCatalogueOriginColumn(
-  orgName: string,
-  homeNameOf?: (item: CardItem) => string | null,
-): DataColumn<CardItem> {
-  const { t } = useTranslation("settings");
+export function useCatalogueOriginColumn<
+  T extends { source?: string | null; autoInstalled?: boolean } = CardItem,
+>(orgName: string, homeNameOf?: (item: T) => string | null): DataColumn<T> {
+  const { t } = useTranslation(["settings", "agents"]);
   return {
     id: "origin",
     header: t("catalogue.origin"),
@@ -106,10 +107,11 @@ export function useCatalogueOriginColumn(
     cell: (item) => {
       const home = item.source === "system" ? null : homeNameOf?.(item);
       return (
-        <span className="flex min-w-0 flex-col">
+        <span className="flex min-w-0 flex-col items-start">
           <span className="text-muted-foreground truncate text-xs">
             {item.source === "system" ? t("catalogue.sourceSystem") : orgName}
           </span>
+          {item.autoInstalled && <MetaBadge label={t("agents:list.badgeAutoInstalled")} />}
           {home && (
             <span
               className="text-muted-foreground/70 truncate text-[0.68rem]"
@@ -173,9 +175,9 @@ export function useCatalogueActionsColumn({
 }
 
 /** API or MCP, for a remote integration — a local one is always MCP. */
-export function useCatalogueProtocolColumn(
-  protocolOf: (item: CardItem) => IntegrationProtocol | undefined,
-): DataColumn<CardItem> {
+export function useCatalogueProtocolColumn<T = CardItem>(
+  protocolOf: (item: T) => IntegrationProtocol | undefined,
+): DataColumn<T> {
   const { t } = useTranslation("settings");
   return {
     id: "protocol",
@@ -211,7 +213,10 @@ export function useCatalogueProtocolColumn(
  *
  * "Offered" is written beside the switch rather than in place of it: it is the
  * one state that asks the reader for a decision, and hiding the control that
- * takes it behind a word would make the row a dead end.
+ * takes it behind a word would make the row a dead end; its switch says what
+ * switching it on consents to. "Switched off" is
+ * written too: an off switch alone reads the same placed or not, and only the
+ * placed one keeps its settings.
  */
 export function useCatalogueSpaceColumns({
   spaces,
@@ -277,7 +282,11 @@ export function useCatalogueSpaceColumns({
               space: space.name,
             })}
             title={
-              gate.refusal ? t(ACTIVATION_REFUSAL_KEY[gate.refusal], { ns: "common" }) : undefined
+              gate.refusal
+                ? t(ACTIVATION_REFUSAL_KEY[gate.refusal], { ns: "common" })
+                : state === "offered"
+                  ? t("catalogue.sheet.offerCredentials")
+                  : undefined
             }
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
@@ -287,6 +296,11 @@ export function useCatalogueSpaceColumns({
             // taken; here the cell only has to tell shared-and-off from off.
             <span className="text-primary text-[0.7rem] font-medium">
               {t("catalogue.offeredHere")}
+            </span>
+          )}
+          {state === "inactive" && (
+            <span className="text-muted-foreground text-[0.7rem]">
+              {t("catalogue.filter.inactive")}
             </span>
           )}
         </span>

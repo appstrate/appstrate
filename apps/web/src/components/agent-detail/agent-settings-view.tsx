@@ -35,7 +35,7 @@ import {
 } from "../../lib/settings-section-href";
 import type { EditorPlace } from "../../lib/editor-place";
 import { SectionRail } from "../settings/section-rail";
-import { AgentOverviewTab } from "./agent-overview-tab";
+import { PackageFilesView } from "../package-files/package-files-view";
 import { AgentConfigurationView } from "./agent-configuration-view";
 import { AgentDetailSplit } from "./agent-detail-split";
 import { LoadingState } from "../page-states";
@@ -211,18 +211,16 @@ export function AgentSettingsView({
       />
     </Suspense>
   ) : activeSection === "files" ? (
-    <AgentOverviewTab
+    <PackageFilesView
+      type="agent"
       packageId={packageId}
-      detail={detail}
-      version={version}
-      isHistorical={isHistorical}
+      initialVersion={version}
       currentManifest={currentManifest}
       currentContent={currentContent}
       key={requestedFile}
-      surface="files"
-      initialFilePath={requestedFile}
-      fileEditHref={canEditDefinition ? fileEditHref : undefined}
-      canEditFiles={canEditDefinition}
+      initialPath={requestedFile}
+      editHref={canEditDefinition ? fileEditHref : undefined}
+      editable={canEditDefinition}
     />
   ) : (
     <AgentConfigurationView

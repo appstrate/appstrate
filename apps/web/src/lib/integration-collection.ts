@@ -2,7 +2,6 @@
 
 import type { IntegrationSummaryWire } from "../hooks/use-integrations";
 
-export const INTEGRATION_STATUSES = ["active", "inactive"] as const;
 export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 /**
  * Two attributes of how an integration reaches its service, read off the
@@ -17,7 +16,6 @@ export const INTEGRATION_ORIGINS = ["system", "custom"] as const;
 export const INTEGRATION_EXECUTIONS = ["remote", "local"] as const;
 export const INTEGRATION_PROTOCOLS = ["api", "mcp"] as const;
 
-export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 export type IntegrationOrigin = (typeof INTEGRATION_ORIGINS)[number];
 export type IntegrationExecution = (typeof INTEGRATION_EXECUTIONS)[number];
 export type IntegrationProtocol = (typeof INTEGRATION_PROTOCOLS)[number];
@@ -54,22 +52,8 @@ export function localServerRef(
     : undefined;
 }
 
-export function integrationStatus(integration: IntegrationSummaryWire): IntegrationStatus {
-  return integration.active ? "active" : "inactive";
-}
-
 export function integrationOrigin(integration: IntegrationSummaryWire): IntegrationOrigin {
   return integration.source === "system" ? "system" : "custom";
-}
-
-/**
- * The organization collection is not the catalogue. It contains every custom
- * integration the organization owns, including inactive ones that still need
- * to be administrable, plus the system integrations activated in this
- * workspace.
- */
-export function isOrganizationIntegration(integration: IntegrationSummaryWire): boolean {
-  return integration.source === "local" || Boolean(integration.active);
 }
 
 function integrationMatchesQuery(integration: IntegrationSummaryWire, query: string): boolean {
@@ -88,22 +72,18 @@ export function filterIntegrations(
   integrations: IntegrationSummaryWire[],
   {
     query,
-    statuses,
     origins,
     executions,
     protocols,
   }: {
     query: string;
-    statuses?: IntegrationStatus[];
     origins?: IntegrationOrigin[];
     executions?: IntegrationExecution[];
     protocols?: IntegrationProtocol[];
   },
 ): IntegrationSummaryWire[] {
   return integrations.filter((integration) => {
-    const status = integrationStatus(integration);
     const origin = integrationOrigin(integration);
-    if (statuses?.length && !statuses.includes(status)) return false;
     if (origins?.length && !origins.includes(origin)) return false;
     if (executions?.length && !executions.includes(integrationExecution(integration))) return false;
     if (protocols?.length && !protocols.includes(integrationProtocol(integration))) return false;

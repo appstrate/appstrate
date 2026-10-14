@@ -23,6 +23,13 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to
   `AGENT_RESOURCES_META_KEY`.
+- **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
+  agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
+  `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
+- **`ORG_LOGO_EMOJI_PREFIX`**, **`ORG_LOGO_WEBP_PREFIX`** and
+  **`ORG_LOGO_MAX_LENGTH`** (`@appstrate/core/validation`): the organization
+  logo's wire form — `emoji:<grapheme>` or a `data:image/webp;base64,` URL —
+  and its longest accepted value, 48 000 characters.
 - **`MODEL_BINDINGS`** / **`ModelBinding`** and **`MODEL_CREDENTIAL_OWNERS`** /
   **`ModelCredentialOwner`** (`@appstrate/core/model-payer`): whose credential
   serves a listed model, `system` | `org` | `user` | `managed` (`MODEL_PAYERS`

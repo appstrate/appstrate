@@ -177,6 +177,14 @@ describe("providerRows", () => {
     expect(rows.some((r) => r.id === "cred_builtin")).toBe(false);
   });
 
+  it("keeps a switched-off built-in model in the instance's row: the server resolves it as default", () => {
+    const off = model({ ...SYSTEM, id: "mdl_s_off", enabled: false, is_default: true });
+    const [instance] = providerRows([off], [], REGISTRY, "usr_me");
+    expect(instance!.models.map((m) => m.id)).toEqual(["mdl_s_off"]);
+    expect(instance!.disabled).toBe(true);
+    expect(rowStates(instance!)).toEqual(["default", "disabled"]);
+  });
+
   it("orders the organization first, the caller's own before the others', the instance last", () => {
     expect(rows.map((r) => r.id)).toEqual([
       "cred_org",

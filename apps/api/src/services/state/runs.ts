@@ -19,7 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import { runSearchCondition } from "../../lib/run-list-filters.ts";
+import { runListConditions } from "../../lib/run-list-filters.ts";
 import { db, type Db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
@@ -1726,8 +1726,7 @@ export async function listPackageRuns(
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
-  if (status?.length) conditions.push(inArray(runs.status, status));
-  if (search) conditions.push(runSearchCondition(search));
+  conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
@@ -1848,8 +1847,7 @@ export async function listGlobalRuns(
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
-  // An empty list would be `IN ()`, SQL for "nothing", where the caller meant no filter.
-  if (status?.length) conditions.push(inArray(runs.status, status));
+  conditions.push(...runListConditions({ status, search }));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (chatSessionId) {
@@ -1871,8 +1869,6 @@ export async function listGlobalRuns(
         : sql`false`,
     );
   }
-
-  if (search) conditions.push(runSearchCondition(search));
 
   // Kind filter via JOINed `packages.ephemeral`. After migration 0017, runs
   // can outlive their source package (`runs.package_id ON DELETE SET NULL`),
@@ -1913,8 +1909,7 @@ export async function listScheduleRuns(
     canReadAgentInput = false,
   } = options;
   const conditions = [eq(runs.scheduleId, scheduleId)];
-  if (status?.length) conditions.push(inArray(runs.status, status));
-  if (search) conditions.push(runSearchCondition(search));
+  conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
     scopedWhere(runs, {

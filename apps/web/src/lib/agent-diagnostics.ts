@@ -24,6 +24,7 @@ type AgentDiagnosticCode =
   | "missing_skill"
   | "model_not_configured"
   | "model_credential_required"
+  | "model_credential_missing"
   | "pinned_model_unavailable"
   | "schedule_version_differs";
 
@@ -108,6 +109,10 @@ const DIAGNOSTIC_TEXT_KEYS = {
     title: "detail.diagnostics.modelCredentialRequired.title",
     explanation: "detail.diagnostics.modelCredentialRequired.explanation",
   },
+  model_credential_missing: {
+    title: "detail.diagnostics.modelCredentialMissing.title",
+    explanation: "detail.diagnostics.modelCredentialMissing.explanation",
+  },
   pinned_model_unavailable: {
     title: "detail.diagnostics.pinnedModelUnavailable.title",
     explanation: "detail.diagnostics.pinnedModelUnavailable.explanation",
@@ -157,14 +162,14 @@ const CORRECTION_SECTIONS: Partial<Record<string, AgentSettingsSection>> = {
 
 /**
  * Where a diagnostic is fixed, or `null` when the page already says it: an
- * agent switched off here is switched on from the page's own band.
+ * agent is switched on here from the page's own band.
  */
 export function agentDiagnosticCorrectionTarget(
   diagnostic: AgentDiagnostic,
   pathname: string,
 ): string | null {
-  if (diagnostic.code === "agent_not_active") return null;
   const { destination, section, params } = diagnostic.correction;
+  if (section === "activation") return null;
   if (destination === "schedule") {
     return params.scheduleId
       ? `/schedules/${params.scheduleId}`

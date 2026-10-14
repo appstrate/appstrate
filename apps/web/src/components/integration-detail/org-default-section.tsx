@@ -58,6 +58,9 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const [draftMode, setDraftMode] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<"success" | "error" | null>(null);
   const mode = draftMode ?? (hasDefault ? (enforce ? "forced" : "default") : "choice");
+  // A stored default whose members are all unshared has nothing to write a mode change with (the
+  // server refuses them): its connections are picked, or dropped, first.
+  const modeLocked = !!orgDefault && pendingValue === null && connectionIds.length === 0;
   /** An empty set removes the default; `keepMode` holds the mode while the list is empty. */
   const save = async (nextIds: string[], nextEnforce: boolean, keepMode: string | null = null) => {
     setPendingValue({ connection_ids: nextIds, enforce: nextEnforce });
@@ -135,7 +138,9 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
                 <SelectItem
                   key={value}
                   value={value}
-                  disabled={value !== "choice" && shared.length === 0}
+                  disabled={
+                    value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode))
+                  }
                 >
                   {t(`integration.admin.usage.${value}`)}
                 </SelectItem>
@@ -148,6 +153,10 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
           {shared.length === 0 ? (
             <p className="text-muted-foreground text-xs italic">
               {t("integration.admin.orgDefault.noPinnableConnections")}
+            </p>
+          ) : modeLocked ? (
+            <p className="text-muted-foreground text-xs" data-testid="org-default-mode-locked">
+              {t("integration.admin.orgDefault.pickBeforeMode")}
             </p>
           ) : null}
         </div>

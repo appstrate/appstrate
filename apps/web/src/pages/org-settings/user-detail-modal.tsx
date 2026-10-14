@@ -30,6 +30,7 @@ import { memberRoleValue, spaceRoleAssignment, useSpaceRoleOptions } from "../..
 import { useAddSpaceMember, useUpdateSpaceMember } from "../../hooks/use-space-members";
 import type { SpaceMembership } from "../../hooks/use-space-memberships";
 import { formatDateField } from "../../lib/format-date";
+import { memberLabel } from "../../lib/billing-managers";
 import { useUserSpaceColumns } from "./user-space-columns";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -99,7 +100,7 @@ export function UserDetailModal({
     <Modal
       open
       onClose={onClose}
-      title={member.displayName || member.email || member.userId}
+      title={memberLabel(member)}
       className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
     >
       <div className="flex min-h-0 flex-col gap-6 overflow-y-auto">
@@ -118,26 +119,28 @@ export function UserDetailModal({
           description={t(`orgSettings.roleHint.${member.role}`)}
           className="pb-0"
         >
-          {assignableRoles.length > 0 ? (
-            <Select
-              value={member.role}
-              onValueChange={(value) => onChangeOrgRole(value as OrgRole)}
-              disabled={isChangingOrgRole}
-            >
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {assignableRoles.map((role) => (
-                  <SelectItem key={role} value={role}>
-                    {t(roleI18nKey(role))}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <span className="text-sm">{t(roleI18nKey(member.role))}</span>
-          )}
+          {(labelId) =>
+            assignableRoles.length > 0 ? (
+              <Select
+                value={member.role}
+                onValueChange={(value) => onChangeOrgRole(value as OrgRole)}
+                disabled={isChangingOrgRole}
+              >
+                <SelectTrigger aria-labelledby={labelId} className="w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignableRoles.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {t(roleI18nKey(role))}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="text-sm">{t(roleI18nKey(member.role))}</span>
+            )
+          }
         </SettingRow>
 
         {showSpaces && (

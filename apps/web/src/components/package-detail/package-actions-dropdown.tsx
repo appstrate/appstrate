@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Download,
   Package,
   GitBranchPlus,
   GitFork,
-  Pencil,
   CalendarPlus,
   Trash2,
   PackagePlus,
@@ -22,7 +20,6 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import type { PackageType } from "@appstrate/core/validation";
-import { packageEditPath } from "../../lib/package-paths";
 import { packagePermission } from "@appstrate/core/permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
 import { usePermissions, useCurrentSpaceGrant } from "../../hooks/use-permissions";
@@ -82,15 +79,9 @@ interface PackageActionsDropdownProps {
    */
   isActiveHere?: boolean;
   onCreateVersion?: () => void;
+  /** Why « Créer une version » is held back, already translated; `undefined` when it is not. */
+  createVersionBlockedReason?: string;
   onFork?: () => void;
-  /** Override route navigation when editing is hosted in the current surface. */
-  onEdit?: () => void;
-  /**
-   * False where the definition is edited in the package's own settings (agents,
-   * integrations): one door to it, not a second one in this menu.
-   */
-  showEdit?: boolean;
-  editLabel?: string;
   // Agent-specific
   runningRuns?: number;
   hasRuns?: boolean;
@@ -153,10 +144,8 @@ export function PackageActionsDropdown({
   hasPublishedVersion,
   isActiveHere,
   onCreateVersion,
+  createVersionBlockedReason,
   onFork,
-  onEdit,
-  showEdit = true,
-  editLabel,
   runningRuns = 0,
   hasRuns,
   hasMemories,
@@ -176,7 +165,6 @@ export function PackageActionsDropdown({
   activationPending,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
-  const navigate = useNavigate();
   const { can } = usePermissions();
   const spaceGrant = useCurrentSpaceGrant();
   const moveHome = useModalParam(MOVE_HOME_PARAM);
@@ -237,6 +225,16 @@ export function PackageActionsDropdown({
       canShare ||
       (showDelete && Boolean(onDeleteAgent)));
 
+  const createVersionItem = isMutable && onCreateVersion && (
+    <DropdownMenuItem
+      onSelect={() => !createVersionBlockedReason && onCreateVersion()}
+      disabled={!!createVersionBlockedReason}
+    >
+      <GitBranchPlus size={14} />
+      <DisabledItemLabel label={t("version.createVersion")} reason={createVersionBlockedReason} />
+    </DropdownMenuItem>
+  );
+
   // Where the package runs and where it lives, the same group in both menus:
   // moving the home is the same authority as editing, since it is the home
   // that grants that authority; sharing is a verb of its own on that same space
@@ -285,22 +283,7 @@ export function PackageActionsDropdown({
             {hasAgentBuildActions && (
               <>
                 <DropdownMenuLabel>{t("detail.actions.agent")}</DropdownMenuLabel>
-                {isMutable && showEdit && (
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      onEdit ? onEdit() : navigate(packageEditPath(type, packageId))
-                    }
-                  >
-                    <Pencil size={14} />
-                    {editLabel ?? t("btn.edit")}
-                  </DropdownMenuItem>
-                )}
-                {isMutable && onCreateVersion && (
-                  <DropdownMenuItem onSelect={onCreateVersion}>
-                    <GitBranchPlus size={14} />
-                    {t("version.createVersion")}
-                  </DropdownMenuItem>
-                )}
+                {createVersionItem}
                 {showFork && (
                   <DropdownMenuItem onSelect={onFork}>
                     <GitFork size={14} />
@@ -407,20 +390,7 @@ export function PackageActionsDropdown({
                 {t("btn.download", { ns: "common" })}
               </DropdownMenuItem>
             )}
-            {isMutable && onCreateVersion && (
-              <DropdownMenuItem onSelect={onCreateVersion}>
-                <GitBranchPlus size={14} />
-                {t("version.createVersion")}
-              </DropdownMenuItem>
-            )}
-            {isMutable && showEdit && (
-              <DropdownMenuItem
-                onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
-              >
-                <Pencil size={14} />
-                {editLabel ?? t("btn.edit")}
-              </DropdownMenuItem>
-            )}
+            {createVersionItem}
             {showFork && (
               <DropdownMenuItem onSelect={onFork}>
                 <GitFork size={14} />
@@ -447,18 +417,16 @@ export function PackageActionsDropdown({
       </PageActionsMenu>
 
       {/* Mounted only while open: any way of closing a form modal abandons its input. */}
-      {moveHome.value === packageId && (
+      {moveHome.value === packageId && isMutable && (
         <MoveHomeSpaceDialog
-          open
           onClose={moveHome.close}
           packageId={packageId}
           type={type}
           homeSpaceId={homeSpaceId}
         />
       )}
-      {share.value === packageId && (
+      {share.value === packageId && canShare && (
         <SharePackageDialog
-          open
           onClose={share.close}
           packageId={packageId}
           type={type}

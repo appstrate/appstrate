@@ -14,7 +14,7 @@ import filesFr from "../../../locales/fr/files.json";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import type { FileDto } from "../../../hooks/use-files.ts";
 import { fileFixture, render } from "../../../test/render.tsx";
-import { makeRun } from "../../test/run-fixture.tsx";
+import { makeRun } from "../../../test/run-fixture.ts";
 import { RunInputFacts } from "../run-snapshot-inspector.tsx";
 
 await i18nReady;

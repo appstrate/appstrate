@@ -39,8 +39,6 @@ import { mimeKind } from "../lib/files";
 import { ExpiryBadge, MimeIcon } from "./file-tile";
 import { FileViewer, type ViewableFile } from "./file-viewer";
 
-const COPIED_FEEDBACK_MS = 1500;
-
 export function FileArtifact({
   fileId,
   file,
@@ -70,7 +68,6 @@ export function FileArtifact({
   const frameRef = useRef<HTMLDivElement>(null);
   const download = useFileDownload();
   const copyText = useFileTextCopy();
-  const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
@@ -78,12 +75,6 @@ export function FileArtifact({
     document.addEventListener("fullscreenchange", sync);
     return () => document.removeEventListener("fullscreenchange", sync);
   }, []);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-    return () => clearTimeout(timer);
-  }, [copied]);
 
   const name = fallbackName || file?.name || "";
   const canDownload = file?.capabilities.download === true;
@@ -108,9 +99,9 @@ export function FileArtifact({
         <ArtifactActions>
           {canCopy && (
             <ArtifactAction
-              icon={copied ? CheckIcon : CopyIcon}
-              label={copied ? t("artifact.copied") : t("artifact.copy")}
-              onClick={() => void copyText(fileId).then(setCopied)}
+              icon={copyText.copied ? CheckIcon : CopyIcon}
+              label={copyText.copied ? t("artifact.copied") : t("artifact.copy")}
+              onClick={() => void copyText.copy(fileId)}
             />
           )}
           {canDownload && (

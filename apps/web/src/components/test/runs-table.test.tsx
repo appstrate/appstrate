@@ -15,7 +15,7 @@ import { RunsTable } from "../runs-table.tsx";
 import { useRunColumns } from "../run-columns.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
-import { makeRun, STARTED_AT } from "./run-fixture.tsx";
+import { makeRun, STARTED_AT } from "../../test/run-fixture.ts";
 import { formatDateField } from "../../lib/format-date.ts";
 
 await i18nReady;
@@ -126,6 +126,13 @@ describe("what a surface subtracts", () => {
     expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
     // The row still leads somewhere: the link moves to the next surviving column.
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
+  });
+
+  it("keeps the badges that explain a missing Cancel or Re-run", () => {
+    const html = table([makeRun({ package_ephemeral: false, runOrigin: "remote" })], {
+      hideAgentName: true,
+    });
+    expect(html).toContain(agentsFr["runs.remoteBadge"]);
   });
 });
 

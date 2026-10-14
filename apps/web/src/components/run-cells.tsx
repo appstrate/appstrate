@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FileInput, FileOutput } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { runErrorText } from "../lib/run-error";
+import { MetaBadge } from "./status-badge";
 import { summarizeRunOutput } from "../lib/run-output-summary";
 
 /** What a run ended with: its error, else a readable line of its output, else a dash. */
@@ -27,6 +28,27 @@ export function RunResult({ run }: { run: EnrichedRun }) {
     <span className="relative z-10 truncate text-xs" title={text}>
       {text}
     </span>
+  );
+}
+
+/**
+ * Where a run came from, when that is not an ordinary agent run: inline, its
+ * agent deleted, or run remotely — each explains an action the run lacks.
+ */
+export function RunProvenanceBadges({ run }: { run: EnrichedRun }) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <>
+      {run.package_ephemeral === true && <MetaBadge label={t("runs.inlineBadge")} />}
+      {/* `packageId == null` on a non-inline run: the source agent was deleted
+          (FK SET NULL); the run survives, its agent page does not. */}
+      {run.packageId == null && run.package_ephemeral !== true && (
+        <MetaBadge label={t("runs.deletedAgentBadge")} title={t("runs.deletedAgentTitle")} italic />
+      )}
+      {run.runOrigin === "remote" && (
+        <MetaBadge label={t("runs.remoteBadge")} title={t("runs.remoteBadgeTitle")} />
+      )}
+    </>
   );
 }
 

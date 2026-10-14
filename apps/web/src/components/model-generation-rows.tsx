@@ -91,36 +91,38 @@ export function GenerationSettingRows({
             : t("models.generation.temperatureHint")
         }
       >
-        <Select
-          value={
-            temperatureUnsupported
-              ? UNSUPPORTED
-              : generation.temperature == null
-                ? INHERIT
-                : String(generation.temperature)
-          }
-          disabled={disabled || temperatureUnsupported}
-          onValueChange={(value) =>
-            onChange(
-              value === INHERIT
-                ? without("temperature")
-                : { ...generation, temperature: Number(value) },
-            )
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {temperatureUnsupported
-              ? unsupportedItem
-              : temperatureOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-          </SelectContent>
-        </Select>
+        {(labelId) => (
+          <Select
+            value={
+              temperatureUnsupported
+                ? UNSUPPORTED
+                : generation.temperature == null
+                  ? INHERIT
+                  : String(generation.temperature)
+            }
+            disabled={disabled || temperatureUnsupported}
+            onValueChange={(value) =>
+              onChange(
+                value === INHERIT
+                  ? without("temperature")
+                  : { ...generation, temperature: Number(value) },
+              )
+            }
+          >
+            <SelectTrigger aria-labelledby={labelId}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {temperatureUnsupported
+                ? unsupportedItem
+                : temperatureOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+            </SelectContent>
+          </Select>
+        )}
       </SettingRow>
 
       <SettingRow
@@ -129,37 +131,39 @@ export function GenerationSettingRows({
           reasoningUnsupported ? t("models.generation.unsupported") : labels.reasoningHint
         }
       >
-        <Select
-          value={reasoningUnsupported ? UNSUPPORTED : (generation.reasoning_level ?? INHERIT)}
-          disabled={disabled || reasoningUnsupported}
-          onValueChange={(value) =>
-            onChange(
-              value === INHERIT
-                ? without("reasoning_level")
-                : { ...generation, reasoning_level: value as ModelReasoningLevel },
-            )
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {reasoningUnsupported ? (
-              unsupportedItem
-            ) : (
-              <>
-                <SelectItem value={INHERIT}>
-                  {inheritLabels?.reasoning ?? labels.reasoningInherit}
-                </SelectItem>
-                {supportedReasoningLevels.map((level) => (
-                  <SelectItem key={level} value={level}>
-                    {labels.levels[level]}
+        {(labelId) => (
+          <Select
+            value={reasoningUnsupported ? UNSUPPORTED : (generation.reasoning_level ?? INHERIT)}
+            disabled={disabled || reasoningUnsupported}
+            onValueChange={(value) =>
+              onChange(
+                value === INHERIT
+                  ? without("reasoning_level")
+                  : { ...generation, reasoning_level: value as ModelReasoningLevel },
+              )
+            }
+          >
+            <SelectTrigger aria-labelledby={labelId}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {reasoningUnsupported ? (
+                unsupportedItem
+              ) : (
+                <>
+                  <SelectItem value={INHERIT}>
+                    {inheritLabels?.reasoning ?? labels.reasoningInherit}
                   </SelectItem>
-                ))}
-              </>
-            )}
-          </SelectContent>
-        </Select>
+                  {supportedReasoningLevels.map((level) => (
+                    <SelectItem key={level} value={level}>
+                      {labels.levels[level]}
+                    </SelectItem>
+                  ))}
+                </>
+              )}
+            </SelectContent>
+          </Select>
+        )}
       </SettingRow>
     </>
   );

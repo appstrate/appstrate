@@ -12,11 +12,12 @@
 import { describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { I18nextProvider } from "react-i18next";
-import agentsFr from "../../locales/fr/agents.json";
-import i18n, { i18nReady } from "../../i18n.ts";
-import type { RunTurnRow } from "../log-utils.ts";
-import { formatWindowPercent } from "../run-context.ts";
-import { RunTurnsDetail } from "../run-execution-tab.tsx";
+import agentsFr from "../../../locales/fr/agents.json";
+import i18n, { i18nReady } from "../../../i18n.ts";
+import type { RunTurnRow } from "../../log-utils.ts";
+import { formatWindowPercent } from "../../run-context.ts";
+import { formatNumber } from "../../../lib/format-number.ts";
+import { RunTurnsDetail } from "../run-turns-detail.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -106,8 +107,9 @@ describe("TurnsTable without a context window", () => {
     expect(html).toContain('style="width:100%"');
   });
 
-  it("still lists the absolute token counts", () => {
-    expect(html).toContain((100_000).toLocaleString());
+  it("still lists the absolute token counts, in the interface's language", () => {
+    expect(html).toContain(formatNumber(100_000));
+    expect(html).not.toContain("100,000");
   });
 
   it("says so, instead of silently swapping the denominator under an unchanged header", () => {

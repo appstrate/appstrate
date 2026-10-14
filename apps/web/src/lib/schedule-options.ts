@@ -10,6 +10,7 @@ import {
   SlidersHorizontal,
   UserRound,
 } from "lucide-react";
+import { scheduleDetailPath } from "./package-paths";
 
 // Sentinel for the schedule's "inherit" version choice — nothing stored; the
 // agent's version resolution applies at fire time, which means the latest
@@ -59,5 +60,5 @@ export type ScheduleSettingsSection = (typeof SCHEDULE_SETTINGS_SECTIONS)[number
 
 /** The URL of one section of a schedule's Paramètres tab. */
 export function scheduleSettingsHref(scheduleId: string, section: ScheduleSettingsSection) {
-  return `/schedules/${scheduleId}?scheduleSettings=${section}#settings`;
+  return `${scheduleDetailPath(scheduleId)}?scheduleSettings=${section}#settings`;
 }

@@ -13,7 +13,6 @@ import { ApiError } from "../api/errors";
 import { errorMessage } from "../lib/mutation-error";
 
 interface CreateVersionModalProps {
-  open: boolean;
   onClose: () => void;
   type: PackageType;
   packageId: string;
@@ -25,7 +24,6 @@ interface CreateVersionModalProps {
 type FormData = { selectedBump: VersionBump };
 
 export function CreateVersionModal({
-  open,
   onClose,
   type,
   packageId,
@@ -92,7 +90,7 @@ export function CreateVersionModal({
 
   return (
     <Modal
-      open={open}
+      open
       onClose={onClose}
       title={t("version.createVersion")}
       actions={

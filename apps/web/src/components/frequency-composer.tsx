@@ -91,6 +91,44 @@ function bounded(value: string, min: number, max: number): number | null {
   return value !== "" && Number.isInteger(n) && n >= min && n <= max ? n : null;
 }
 
+interface Bounds {
+  min: number;
+  max: number;
+}
+
+/** What is typed stays on screen; out of bounds it is marked and reported as `null`. */
+function WholeNumberInput({
+  id,
+  value,
+  bounds,
+  onChange,
+}: {
+  id: string;
+  value: number;
+  bounds: Bounds;
+  onChange: (value: number | null) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  return (
+    <Input
+      id={id}
+      type="number"
+      className="w-24"
+      min={bounds.min}
+      max={bounds.max}
+      value={text}
+      aria-invalid={bounded(text, bounds.min, bounds.max) === null || undefined}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(bounded(e.target.value, bounds.min, bounds.max));
+      }}
+    />
+  );
+}
+
+const MINUTE_BOUNDS: Bounds = { min: 0, max: 59 };
+const DAY_BOUNDS: Bounds = { min: 1, max: 31 };
+
 function useFormats(timezone: string) {
   const { i18n } = useTranslation();
   const lang = i18n.language;
@@ -137,13 +175,21 @@ export function FrequencyComposer({
   const { t } = useTranslation(["agents"]);
   const format = useFormats(timezone);
   const [frequency, setFrequency] = useState<Frequency>(() => parseCron(cron));
+  // The bounds a number field is typed out of; nothing is composed meanwhile.
+  const [outOfBounds, setOutOfBounds] = useState<Bounds | null>(null);
 
   const expression = toCron(frequency);
-  const fires = isComplete(frequency) ? nextFires(expression, timezone) : null;
+  const fires = isComplete(frequency) && !outOfBounds ? nextFires(expression, timezone) : null;
   const update = (next: Frequency) => {
     setFrequency(next);
+    setOutOfBounds(null);
     const nextCron = toCron(next);
     onChange(isComplete(next) && nextFires(nextCron, timezone, 1) ? nextCron : null);
+  };
+  const updateNumber = (bounds: Bounds, value: number | null, next: (n: number) => Frequency) => {
+    if (value !== null) return update(next(value));
+    setOutOfBounds(bounds);
+    onChange(null);
   };
   const setAt = (value: string) => {
     const at = parseTime(value);
@@ -151,6 +197,7 @@ export function FrequencyComposer({
   };
 
   const summary = (() => {
+    if (outOfBounds) return t("schedule.frequency.outOfBounds", { ...outOfBounds });
     switch (frequency.kind) {
       case "minutes":
         return t("schedule.frequency.summary.minutes", { count: frequency.every });
@@ -234,17 +281,13 @@ export function FrequencyComposer({
           <Label htmlFor="frequency-minute">{t("schedule.frequency.atMinute")}</Label>
           {/* Kept to the width of its value: a field takes the full row. */}
           <div>
-            <Input
+            <WholeNumberInput
               id="frequency-minute"
-              type="number"
-              className="w-24"
-              min={0}
-              max={59}
-              defaultValue={frequency.minute}
-              onChange={(e) => {
-                const minute = bounded(e.target.value, 0, 59);
-                if (minute !== null) update({ ...frequency, minute });
-              }}
+              value={frequency.minute}
+              bounds={MINUTE_BOUNDS}
+              onChange={(minute) =>
+                updateNumber(MINUTE_BOUNDS, minute, (n) => ({ ...frequency, minute: n }))
+              }
             />
           </div>
         </Field>
@@ -252,9 +295,10 @@ export function FrequencyComposer({
 
       {frequency.kind === "weekly" && (
         <Field>
-          <Label>{t("schedule.frequency.days")}</Label>
+          <Label id="frequency-days">{t("schedule.frequency.days")}</Label>
           <ToggleGroup
             type="multiple"
+            aria-labelledby="frequency-days"
             variant="outline"
             className="flex-wrap justify-start"
             value={frequency.days.map(String)}
@@ -278,17 +322,11 @@ export function FrequencyComposer({
         <Field>
           <Label htmlFor="frequency-day">{t("schedule.frequency.dayOfMonth")}</Label>
           <div>
-            <Input
+            <WholeNumberInput
               id="frequency-day"
-              type="number"
-              className="w-24"
-              min={1}
-              max={31}
-              defaultValue={frequency.day}
-              onChange={(e) => {
-                const day = bounded(e.target.value, 1, 31);
-                if (day !== null) update({ ...frequency, day });
-              }}
+              value={frequency.day}
+              bounds={DAY_BOUNDS}
+              onChange={(day) => updateNumber(DAY_BOUNDS, day, (n) => ({ ...frequency, day: n }))}
             />
           </div>
           {frequency.day > 28 && (

@@ -23,10 +23,9 @@ import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
 import { useOverlayPath } from "@/lib/modal-route";
 import { useCanReach } from "@/hooks/use-can-reach";
-import { usePendingOfferCount, usePendingSharesHref } from "@/hooks/use-pending-offers";
+import { usePendingShares } from "@/hooks/use-pending-offers";
 import { catalogueHref } from "@/lib/catalogue-link";
-import { isUnder } from "@/lib/route-access";
-import { useSettingsSections } from "@/pages/settings/use-settings-sections";
+import { isSettingsPath, isUnder } from "@/lib/route-access";
 import { cn } from "@appstrate/ui/cn";
 import {
   Sidebar,
@@ -50,17 +49,13 @@ export function ShellSidebar({
   contentClassName?: string;
 }) {
   const { t } = useTranslation();
-  // Two organization-wide destinations, each drawn only for a caller it admits:
-  // settings when its own rail lists an entry for them, the catalogue when its
-  // route does (`ROUTE_ACCESS`).
-  const settingsSections = useSettingsSections();
+  // Two organization-wide destinations: settings, which always hold the
+  // caller's own account, and the catalogue, drawn when its route admits the
+  // caller (`ROUTE_ACCESS`).
   const canReach = useCanReach();
-  const pendingOffers = usePendingOfferCount();
-  const pendingHref = usePendingSharesHref();
+  const pendingShares = usePendingShares();
   const overlayPath = useOverlayPath() ?? "";
-  const settingsActive = ["/org-settings", "/workspace-settings", "/preferences"].some((prefix) =>
-    isUnder(overlayPath, prefix),
-  );
+  const settingsActive = isSettingsPath(overlayPath);
   const catalogueActive = isUnder(overlayPath, "/catalogue");
 
   return (
@@ -104,9 +99,8 @@ export function ShellSidebar({
               ) : (
                 <Link
                   // With shares waiting, the entry opens ON them: the count is a
-                  // promise, and the first click keeps it (one rule, in
-                  // `usePendingSharesHref`).
-                  to={pendingHref ?? catalogueHref("agent")}
+                  // promise, and the first click keeps it.
+                  to={pendingShares.href ?? catalogueHref("agent")}
                 >
                   <LibraryBig />
                   <span>{t("nav.catalogue")}</span>
@@ -117,21 +111,19 @@ export function ShellSidebar({
                 by nobody. The share route notifies a PERSON and says nothing
                 when the target is a team space, so without this an offer to the
                 team is visible only to whoever thinks to go and look. */}
-            {pendingOffers > 0 && (
+            {pendingShares.count > 0 && (
               <SidebarMenuBadge>
                 <span
                   className="bg-primary text-primary-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium"
-                  aria-label={t("catalogue.pendingOffers", { count: pendingOffers })}
+                  aria-label={t("catalogue.pendingOffers", { count: pendingShares.count })}
                 >
-                  {pendingOffers > 99 ? "99+" : pendingOffers}
+                  {pendingShares.count > 99 ? "99+" : pendingShares.count}
                 </span>
               </SidebarMenuBadge>
             )}
           </SidebarMenuItem>
         </SidebarMenu>
-        {/* Gated on what the surface actually holds: the rail decides. A caller
-            whose settings rail lists nothing has no settings to open. */}
-        <SidebarMenu className="px-2 pb-2" hidden={settingsSections.length === 0}>
+        <SidebarMenu className="px-2 pb-2">
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={settingsActive} tooltip={t("nav.settings")}>
               {settingsActive ? (

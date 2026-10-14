@@ -120,6 +120,7 @@ function MetadataItem({
   value: React.ReactNode;
   separated?: boolean;
 }) {
+  const { t } = useTranslation("agents");
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1">
       {separated && (
@@ -127,7 +128,7 @@ function MetadataItem({
           ·
         </span>
       )}
-      <span className="text-foreground font-semibold">{label} :</span>
+      <span className="text-foreground font-semibold">{t("run.headerLabel", { label })}</span>
       <span className="text-muted-foreground min-w-0 font-normal">{value}</span>
     </span>
   );

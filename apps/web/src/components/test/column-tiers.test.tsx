@@ -106,7 +106,7 @@ const SETS = {
         onToggleAll: () => {},
       }),
       ...usePackageColumns("agent").filter(
-        (c) => !["state", "actions", "source", "keywords"].includes(c.id),
+        (c) => !["state", "actions", "origin", "keywords"].includes(c.id),
       ),
       // The organization view, the wider of the two: provenance, then one
       // column per space the caller reaches — three here, which is what the

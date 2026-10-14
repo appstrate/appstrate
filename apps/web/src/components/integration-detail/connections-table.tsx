@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Plug } from "lucide-react";
 import { DataTable } from "../data-table";
 import { EmptyState } from "../page-states";
@@ -51,10 +51,23 @@ export function ConnectionsTable({
   const [search, setSearch] = useState("");
   const [sharing, setSharing] = useState<string[]>([]);
   const location = useLocation();
+  const navigate = useNavigate();
+  // `?connectionMethod` opens the table filtered once (« see the connections » of a method); the
+  // table is remounted at every tab switch, so the parameter is consumed rather than re-applied.
+  const urlMethod =
+    initialMethod === undefined
+      ? new URLSearchParams(location.search).get("connectionMethod")
+      : null;
   const [methods, setMethods] = useState<string[]>(() => {
-    const method = initialMethod ?? new URLSearchParams(location.search).get("connectionMethod");
+    const method = initialMethod ?? urlMethod;
     return detail.auths.some((auth) => auth.auth_key === method) ? [method!] : [];
   });
+  useEffect(() => {
+    if (urlMethod === null) return;
+    const params = new URLSearchParams(location.search);
+    params.delete("connectionMethod");
+    void navigate({ search: params.toString(), hash: location.hash }, { replace: true });
+  }, [urlMethod, location.search, location.hash, navigate]);
   const { user } = useAuth();
   const connections = detail.auths.flatMap((auth) =>
     auth.connections.map((connection) => ({ ...connection, auth_key: auth.auth_key })),

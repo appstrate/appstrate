@@ -6,7 +6,6 @@ import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useQueryClient } from "@tanstack/react-query";
 import { $api, type components } from "../../api/client";
 import { useOrg, useOrgDetail } from "../../hooks/use-org";
-import { invalidateIntegrationQueries } from "../../hooks/use-integrations";
 import { useAuth } from "../../hooks/use-auth";
 import { roleI18nKey, usePermissions } from "../../hooks/use-permissions";
 import { useSpaceMembershipsByUser } from "../../hooks/use-space-memberships";
@@ -23,6 +22,8 @@ import { useMemberColumns } from "./member-columns";
 import { UserDetailModal } from "./user-detail-modal";
 import { useState } from "react";
 import { hasFullOrgAccess } from "../../lib/org-role";
+import { memberLabel } from "../../lib/billing-managers";
+import { invalidateMemberWrite } from "../../lib/member-write";
 import { assignableRolesForMember, canRemoveMember, type OrgRole } from "@appstrate/shared-types";
 
 type OrgMember = components["schemas"]["OrgMember"];
@@ -60,22 +61,17 @@ export function OrgSettingsMembersPage() {
 
   const members = orgData?.members ?? [];
   const invitations = orgData?.invitations ?? [];
-  // A removal or a role drop that ends space access unshares the member's connections.
-  const invalidateOrg = () => {
-    void queryClient.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-    void invalidateIntegrationQueries(queryClient);
-  };
 
   const removeMemberMutation = $api.useMutation("delete", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: invalidateOrg,
+    onSuccess: () => invalidateMemberWrite(queryClient),
   });
 
   const changeRoleMutation = $api.useMutation("put", "/api/orgs/{orgId}/members/{userId}", {
-    onSuccess: invalidateOrg,
+    onSuccess: () => invalidateMemberWrite(queryClient),
   });
 
   const handleRemove = (member: OrgMember) => {
-    const label = member.displayName || member.email || member.userId;
+    const label = memberLabel(member);
     setConfirmState({ label, id: member.userId });
   };
 
@@ -90,7 +86,7 @@ export function OrgSettingsMembersPage() {
   const handleRoleChange = (member: OrgMember, newRole: OrgRole) => {
     if (newRole === "owner" || member.role === "owner" || revokesAccess(member.role, newRole)) {
       setRoleChange({
-        label: member.displayName || member.email || member.userId,
+        label: memberLabel(member),
         id: member.userId,
         role: newRole,
         from: member.role,
@@ -177,7 +173,7 @@ export function OrgSettingsMembersPage() {
         rows={members}
         rowKey={(member) => member.userId}
         rowHref={(member) => `?user=${encodeURIComponent(member.userId)}`}
-        rowLabel={(member) => member.displayName || member.email || member.userId}
+        rowLabel={memberLabel}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState error={error} compact />}

@@ -22,6 +22,7 @@ import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { SaveFeedback } from "../../components/settings/save-feedback";
+import { fieldWriteState } from "../../lib/field-write-state";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
@@ -29,10 +30,11 @@ import { useViewAsHeader } from "../../stores/view-as-store";
 import { toast } from "sonner";
 import { OrganizationAvatar } from "../../components/organization-avatar";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { ORG_LOGO_EMOJI_PREFIX } from "@appstrate/core/validation";
+import { storableLogo } from "../../lib/org-logo";
 
 const ORGANIZATION_EMOJIS = ["⚡️", "🚜", "🏢", "🧠", "✨", "🔵", "🟣", "🟠"];
 const MAX_LOGO_SOURCE_BYTES = 5 * 1024 * 1024;
-const MAX_LOGO_LENGTH = 180_000;
 
 async function normalizeOrganizationLogo(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("logo_file_type");
@@ -51,39 +53,14 @@ async function normalizeOrganizationLogo(file: File): Promise<string> {
       const context = canvas.getContext("2d");
       if (!context) throw new Error("logo_processing");
       context.drawImage(bitmap, sourceX, sourceY, crop, crop, 0, 0, size, size);
-      const encoded = canvas.toDataURL("image/webp", 0.82);
-      if (encoded.length <= MAX_LOGO_LENGTH) return encoded;
+      const logo = storableLogo(canvas.toDataURL("image/webp", 0.82));
+      if (logo) return logo;
     }
   } finally {
     bitmap.close();
   }
 
   throw new Error("logo_processing");
-}
-
-/**
- * One mutation writes several settings: a row reports only the write that
- * carried its own key, so a second toggle does not say « Enregistré » for the
- * first.
- */
-function writeFeedback(
-  mutation: {
-    isPending: boolean;
-    isSuccess: boolean;
-    isError: boolean;
-    variables?: { body?: object };
-  },
-  key: string,
-  extraPending = false,
-) {
-  const mine = !!mutation.variables?.body && key in mutation.variables.body;
-  return (
-    <SaveFeedback
-      pending={(mine && mutation.isPending) || extraPending}
-      success={mine && mutation.isSuccess}
-      error={mine && mutation.isError}
-    />
-  );
 }
 
 export function OrgSettingsGeneralPage() {
@@ -137,6 +114,9 @@ export function OrgSettingsGeneralPage() {
     },
   });
 
+  const logoWrite = fieldWriteState(updateNameMutation, "logo");
+  const nameWrite = fieldWriteState(updateNameMutation, "name");
+
   // No reload needed: `forgetOrg` moves the selection off the gone org.
   const exitOrg = (leftOrgId: string) => {
     forgetOrg(leftOrgId);
@@ -162,7 +142,7 @@ export function OrgSettingsGeneralPage() {
           variant="field"
           label={t("orgSettings.logoLabel")}
           description={canUpdateOrg ? t("orgSettings.logoDescription") : undefined}
-          status={writeFeedback(updateNameMutation, "logo", processingLogo)}
+          status={<SaveFeedback {...logoWrite} pending={logoWrite.pending || processingLogo} />}
         >
           <div className="flex items-center gap-3">
             <OrganizationAvatar
@@ -231,7 +211,7 @@ export function OrgSettingsGeneralPage() {
                             if (!orgId) return;
                             updateNameMutation.mutate({
                               params: { path: { orgId } },
-                              body: { logo: `emoji:${emoji}` },
+                              body: { logo: `${ORG_LOGO_EMOJI_PREFIX}${emoji}` },
                             });
                           }}
                         >
@@ -267,12 +247,12 @@ export function OrgSettingsGeneralPage() {
           variant="field"
           label={t("orgSettings.nameLabel")}
           description={currentOrg.slug}
-          status={writeFeedback(updateNameMutation, "name")}
+          status={<SaveFeedback {...nameWrite} />}
         >
           {canUpdateOrg ? (
             <InlineTextSetting
               value={currentOrg.name}
-              disabled={updateNameMutation.isPending}
+              disabled={nameWrite.pending}
               aria-label={t("orgSettings.nameLabel")}
               onCommit={(name) => {
                 if (!orgId) return;
@@ -352,7 +332,11 @@ export function OrgSettingsGeneralPage() {
                 </Label>
               }
               description={t("orgSettings.restrictCopyDesc")}
-              status={writeFeedback(updateSettingsMutation, "restrict_package_copy")}
+              status={
+                <SaveFeedback
+                  {...fieldWriteState(updateSettingsMutation, "restrict_package_copy")}
+                />
+              }
             >
               <Switch
                 id="restrict-package-copy"

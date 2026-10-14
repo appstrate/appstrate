@@ -19,11 +19,12 @@ import {
   Users,
   Webhook,
 } from "lucide-react";
-import type { GateablePermission } from "../../hooks/use-permissions";
-import { isUnder, type RoutePath } from "../../lib/route-access";
-
-/** What a settings page configures, and the API scope its requests carry. */
-export type SettingsScope = "organization" | "workspace" | "account";
+import {
+  isUnder,
+  SETTINGS_INDEX,
+  type RoutePath,
+  type SettingsScope,
+} from "../../lib/route-access";
 
 export interface UnifiedSettingsNavItem {
   to: RoutePath;
@@ -37,27 +38,18 @@ export interface UnifiedSettingsSection {
   items: UnifiedSettingsNavItem[];
 }
 
-interface SettingsNavigationOptions {
-  /** Whether `RouteGate` opens the route (`lib/route-access.ts`): feature, team space, permission. */
-  canReach: (path: RoutePath) => boolean;
-  can: (permission: GateablePermission) => boolean;
-}
-
-/** The rail as drawn: entries the caller cannot use are gone, empty sections too. */
-export function visibleSettingsSections({
-  canReach,
-  can,
-}: SettingsNavigationOptions): UnifiedSettingsSection[] {
+/**
+ * The rail as drawn: entries whose route `RouteGate` refuses (feature, team
+ * space, permission) are gone, empty sections too.
+ */
+export function visibleSettingsSections(
+  canReach: (path: RoutePath) => boolean,
+): UnifiedSettingsSection[] {
   const entry = (
     to: RoutePath,
     icon: LucideIcon,
     labelKey: string,
-    extra = true,
-  ): UnifiedSettingsNavItem | null => (canReach(to) && extra ? { to, icon, labelKey } : null);
-  // The infrastructure screens are listed to whoever can change them: a guest
-  // reads spaces, models and proxies so its runs resolve them, which is no
-  // reason to open their administration. The routes stay on the read, so a
-  // pasted URL still opens the read-only page.
+  ): UnifiedSettingsNavItem | null => (canReach(to) ? { to, icon, labelKey } : null);
   const sections: {
     scope: SettingsScope;
     labelKey: string;
@@ -70,9 +62,9 @@ export function visibleSettingsSections({
         entry("/org-settings/general", Building, "orgSettings.tabGeneral"),
         entry("/org-settings/members", Users, "orgSettings.tabMembers"),
         entry("/org-settings/roles", ShieldCheck, "roles.tabTitle"),
-        entry("/org-settings/spaces", LayoutGrid, "spaces.pageTitle", can("spaces:write")),
-        entry("/org-settings/models", BrainCircuit, "models.tabTitle", can("models:write")),
-        entry("/org-settings/proxies", Globe, "proxies.tabTitle", can("proxies:write")),
+        entry("/org-settings/spaces", LayoutGrid, "spaces.pageTitle"),
+        entry("/org-settings/models", BrainCircuit, "models.tabTitle"),
+        entry("/org-settings/proxies", Globe, "proxies.tabTitle"),
         entry("/org-settings/oauth", KeyRound, "orgSettings.tabOauth"),
         entry("/org-settings/cli-sessions", Laptop, "orgSettings.tabCliSessions"),
         entry("/org-settings/billing", CreditCard, "billing.tabTitle"),
@@ -111,14 +103,17 @@ export function visibleSettingsSections({
 }
 
 /**
- * Where a settings index opens: the first entry the rail lists in that scope,
- * else the rail's first entry; `undefined` when the rail is empty.
+ * Where a scope's index opens: the first entry the rail lists in that scope,
+ * else the scope's General page, whose gate says why it is refused.
  */
 export function firstSettingsPath(
   sections: UnifiedSettingsSection[],
   scope: SettingsScope,
-): RoutePath | undefined {
-  return (sections.find((section) => section.scope === scope) ?? sections[0])?.items[0]?.to;
+): RoutePath {
+  return (
+    sections.find((section) => section.scope === scope)?.items[0]?.to ??
+    (`${SETTINGS_INDEX[scope]}/general` as const)
+  );
 }
 
 /** The entry a settings URL belongs to, nested URLs included; `undefined` when the rail lists none. */
@@ -129,21 +124,9 @@ export function activeSettingsItem(
   return sections.flatMap((section) => section.items).find((item) => isUnder(pathname, item.to));
 }
 
-/** Each scope's own index, which opens no page: `SettingsIndexRedirect` sends it on, a phone shows the rail. */
-export const SETTINGS_INDEX = {
-  organization: "/org-settings",
-  workspace: "/workspace-settings",
-  account: "/preferences",
-} as const satisfies Record<SettingsScope, RoutePath>;
-
-export function isSettingsIndex(pathname: string): boolean {
-  return (Object.values(SETTINGS_INDEX) as string[]).includes(pathname.replace(/\/$/, ""));
-}
-
 export function settingsScopeFromPath(pathname: string): SettingsScope {
-  if (isUnder(pathname, "/workspace-settings")) return "workspace";
-  if (isUnder(pathname, "/preferences")) return "account";
-  return "organization";
+  const scopes = Object.keys(SETTINGS_INDEX) as SettingsScope[];
+  return scopes.find((scope) => isUnder(pathname, SETTINGS_INDEX[scope])) ?? "organization";
 }
 
 /** Keys the content outlet: a context switch remounts the page instead of flashing the previous scope's data. */

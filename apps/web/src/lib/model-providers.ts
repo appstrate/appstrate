@@ -39,7 +39,10 @@ export interface ProviderRow {
   /** `org`, `instance` or `user:<id>`. */
   owner: string;
   ownerName: string | null;
-  /** The models this provider makes usable, switched-on ones only. */
+  /**
+   * The models this provider makes usable, switched-on ones only; the instance's row keeps its
+   * switched-off ones, which the server still resolves as the default.
+   */
   models: OrgModelInfo[];
   /** The key can no longer serve (a dead subscription, a secret that no longer decrypts). */
   unavailable: boolean;
@@ -104,7 +107,7 @@ export function providerRows(
   userId: string | undefined,
 ): ProviderRow[] {
   const usable = models.filter((m) => m.enabled);
-  const system = usable.filter(isSystemModel);
+  const system = models.filter(isSystemModel);
   const unbound = memberModels(models);
   const rows: ProviderRow[] = [];
 
@@ -170,7 +173,7 @@ export function providerRows(
       ownerName: null,
       models: system,
       unavailable: false,
-      disabled: false,
+      disabled: system.every((m) => !m.enabled),
     });
   }
 

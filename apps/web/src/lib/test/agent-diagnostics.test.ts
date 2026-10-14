@@ -61,10 +61,9 @@ describe("agent diagnostics routing", () => {
     );
   });
 
-  it("links nowhere for an agent switched off here: the page's band holds the switch", () => {
-    expect(
-      target({ destination: "configuration", section: "inputs", params: {} }, "agent_not_active"),
-    ).toBeNull();
+  it("links nowhere for the activation correction: the page's band holds the switch", () => {
+    // Routed by the server's correction, whatever the code.
+    expect(target({ destination: "configuration", section: "activation", params: {} })).toBeNull();
   });
 });
 
@@ -107,6 +106,13 @@ describe("agentDiagnosticText", () => {
       ],
       [
         {
+          code: "model_credential_missing",
+          correction: { destination: "configuration", section: "model", params: { model: "GPT" } },
+        },
+        "Le modèle GPT n'a aucune clé d'API",
+      ],
+      [
+        {
           code: "pinned_model_unavailable",
           correction: {
             destination: "configuration",
@@ -144,6 +150,7 @@ describe("agentDiagnosticText", () => {
   it("has a sentence in both languages for every code it maps", () => {
     for (const code of [
       "agent_not_active",
+      "model_credential_missing",
       "integration_not_active",
       "insufficient_scopes",
       "override_outranked",

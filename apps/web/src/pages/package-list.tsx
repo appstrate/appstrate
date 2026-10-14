@@ -184,7 +184,7 @@ export function PackageList() {
           ) : undefined
         }
       />
-      {importParam.value !== null && <ImportModal open onClose={importParam.close} />}
+      {importParam.value !== null && <ImportModal onClose={importParam.close} />}
       {creation.isOpen && (
         <CreationHandoffModal
           resource="agent"

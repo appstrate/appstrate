@@ -56,6 +56,11 @@ import { recordAuditFromContext } from "../services/audit.ts";
 import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
+import {
+  ORG_LOGO_EMOJI_PREFIX,
+  ORG_LOGO_MAX_LENGTH,
+  ORG_LOGO_WEBP_PREFIX,
+} from "@appstrate/core/validation";
 
 export const createOrgSchema = z
   .object({
@@ -64,24 +69,22 @@ export const createOrgSchema = z
   })
   .strict();
 
-const EMOJI_LOGO_PREFIX = "emoji:";
-const WEBP_LOGO_PREFIX = "data:image/webp;base64,";
 /** Enough for any single emoji: the longest ZWJ sequences hold about ten code points. */
 const MAX_EMOJI_CODE_POINTS = 16;
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /** One emoji, or a base64 WebP image (a RIFF container whose form type is `WEBP`). */
 function isValidLogo(value: string): boolean {
-  if (value.startsWith(EMOJI_LOGO_PREFIX)) {
-    const emoji = value.slice(EMOJI_LOGO_PREFIX.length);
+  if (value.startsWith(ORG_LOGO_EMOJI_PREFIX)) {
+    const emoji = value.slice(ORG_LOGO_EMOJI_PREFIX.length);
     return (
       [...emoji].length <= MAX_EMOJI_CODE_POINTS &&
       [...graphemes.segment(emoji)].length === 1 &&
       /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(emoji)
     );
   }
-  if (!value.startsWith(WEBP_LOGO_PREFIX)) return false;
-  const payload = value.slice(WEBP_LOGO_PREFIX.length);
+  if (!value.startsWith(ORG_LOGO_WEBP_PREFIX)) return false;
+  const payload = value.slice(ORG_LOGO_WEBP_PREFIX.length);
   if (payload.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) return false;
   const bytes = atob(payload);
   return bytes.slice(0, 4) === "RIFF" && bytes.slice(8, 12) === "WEBP";
@@ -93,8 +96,7 @@ export const updateOrgSchema = z
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
     logo: z
       .string()
-      // Bounds the decoded image at about 132 KiB.
-      .max(180_000)
+      .max(ORG_LOGO_MAX_LENGTH)
       .refine(isValidLogo, "Logo must be one emoji or a WebP image")
       .nullable()
       .optional(),
@@ -348,7 +350,9 @@ router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
     resourceId: orgId,
     after: {
       ...renamed,
-      ...(logo !== undefined ? { logo: logo?.startsWith(WEBP_LOGO_PREFIX) ? "image" : logo } : {}),
+      ...(logo !== undefined
+        ? { logo: logo?.startsWith(ORG_LOGO_WEBP_PREFIX) ? "image" : logo }
+        : {}),
     },
     orgIdOverride: orgId,
   });

@@ -48,6 +48,24 @@ import {
 // OAuth clients
 // ─────────────────────────────────────────────
 
+/** The label key of a client's level; an auto-provisioned space client is told apart. */
+export function clientLevelKey({ client, level }: ClientRow) {
+  if (level === "system") return "source.builtIn";
+  if (level === "org") return "source.org";
+  return client.auto_provisioned ? "source.autoProvisioned" : "source.space";
+}
+
+/**
+ * What the caller may do to a client: a space's own one is the space admin's, an organization
+ * one the org integrations admin's, the system's nobody's. A system client is the platform's and
+ * an auto-provisioned one was minted by the server at connect time: neither has settings an admin
+ * could edit (the auto-provisioned one may be deleted, which re-triggers registration).
+ */
+export function clientDeeds({ client, level }: ClientRow, canManageOrg: boolean) {
+  const ownLevel = level === "space" || (level === "org" && canManageOrg);
+  return { ownLevel, editable: ownLevel && !client.auto_provisioned };
+}
+
 /**
  * The OAuth client column set: which client, at what level, whether this space
  * uses it, and what may be done to it.
@@ -108,15 +126,9 @@ export function useIntegrationClientColumns({
       header: t("integration.clients.col.level"),
       width: "104px",
       tier: 3,
-      cell: ({ client, level }) => (
+      cell: (row) => (
         <span className="text-muted-foreground block truncate text-xs">
-          {level === "system"
-            ? t("source.builtIn")
-            : level === "org"
-              ? t("source.org")
-              : client.auto_provisioned
-                ? t("source.autoProvisioned")
-                : t("source.space")}
+          {t(clientLevelKey(row))}
         </span>
       ),
     },
@@ -141,12 +153,7 @@ export function useIntegrationClientColumns({
       align: "end",
       cell: (row) => {
         const { client, level } = row;
-        // A system client is the platform's, and an auto-provisioned one was
-        // minted by the server at connect time — neither has settings an
-        // admin could edit here. Deleting the auto-provisioned one is
-        // allowed: it re-triggers registration.
-        const ownLevel = level === "space" || (level === "org" && canManageOrg);
-        const editable = ownLevel && !client.auto_provisioned;
+        const { ownLevel, editable } = clientDeeds(row, canManageOrg);
         const promotable = level === "space" && !client.auto_provisioned && canPromote;
         const useHere = canUseHere && row.inSpaceList && !row.usedHere;
         const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;

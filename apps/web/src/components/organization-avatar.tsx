@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cn } from "@appstrate/ui/cn";
+import { ORG_LOGO_EMOJI_PREFIX, ORG_LOGO_WEBP_PREFIX } from "@appstrate/core/validation";
 
 export function OrganizationAvatar({
   name,
@@ -11,8 +12,10 @@ export function OrganizationAvatar({
   logo?: string | null;
   className?: string;
 }) {
-  const emoji = logo?.startsWith("emoji:") ? logo.slice("emoji:".length) : null;
-  const image = logo?.startsWith("data:image/webp;base64,") ? logo : null;
+  const emoji = logo?.startsWith(ORG_LOGO_EMOJI_PREFIX)
+    ? logo.slice(ORG_LOGO_EMOJI_PREFIX.length)
+    : null;
+  const image = logo?.startsWith(ORG_LOGO_WEBP_PREFIX) ? logo : null;
 
   return (
     <span

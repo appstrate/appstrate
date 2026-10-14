@@ -5,6 +5,7 @@ import { formatDuration } from "@appstrate/core/format";
 import {
   buildLogEntries,
   buildTurnRows,
+  journalLevel,
   type ExecutionEntry,
   type RawLog,
   type ToolExecutionEntry,
@@ -499,5 +500,25 @@ describe("buildLogEntries — turn breadcrumbs excluded from the stream", () => 
     expect(toolEntry(entries, 1).detail).toBe("path: a.md");
     expect(toolEntry(entries, 1).durationMs).toBe(120);
     expect(entries[2]!.level).toBe("warn");
+  });
+});
+
+describe("journalLevel — what the run overview counts and the journal filters", () => {
+  const tool = (status: ToolExecutionEntry["status"]): ExecutionEntry => ({
+    id: status,
+    kind: "tool",
+    tool: "gmail__search",
+    status,
+  });
+
+  it("puts a tool call that did not complete under the errors", () => {
+    expect(journalLevel(tool("failed"))).toBe("error");
+    expect(journalLevel(tool("interrupted"))).toBe("error");
+  });
+
+  it("leaves a completed or running call at its own level", () => {
+    expect(journalLevel(tool("success"))).toBe("info");
+    expect(journalLevel(tool("running"))).toBe("info");
+    expect(journalLevel({ id: "w", kind: "log", level: "warn", message: "slow" })).toBe("warn");
   });
 });

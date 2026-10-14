@@ -226,12 +226,9 @@ function DisplayNameRow() {
       <InlineTextSetting
         value={profile?.displayName ?? ""}
         disabled={updateDisplayName.isPending}
+        maxLength={100}
         aria-label={t("preferences.displayName")}
-        onCommit={(name) => {
-          const next = name.trim();
-          if (!next) return;
-          updateDisplayName.mutate({ body: { displayName: next } });
-        }}
+        onCommit={(displayName) => updateDisplayName.mutate({ body: { displayName } })}
       />
     </SettingRow>
   );

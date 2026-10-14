@@ -5,9 +5,8 @@
  * not a page (like a package). It asks what a schedule needs to exist — the
  * agent, a name, when it fires, the inputs the agent asks for — and, folded,
  * what may decide whether it can be created at all: who it runs as, the
- * version (an agent never published fires only its draft) and the model (one
- * no organization credential serves is refused). The schedule's Paramètres tab
- * takes the connections.
+ * version (an agent never published fires only its draft), the model (one
+ * no organization credential serves is refused) and the connections.
  *
  * Opened from anywhere by the `newSchedule` URL parameter (`useModalParam`),
  * carrying the agent to preselect or `1` for none: the schedules list, an
@@ -42,6 +41,7 @@ import { AgentInputForm } from "./agent-input-form";
 import { FrequencyComposer } from "./frequency-composer";
 import { AgentVersionField } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
+import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { ErrorState, LoadingState } from "./page-states";
 import { useActorName } from "../hooks/use-actor-name";
@@ -67,6 +67,7 @@ import {
   scheduleCreatePayload,
 } from "../lib/schedule-payload";
 import { VERSION_INHERIT } from "../lib/schedule-options";
+import { scheduleDetailPath } from "../lib/package-paths";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 
 /** The URL parameter that opens the modal; its value is the agent to preselect, or `1`. */
@@ -93,7 +94,7 @@ export function NewScheduleModalHost() {
       <NewScheduleForm
         initialAgentId={param.value === "1" ? undefined : param.value}
         onCancel={param.close}
-        onCreated={(schedule) => navigate(`/schedules/${schedule.id}`)}
+        onCreated={(schedule) => navigate(scheduleDetailPath(schedule.id))}
       />
     </Modal>
   );
@@ -341,11 +342,25 @@ export function ScheduleFieldsReady({
             persistedModelId={deps.persistedModelId}
             persistedGenerationConfig={deps.persistedGenerationConfig}
             persistedProxyId={deps.persistedProxyId}
+            {...(runsAsViewer && firedIntegrations ? { agentIntegrations: firedIntegrations } : {})}
             value={overrides}
             onChange={(next) => setRun((prev) => ({ ...prev, overrides: next }))}
+            onConnectionPick={setConnectionPick}
             version={firedVersion}
             scheduled
           />
+          {/* Fires running as someone else: the panel's pickers would judge the viewer's
+              connections. A refusal is answered below the options. */}
+          {!runsAsViewer &&
+            refused.length === 0 &&
+            ((firedIntegrations?.length ?? 0) > 0 || Object.keys(picks).length > 0) && (
+              <ScheduleActorConnectionChoice
+                choices={[]}
+                integrations={firedIntegrations ?? []}
+                value={picks}
+                onChange={setConnectionPick}
+              />
+            )}
         </CollapsibleContent>
       </Collapsible>
       {refused.length > 0 && (

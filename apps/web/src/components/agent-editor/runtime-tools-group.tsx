@@ -37,7 +37,7 @@ export function RuntimeToolsGroup({ selected, onChange, showHint = true }: Runti
           // The catalog's English line is the fallback; the UI speaks the reader's language.
           description: t(`editor.runtimeTool.${tool.id}`, { defaultValue: tool.description }),
         }))}
-        selection={{ values: selectedSet, onToggle: toggle, testIdPrefix: "runtime-tool-" }}
+        selection={{ values: selectedSet, onToggle: toggle }}
       />
     </div>
   );

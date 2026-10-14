@@ -42,6 +42,8 @@ interface ChoiceDialogProps {
   existing: OrgModelInfo[];
   /** Where the models live: an organization key, or none (each person's own). */
   credentialId: string | null;
+  /** The organization key needs reconnecting: none of its models can become the default. */
+  credentialUnavailable?: boolean;
   /** « Ajouter une clé org »: the key to mint with the models, and the way back to its form. */
   newCredential?: NewProviderCredential;
   onBack?: () => void;
@@ -62,6 +64,7 @@ function ChoiceDialog({
   provider,
   existing: given,
   credentialId,
+  credentialUnavailable,
   newCredential,
   onBack,
   discoverWith,
@@ -147,6 +150,7 @@ function ChoiceDialog({
         {header}
         <ModelChoiceList
           choice={choice}
+          defaultUnavailable={credentialUnavailable}
           advanced={
             onAdvanced
               ? {
@@ -213,6 +217,7 @@ export function ProviderModelsModal({
       provider={provider}
       existing={models.filter((m) => m.credentialId === credential.id && !isSystemModel(m))}
       credentialId={credential.id}
+      credentialUnavailable={credential.needs_reconnection === true}
       discoverWith={{ credentialId: credential.id }}
       tickAll={false}
       hasDefault={models.some((m) => m.is_default)}

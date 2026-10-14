@@ -12,6 +12,7 @@ import { useSpace, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { SaveFeedback } from "../../components/settings/save-feedback";
+import { fieldWriteState } from "../../lib/field-write-state";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Label } from "@appstrate/ui/components/label";
 import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
@@ -73,18 +74,7 @@ function GeneralForm({
   const [confirmOpen, setConfirmOpen] = useState(false);
   // A visibility leaving `open`, held until its consequence is confirmed.
   const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
-  // The last write and how it went: each row reports its own field only.
-  const [write, setWrite] = useState<{
-    field: SpaceSettingChange["field"];
-    state: "pending" | "success" | "error";
-  } | null>(null);
-  const feedback = (field: SpaceSettingChange["field"]) => (
-    <SaveFeedback
-      pending={write?.field === field && write.state === "pending"}
-      success={write?.field === field && write.state === "success"}
-      error={write?.field === field && write.state === "error"}
-    />
-  );
+  const nameWrite = fieldWriteState(updateMutation, "name");
   const activeDomains = editedDomains ?? domains;
   const activeVisibility = editedVisibility ?? space.visibility;
   const activeDefaultRole = editedDefaultRole ?? space.default_role;
@@ -109,17 +99,11 @@ function GeneralForm({
     change: SpaceSettingChange,
     { onSuccess, onError }: { onSuccess?: () => void; onError?: () => void } = {},
   ) => {
-    const { field } = change;
-    setWrite({ field, state: "pending" });
     updateMutation.mutate(
       { params: { path: { id: spaceId } }, body: spaceUpdateBody(change) },
       {
-        onSuccess: () => {
-          setWrite({ field, state: "success" });
-          onSuccess?.();
-        },
+        onSuccess,
         onError: (error) => {
-          setWrite({ field, state: "error" });
           toastError(error);
           onError?.();
         },
@@ -149,16 +133,22 @@ function GeneralForm({
 
   const commitDomains = (next: string[]) => {
     setEditedDomains(next);
-    if (domainsChanged(domains, next)) save({ field: "domains", value: next });
+    if (domainsChanged(domains, next)) {
+      save({ field: "domains", value: next }, { onError: () => setEditedDomains(null) });
+    }
   };
 
   return (
     <>
       <SettingsGroup title={t("spaces.settingsTitle")}>
-        <SettingRow variant="field" label={t("spaces.nameLabel")} status={feedback("name")}>
+        <SettingRow
+          variant="field"
+          label={t("spaces.nameLabel")}
+          status={<SaveFeedback {...nameWrite} />}
+        >
           <InlineTextSetting
             value={space.name}
-            disabled={updateMutation.isPending}
+            disabled={nameWrite.pending}
             aria-label={t("spaces.nameLabel")}
             placeholder={t("spaces.namePlaceholder")}
             onCommit={(name) => save({ field: "name", value: name })}
@@ -173,7 +163,7 @@ function GeneralForm({
               variant="field"
               label={t("spaces.redirectDomains")}
               description={t("spaces.redirectDomainsHint")}
-              status={feedback("domains")}
+              status={<SaveFeedback {...fieldWriteState(updateMutation, "settings")} />}
             >
               <div className="flex w-full flex-col gap-2">
                 {activeDomains.map((domain, index) => (
@@ -231,7 +221,7 @@ function GeneralForm({
               variant="field"
               label={t("spaces.visibilityLabel")}
               description={t("spaces.visibilityHint")}
-              status={feedback("visibility")}
+              status={<SaveFeedback {...fieldWriteState(updateMutation, "visibility")} />}
             >
               <div className="flex w-full flex-col gap-3">
                 <RadioGroup
@@ -275,7 +265,7 @@ function GeneralForm({
                 variant="field"
                 label={t("spaces.defaultRoleLabel")}
                 description={t("spaces.defaultRoleHint")}
-                status={feedback("defaultRole")}
+                status={<SaveFeedback {...fieldWriteState(updateMutation, "default_role")} />}
               >
                 <div className="flex w-full flex-col gap-2">
                   <SpaceRoleSelect
@@ -287,6 +277,9 @@ function GeneralForm({
                     disabled={updateMutation.isPending}
                     onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
                   />
+                  <p className="text-muted-foreground text-xs">
+                    {t(`roles.presetDesc.${activeDefaultRole}`)}
+                  </p>
                   <RoleCatalogState
                     isLoading={rolesLoading}
                     rolesKnown={rolesKnown}

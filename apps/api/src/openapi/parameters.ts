@@ -24,7 +24,7 @@ export const parameters = {
     description: `Filter runs by lifecycle status: one of ${runStatusValues.map((s) => `\`${s}\``).join(", ")}, or several separated by commas (\`failed,timeout\` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with \`400\` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.`,
     schema: {
       type: "string",
-      pattern: `^(${RUN_STATUS}(,${RUN_STATUS})*)?$`,
+      pattern: `^(\\s*${RUN_STATUS}\\s*(,\\s*${RUN_STATUS}\\s*)*)?$`,
       example: "failed,timeout",
     },
   },

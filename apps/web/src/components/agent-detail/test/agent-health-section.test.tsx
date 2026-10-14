@@ -26,14 +26,14 @@ await i18nModule.default.changeLanguage("fr");
 const ORG_ID = "org_a";
 const SPACE_ID = "spc_a";
 
-function diagnostic(code: string, field: string): AgentDiagnostic {
+function diagnostic(code: string, field: string, section = "inputs"): AgentDiagnostic {
   return {
     code,
     severity: "blocking",
     title: code,
     explanation: code,
     field,
-    correction: { destination: "configuration", section: "inputs", params: {} },
+    correction: { destination: "configuration", section, params: {} },
     recoverable_on_launch: false,
   };
 }
@@ -78,7 +78,7 @@ const FIX = ">Corriger</a>";
 
 describe("the agent's health card", () => {
   it("offers no fix for an agent switched off here", () => {
-    const html = renderSection([diagnostic("agent_not_active", "agent")]);
+    const html = renderSection([diagnostic("agent_not_active", "agent", "activation")]);
     expect(html).toContain(
       i18nModule.default.t("detail.diagnostics.agentNotActive.title", { ns: "agents" }),
     );

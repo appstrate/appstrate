@@ -166,3 +166,22 @@ describe("a pinned version's inputs", () => {
     expect(html).not.toContain("current_field");
   });
 });
+
+describe("a pinned version's per-space settings", () => {
+  // Connections and schedules belong to the space, not to a version: reading a
+  // past version shows them as they are.
+  for (const section of ["connections", "schedules"] as const) {
+    it(`renders ${section} as for the live draft`, () => {
+      const view = (isHistorical: boolean) =>
+        render(
+          <AgentConfigurationView
+            packageId="@acme/worker"
+            detail={agent()}
+            section={section}
+            isHistorical={isHistorical}
+          />,
+        );
+      expect(view(true)).toBe(view(false));
+    });
+  }
+});

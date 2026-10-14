@@ -59,8 +59,25 @@ describe("route declarations", () => {
       ...reached(text),
       ...[...text.matchAll(/(?:path|landsOn): "([^"]+)"/g)].map((m) => m[1]!),
     ]);
-    // Few on purpose: the settings rail, not the shell, links every settings page.
-    expect(targets.length).toBeGreaterThan(10);
+    // Pinned, so a shell link that moves out of these files or out of reach of
+    // the patterns above is a diff here. The settings rail, not the shell,
+    // links every settings page.
+    expect([...new Set(targets)].sort()).toEqual([
+      "/",
+      "/agents",
+      "/agents/:scope/:name/runs/:runId",
+      "/catalogue",
+      "/catalogue/:reading/:type",
+      "/chat",
+      "/files",
+      "/integrations",
+      "/org-settings",
+      "/preferences",
+      "/runs",
+      "/schedules",
+      "/skills",
+      "/workspace-settings",
+    ]);
     expect(targets.filter((t) => !declared.has(t) && !OUTSIDE_MAIN_LAYOUT.has(t))).toEqual([]);
   });
 
@@ -118,13 +135,14 @@ describe("routeVerdict", () => {
       "/workspace-settings/api-keys",
       "/workspace-settings/oauth",
       "/workspace-settings/end-users",
-      "/workspace-settings/auth",
     ];
     for (const path of teamSpaceOnly) {
       expect(routeVerdict(path, all, { oidc: true }, true)).toBe("absent");
       expect(routeVerdict(path, all, { oidc: true }, false)).toBe("granted");
     }
     expect(routeVerdict("/workspace-settings/general", all, {}, true)).toBe("granted");
+    // Its deletes stay open there, so a row the space holds can always be removed.
+    expect(routeVerdict("/workspace-settings/auth", all, { oidc: true }, true)).toBe("granted");
     expect(routeVerdict("/agents", all, {}, true)).toBe("granted");
   });
 
@@ -137,7 +155,7 @@ describe("routeVerdict", () => {
 describe("overlay paths", () => {
   it("are the overlay prefixes, segment by segment", () => {
     expect(isOverlayPath("/org-settings")).toBe(true);
-    expect(isOverlayPath("/org-settings/space/general")).toBe(true);
+    expect(isOverlayPath("/workspace-settings/webhooks/wh_1")).toBe(true);
     expect(isOverlayPath("/preferences/x")).toBe(true);
     expect(isOverlayPath("/catalogueX")).toBe(false);
     expect(isOverlayPath("/org-settingsfoo")).toBe(false);
@@ -156,6 +174,8 @@ describe("overlay paths", () => {
     for (const prefix of OVERLAY_PREFIXES) {
       expect(matched(`${prefix}/no-such-page`)).toBe(`${prefix}/*`);
     }
+    // Below a declared page too: no prefix of it stands in.
+    expect(matched("/org-settings/general/no-such-page")).toBe("/org-settings/*");
     // Outside the overlays the main tree answers.
     expect(matched("/agents/no-such-page")).toBeUndefined();
   });
@@ -164,7 +184,6 @@ describe("overlay paths", () => {
     expect(matched("/org-settings/general")).toBe("/org-settings/general");
     expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
     expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");
-    expect(matched("/org-settings/space/general")).toBe("/org-settings/*");
     expect(matched("/preferences/x")).toBe("/preferences/*");
   });
 });

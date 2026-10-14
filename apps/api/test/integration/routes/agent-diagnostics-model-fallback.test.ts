@@ -219,3 +219,64 @@ describe("GET /api/agents/:scope/:name/diagnostics — model no credential serve
     expect(((await launch.json()) as { code: string }).code).toBe("model_credential_required");
   });
 });
+
+describe("GET /api/agents/:scope/:name/diagnostics — model credential without a secret", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "modelkeyless" });
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: { name: AGENT, version: "0.1.0", type: "agent" },
+      draftContent: "Do the thing.",
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+    const cred = await seedOrgModelProviderKey({
+      orgId: ctx.orgId,
+      providerId: "deepseek",
+      apiShape: "openai-completions",
+      baseUrl: "https://api.deepseek.com/v1",
+      apiKey: "   ",
+    });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: cred.id,
+      label: "Keyless",
+      modelId: "deepseek-chat",
+      aliased: false,
+    });
+    await setDefaultModel(ctx.orgId, model.id);
+  });
+
+  it("blocks with the launch's refusal of a model whose credential carries no key", async () => {
+    const res = await app.request(`/api/agents/${AGENT}/diagnostics`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiagnosticsBody;
+    expect(body.can_launch).toBe(false);
+    expect(body.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "model_credential_missing",
+        severity: "blocking",
+        correction: {
+          destination: "configuration",
+          section: "model",
+          params: { model: "Keyless" },
+        },
+      }),
+    ]);
+
+    const launch = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+    });
+    expect(launch.status).toBe(400);
+    expect(((await launch.json()) as { code: string }).code).toBe("model_credential_missing");
+  });
+});

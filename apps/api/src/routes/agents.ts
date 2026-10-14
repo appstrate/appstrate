@@ -34,7 +34,7 @@ import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
-import { readAgentAppearance } from "../lib/agent-appearance.ts";
+import { readAgentAppearance } from "@appstrate/core/validation";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";

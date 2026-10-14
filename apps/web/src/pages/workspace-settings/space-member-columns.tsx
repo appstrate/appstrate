@@ -25,7 +25,7 @@ import type { SpaceMemberObject } from "../../hooks/use-space-members";
 
 type SpaceRoleOption = ReturnType<typeof useSpaceRoleOptions>["options"][number];
 
-function memberLabel(member: SpaceMemberObject): string {
+export function spaceMemberLabel(member: SpaceMemberObject): string {
   return member.name || member.email || member.userId;
 }
 
@@ -66,8 +66,8 @@ export function useSpaceMemberColumns({
       header: t("spaceMembers.colMember"),
       width: "minmax(100px,1.4fr)",
       cell: (member) => (
-        <span className="block truncate text-sm font-medium" title={memberLabel(member)}>
-          {memberLabel(member)}
+        <span className="block truncate text-sm font-medium" title={spaceMemberLabel(member)}>
+          {spaceMemberLabel(member)}
         </span>
       ),
     },
@@ -110,7 +110,7 @@ export function useSpaceMemberColumns({
             fallbackLabel={spaceRoleLabel(member.role, t) ?? t("spaceMembers.noRole")}
             placeholder={t("spaceMembers.noRole")}
             className="h-7 w-full text-xs"
-            ariaLabel={t("spaceMembers.roleAriaLabel", { name: memberLabel(member) })}
+            ariaLabel={t("spaceMembers.roleAriaLabel", { name: spaceMemberLabel(member) })}
             disabled={isChangingRole}
             onValueChange={(value) => onChangeRole(member, value)}
           />
@@ -130,7 +130,7 @@ export function useSpaceMemberColumns({
         if (!kind) return null;
         return (
           <TableRowActions
-            menuLabel={t("spaceMembers.moreActions", { name: memberLabel(member) })}
+            menuLabel={t("spaceMembers.moreActions", { name: spaceMemberLabel(member) })}
             isPending={isRemoving}
             pendingLabel={t("common:loading")}
           >

@@ -172,6 +172,42 @@ describe("ConnectionDeleteImpact", () => {
     expect(html).toContain(i18n.t("settings:connections.deleteImpact.loading"));
   });
 
+  it("punctuates each line as its language does", async () => {
+    const impact: Impact = {
+      pins: [
+        {
+          agent_package_id: "@acme/ops",
+          agent_display_name: "Ops multi",
+          integration_package_id: "@acme/ssh",
+          connection_count: 1,
+          schedules_disabled_count: 0,
+        },
+      ],
+      schedules: [
+        {
+          scheduleId: "sch_1",
+          schedule_name: "Veille",
+          agent_package_id: "@acme/ops",
+          agent_display_name: "Ops multi",
+          integration_package_id: "@acme/ssh",
+          connection_count: 1,
+          disables: false,
+        },
+      ],
+      other_schedules_disabled_count: 0,
+    };
+    expect(renderWith(impact)).toContain("Ops multi</span> : ");
+    await i18n.changeLanguage("en");
+    try {
+      const html = renderWith(impact);
+      expect(html).toContain("Ops multi</span>: ");
+      expect(html).toContain("Veille</span> (Ops multi): ");
+      expect(html).not.toContain(" : ");
+    } finally {
+      await i18n.changeLanguage("fr");
+    }
+  });
+
   it("says the check failed when the impact cannot be read", () => {
     const html = render(
       <ConnectionDeleteImpact

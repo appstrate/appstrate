@@ -87,7 +87,6 @@ export const SHARE_PARAM = "share";
  * in one `TabsList`.
  */
 export function SharePackageDialog({
-  open,
   onClose,
   packageId,
   type,
@@ -95,7 +94,6 @@ export function SharePackageDialog({
   canPublish,
   onMoveHome,
 }: {
-  open: boolean;
   onClose: () => void;
   packageId: string;
   /** Publishing is per-type — the version routes are `/api/packages/<type>/…`. */
@@ -117,12 +115,12 @@ export function SharePackageDialog({
   onMoveHome?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: shares, isLoading } = usePackageShares(packageId, open);
-  const { data: spaces } = useSpaces(open);
-  const { data: org } = useOrgDetail({ enabled: open });
+  const { data: shares, isLoading } = usePackageShares(packageId, true);
+  const { data: spaces } = useSpaces();
+  const { data: org } = useOrgDetail();
   // Only an AGENT declares integrations; the other families have no closure a
   // recipient has to hold.
-  const detail = usePackageDetail("agent", open && type === "agent" ? packageId : undefined);
+  const detail = usePackageDetail("agent", type === "agent" ? packageId : undefined);
   // The names as a reader knows them, not the ids: the index is already loaded
   // wherever this dialog opens from, so it costs nothing here.
   const { data: integrationRows } = useAllIntegrations();
@@ -222,7 +220,7 @@ export function SharePackageDialog({
 
   return (
     <Modal
-      open={open}
+      open
       onClose={close}
       title={t("packages.shareTitle")}
       actions={
@@ -378,7 +376,6 @@ export function SharePackageDialog({
         </TabsContent>
         <TabsContent value="coedit">
           <CoeditTab
-            open={open}
             homeSpaceId={homeSpaceId}
             orgMembers={org?.members ?? []}
             onMoveHome={onMoveHome}
@@ -399,19 +396,17 @@ export function SharePackageDialog({
  * is standing in, which is rarely this one.
  */
 function CoeditTab({
-  open,
   homeSpaceId,
   orgMembers,
   onMoveHome,
 }: {
-  open: boolean;
   homeSpaceId: string | null | undefined;
   orgMembers: Array<{ userId: string; displayName?: string | null; email?: string | null }>;
   onMoveHome?: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const home = useSpaceGrant(homeSpaceId);
-  const homeName = (useSpaces(open).data ?? []).find((space) => space.id === homeSpaceId)?.name;
+  const homeName = (useSpaces().data ?? []).find((space) => space.id === homeSpaceId)?.name;
   const verdict = coeditVerdict(home);
   const mayInvite = verdict === "invite";
   const mayRead = home?.permissions.includes("space-members:read") ?? false;
@@ -419,8 +414,8 @@ function CoeditTab({
   // space_member_exists`: `space-members:read` is a separate grant from
   // `invite`, so when it is missing the list is simply not narrowed and the
   // refusal does the talking.
-  const { data: existing } = useSpaceMembers(homeSpaceId ?? "", open && mayInvite && mayRead);
-  const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, open && mayInvite);
+  const { data: existing } = useSpaceMembers(homeSpaceId ?? "", mayInvite && mayRead);
+  const roles = useSpaceRoleOptions(homeSpaceId ?? undefined, mayInvite);
   const addMember = useAddSpaceMember({ errorHandledByCaller: true });
   const [member, setMember] = useState("");
   const [role, setRole] = useState(DEFAULT_SPACE_ROLE_VALUE);

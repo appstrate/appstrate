@@ -11,8 +11,9 @@ import {
   TableHeader,
   TableRow,
 } from "@appstrate/ui/components/table";
-import { fractionOfWindow, formatWindowPercent, readRunContext } from "./run-context";
-import type { RunTurnRow } from "./log-utils";
+import { fractionOfWindow, formatWindowPercent, readRunContext } from "../run-context";
+import type { RunTurnRow } from "../log-utils";
+import { formatNumber } from "../../lib/format-number";
 
 /**
  * Per-turn breakdown. Totals alone hide WHERE a run started re-reading its
@@ -104,7 +105,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
                     )}
                     style={{ width: `${fraction * 100}%` }}
                   />
-                  <span className="relative">{turn.contextTokens.toLocaleString()}</span>
+                  <span className="relative">{formatNumber(turn.contextTokens)}</span>
                 </TableCell>
                 {hasWindow && (
                   <TableCell className="text-muted-foreground px-0 py-1 pr-3 text-right tabular-nums">
@@ -112,7 +113,7 @@ function TurnsTable({ turns }: { turns: RunTurnRow[] }) {
                   </TableCell>
                 )}
                 <TableCell className="px-0 py-1 pr-3 text-right tabular-nums">
-                  {turn.outputTokens.toLocaleString()}
+                  {formatNumber(turn.outputTokens)}
                 </TableCell>
                 <TableCell className="text-muted-foreground px-0 py-1 text-right tabular-nums">
                   {/* Omitted by the runner when it could not observe the turn's

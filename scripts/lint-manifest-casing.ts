@@ -199,11 +199,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName"],
     reason: PROFILE_DISPLAY_NAME,
   },
-  {
-    path: "apps/web/src/pages/preferences/general.tsx",
-    keys: ["displayName"],
-    reason: PROFILE_DISPLAY_NAME,
-  },
   { path: "apps/web/src/pages/welcome.tsx", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   { path: "apps/cli/src/commands/whoami.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
 

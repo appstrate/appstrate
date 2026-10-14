@@ -1,17 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, lazy, Suspense, type ReactNode } from "react";
-import {
-  Routes,
-  Route,
-  Outlet,
-  useLocation,
-  useNavigate,
-  useSearchParams,
-  Navigate,
-} from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
+import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
 import { PackageList } from "./pages/package-list";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
@@ -26,12 +16,8 @@ import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
 import { AppSidebar } from "./components/app-sidebar";
-import {
-  modalReturnTarget,
-  OverlayProvider,
-  useBackgroundLocation,
-  usePageLocation,
-} from "./lib/modal-route";
+import { OverlayExitProvider, OverlayProvider, useOverlayState } from "./lib/modal-route";
+import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { ShellHeader } from "./components/shell-frame";
 import { LoadingState } from "./components/page-states";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
@@ -45,7 +31,7 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { NotFoundPage, RouteGate, UnavailableState } from "./components/route-gate";
+import { NotFoundPage, RouteGate } from "./components/route-gate";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -55,6 +41,7 @@ import {
   isOverlayPath,
   isUnder,
   OVERLAY_NOT_FOUND_PATHS,
+  SETTINGS_INDEX,
   type RoutePath,
 } from "./lib/route-access";
 
@@ -421,32 +408,9 @@ function mountOf(path: RoutePath): "main" | "chat" | "overlay" {
   return isOverlayPath(path) ? "overlay" : "main";
 }
 
-/** An address under an overlay that matches none of its pages: said in a dialog over the background. */
-function OverlayNotFound() {
-  const { t } = useTranslation("common");
-  const navigate = useNavigate();
-  const close = modalReturnTarget(useBackgroundLocation());
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && navigate(close.to, { replace: true, state: close.state })}
-    >
-      <DialogContent aria-describedby={undefined}>
-        <DialogTitle className="sr-only">{t("access.unavailable")}</DialogTitle>
-        <UnavailableState />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** The nested layouts, with what each index opens. */
-const LAYOUT_INDEX = {
-  "/preferences": <SettingsIndexRedirect />,
-  "/org-settings": <SettingsIndexRedirect />,
-  "/workspace-settings": <SettingsIndexRedirect />,
-} satisfies Partial<Record<RoutePath, ReactNode>>;
-type LayoutPath = keyof typeof LAYOUT_INDEX;
-const LAYOUTS = Object.keys(LAYOUT_INDEX) as LayoutPath[];
+/** The nested layouts: the settings scopes, each index opening the scope's first page. */
+const LAYOUTS = Object.values(SETTINGS_INDEX);
+type LayoutPath = (typeof LAYOUTS)[number];
 const inLayout = (path: RoutePath) => LAYOUTS.some((layout) => isUnder(path, layout));
 
 /** A mount's routes that no layout nests. */
@@ -466,7 +430,7 @@ function layoutRoute(layout: LayoutPath) {
       path={layout}
       element={<RouteGate path={layout}>{PAGES[layout]}</RouteGate>}
     >
-      <Route index element={LAYOUT_INDEX[layout]} />
+      <Route index element={<SettingsIndexRedirect />} />
       {PATHS.filter((path) => path.startsWith(`${layout}/`)).map(pageRoute)}
     </Route>
   );
@@ -540,10 +504,13 @@ function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
  * by it.
  */
 function ChatLayout() {
+  const { pathname } = useLocation();
   useSpaceResolver();
   return (
     <GlobalRealtimeSync>
-      <Outlet />
+      <ErrorBoundary resetKey={pathname}>
+        <Outlet />
+      </ErrorBoundary>
     </GlobalRealtimeSync>
   );
 }
@@ -647,8 +614,7 @@ export function App() {
   // While an overlay is up the page tree renders the page it opened over, so
   // that page stays exactly as the user left it — scroll, filters and all —
   // instead of unmounting.
-  const page = usePageLocation();
-  const overlay = page === location ? null : { path: location.pathname, background: page };
+  const { page, overlay, exit } = useOverlayState();
   useExternalRedirect(!!user);
 
   if (loading) {
@@ -817,120 +783,123 @@ export function App() {
       <PendingPairingsWatcher />
       <OrgGate>
         <OverlayProvider value={overlay}>
-          <Routes location={page}>
-            <Route path="/login" element={<Navigate to="/" replace />} />
-            <Route path="/register" element={<Navigate to="/" replace />} />
-            {/*
-             * `/auth/callback` must be reachable while authenticated too: by
-             * the time the browser lands here, the BA session cookie is
-             * already set by the server, so `useAuth()` flips us into this
-             * block before `AuthCallbackPage` runs. Without the route here
-             * the URL falls through to the catch-all and the `sessionStorage`
-             * returnTo we stashed pre-login is never consumed.
-             */}
-            {features.oidc && (
+          <OverlayExitProvider value={exit}>
+            <Routes location={page}>
+              <Route path="/login" element={<Navigate to="/" replace />} />
+              <Route path="/register" element={<Navigate to="/" replace />} />
+              {/*
+               * `/auth/callback` must be reachable while authenticated too: by
+               * the time the browser lands here, the BA session cookie is
+               * already set by the server, so `useAuth()` flips us into this
+               * block before `AuthCallbackPage` runs. Without the route here
+               * the URL falls through to the catch-all and the `sessionStorage`
+               * returnTo we stashed pre-login is never consumed.
+               */}
+              {features.oidc && (
+                <Route
+                  path="/auth/callback"
+                  element={
+                    <Suspense fallback={<BootScreen />}>
+                      <AuthCallbackPage />
+                    </Suspense>
+                  }
+                />
+              )}
+              <Route path="/invite/:token" element={<InviteAcceptPage />} />
               <Route
-                path="/auth/callback"
-                element={
-                  <Suspense fallback={<BootScreen />}>
-                    <AuthCallbackPage />
-                  </Suspense>
-                }
-              />
-            )}
-            <Route path="/invite/:token" element={<InviteAcceptPage />} />
-            <Route
-              path="/welcome"
-              element={
-                <LazyRoute>
-                  <WelcomePage />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/onboarding/waiting"
-              element={
-                <LazyRoute>
-                  <OnboardingWaitingStep />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/onboarding/create"
-              element={
-                <LazyRoute>
-                  <OnboardingCreateStep />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/onboarding/plan"
-              element={
-                <LazyRoute>
-                  <OnboardingPlanStep />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/onboarding/model"
-              element={
-                <LazyRoute>
-                  <OnboardingModelStep />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/onboarding/members"
-              element={
-                <LazyRoute>
-                  <OnboardingMembersStep />
-                </LazyRoute>
-              }
-            />
-            <Route
-              path="/onboarding/complete"
-              element={
-                <LazyRoute>
-                  <OnboardingDoneStep />
-                </LazyRoute>
-              }
-            />
-            {/* Beside MainLayout, not inside it: see `ChatLayout`. */}
-            <Route element={<ChatLayout />}>{flatPaths("chat").map(pageRoute)}</Route>
-            <Route
-              element={
-                <GlobalRealtimeSync>
-                  <MainLayout />
-                </GlobalRealtimeSync>
-              }
-            >
-              {flatPaths("main").map(pageRoute)}
-              <Route path="*" element={<NotFoundPage />} />
-            </Route>
-          </Routes>
-          {/* Overlay tree — the ONLY home of the routed modals. The tree above
-              renders the page under the overlay, so a second copy there could
-              never match; that is why there is no page-shaped variant to keep
-              in sync. */}
-          {overlay && (
-            <Routes>
-              {flatPaths("overlay").map(pageRoute)}
-              <Route
+                path="/welcome"
                 element={
                   <LazyRoute>
-                    <UnifiedSettingsLayout />
+                    <WelcomePage />
                   </LazyRoute>
                 }
+              />
+              <Route
+                path="/onboarding/waiting"
+                element={
+                  <LazyRoute>
+                    <OnboardingWaitingStep />
+                  </LazyRoute>
+                }
+              />
+              <Route
+                path="/onboarding/create"
+                element={
+                  <LazyRoute>
+                    <OnboardingCreateStep />
+                  </LazyRoute>
+                }
+              />
+              <Route
+                path="/onboarding/plan"
+                element={
+                  <LazyRoute>
+                    <OnboardingPlanStep />
+                  </LazyRoute>
+                }
+              />
+              <Route
+                path="/onboarding/model"
+                element={
+                  <LazyRoute>
+                    <OnboardingModelStep />
+                  </LazyRoute>
+                }
+              />
+              <Route
+                path="/onboarding/members"
+                element={
+                  <LazyRoute>
+                    <OnboardingMembersStep />
+                  </LazyRoute>
+                }
+              />
+              <Route
+                path="/onboarding/complete"
+                element={
+                  <LazyRoute>
+                    <OnboardingDoneStep />
+                  </LazyRoute>
+                }
+              />
+              {/* Beside MainLayout, not inside it: see `ChatLayout`. */}
+              <Route element={<ChatLayout />}>{flatPaths("chat").map(pageRoute)}</Route>
+              <Route
+                element={
+                  <GlobalRealtimeSync>
+                    <MainLayout />
+                  </GlobalRealtimeSync>
+                }
               >
-                {layoutRoute("/org-settings")}
-                {layoutRoute("/workspace-settings")}
-                {layoutRoute("/preferences")}
+                {flatPaths("main").map(pageRoute)}
+                <Route path="*" element={<NotFoundPage />} />
               </Route>
-              {OVERLAY_NOT_FOUND_PATHS.map((path) => (
-                <Route key={path} path={path} element={<OverlayNotFound />} />
-              ))}
             </Routes>
-          )}
+            {/* Overlay tree — the ONLY home of the routed modals. The tree above
+                renders the page under the overlay, so a second copy there could
+                never match; that is why there is no page-shaped variant to keep
+                in sync. Outside MainLayout's boundary, so it has its own: the
+                root one is cleared by no navigation. */}
+            {overlay && (
+              <ErrorBoundary resetKey={location.pathname}>
+                <Routes>
+                  {flatPaths("overlay").map(pageRoute)}
+                  <Route
+                    element={
+                      <LazyRoute>
+                        <UnifiedSettingsLayout />
+                      </LazyRoute>
+                    }
+                  >
+                    {LAYOUTS.map(layoutRoute)}
+                  </Route>
+                  {OVERLAY_NOT_FOUND_PATHS.map((path) => (
+                    <Route key={path} path={path} element={<OverlayUnavailable />} />
+                  ))}
+                </Routes>
+              </ErrorBoundary>
+            )}
+          </OverlayExitProvider>
         </OverlayProvider>
       </OrgGate>
     </ErrorBoundary>

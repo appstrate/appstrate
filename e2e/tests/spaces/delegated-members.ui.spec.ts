@@ -319,17 +319,33 @@ test("a runner lands on the agents page, can run, and cannot read what it runs",
     const navLink = (href: string) => page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
     await expect(navLink("/agents")).toBeVisible();
     await expect(navLink("/skills")).toHaveCount(0);
-    await expect(navLink("/mcp-servers")).toHaveCount(0);
     await expect(navLink("/schedules")).toHaveCount(0);
     await expect(page.getByText(`Test Agent ${agentName}`).first()).toBeVisible();
 
-    // The detail is the SUMMARY read: it launches, and the tabs fed by the
-    // manifest, the file explorer and the version history are not offered.
-    await page.goto(`/agents/${scope}/${agentName}`);
+    // The detail is the SUMMARY read: it launches and opens on the runner's own
+    // runs, where a full reader opens on the overview. Every tab and settings
+    // section stays listed; the ones fed by the manifest, the file explorer and
+    // the version history say the role does not open them, and show none of it.
+    const detailPath = `/agents/${scope}/${agentName}`;
+    await page.goto(detailPath);
     await expect(page.getByRole("button", { name: /^(Lancer|Run)$/ }).first()).toBeVisible();
-    await expect(page.getByRole("tab", { name: /^(Runs)$/ })).toBeVisible();
-    for (const withheld of [/^(À propos|About)$/, /^(Contenu|Content)$/, /^Archives$/]) {
-      await expect(page.getByRole("tab", { name: withheld })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Runs", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await page.getByRole("tab", { name: /^(Vue d’ensemble|Overview)$/ }).click();
+    await expect(
+      page.getByRole("note").filter({
+        hasText: /pas de voir son contenu|not see what it is made of/,
+      }),
+    ).toBeVisible();
+    for (const section of ["files", "versions"]) {
+      await page.goto(`${detailPath}?agentSettings=${section}#settings`);
+      await expect(
+        page.getByRole("note").filter({
+          hasText: /ne donne pas accès à cette section|does not give access to this section/,
+        }),
+      ).toBeVisible();
     }
 
     // A typed URL for a surface the preset withholds is the shared refusal

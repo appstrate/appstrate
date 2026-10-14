@@ -38,7 +38,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -88,7 +88,7 @@ import {
   type PlacementState,
 } from "../lib/catalogue-placement";
 import { useModalParam } from "../hooks/use-modal-param";
-import { useLocalListParams } from "../lib/list-params";
+import { useListParams } from "../lib/list-params";
 import {
   INTEGRATION_EXECUTIONS,
   integrationExecution,
@@ -127,11 +127,10 @@ const KIND: Record<PackageType, { icon: typeof Layers; titleKey: string }> = {
 const KINDS = CATALOGUE_KINDS.map((type) => ({ type, ...KIND[type] }));
 
 /**
- * Columns the catalogue drops. `source` gives way to the catalogue's own origin
- * column, which names the provider instead of badging only one side, and
- * `keywords` goes because the library carries none.
+ * Columns the catalogue drops. `origin` is drawn again with each package's home
+ * space under its provider, and `keywords` goes because the library carries none.
  */
-const CATALOGUE_DROPS = ["state", "actions", "source", "keywords"];
+const CATALOGUE_DROPS = ["state", "actions", "origin", "keywords"];
 
 /** One activation waiting on the integration question. */
 interface Closure {
@@ -158,7 +157,8 @@ export function OrgCatalogueModal({
   const { currentOrg } = useOrg();
   const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
-  const list = useLocalListParams();
+  // The catalogue has an address of its own: its search and filters are in it.
+  const list = useListParams(["state", "origin"]);
   // Each half has the form its job needs, and the reader does not choose it.
   // Découvrir is BROWSING — a name, what it does, where it comes from — which
   // is what a card carries and a table row crushes. Vos espaces is MANAGING —
@@ -201,7 +201,6 @@ export function OrgCatalogueModal({
   const { data: reachable } = useSpaces();
   const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
 
   /**
    * One row's placement, for every kind but the integrations.
@@ -311,22 +310,9 @@ export function OrgCatalogueModal({
    * own entry at the head of the rail. `pages/catalogue.tsx` drops the key when
    * the reading changes, so it never lingers on the way to Découvrir.
    */
-  const STATE_VALUES = ["active", "inactive", "offered"] as const;
-  const states = discovering
+  const states: PlacementState[] = discovering
     ? []
-    : (searchParams.get("state") ?? "")
-        .split(",")
-        .filter((value) => (STATE_VALUES as readonly string[]).includes(value));
-  const setStates = (next: string[]) =>
-    setSearchParams(
-      (prev) => {
-        const out = new URLSearchParams(prev);
-        if (next.length > 0) out.set("state", next.join(","));
-        else out.delete("state");
-        return out;
-      },
-      { replace: true },
-    );
+    : list.values("state", ["active", "inactive", "offered"] as const);
   /** Its states across every space: the columns are the question. */
   const statesIn = (placement: CataloguePlacement): PlacementState[] => {
     const out: PlacementState[] = [];
@@ -350,7 +336,7 @@ export function OrgCatalogueModal({
       { value: "inactive", label: t("catalogue.filter.inactive") },
       { value: "offered", label: t("catalogue.filter.offered") },
     ],
-    onChange: setStates,
+    onChange: list.setValues("state"),
   };
   // Provenance: an attribute of the package, not the question a reader asks
   // first — which is why it is a filter and not the rail's axis.
@@ -657,45 +643,10 @@ export function OrgCatalogueModal({
     </div>
   );
 
-  const mobileNav = (
-    <div>
-      <nav aria-label={t("catalogue.kinds")} className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
-        {showShared && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={reading === "shared"}
-            className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
-            onClick={() => show("shared", active)}
-          >
-            <Inbox className="size-4 shrink-0" />
-            {t("catalogue.shared.title")}
-          </Button>
-        )}
-        {KINDS.map((entry) => (
-          <Button
-            key={entry.type}
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-pressed={reading !== "shared" && entry.type === active}
-            className="aria-pressed:bg-accent shrink-0 gap-2 px-3"
-            onClick={() => show(reading === "shared" ? "discover" : reading, entry.type)}
-          >
-            <entry.icon className="size-4 shrink-0" />
-            {t(entry.titleKey)}
-          </Button>
-        ))}
-      </nav>
-    </div>
-  );
-
   return (
     <PanelDialog
       title={t("catalogue.title")}
       rail={rail}
-      mobileNav={mobileNav}
       // Where the reader is, kept in place while the pane scrolls: the kind
       // they are browsing, or the package they opened, with the way back.
       contentHeader={(stuck) =>
@@ -806,8 +757,6 @@ export function OrgCatalogueModal({
           emptyHint={t(discovering ? "catalogue.emptyDiscoverHint" : "catalogue.emptyPlacedHint")}
           emptyIcon={kind.icon}
           list={list}
-          // The state lives in the URL, out of the bar's own reset's reach.
-          onResetFilters={() => setStates([])}
           view={view}
           header={
             <>
@@ -917,7 +866,6 @@ export function OrgCatalogueModal({
 
       {moveHome.value && (
         <MoveHomeSpaceDialog
-          open
           onClose={moveHome.close}
           packageId={moveHome.value}
           type={active}
@@ -926,7 +874,6 @@ export function OrgCatalogueModal({
       )}
       {share.value && (
         <SharePackageDialog
-          open
           onClose={share.close}
           packageId={share.value}
           type={active}

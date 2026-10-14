@@ -63,6 +63,7 @@ import { useUpdatePackage } from "../../hooks/use-mutations";
 import { useOrgScope } from "../../hooks/use-org-scope";
 import { usePackageDetail, usePackageVersions, useVersionDetail } from "../../hooks/use-packages";
 import { useUnsavedChanges } from "../../hooks/use-unsaved-changes";
+import { useReportEditorDirty } from "../../hooks/use-editor-state";
 import {
   isPinnedEntry,
   languageForPath,
@@ -220,15 +221,20 @@ export function PackageFilesView({
   const { data: writableDraft } = usePackageDetail(type, editing ? packageId : undefined);
   const updatePackage = useUpdatePackage(type, packageId);
   const [operations, setOperations] = useState<PackageFileWriteOperation[]>([]);
-  // The tree the first edit started from. A refetch cannot rebase staged edits;
-  // the original ETag (sent as If-Match) rejects the save if the package moved meanwhile.
-  const [base, setBase] = useState<readonly PackageFileEntry[] | null>(null);
+  // The draft the first edit started from. A refetch cannot rebase staged edits;
+  // its ETag (sent as If-Match) rejects the save if the package moved meanwhile.
+  const [base, setBase] = useState<{
+    entries: readonly PackageFileEntry[];
+    etag: string;
+    manifest: Record<string, unknown>;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const editingFile = useModalParam("editFile");
   const dirty = operations.length > 0;
   const { blocker } = useUnsavedChanges(dirty);
-  const bundleBase = base ?? bundleIndex?.data;
+  useReportEditorDirty(dirty);
+  const bundleBase = base?.entries ?? bundleIndex?.data;
   const bundleEntries: readonly DraftFile[] | undefined =
     editing && bundleBase ? projectDraftFiles(bundleBase, operations, type) : bundleIndex?.data;
   const staged = useStagedPackageFiles({
@@ -237,12 +243,18 @@ export function PackageFilesView({
     entries: bundleEntries ?? [],
     operations,
     onChange: (next) => {
-      if (base === null && bundleBase) setBase(bundleBase);
+      if (base === null && bundleBase && writableDraft) {
+        setBase({
+          entries: bundleBase,
+          etag: writableDraft.etag ?? "",
+          manifest: writableDraft.manifest ?? {},
+        });
+      }
       setOperations(next);
       setSaveError(null);
     },
     onSelect: (path) => setSelected({ kind: "file", file: emptyBundleFile(packageId, path) }),
-    disabled: saving,
+    disabled: saving || !writableDraft,
   });
   const busy = staged.busy;
 
@@ -252,13 +264,13 @@ export function PackageFilesView({
     setSaveError(null);
   };
   const saveEdits = async () => {
-    if (!writableDraft || !dirty) return;
+    if (!base || !dirty) return;
     setSaving(true);
     setSaveError(null);
     try {
       await updatePackage.mutateAsync({
-        etag: writableDraft.etag ?? "",
-        body: packageUpdateBody({ manifest: writableDraft.manifest ?? {}, operations }),
+        etag: base.etag,
+        body: packageUpdateBody({ manifest: base.manifest, operations }),
       });
       // Start again from what the server now holds, not from the staged tree.
       await queryClient.refetchQueries({ queryKey: ["get", "/api/packages/{scope}/{name}/files"] });
@@ -709,11 +721,7 @@ export function PackageFilesView({
             <Button variant="outline" type="button" disabled={busy} onClick={discardEdits}>
               {t("editor.discardChanges")}
             </Button>
-            <Button
-              type="button"
-              disabled={busy || !writableDraft}
-              onClick={() => void saveEdits().catch(() => {})}
-            >
+            <Button type="button" disabled={busy} onClick={() => void saveEdits().catch(() => {})}>
               {busy ? <Spinner /> : t("btn.save", { ns: "common" })}
             </Button>
           </div>
@@ -748,7 +756,7 @@ export function PackageFilesView({
           )}
         </Modal>
       )}
-      <UnsavedChangesModal blocker={blocker} onSaveDraft={writableDraft ? saveEdits : undefined} />
+      <UnsavedChangesModal blocker={blocker} onSaveDraft={base ? saveEdits : undefined} />
 
       <Modal
         open={compareVersion !== null}

@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { isUnder, routeVerdict } from "../../../lib/route-access";
+import { isUnder, routeVerdict, SETTINGS_INDEX } from "../../../lib/route-access";
 import {
   activeSettingsItem,
   firstSettingsPath,
-  isSettingsIndex,
-  SETTINGS_INDEX,
   settingsContentKey,
   settingsScopeFromPath,
   visibleSettingsSections,
@@ -17,17 +15,15 @@ type Features = Record<string, boolean>;
 const ALL_FEATURES: Features = { oidc: true, billing: true, webhooks: true };
 const NO_FEATURES: Features = {};
 
-function options(features: Features, granted: string[], inPersonalSpace = false) {
+function sectionsFor(features: Features, granted: string[], inPersonalSpace = false) {
   const can = (permission: string) => granted.includes(permission);
-  return {
-    can,
-    canReach: (path: Parameters<typeof routeVerdict>[0]) =>
-      routeVerdict(path, can, features, inPersonalSpace) === "granted",
-  };
+  return visibleSettingsSections(
+    (path) => routeVerdict(path, can, features, inPersonalSpace) === "granted",
+  );
 }
 
 function destinations(features: Features, granted: string[], inPersonalSpace = false) {
-  return visibleSettingsSections(options(features, granted, inPersonalSpace)).flatMap((section) =>
+  return sectionsFor(features, granted, inPersonalSpace).flatMap((section) =>
     section.items.map((item) => item.to),
   );
 }
@@ -41,28 +37,24 @@ describe("unified settings navigation", () => {
     expect(destinations(ALL_FEATURES, ["oauth-clients:read"])).toContain("/org-settings/oauth");
   });
 
-  it("lists General to every member: leaving the organization lives there", () => {
-    // A guest reads spaces, models and proxies so its runs resolve them; that
-    // is no reason to list their administration screens.
-    expect(orgEntries(destinations(ALL_FEATURES, GUEST))).toEqual(["/org-settings/general"]);
+  it("lists every screen its route opens, on the read alone", () => {
+    // A guest reads spaces, models and proxies so its runs resolve them: their
+    // pages open read-only, so the rail lists them.
+    expect(orgEntries(destinations(ALL_FEATURES, GUEST))).toEqual([
+      "/org-settings/general",
+      "/org-settings/spaces",
+      "/org-settings/models",
+      "/org-settings/proxies",
+    ]);
 
-    const member = orgEntries(destinations(ALL_FEATURES, [...GUEST, "members:read", "roles:read"]));
+    const member = orgEntries(
+      destinations(ALL_FEATURES, ["org:read", "members:read", "roles:read"]),
+    );
     expect(member).toEqual([
       "/org-settings/general",
       "/org-settings/members",
       "/org-settings/roles",
     ]);
-
-    const admin = destinations(ALL_FEATURES, [
-      ...GUEST,
-      "spaces:write",
-      "models:write",
-      "space-settings:write",
-    ]);
-    expect(admin).toContain("/org-settings/spaces");
-    expect(admin).toContain("/org-settings/models");
-    expect(admin).not.toContain("/org-settings/proxies");
-    expect(admin).toContain("/workspace-settings/auth");
   });
 
   it("never lists a screen its route refuses, whatever the write grant", () => {
@@ -130,30 +122,31 @@ describe("unified settings navigation", () => {
       "/workspace-settings/api-keys",
       "/workspace-settings/oauth",
       "/workspace-settings/end-users",
-      "/workspace-settings/auth",
     ]) {
       expect(shown).not.toContain(path);
     }
     expect(shown).toContain("/workspace-settings/general");
+    // Its deletes stay open there, so a row the space holds can always be removed.
+    expect(shown).toContain("/workspace-settings/auth");
     // A webhook pinned to a personal space is accepted (201), so its page stays.
     expect(shown).toContain("/workspace-settings/webhooks");
   });
 });
 
 describe("settings index", () => {
-  const admin = visibleSettingsSections(
-    options(ALL_FEATURES, [...GUEST, "space-settings:write", "api-keys:read"]),
-  );
-
   it("opens each scope on its own first entry", () => {
+    const admin = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write", "api-keys:read"]);
     expect(firstSettingsPath(admin, "organization")).toBe("/org-settings/general");
     expect(firstSettingsPath(admin, "workspace")).toBe("/workspace-settings/general");
+    // The first entry the scope lists, not its General page.
+    const reader = sectionsFor(ALL_FEATURES, ["api-keys:read"]);
+    expect(firstSettingsPath(reader, "workspace")).toBe("/workspace-settings/api-keys");
   });
 
-  it("falls back to the rail's first entry when the scope lists none", () => {
-    const guest = visibleSettingsSections(options(ALL_FEATURES, GUEST));
-    expect(firstSettingsPath(guest, "workspace")).toBe("/org-settings/general");
-    expect(firstSettingsPath([], "workspace")).toBeUndefined();
+  it("stays in its scope when the scope lists nothing: its General page says why", () => {
+    const guest = sectionsFor(ALL_FEATURES, GUEST);
+    expect(firstSettingsPath(guest, "workspace")).toBe("/workspace-settings/general");
+    expect(firstSettingsPath([], "organization")).toBe("/org-settings/general");
   });
 });
 
@@ -168,7 +161,7 @@ describe("account section (/preferences)", () => {
   ];
 
   it("is built for a caller with no organization or space permission", () => {
-    const sections = visibleSettingsSections(options(NO_FEATURES, []));
+    const sections = sectionsFor(NO_FEATURES, []);
     const account = sections.find((section) => section.scope === "account");
     expect(account?.items.map((item): string => item.to)).toEqual(OWN_ACCOUNT_PAGES);
     expect(firstSettingsPath(sections, "account")).toBe("/preferences/general");
@@ -182,9 +175,7 @@ describe("account section (/preferences)", () => {
   });
 
   it("sits in the same rail as the organization and workspace sections", () => {
-    const sections = visibleSettingsSections(
-      options(ALL_FEATURES, [...GUEST, "space-settings:write"]),
-    );
+    const sections = sectionsFor(ALL_FEATURES, [...GUEST, "space-settings:write"]);
     expect(sections.map((section) => section.scope)).toEqual([
       "organization",
       "workspace",
@@ -194,7 +185,7 @@ describe("account section (/preferences)", () => {
 });
 
 describe("active settings entry", () => {
-  const sections = visibleSettingsSections(options(ALL_FEATURES, GUEST));
+  const sections = sectionsFor(ALL_FEATURES, GUEST);
 
   it("names the entry of the page shown, nested URLs included, in every scope", () => {
     expect(activeSettingsItem(sections, "/org-settings/general")?.to).toBe("/org-settings/general");
@@ -213,13 +204,6 @@ describe("active settings entry", () => {
 });
 
 describe("index URLs", () => {
-  it("treats every scope's root as an index, /preferences included", () => {
-    for (const index of ["/org-settings", "/workspace-settings", "/preferences", "/preferences/"]) {
-      expect(isSettingsIndex(index)).toBe(true);
-    }
-    expect(isSettingsIndex("/preferences/general")).toBe(false);
-  });
-
   it("gives each page the index of its own scope, which the breadcrumb root links to", () => {
     expect(SETTINGS_INDEX[settingsScopeFromPath("/org-settings/models")]).toBe("/org-settings");
     expect(SETTINGS_INDEX[settingsScopeFromPath("/workspace-settings/webhooks/wh_1")]).toBe(

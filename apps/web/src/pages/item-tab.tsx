@@ -123,7 +123,7 @@ export function ItemTab({
         title={title}
         breadcrumbs={[{ label: title }]}
       />
-      {importParam.value !== null && <ImportModal open onClose={importParam.close} />}
+      {importParam.value !== null && <ImportModal onClose={importParam.close} />}
       {creation.isOpen && (
         <CreationHandoffModal
           resource={type}

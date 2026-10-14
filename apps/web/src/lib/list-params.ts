@@ -26,10 +26,9 @@ import { useSearchParams } from "react-router-dom";
 /**
  * What a list's bar reads and writes, wherever that state happens to live.
  *
- * A page keeps it in the URL ({@link useListParams}); a panel floating over
- * that page keeps it in itself ({@link useLocalListParams}), because both would
- * otherwise write `?q=` and searching the catalogue would filter the list
- * underneath it.
+ * A page keeps it in the URL ({@link useListParams}); a list inside a page (a
+ * tab, a section) keeps it in itself ({@link useLocalListParams}), because both
+ * would otherwise write the page's `?q=`.
  */
 export interface ListState {
   search: string;

@@ -21,8 +21,11 @@ import type { ModelChoice } from "../hooks/use-model-choice";
 export function ModelChoiceList({
   choice,
   advanced,
+  defaultUnavailable,
 }: {
   choice: ModelChoice;
+  /** The key needs reconnecting: none of its models can become the default. */
+  defaultUnavailable?: boolean;
   /** The models already saved, with where their finer settings open. */
   advanced?: { ids: ReadonlySet<string>; onOpen: (modelId: string) => void };
 }) {
@@ -56,6 +59,7 @@ export function ModelChoiceList({
         grouped={source === "catalog"}
         defaultId={choice.star}
         onDefaultChange={choice.setStar}
+        defaultUnavailable={defaultUnavailable}
         lockedId={choice.lockedId}
         advancedIds={advanced?.ids}
         onAdvanced={advanced?.onOpen}

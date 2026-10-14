@@ -4,9 +4,9 @@
  * The workspaces column set.
  *
  * Same reasoning as `member-columns.tsx`: a workspace row is a record — name,
- * what kind of space it is, when it was created, and what can be done to it —
- * so it belongs in a table where those are named once at the top rather than
- * in a card that reprints them per row.
+ * what kind of space it is and who reaches it, when it was created, and what
+ * can be done to it — so it belongs in a table where those are named once at
+ * the top rather than in a card that reprints them per row.
  *
  * The kind column is what carries the personal spaces: a member's own space,
  * and an ORPHANED one whose owner has left. The two acts an orphan
@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { FolderInput, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
+import type { components } from "../../api/client";
 import type { DataColumn } from "../../components/data-table";
 import { TableRowActions } from "../../components/table-row-actions";
 import { formatDateField } from "../../lib/format-date";
@@ -30,6 +31,7 @@ export interface SpaceRow {
   isDefault: boolean;
   createdAt: string;
   personal: boolean;
+  visibility: components["schemas"]["SpaceObject"]["visibility"];
   orphaned_at?: string | null;
   access: string;
 }
@@ -68,8 +70,8 @@ export function useSpaceColumns({
     },
     {
       id: "kind",
-      header: t("spaces.default"),
-      width: "minmax(120px,0.8fr)",
+      header: t("spaces.visibilityLabel"),
+      width: "minmax(150px,0.9fr)",
       tier: 2,
       cell: (space) =>
         space.orphaned_at ? (
@@ -79,10 +81,11 @@ export function useSpaceColumns({
           <Badge variant="warning">{t("spaces.personal.orphanedBadge")}</Badge>
         ) : space.personal ? (
           <Badge variant="secondary">{t("spaces.personal.badge")}</Badge>
-        ) : space.isDefault ? (
-          <Badge variant="running">{defaultLabel}</Badge>
         ) : (
-          <span className="text-muted-foreground text-xs">—</span>
+          <span className="flex flex-wrap gap-1">
+            <Badge variant="secondary">{t(`spaces.visibility.${space.visibility}`)}</Badge>
+            {space.isDefault && <Badge variant="running">{defaultLabel}</Badge>}
+          </span>
         ),
     },
     {

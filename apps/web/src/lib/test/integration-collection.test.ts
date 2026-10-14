@@ -2,12 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import type { IntegrationSummaryWire } from "../../hooks/use-integrations.ts";
-import {
-  filterIntegrations,
-  integrationOrigin,
-  integrationStatus,
-  isOrganizationIntegration,
-} from "../integration-collection.ts";
+import { filterIntegrations, integrationOrigin } from "../integration-collection.ts";
 
 function integration({
   id,
@@ -47,25 +42,11 @@ const rows = [
   integration({ id: "@acme/legacy", source: "local", active: false, displayName: "Legacy" }),
 ];
 
-describe("integration collection predicates", () => {
-  it("keeps active system integrations and every custom integration", () => {
-    expect(rows.filter(isOrganizationIntegration).map((row) => row.id)).toEqual([
-      "@appstrate/gmail",
-      "@acme/qbo",
-      "@acme/legacy",
-    ]);
-  });
-});
-
 describe("filterIntegrations", () => {
-  it("combines status, origin and full-corpus search", () => {
+  it("combines origin and full-corpus search", () => {
     expect(
-      filterIntegrations(rows, {
-        query: "legacy",
-        statuses: ["inactive"],
-        origins: ["custom"],
-      }).map((row) => row.id),
-    ).toEqual(["@acme/legacy"]);
+      filterIntegrations(rows, { query: "fixture", origins: ["custom"] }).map((row) => row.id),
+    ).toEqual(["@acme/qbo", "@acme/legacy"]);
   });
 
   it("searches names, package ids and keywords", () => {
@@ -76,8 +57,6 @@ describe("filterIntegrations", () => {
   });
 
   it("classifies the facts used by filters, cards and columns once", () => {
-    expect(integrationStatus(rows[0]!)).toBe("active");
-    expect(integrationStatus(rows[1]!)).toBe("inactive");
     expect(integrationOrigin(rows[0]!)).toBe("system");
     expect(integrationOrigin(rows[2]!)).toBe("custom");
   });

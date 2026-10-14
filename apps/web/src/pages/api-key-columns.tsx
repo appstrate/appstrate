@@ -107,7 +107,7 @@ export function useApiKeyColumns({
       tier: 3,
       cell: (key) => (
         <span className="text-muted-foreground text-xs">
-          {key.lastUsedAt ? formatDateField(key.lastUsedAt, "date") : "—"}
+          {formatDateField(key.lastUsedAt, "date")}
         </span>
       ),
     },

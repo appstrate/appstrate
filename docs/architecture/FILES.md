@@ -156,7 +156,7 @@ Tab keys above are the URL hashes; in the French UI the panes read « Vue d’en
 
 A run opened with no hash, or with any hash outside those three, lands on `overview`, whose counts link into the other two.
 
-`results` reads the run's files in one page and keeps those the run produced (`producedRunFiles`); `overview` reads the run's `user_upload` files for its input card.
+`results` and `overview` read the run's whole file container in one page: `results` keeps the files the run produced (`producedRunFiles`), the input card of `overview` the ones it consumed — uploads and files chained in from earlier runs (`runFileDirection`).
 
 ## HTTP surface
 

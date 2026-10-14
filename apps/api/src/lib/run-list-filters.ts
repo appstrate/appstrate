@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { eq, ilike, or, type SQL } from "drizzle-orm";
+import { eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { runStatusValues, type RunStatus } from "@appstrate/core/run-status";
 import { invalidRequest } from "./errors.ts";
@@ -20,8 +20,10 @@ export function parseRunListFilters(query: { status?: string; q?: string }): {
   search?: string;
 } {
   // Bounded because it reaches an unindexed substring match.
+  if (query.q && query.q.length > 200) {
+    throw invalidRequest("q must be 200 characters or fewer", "q");
+  }
   const search = query.q?.trim() || undefined;
-  if (search && search.length > 200) throw invalidRequest("q must be 200 characters or fewer", "q");
   const parts = query.status ? query.status.split(",").map((part) => part.trim()) : undefined;
   if (parts?.some((part) => !(runStatusValues as readonly string[]).includes(part))) {
     throw invalidRequest(`status must be one of: ${runStatusValues.join(", ")}`, "status");
@@ -44,4 +46,13 @@ export function runSearchCondition(search: string): SQL {
   const runNumber = digits ? Number(digits) : 0;
   if (runNumber > 0 && runNumber <= MAX_RUN_NUMBER) matches.push(eq(runs.runNumber, runNumber));
   return or(...matches)!;
+}
+
+/** The conditions of `parseRunListFilters`' result; an absent filter adds none. */
+export function runListConditions(filters: { status?: RunStatus[]; search?: string }): SQL[] {
+  const conditions: SQL[] = [];
+  // An empty list would be `IN ()`, SQL for "nothing", where the caller meant no filter.
+  if (filters.status?.length) conditions.push(inArray(runs.status, filters.status));
+  if (filters.search) conditions.push(runSearchCondition(filters.search));
+  return conditions;
 }

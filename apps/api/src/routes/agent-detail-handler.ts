@@ -28,7 +28,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId, sendPackageDetail, type PackageDetail } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
-import { readAgentAppearance } from "../lib/agent-appearance.ts";
+import { readAgentAppearance } from "@appstrate/core/validation";
 import {
   agentReadIsSummary,
   draftNotWritable,

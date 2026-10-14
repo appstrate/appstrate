@@ -24,10 +24,10 @@ import { useTranslation } from "react-i18next";
 import { Shield } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
-import { Badge, MetaBadge } from "./status-badge";
+import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunDuration } from "./run-duration";
-import { DocumentCounts, RunResult } from "./run-cells";
+import { DocumentCounts, RunProvenanceBadges, RunResult } from "./run-cells";
 import { formatDateField } from "../lib/format-date";
 
 /**
@@ -71,19 +71,7 @@ export function useRunColumns({
       cell: (run) => (
         <>
           <span className="truncate font-medium">{agentName(run)}</span>
-          {run.package_ephemeral === true && <MetaBadge label={t("runs.inlineBadge")} />}
-          {/* `packageId == null` on a non-inline run means the source agent was
-              deleted (FK SET NULL): the run survives, its agent page does not. */}
-          {run.packageId == null && run.package_ephemeral !== true && (
-            <MetaBadge
-              label={t("runs.deletedAgentBadge")}
-              title={t("runs.deletedAgentTitle")}
-              italic
-            />
-          )}
-          {run.runOrigin === "remote" && (
-            <MetaBadge label={t("runs.remoteBadge")} title={t("runs.remoteBadgeTitle")} />
-          )}
+          <RunProvenanceBadges run={run} />
         </>
       ),
     },
@@ -100,6 +88,9 @@ export function useRunColumns({
       tier: 3,
       cell: (run) => (
         <>
+          {/* Without the agent column, the badges that explain a missing
+              Cancel or Re-run sit with the trigger. */}
+          {hideAgentName && <RunProvenanceBadges run={run} />}
           <RunTrigger run={run} />
           {/* Which egress the run went through. It sits beside the trigger
               because both answer "how did this run reach the outside" — and it

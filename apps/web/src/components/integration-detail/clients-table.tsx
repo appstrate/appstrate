@@ -21,7 +21,7 @@ import { DataTable } from "../data-table";
 import { EmptyState, ErrorState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useModalParam } from "../../hooks/use-modal-param";
-import { useIntegrationClientColumns } from "./integration-columns";
+import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
 import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
   useIntegrationDetail,
@@ -324,11 +324,16 @@ export function ClientsTable({
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
   const tierOf = (row: ClientRow): IntegrationClientTier => (row.level === "org" ? "org" : "space");
-  const editedRow = rows.find((row) => row.client.client_ref === scopedValue(editClient.value));
+  // A parameter typed in the URL opens only what the table itself would offer.
+  const editedRow = rows.find(
+    (row) =>
+      row.client.client_ref === scopedValue(editClient.value) &&
+      clientDeeds(row, canManageOrg).editable,
+  );
   const newTier = scopedValue(newClient.value);
   const modal: ModalState = editedRow
     ? { mode: "edit", tier: tierOf(editedRow), client: editedRow.client }
-    : newTier === "space" || newTier === "org"
+    : canRegister && (newTier === "space" || (newTier === "org" && canManageOrg))
       ? { mode: "create", tier: newTier }
       : null;
   const closeModal = editedRow ? editClient.close : newClient.close;
@@ -366,12 +371,6 @@ export function ClientsTable({
     onPromote: (row) => setConfirmPromote(row),
     onDelete: (row) => setConfirmDelete(row),
   });
-  const levelLabel = (row: ClientRow) =>
-    row.level === "system"
-      ? t("source.builtIn")
-      : row.level === "org"
-        ? t("source.org")
-        : t("source.space");
   const deleteMutation =
     confirmDelete && tierOf(confirmDelete) === "org" ? deleteOrgClient : deleteSpaceClient;
 
@@ -426,7 +425,7 @@ export function ClientsTable({
         <p className="mb-1 text-sm" data-testid={`oauth-client-in-use-${authKey}`}>
           {t("integration.clients.inUse", {
             client: inUse.client.client_id,
-            level: levelLabel(inUse),
+            level: t(clientLevelKey(inUse)),
           })}
         </p>
       )}
@@ -480,7 +479,7 @@ export function ClientsTable({
         </Button>
       )}
 
-      {modal && (
+      {modal && (newClient.value || editClient.value) && (
         <OAuthClientModal
           key={modal.mode === "edit" ? modal.client.client_ref : `create-${modal.tier}`}
           tier={modal.tier}

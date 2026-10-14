@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { ORG_LOGO_MAX_LENGTH } from "@appstrate/core/validation";
 import { eq, and } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -532,7 +533,6 @@ describe("Organizations API", () => {
           `emoji:🧠${"\u0301".repeat(40)}`,
           "data:image/webp;base64,not base64!",
           `data:image/webp;base64,${png}`,
-          `${webp}${"A".repeat(180_000)}`,
           "data:image/png;base64,AAAA",
           "🧠",
         ]) {
@@ -544,6 +544,17 @@ describe("Organizations API", () => {
           .from(organizations)
           .where(eq(organizations.id, ctx.orgId));
         expect(org!.logo).toBeNull();
+      });
+
+      it("accepts an image up to ORG_LOGO_MAX_LENGTH characters and refuses one past it", async () => {
+        const ctx = await createTestContext({ orgSlug: "logo-limit-org" });
+        // A RIFF/WEBP header in whole base64 quanta, padded with zero bytes:
+        // valid at every length, so only the length decides.
+        const header = `data:image/webp;base64,${btoa("RIFF\x04\0\0\0WEBP")}`;
+        const fill = Math.floor((ORG_LOGO_MAX_LENGTH - header.length) / 4) * 4;
+        const largest = `${header}${"A".repeat(fill)}`;
+        expect((await patchLogo(authHeaders(ctx), ctx.orgId, largest)).status).toBe(200);
+        expect((await patchLogo(authHeaders(ctx), ctx.orgId, `${largest}AAAA`)).status).toBe(400);
       });
 
       it("audits an image logo as changed, without its bytes", async () => {

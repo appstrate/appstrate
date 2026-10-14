@@ -148,7 +148,7 @@ export function useRunLogStream(
   // Every field above is derived from ONE run. The effect re-subscribes when
   // `runId` changes but cannot clear them (an effect body may not call
   // `setState` here), so the reset is React's documented render-phase
-  // adjustment — the same pattern as `run-detail-tabs-controller.tsx`. It
+  // adjustment. It
   // re-renders before anything is painted, so the previous run's values never
   // reach the screen. Without it a card whose `runId` moves between two real
   // ids renders run A's chips under run B and can auto-open A's file against

@@ -24,6 +24,7 @@ import { useApiKeyColumns } from "./api-key-columns";
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const canCreate = can("api-keys:create");
   const spaceId = useCurrentSpaceId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
@@ -47,7 +48,7 @@ export function ApiKeysPage() {
     <div>
       <SettingsPageActions>
         <PageActionsMenu>
-          {can("api-keys:create") && (
+          {canCreate && (
             <DropdownMenuItem data-page-action="create" onSelect={() => newApiKey.open()}>
               <Plus />
               {t("settings:apiKeys.createBtn")}
@@ -83,7 +84,7 @@ export function ApiKeysPage() {
             icon={KeyRound}
             compact
           >
-            {can("api-keys:create") && (
+            {canCreate && (
               <EmptyStateAction
                 label={t("settings:apiKeys.createBtn")}
                 onClick={() => newApiKey.open()}
@@ -93,7 +94,7 @@ export function ApiKeysPage() {
         }
       />
 
-      <ApiKeyCreateModal />
+      {canCreate && <ApiKeyCreateModal />}
 
       <ConfirmModal
         open={!!confirmState}

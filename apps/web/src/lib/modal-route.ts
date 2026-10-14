@@ -11,8 +11,8 @@
  * (a pasted link, a reload). Opening one is a plain navigation to its path.
  */
 import { createContext, useContext, useState } from "react";
-import { matchPath, useLocation, type Location } from "react-router-dom";
-import { isOverlayPath, ROUTE_ACCESS } from "./route-access";
+import { matchPath, useLocation, useNavigate, type Location } from "react-router-dom";
+import { isOverlayPath, isUnder, ROUTE_ACCESS } from "./route-access";
 
 const DASHBOARD: Location = { pathname: "/", search: "", hash: "", state: null, key: "default" };
 
@@ -36,12 +36,14 @@ export function pageLocation(current: Location, lastPage: Location | null): Loca
   return lastPage ?? DASHBOARD;
 }
 
-/** `pageLocation` for the router's current location, remembering the last page across renders. */
-export function usePageLocation(): Location {
-  const location = useLocation();
-  const [lastPage, setLastPage] = useState<Location | null>(null);
-  if (location !== lastPage && isPage(location.pathname)) setLastPage(location);
-  return pageLocation(location, lastPage);
+/**
+ * The current entry's position in the session history: React Router's browser
+ * history numbers its entries in `history.state.idx`.
+ */
+function historyIndex(): number | null {
+  if (typeof window === "undefined") return null;
+  const index = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof index === "number" ? index : null;
 }
 
 interface OpenOverlay {
@@ -51,11 +53,47 @@ interface OpenOverlay {
   background: Location;
 }
 
+interface OverlayExit {
+  /** The background's history entry; `null` when it has none (a pasted link, a reload). */
+  backgroundIndex: number | null;
+  /** Puts another page under the overlay, one with no history entry. */
+  replaceBackground: (pathname: string) => void;
+}
+
 const OverlayContext = createContext<OpenOverlay | null>(null);
 export const OverlayProvider = OverlayContext.Provider;
+const OverlayExitContext = createContext<OverlayExit | null>(null);
+export const OverlayExitProvider = OverlayExitContext.Provider;
+
+/**
+ * The page the page tree renders, and the overlay open over it, remembering the
+ * last page shown across renders.
+ */
+export function useOverlayState(): {
+  page: Location;
+  overlay: OpenOverlay | null;
+  exit: OverlayExit | null;
+} {
+  const location = useLocation();
+  const [shown, setShown] = useState<{ location: Location; index: number | null } | null>(null);
+  if (location !== shown?.location && isPage(location.pathname)) {
+    setShown({ location, index: historyIndex() });
+  }
+  const page = pageLocation(location, shown?.location ?? null);
+  if (page === location) return { page, overlay: null, exit: null };
+  return {
+    page,
+    overlay: { path: location.pathname, background: page },
+    exit: {
+      backgroundIndex: shown?.index ?? null,
+      replaceBackground: (pathname) =>
+        setShown({ location: { ...DASHBOARD, pathname }, index: null }),
+    },
+  };
+}
 
 /** The screen the open overlay floats over, or null when none is open. */
-export function useBackgroundLocation(): Location | null {
+function useBackgroundLocation(): Location | null {
   return useContext(OverlayContext)?.background ?? null;
 }
 
@@ -75,4 +113,60 @@ export function modalReturnTarget(background: Location | null): {
 } {
   const { pathname, search, hash, state } = background ?? DASHBOARD;
   return { to: { pathname, search, hash }, state };
+}
+
+/**
+ * How far back closing an overlay goes: to the background's own entry when the
+ * app navigated from it, past every page opened inside the overlay. `null`
+ * when it has no entry behind the current one: the close replaces instead.
+ */
+export function overlayCloseStep(
+  backgroundIndex: number | null,
+  currentIndex: number | null,
+): number | null {
+  if (backgroundIndex === null || currentIndex === null || currentIndex <= backgroundIndex) {
+    return null;
+  }
+  return backgroundIndex - currentIndex;
+}
+
+/**
+ * Closes the open overlay. Back steps over the overlay's entries rather than
+ * adding one, so Back after a close does not reopen it.
+ */
+export function useCloseOverlay(): () => void {
+  const background = useBackgroundLocation();
+  const exit = useContext(OverlayExitContext);
+  const navigate = useNavigate();
+  return () => {
+    const step = overlayCloseStep(exit?.backgroundIndex ?? null, historyIndex());
+    if (step !== null) {
+      navigate(step);
+      return;
+    }
+    const target = modalReturnTarget(background);
+    navigate(target.to, { replace: true, state: target.state });
+  };
+}
+
+/** The page an organization switch lands on: the root of the product it happened in. */
+export function orgSwitchLanding(pagePath: string): "/" | "/chat" {
+  return isUnder(pagePath, "/chat") ? "/chat" : "/";
+}
+
+/**
+ * After an organization switch, the page may name a resource of the previous
+ * organization (an agent, a run): it lands on its product's root. Under an
+ * overlay only the page beneath moves — the overlay's paths name a page type,
+ * not a resource, so it stays open.
+ */
+export function useLandAfterOrgSwitch(): () => void {
+  const background = useBackgroundLocation();
+  const exit = useContext(OverlayExitContext);
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  return () => {
+    if (background && exit) exit.replaceBackground(orgSwitchLanding(background.pathname));
+    else navigate(orgSwitchLanding(pathname), { replace: true });
+  };
 }

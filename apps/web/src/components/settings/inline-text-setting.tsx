@@ -11,6 +11,9 @@
  * an effect is exactly what the Rules-of-React gate rejects
  * (`react-hooks/set-state-in-effect`, see apps/web/CLAUDE.md). Remounting on a
  * value change costs nothing here and needs no state at all.
+ *
+ * Marked `data-inline-editing` so Escape reverts the field without closing the
+ * dialog the settings page sits in (`keepOpenWhileRenaming`).
  */
 import { Input } from "@appstrate/ui/components/input";
 
@@ -19,6 +22,7 @@ export function InlineTextSetting({
   onCommit,
   disabled,
   placeholder,
+  maxLength,
   className,
   "aria-label": ariaLabel,
 }: {
@@ -26,6 +30,7 @@ export function InlineTextSetting({
   onCommit: (next: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  maxLength?: number;
   className?: string;
   "aria-label"?: string;
 }) {
@@ -35,8 +40,10 @@ export function InlineTextSetting({
       defaultValue={value}
       disabled={disabled}
       placeholder={placeholder}
+      maxLength={maxLength}
       aria-label={ariaLabel}
       className={className}
+      data-inline-editing=""
       onBlur={(e) => {
         const next = e.currentTarget.value.trim();
         if (!next || next === value) {

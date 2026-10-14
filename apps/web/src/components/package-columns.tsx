@@ -16,11 +16,12 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { ShieldCheck } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
-import { Badge, MetaBadge } from "./status-badge";
+import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
+import { useCatalogueOriginColumn } from "./catalogue-columns";
+import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../pages/package-list";
 
 /**
@@ -34,6 +35,7 @@ import type { CardItem } from "../pages/package-list";
 export function usePackageColumns(holds?: PackageType): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
   const runnable = holds === undefined || holds === "agent";
+  const origin = useCatalogueOriginColumn<CardItem>(useOrg().currentOrg?.name ?? "");
 
   const columns: DataColumn<CardItem>[] = [
     {
@@ -58,30 +60,7 @@ export function usePackageColumns(holds?: PackageType): DataColumn<CardItem>[] {
         </div>
       ),
     },
-    {
-      id: "source",
-      header: t("list.column.source"),
-      width: "112px",
-      tier: 2,
-      cell: (item) => (
-        <>
-          {item.source === "system" && (
-            <span
-              className="text-muted-foreground relative z-10 inline-flex items-center gap-1 text-xs"
-              title={t("list.badgeBuiltIn")}
-            >
-              <ShieldCheck className="size-3.5 shrink-0" />
-              {t("list.badgeBuiltIn")}
-            </span>
-          )}
-          {/* The origin of a package the organization made is said in the filter's own word, a column of blanks says nothing. */}
-          {item.source === "local" && !item.autoInstalled && (
-            <span className="text-muted-foreground truncate text-xs">{t("list.filter.local")}</span>
-          )}
-          {item.autoInstalled && <MetaBadge label={t("list.badgeAutoInstalled")} />}
-        </>
-      ),
-    },
+    origin,
     {
       id: "keywords",
       header: t("list.column.keywords"),

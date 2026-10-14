@@ -67,26 +67,11 @@ export function AgentConfigurationView({
     if (section === "inputs") {
       return <AgentConfigurationTab {...sharedConfigurationProps} section="inputs" />;
     }
+    // Both are set per space, whatever version is being read.
     if (section === "connections") {
-      return isHistorical ? (
-        <p className="text-muted-foreground text-sm">
-          {t("detail.configuration.historicalUnavailable")}
-        </p>
-      ) : (
-        <div className="space-y-4">
-          <AgentConnectionsSection packageId={packageId} detail={detail} />
-        </div>
-      );
+      return <AgentConnectionsSection packageId={packageId} detail={detail} />;
     }
-    return isHistorical ? (
-      <p className="text-muted-foreground text-sm">
-        {t("detail.configuration.historicalUnavailable")}
-      </p>
-    ) : (
-      <div className="space-y-4">
-        <AgentSchedulesTab packageId={packageId} />
-      </div>
-    );
+    return <AgentSchedulesTab packageId={packageId} />;
   })();
 
   const text = CONFIGURATION_SECTION_TEXT[section];

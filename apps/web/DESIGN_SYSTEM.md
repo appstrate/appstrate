@@ -559,7 +559,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     `?inspectTool=<integrationId>:<tool name>` (the catalog answers only for its
     own integration). Full-screen maps are `?fullscreenMap=1`
     (`useMapFullscreen`). A modal opened over another has its own param
-    (`?newModel=1` over `?mapPanel=model`).
+    (`?structurePanel=<section>` over `?fullscreenMap=1`).
   - **A pairing in progress** (`?connectProvider=<providerId>` in the
     onboarding) is a place too: its token lives in memory, so a reload reopens
     the modal and mints a new pairing instead of resuming the old one (which
