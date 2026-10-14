@@ -20,6 +20,7 @@ import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
+import { AgentIdentityTile } from "./agent-identity";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../pages/package-list";
@@ -43,20 +44,31 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       header: t("list.column.name"),
       width: "minmax(188px,1.6fr)",
       cell: (item) => (
-        <div className="flex min-w-0 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-medium">{item.displayName}</span>
-            {!!item.unreadCount && item.unreadCount > 0 && (
-              <span className="bg-destructive text-destructive-foreground relative z-10 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                {item.unreadCount > 99 ? "99+" : item.unreadCount}
-              </span>
-            )}
-          </span>
-          {/* One line, where the card gives two: at this density a description
-              is there to tell two neighbours apart, not to be read. */}
-          {item.description && (
-            <span className="text-muted-foreground truncate text-xs">{item.description}</span>
+        <div className="flex min-w-0 items-center gap-3">
+          {item.identity && (
+            <AgentIdentityTile
+              agentId={item.id}
+              icon={item.identity.icon}
+              color={item.identity.color}
+              className="size-8 rounded-md"
+              iconClassName="size-4"
+            />
           )}
+          <div className="flex min-w-0 flex-col">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-medium">{item.displayName}</span>
+              {!!item.unreadCount && item.unreadCount > 0 && (
+                <span className="bg-destructive text-destructive-foreground relative z-10 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
+                  {item.unreadCount > 99 ? "99+" : item.unreadCount}
+                </span>
+              )}
+            </span>
+            {/* One line, where the card gives two: at this density a description
+                is there to tell two neighbours apart, not to be read. */}
+            {item.description && (
+              <span className="text-muted-foreground truncate text-xs">{item.description}</span>
+            )}
+          </div>
         </div>
       ),
     },

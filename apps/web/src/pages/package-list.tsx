@@ -37,6 +37,8 @@ export interface CardItem {
   autoInstalled?: boolean;
   /** A tile drawn left of the title: the package's icon on its tinted ground. */
   icon?: ReactNode;
+  /** An agent's chosen icon and colour: its identity tile, in the cards and the table alike. */
+  identity?: { icon?: string | null; color?: string | null };
   /** The card's state, top right: what a browsing reader looks for first. */
   status?: ReactNode;
   /** One muted line under the description: who provides it, what it carries. */
@@ -130,6 +132,7 @@ export function PackageList() {
     runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
+    identity: { icon: f.icon, color: f.color },
   }));
 
   return (

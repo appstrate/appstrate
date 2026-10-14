@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
+import { AgentIdentityTile } from "./agent-identity";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import type { CardItem } from "../pages/package-list";
@@ -22,6 +23,7 @@ export function PackageCard({
   actions,
   autoInstalled,
   icon,
+  identity,
   status,
   meta,
   showRun = true,
@@ -60,7 +62,15 @@ export function PackageCard({
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
-        {icon}
+        {icon ??
+          (identity && (
+            <AgentIdentityTile
+              agentId={id}
+              icon={identity.icon}
+              color={identity.color}
+              className="size-10 rounded-[10px]"
+            />
+          ))}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
