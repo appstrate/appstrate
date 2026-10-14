@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { codeSyncCommand } from "../src/commands/code-sync.ts";
 import { getStatePath } from "../src/lib/skills-sync/state.ts";
 import { seedLoggedInProfile } from "./helpers/auth-fixture.ts";
+import { updateProfile } from "../src/lib/config.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { CommandExit } from "../src/lib/io.ts";
 import {
@@ -427,6 +428,32 @@ describe("code sync — agents come from the selected spaces (#1972)", () => {
 
     expect(await readdir(pluginSkills())).toEqual(["run-report"]);
     expect(stderr()).toBe("");
+  });
+
+  it("keeps a runner's space configured in syncSpaces", async () => {
+    serve([REPORT], { spaces: runnerSpace });
+    await updateProfile("default", { syncSpaces: [ONE] });
+    const { io, stderr } = createMemoryIO();
+
+    await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
+
+    expect(await readdir(pluginSkills())).toEqual(["run-report"]);
+    expect(stderr()).toBe("");
+  });
+
+  it("refuses --space naming a member space that supplies neither kind", async () => {
+    serve([REPORT], {
+      spaces: [{ id: ONE, name: "Space One", isDefault: true, permissions: ["agents:read"] }],
+    });
+    const { io, stderr } = createMemoryIO();
+
+    await expect(
+      codeSyncCommand({ target: ["claude-plugin"], space: [ONE] }, io),
+    ).rejects.toBeInstanceOf(CommandExit);
+
+    expect(stderr()).toContain(
+      `Space "Space One" (${ONE}) cannot supply skills or agent commands: your role there grants neither skills:read nor agents:run, runs:read and mcp:invoke.`,
+    );
   });
 
   it("refuses --space naming a runner's space for a target that carries no agent", async () => {

@@ -729,25 +729,21 @@ function suppliesAgents(space: Space): boolean {
 
 const AGENTS_GRANT = "agents:run, runs:read and mcp:invoke";
 
-/** The kinds this run syncs, and what a space must grant to supply one of them. */
-interface Kinds {
-  agents: boolean;
-}
-
-function suppliesAny(space: Space, { agents }: Kinds): boolean {
-  return suppliesSkills(space) || (agents && suppliesAgents(space));
+/** Whether the space supplies one of the kinds this run syncs (agents only with the plugin). */
+function suppliesAny(space: Space, withAgents: boolean): boolean {
+  return suppliesSkills(space) || (withAgents && suppliesAgents(space));
 }
 
 /** Why `suppliesAny` said no — the half of the answer a user can act on. */
-function unusableReason(space: Space, { agents }: Kinds): string {
+function unusableReason(space: Space, withAgents: boolean): string {
   if (space.access !== "member") return "you are not a member of it";
-  return agents
+  return withAgents
     ? `your role there grants neither ${SKILLS_READ} nor ${AGENTS_GRANT}`
     : `your role there does not grant ${SKILLS_READ}`;
 }
 
-function whatSpacesSupply({ agents }: Kinds): string {
-  return agents ? "skills or agent commands" : "skills";
+function whatSpacesSupply(withAgents: boolean): string {
+  return withAgents ? "skills or agent commands" : "skills";
 }
 
 /**
@@ -816,8 +812,7 @@ async function selectSources(
     // more, so the ordinary removal plan takes every one of them off the disk.
     return { skillSpaces: [], agentSpaces: [] };
   }
-  const kinds: Kinds = { agents: withAgents };
-  const selected = selectedSpaces(profileName, profile, spaces, explicit, kinds, report);
+  const selected = selectedSpaces(profileName, profile, spaces, explicit, withAgents, report);
   const skillSpaces = selected.filter(suppliesSkills).map((space) => space.id);
   if (!withAgents) return { skillSpaces, agentSpaces: [] };
   const refused = selected.filter((space) => !suppliesAgents(space));
@@ -845,16 +840,16 @@ function selectedSpaces(
   profile: Profile,
   spaces: Space[],
   explicit: string[] | undefined,
-  kinds: Kinds,
+  withAgents: boolean,
   report: Report,
 ): Space[] {
   if (explicit) {
     const chosen = explicit.map((ref) => explicitSpace(spaces, ref));
     // Typed just now, so it gets immediate feedback rather than a silent drop.
     for (const space of chosen) {
-      if (!suppliesAny(space, kinds))
+      if (!suppliesAny(space, withAgents))
         throw new Error(
-          `Space "${space.name}" (${space.id}) cannot supply ${whatSpacesSupply(kinds)}: ${unusableReason(space, kinds)}.`,
+          `Space "${space.name}" (${space.id}) cannot supply ${whatSpacesSupply(withAgents)}: ${unusableReason(space, withAgents)}.`,
         );
     }
     return [...new Set(chosen)];
@@ -868,13 +863,13 @@ function selectedSpaces(
   const kept = new Set<Space>();
   for (const id of configured) {
     const space = listed.get(id);
-    if (space && suppliesAny(space, kinds)) {
+    if (space && suppliesAny(space, withAgents)) {
       kept.add(space);
       continue;
     }
     report.note(
       space
-        ? `Configured sync space "${id}" cannot supply ${whatSpacesSupply(kinds)} — ${unusableReason(space, kinds)}; skipped.`
+        ? `Configured sync space "${id}" cannot supply ${whatSpacesSupply(withAgents)} — ${unusableReason(space, withAgents)}; skipped.`
         : `Configured sync space "${id}" is not accessible in the active organization — skipped.`,
     );
   }

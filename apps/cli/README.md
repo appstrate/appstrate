@@ -421,7 +421,7 @@ For a persistent restriction, add IDs to the existing profile in `config.toml` (
 syncSpaces = ["spc_prod", "spc_team"]
 ```
 
-Changing organization clears this list because space IDs belong to one organization. Removing `syncSpaces` restores the every-space-you-are-in default. Setting `syncSpaces = []` writes no business skills while retaining the MCP connection. A configured ID this profile can no longer use — one that is gone, or one you are only listed for and have not joined — is skipped with a note on stderr saying which, and the other spaces still sync; a `--space` flag naming nothing, or naming a space you cannot use, fails the run instead, because you typed it just now. An organization that has revoked this profile's access to its spaces entirely leaves no source at all: the sync removes every skill it installed from it, or fails the run when `--space` was typed.
+Changing organization clears this list because space IDs belong to one organization. Removing `syncSpaces` restores the every-space-you-are-in default. Setting `syncSpaces = []` writes no business skills while retaining the MCP connection. A configured ID this profile can no longer use — one that is gone, one you are only listed for and have not joined, or one that supplies none of the kinds this run syncs — is skipped with a note on stderr saying which, and the other spaces still sync; a `--space` flag naming nothing, or naming a space that supplies none of the kinds this run syncs, fails the run instead, because you typed it just now. An organization that has revoked this profile's access to its spaces entirely leaves no source at all: the sync removes every skill it installed from it, or fails the run when `--space` was typed.
 
 **One copy per package, at the organization's `latest`.** A package is an organization-level row that `space_packages` attributes to any number of spaces, so the same skill is normally listed by several of the spaces you reach. It is downloaded once, from the first that listed it. That choice never decides _which_ version: `versions/latest` resolves per organization, so what lands on your machine is the organization's latest published version, whichever space listed it first. It can still be newer than what an agent in that space executes — an agent resolves its skills against the semver ranges in its own manifest, and each run freezes what it resolved.
 
@@ -984,7 +984,7 @@ userId = "EWnC2cLyy88EpCGBa3WrIdS7uqI648BB"
 email = "alice@example.com"
 orgId = "org_123abc"
 spaceId = "spc_abc123"
-syncSpaces = ["spc_abc123", "spc_team456"] # optional skill sources; MCP uses spaceId
+syncSpaces = ["spc_abc123", "spc_team456"] # optional sync sources (skills and agent commands); spaceId is the REST default
 
 [profile.dev]
 instance = "http://localhost:3000"
