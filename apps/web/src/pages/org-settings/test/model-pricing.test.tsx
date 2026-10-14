@@ -2,17 +2,20 @@
 
 /**
  * The "No pricing" badge exists so a self-hoster learns a model is unpriced
- * BEFORE spending on it. The web test runner has no DOM, so this exercises the
- * pure rule the badge renders (`model-pricing.ts`) — each exclusion on its own,
- * because an exclusion silently dropped is a false positive on every alias or
- * every built-in row — plus source scans proving the page really routes through
- * it instead of restating the condition inline.
+ * BEFORE spending on it. This exercises the pure rule the badge renders
+ * (`model-pricing.ts`) — each exclusion on its own, because an exclusion
+ * silently dropped is a false positive on every alias or every built-in row —
+ * then the model cell that draws it, row by row.
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { ModelsCell } from "../../../components/provider-models-cell.tsx";
+import i18n, { i18nReady } from "../../../i18n.ts";
+import { orgModelFixture as orgModel } from "../../../test/org-model-fixture.ts";
+import { render } from "../../../test/render.tsx";
 import { isModelUnpriced, type ModelPricingFields } from "../model-pricing.ts";
+
+await i18nReady;
 
 /** A custom, non-aliased, unpriced row — the one shape that SHOULD flag. */
 function model(overrides: Partial<ModelPricingFields> = {}): ModelPricingFields {
@@ -64,30 +67,32 @@ describe("isModelUnpriced", () => {
   });
 });
 
-describe("unpriced badge wiring", () => {
-  function read(relative: string): string {
-    return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf-8");
-  }
+describe("the unpriced badge", () => {
+  const cell = () =>
+    render(
+      <ModelsCell
+        models={[
+          orgModel({ id: "mdl_priced", label: "Priced" }),
+          orgModel({ id: "mdl_local", label: "Local", cost: null }),
+          orgModel({ id: "mdl_alias", label: "Alias", cost: null, aliased: true }),
+        ]}
+      />,
+    );
+  /** The markup of one model's name, up to the next one. */
+  const nameOf = (html: string, label: string, next?: string) =>
+    html.slice(html.indexOf(`>${label}<`), next ? html.indexOf(`>${next}<`) : undefined);
 
-  it("the model column set decides through isModelUnpriced, not a restated condition", () => {
-    // The badge lives with the column set, and so does the rule it must not
-    // restate.
-    const source = read("../../../components/provider-models-cell.tsx");
-    expect(source).toContain("isModelUnpriced(model)");
-    // A second copy of the rule in the JSX is exactly the drift this split
-    // was made to prevent — the exclusions would only be pinned on one of them.
-    expect(source).not.toContain("model.cost == null");
-  });
-
-  it("both locales define the badge keys the page renders", () => {
-    // Flat dotted keys: a missing entry renders the raw key string silently.
-    for (const locale of ["en", "fr"]) {
-      const messages = JSON.parse(read(`../../../locales/${locale}/settings.json`)) as Record<
-        string,
-        string
-      >;
-      expect(messages["models.unpriced"]).toBeTruthy();
-      expect(messages["models.unpricedHint"]).toBeTruthy();
+  it("marks the unpriced model alone, in both languages", async () => {
+    for (const language of ["fr", "en"]) {
+      await i18n.changeLanguage(language);
+      const label = i18n.t("models.unpriced", { ns: "settings" });
+      const html = cell();
+      expect(nameOf(html, "Local", "Alias")).toContain(`aria-label="${label}"`);
+      expect(nameOf(html, "Priced", "Local")).not.toContain(`aria-label="${label}"`);
+      expect(nameOf(html, "Alias")).not.toContain(`aria-label="${label}"`);
+      expect(html.split(`aria-label="${label}"`)).toHaveLength(2);
+      expect(html).toContain(`title="${i18n.t("models.unpricedHint", { ns: "settings" })}"`);
     }
+    await i18n.changeLanguage("fr");
   });
 });

@@ -215,6 +215,9 @@ export type Manifest = z.infer<typeof manifestSchema>;
 /** Appstrate vendor-extension key for optional agent resource hints. */
 export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
 
+/** Appstrate vendor-extension key for an agent's presentation: `color`, read by Appstrate surfaces only. */
+export const AGENT_UI_META_KEY = "dev.appstrate/ui";
+
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.
  *

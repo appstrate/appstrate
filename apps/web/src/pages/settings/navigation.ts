@@ -29,7 +29,6 @@ export interface UnifiedSettingsNavItem {
   to: RoutePath;
   icon: LucideIcon;
   labelKey: string;
-  show: boolean;
 }
 
 export interface UnifiedSettingsSection {
@@ -44,7 +43,8 @@ interface SettingsNavigationOptions {
   can: (permission: GateablePermission) => boolean;
 }
 
-function buildSettingsNavigation({
+/** The rail as drawn: entries the caller cannot use are gone, empty sections too. */
+export function visibleSettingsSections({
   canReach,
   can,
 }: SettingsNavigationOptions): UnifiedSettingsSection[] {
@@ -53,12 +53,16 @@ function buildSettingsNavigation({
     icon: LucideIcon,
     labelKey: string,
     extra = true,
-  ): UnifiedSettingsNavItem => ({ to, icon, labelKey, show: canReach(to) && extra });
+  ): UnifiedSettingsNavItem | null => (canReach(to) && extra ? { to, icon, labelKey } : null);
   // The infrastructure screens are listed to whoever can change them: a guest
   // reads spaces, models and proxies so its runs resolve them, which is no
   // reason to open their administration. The routes stay on the read, so a
   // pasted URL still opens the read-only page.
-  return [
+  const sections: {
+    scope: SettingsScope;
+    labelKey: string;
+    items: (UnifiedSettingsNavItem | null)[];
+  }[] = [
     {
       scope: "organization",
       labelKey: "orgSettings.sectionOrganization",
@@ -101,14 +105,8 @@ function buildSettingsNavigation({
       ],
     },
   ];
-}
-
-/** The rail as drawn: entries the caller cannot use are gone, empty sections too. */
-export function visibleSettingsSections(
-  options: SettingsNavigationOptions,
-): UnifiedSettingsSection[] {
-  return buildSettingsNavigation(options)
-    .map((section) => ({ ...section, items: section.items.filter((item) => item.show) }))
+  return sections
+    .map((section) => ({ ...section, items: section.items.filter((item) => item !== null) }))
     .filter((section) => section.items.length > 0);
 }
 
@@ -131,11 +129,15 @@ export function activeSettingsItem(
   return sections.flatMap((section) => section.items).find((item) => isUnder(pathname, item.to));
 }
 
-const SETTINGS_INDEXES = ["/org-settings", "/workspace-settings", "/preferences"];
+/** Each scope's own index, which opens no page: `SettingsIndexRedirect` sends it on, a phone shows the rail. */
+export const SETTINGS_INDEX = {
+  organization: "/org-settings",
+  workspace: "/workspace-settings",
+  account: "/preferences",
+} as const satisfies Record<SettingsScope, RoutePath>;
 
-/** A scope's own index, which opens no page: on a phone it shows the rail. */
 export function isSettingsIndex(pathname: string): boolean {
-  return SETTINGS_INDEXES.includes(pathname.replace(/\/$/, ""));
+  return (Object.values(SETTINGS_INDEX) as string[]).includes(pathname.replace(/\/$/, ""));
 }
 
 export function settingsScopeFromPath(pathname: string): SettingsScope {

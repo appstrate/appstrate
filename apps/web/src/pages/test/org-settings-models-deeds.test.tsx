@@ -16,6 +16,7 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
+import { orgModelFixture as model } from "../../test/org-model-fixture.ts";
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -82,34 +83,6 @@ const BOB_KEY = credential({
   bindable: false,
   allowed_actions: ["delete", "test"],
 });
-
-function model(over: Partial<OrgModelInfo>): OrgModelInfo {
-  return {
-    id: "mdl_1",
-    label: "Claude A",
-    apiShape: "anthropic-messages",
-    providerId: "anthropic",
-    provider_name: "Anthropic",
-    pi_provider: "anthropic",
-    pi_dialect: null,
-    base_url: "https://api.anthropic.com",
-    modelId: "claude-a",
-    generation: null,
-    enabled: true,
-    is_default: false,
-    needs_reconnection: false,
-    aliased: false,
-    iconUrl: null,
-    source: "custom",
-    credentialId: "cred_org",
-    binding: "org",
-    billed_to: "org",
-    created_by: null,
-    createdAt: CREATED,
-    updatedAt: CREATED,
-    ...over,
-  };
-}
 
 /** The instance ships one model, the default: there is no other default to choose. */
 const SYSTEM_DEFAULT = model({

@@ -314,7 +314,7 @@ function ModelSectionEditor({
 
 // ─── Proxy Section ──────────────────────────────────────────────────
 
-/** The organisation has no proxy to route through: the button opens the proxy creation itself. */
+/** The organization has no proxy to route through: the button opens the proxy creation itself. */
 function NoProxyState() {
   const { t } = useTranslation(["agents", "settings"]);
   const canReach = useCanReach();

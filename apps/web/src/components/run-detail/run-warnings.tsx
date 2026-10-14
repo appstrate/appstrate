@@ -43,7 +43,7 @@ function DegradedIntegrationItem({ integrationId }: { integrationId: string }) {
 }
 
 /**
- * The model chosen for the run did not load, the organisation default served
+ * The model chosen for the run did not load, the organization default served
  * instead. Presentational: `chosen` is already a name (or the raw id when the
  * model is gone or unreadable), `settingsTo` is where the agent's model is set,
  * null when the reader cannot reach it.
@@ -103,7 +103,7 @@ function ResolvedModelFallback({
  * problem that ended it (never a banner: a finished run is history, not a
  * present state to act on). Three cases, each a warning card:
  *
- * - the model chosen for the run no longer loaded, so the organisation default
+ * - the model chosen for the run no longer loaded, so the organization default
  *   served (`model_fallback`, read off the run's journal by the page);
  * - an integration hit a terminal auth failure (a 401 that survived the
  *   proxy's refresh and retry): the agent lost a tool mid-run, and each row

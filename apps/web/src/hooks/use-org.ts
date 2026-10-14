@@ -121,23 +121,20 @@ export function useOrg() {
   useAutoSelect(orgs.length > 0 ? orgs : undefined, currentOrgId, setOrgId);
 
   const selectOrg = useCallback(
-    (orgId: string | null, spaceId?: string) => {
+    (orgId: string | null) => {
       // A persona is validated in ONE organization; carrying it across is not
       // a preview of anything. No-op unless one is active.
       exitViewAs();
       orgStore.getState().setId(orgId);
-      // A caller that already resolved the destination space can apply the
-      // complete context in one tick. Other callers retain the resolver's
-      // default-selection behaviour by omitting it.
-      spaceStore.getState().setId(spaceId ?? null);
+      spaceStore.getState().setId(null);
       removeOrgScopedQueries(queryClient);
     },
     [queryClient],
   );
 
   const switchOrg = useCallback(
-    (orgId: string, spaceId?: string) => {
-      if (orgId !== orgStore.getState().id) selectOrg(orgId, spaceId);
+    (orgId: string) => {
+      if (orgId !== orgStore.getState().id) selectOrg(orgId);
     },
     [selectOrg],
   );

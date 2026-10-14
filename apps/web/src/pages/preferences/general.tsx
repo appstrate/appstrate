@@ -204,7 +204,7 @@ function EmailRow() {
  *
  * "The control IS the setting": a name is a one-word change, and a Save button
  * put two clicks and a mode change in front of it. It commits on blur or Enter
- * and reverts on Escape, like the organisation's name and the workspace's.
+ * and reverts on Escape, like the organization's name and the workspace's.
  */
 function DisplayNameRow() {
   const { t } = useTranslation(["settings", "common"]);

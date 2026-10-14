@@ -261,13 +261,13 @@ function OAuthClientModal({
 
 /**
  * The admin hub for an auth's OAuth clients, in ONE table: the space's own
- * clients, the organisation's (inherited by every space) and the platform's
+ * clients, the organization's (inherited by every space) and the platform's
  * system client — each once, with the one new connections here will use marked
  * and named above the table. Multi-client: an admin registers as many clients
  * as needed, at the space's level or, for an org integrations admin, the
- * organisation's; edits or deletes each; and picks the one in use (the
+ * organization's; edits or deletes each; and picks the one in use (the
  * model-provider pattern). Auto-provisioned (remote MCP DCR/CIMD) auths have no
- * organisation level and keep ONE machine client, shown read-only with a delete
+ * organization level and keep ONE machine client, shown read-only with a delete
  * action that re-triggers registration; a manual escape hatch (opt-in) covers
  * the rare server needing a pre-registered public client. Secrets are never
  * returned by the endpoint.

@@ -202,6 +202,12 @@ export const isOverlayPath = (path: string) =>
   OVERLAY_PREFIXES.some((prefix) => isUnder(path, prefix));
 
 /**
+ * The overlay tree's not-found routes, one per prefix: an address under an overlay that
+ * none of its pages matches is answered there, not by the dashboard standing in.
+ */
+export const OVERLAY_NOT_FOUND_PATHS = OVERLAY_PREFIXES.map((prefix) => `${prefix}/*`);
+
+/**
  * The agent page's Connexions (the Paramètres section `?agentSettings=connections`, and the
  * launch toast's « Connecter » link to it): its integration reads are not implied by the route.
  */

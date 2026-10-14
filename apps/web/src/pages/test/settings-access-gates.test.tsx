@@ -2,7 +2,9 @@
 
 /**
  * Settings pages open on the route's read permission and draw each deed behind
- * the permission its own API route checks.
+ * the permission its own API route checks. A page refused by its own guard says
+ * so in place, never by a silent redirect, and its deeds go to the shell's
+ * title slot.
  */
 
 import { afterEach, describe, expect, it, spyOn } from "bun:test";
@@ -16,19 +18,33 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
 // The org General page reaches the auth client, which reads `window.location` at import.
+// Module flags are read off this object at render: a case sets the ones it turns on.
+const features: Record<string, boolean> = {};
 installFakeStorage({
-  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  __APP_CONFIG__: { features, trustedOrigins: [] },
   location: { origin: "http://localhost" },
 });
 const { EndUsersPage } = await import("../end-users-page.tsx");
+const { ApiKeysPage } = await import("../api-keys-page.tsx");
 const { OrgSettingsGeneralPage } = await import("../org-settings/general.tsx");
 const { OrgSettingsSpacesPage } = await import("../org-settings/spaces.tsx");
+const { OrgSettingsModelsPage } = await import("../org-settings/models.tsx");
+const { OrgSettingsProxiesPage } = await import("../org-settings/proxies.tsx");
+const { OrgSettingsBillingPage } = await import("../org-settings/billing.tsx");
+const { OrgSettingsOAuthPage } = await import("../org-settings/oauth.tsx");
+const { OrgSettingsAppAuthPage } = await import("../org-settings/app/auth.tsx");
+const { OrgSettingsSpaceOauthPage } = await import("../org-settings/space/oauth.tsx");
+const { SettingsPageActionTargetProvider } =
+  await import("../../components/settings/settings-page-actions.tsx");
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 
 const restores: Array<() => void> = [];
-afterEach(() => restores.splice(0).forEach((restore) => restore()));
+afterEach(() => {
+  restores.splice(0).forEach((restore) => restore());
+  for (const flag of Object.keys(features)) delete features[flag];
+});
 
 type Space = components["schemas"]["SpaceObject"];
 
@@ -159,5 +175,56 @@ describe("the organization's general settings", () => {
     expect(html).toContain("Importer une image");
     expect(html).toContain("Distribution");
     expect(html).toContain('data-testid="delete-org-button"');
+  });
+});
+
+describe("a settings page its own guard refuses", () => {
+  const DENIED = "Vous n'avez pas accès à cette page.";
+  const UNAVAILABLE = "Cette page n'existe pas ici.";
+
+  it("says « no access » in place to whoever lacks the page's read", () => {
+    expect(renderAs(<OrgSettingsModelsPage />, { permissions: [] })).toContain(DENIED);
+    expect(renderAs(<OrgSettingsProxiesPage />, { permissions: [] })).toContain(DENIED);
+    expect(renderAs(<OrgSettingsProxiesPage />, { permissions: ["proxies:read"] })).not.toContain(
+      DENIED,
+    );
+  });
+
+  it("says the page does not exist here when its module is off", () => {
+    expect(renderAs(<OrgSettingsBillingPage />, { permissions: [] })).toContain(UNAVAILABLE);
+    expect(renderAs(<OrgSettingsOAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
+    expect(renderAs(<OrgSettingsSpaceOauthPage />, { permissions: [] })).toContain(UNAVAILABLE);
+    expect(renderAs(<OrgSettingsAppAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
+    features.oidc = true;
+    expect(renderAs(<OrgSettingsOAuthPage />, { permissions: [] })).not.toContain(UNAVAILABLE);
+  });
+
+  it("tells a module that is on from a write that is missing", () => {
+    features.oidc = true;
+    expect(renderAs(<OrgSettingsAppAuthPage />, { permissions: [] })).toContain(DENIED);
+    expect(
+      renderAs(<OrgSettingsAppAuthPage />, { permissions: ["space-settings:write"] }),
+    ).not.toContain(DENIED);
+  });
+});
+
+describe("a settings page's deeds", () => {
+  const apiKeys = () => <ApiKeysPage />;
+  const permissions = ["api-keys:read", "api-keys:create"];
+
+  it("render in place outside the settings shell", () => {
+    expect(renderAs(apiKeys(), { permissions })).toContain(ACTIONS_TRIGGER);
+  });
+
+  it("render only in the shell's title slot, never a second time in the page", () => {
+    // `null` is the slot before it mounts: nothing may fall back to the page body.
+    const html = renderAs(
+      <SettingsPageActionTargetProvider target={null}>
+        {apiKeys()}
+      </SettingsPageActionTargetProvider>,
+      { permissions },
+    );
+    expect(html).not.toContain(ACTIONS_TRIGGER);
+    expect(html).toContain(i18n.t("orgSettings.tabApiKeys", { ns: "settings" }));
   });
 });

@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { asRecord } from "@appstrate/core/safe-json";
-
-const AGENT_UI_META_KEY = "dev.appstrate/ui";
+import { AGENT_UI_META_KEY } from "@appstrate/core/validation";
 
 /**
  * Portable Agent identity used by Appstrate surfaces.
  *
- * The icon is the standard AFPS manifest field. The colour is presentation
+ * The icon is the standard AFPS manifest field. The color is presentation
  * metadata, so it stays namespaced under `_meta` instead of becoming an Agent
  * runtime concern.
  */

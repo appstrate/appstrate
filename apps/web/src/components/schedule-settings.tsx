@@ -14,10 +14,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowRight, Lock, Unplug } from "lucide-react";
+import { ArrowRight, Lock, Pause, Play, Unplug } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { AgentDetailSplit } from "./agent-detail/agent-detail-split";
 import { SettingsHeading } from "./settings/settings-heading";
 import { SectionRail } from "./settings/section-rail";
@@ -45,6 +46,7 @@ import { useAgents, usePackageDetail } from "../hooks/use-packages";
 import { useAgentConnectionReadiness } from "../hooks/use-integrations";
 import { useScheduleFormDeps, useUpdateSchedule } from "../hooks/use-schedules";
 import { useSaveAfterPause } from "../hooks/use-save-after-pause";
+import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import {
   changedInputValues,
   formatInputValue,
@@ -141,6 +143,26 @@ function useScheduleWrite(schedule: Schedule): Save {
     update.mutate(armedScheduleWrite(variables, { enabled: schedule.enabled, named }), options);
   const refused = scheduleConnectionChoices(update.error).length > 0;
   return { ...update, mutate, isError: update.isError && !refused };
+}
+
+/** The detail page's enable/disable deed, through the same write: arming re-sends the named connections. */
+export function ScheduleToggleItem({ schedule }: { schedule: Schedule }) {
+  const { t } = useTranslation("agents");
+  const update = useScheduleWrite(schedule);
+  return (
+    <DropdownMenuItem
+      onSelect={() =>
+        update.mutate(
+          { id: schedule.id, enabled: !schedule.enabled },
+          { onError: toastScheduleConnectionChoice },
+        )
+      }
+      disabled={update.isPending}
+    >
+      {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
+      {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
+    </DropdownMenuItem>
+  );
 }
 
 /** What a move changes; an absent key does not move. */

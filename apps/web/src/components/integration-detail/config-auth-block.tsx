@@ -50,7 +50,7 @@ function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; auth
 
 /**
  * Per-auth admin configuration: what the auth is for, the OAuth clients table
- * (one table for the space's, the organisation's and the system's clients) and
+ * (one table for the space's, the organization's and the system's clients) and
  * the redirect URI to register at the provider.
  */
 export function ConfigAuthBlock({

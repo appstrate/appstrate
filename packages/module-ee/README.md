@@ -95,9 +95,9 @@ section.
 - `apps/web/src/components/onboarding-layout.tsx` — drop `"plan"` from the
   `StepKey` union and its `ALL_STEPS` entry. The `showWhen: "billing"` mechanism
   becomes vestigial; it is unused, not broken.
-- `apps/web/src/pages/settings/test/route-wiring.test.ts` — drop
-  `../../org-settings/billing.tsx` from `guardedPages`: the test reads each page
-  from disk, so the deleted page crashes it with `ENOENT`.
+- `apps/web/src/pages/test/settings-access-gates.test.tsx` — drop the
+  `OrgSettingsBillingPage` import and its assertion in « says the page does not
+  exist here when its module is off »: the import of the deleted page fails.
 - `apps/web/src/components/test/route-gate.test.tsx` — its layout case uses
   `/org-settings/billing` as the page whose module is not loaded; once the route
   is gone the layout mounts. Point it at another module-gated page under the same

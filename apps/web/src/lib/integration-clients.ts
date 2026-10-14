@@ -11,7 +11,7 @@
  *
  * Shown as two tables they repeat each other and carry two "default" columns
  * that mean different things. Merged, each client appears once, with its level,
- * whether THIS space uses it, and whether it is the organisation's default.
+ * whether THIS space uses it, and whether it is the organization's default.
  */
 
 import type { IntegrationClient } from "../hooks/use-integrations";
@@ -24,18 +24,18 @@ export interface ClientRow {
   level: ClientLevel;
   /** New connections in this space use it. */
   usedHere: boolean;
-  /** The organisation's default, which every space without its own inherits. */
+  /** The organization's default, which every space without its own inherits. */
   orgDefault: boolean;
   /** The space list carries it, so the space may choose it (`setDefault` on the space tier). */
   inSpaceList: boolean;
-  /** The org list carries it, so an org admin may choose it for the organisation. */
+  /** The org list carries it, so an org admin may choose it for the organization. */
   inOrgList: boolean;
 }
 
 const LEVEL_ORDER: Record<ClientLevel, number> = { space: 0, org: 1, system: 2 };
 
 /**
- * Space clients first (they win), then the organisation's, then the system's;
+ * Space clients first (they win), then the organization's, then the system's;
  * within a level, the server's order. `orgClients` is undefined when the caller
  * may not read the org tier.
  */

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The organisation roles, in the roles page's first tab.
+ * The organization roles, in the roles page's first tab.
  *
- * Four fixed roles, the same in every organisation: code, not rows, so there
+ * Four fixed roles, the same in every organization: code, not rows, so there
  * is nothing to edit and the rows open nothing. The list says what each one is
  * and how far it reaches into spaces; the matrix crosses them with the
  * capabilities they hold.

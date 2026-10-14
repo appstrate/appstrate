@@ -51,7 +51,12 @@ import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
 import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
-import { isOverlayPath, isUnder, OVERLAY_PREFIXES, type RoutePath } from "./lib/route-access";
+import {
+  isOverlayPath,
+  isUnder,
+  OVERLAY_NOT_FOUND_PATHS,
+  type RoutePath,
+} from "./lib/route-access";
 
 // Module-owned pages live under `apps/web/src/modules/<name>/` and are
 // lazy-loaded so their bundle is never fetched when the corresponding module
@@ -654,7 +659,7 @@ export function App() {
   // before every auth/bootstrap gate because it authenticates via its own
   // httpOnly page cookie (pinned by the dispatch redirect), not the platform
   // session: it must work for embedded end-users with no Better Auth user.
-  if (window.location.pathname === "/connect") {
+  if (location.pathname === "/connect") {
     return (
       <ErrorBoundary>
         <HostedConnectPage />
@@ -663,7 +668,7 @@ export function App() {
   }
 
   // Honoured whoever is signed in: the link's account replaces the session.
-  if (window.location.pathname === "/magic-link/confirm") {
+  if (location.pathname === "/magic-link/confirm") {
     return (
       <ErrorBoundary>
         <MagicLinkConfirmPage />
@@ -921,8 +926,8 @@ export function App() {
                 {layoutRoute("/workspace-settings")}
                 {layoutRoute("/preferences")}
               </Route>
-              {OVERLAY_PREFIXES.map((prefix) => (
-                <Route key={prefix} path={`${prefix}/*`} element={<OverlayNotFound />} />
+              {OVERLAY_NOT_FOUND_PATHS.map((path) => (
+                <Route key={path} path={path} element={<OverlayNotFound />} />
               ))}
             </Routes>
           )}

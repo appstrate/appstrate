@@ -38,7 +38,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -200,7 +200,6 @@ export function OrgCatalogueModal({
   // grant in each, which is the verdict a switch in that column answers to.
   const { data: reachable } = useSpaces();
   const grantById = new Map((reachable ?? []).map((space) => [space.id, space] as const));
-  const routerLocation = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -326,9 +325,7 @@ export function OrgCatalogueModal({
         else out.delete("state");
         return out;
       },
-      // The overlay's background travels in the state; dropping it would
-      // close the catalogue under the reader's hand.
-      { replace: true, state: routerLocation.state },
+      { replace: true },
     );
   /** Its states across every space: the columns are the question. */
   const statesIn = (placement: CataloguePlacement): PlacementState[] => {

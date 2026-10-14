@@ -120,7 +120,7 @@ function EndUsersPageContent() {
     }
     navigate(endUserHref(location, id, editing), {
       replace: true,
-      state: editing ? withEndUserEditReturn(location.state, "detail") : undefined,
+      state: editing ? withEndUserEditReturn("detail") : undefined,
     });
   };
 
@@ -135,7 +135,7 @@ function EndUsersPageContent() {
       : null,
     onEdit: (user) =>
       navigate(endUserHref(location, user.id, true), {
-        state: withEndUserEditReturn(location.state, "list"),
+        state: withEndUserEditReturn("list"),
       }),
     onDelete: setPendingDelete,
   });

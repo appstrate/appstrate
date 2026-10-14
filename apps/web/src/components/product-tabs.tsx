@@ -10,7 +10,7 @@
  * which a launcher would be the right answer instead.
  *
  * The icons are plain, not coloured tiles: the only coloured mark in the
- * column should be the organisation's own, one line up — two competing brands
+ * column should be the organization's own, one line up — two competing brands
  * in eight lines of chrome is one too many. Selection is carried by the
  * segmented control itself (white fill, shadow), which is what a tab strip is
  * for. In the icon rail the labels go and the icons stack, which is the only

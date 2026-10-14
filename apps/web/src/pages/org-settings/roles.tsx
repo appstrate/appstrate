@@ -551,6 +551,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
                 setFormError(null);
               }}
               hint={requiredBy}
+              disabled={isPending}
               // The exception, marked where it applies: most permissions an API
               // key holding this role can use, these only a signed-in person.
               tag={(permission) =>

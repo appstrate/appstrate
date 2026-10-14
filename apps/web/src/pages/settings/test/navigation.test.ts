@@ -6,6 +6,7 @@ import {
   activeSettingsItem,
   firstSettingsPath,
   isSettingsIndex,
+  SETTINGS_INDEX,
   settingsContentKey,
   settingsScopeFromPath,
   visibleSettingsSections,
@@ -217,6 +218,14 @@ describe("index URLs", () => {
       expect(isSettingsIndex(index)).toBe(true);
     }
     expect(isSettingsIndex("/preferences/general")).toBe(false);
+  });
+
+  it("gives each page the index of its own scope, which the breadcrumb root links to", () => {
+    expect(SETTINGS_INDEX[settingsScopeFromPath("/org-settings/models")]).toBe("/org-settings");
+    expect(SETTINGS_INDEX[settingsScopeFromPath("/workspace-settings/webhooks/wh_1")]).toBe(
+      "/workspace-settings",
+    );
+    expect(SETTINGS_INDEX[settingsScopeFromPath("/preferences/models")]).toBe("/preferences");
   });
 });
 

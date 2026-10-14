@@ -503,7 +503,7 @@ type CatalogItem = NonNullable<ReturnType<typeof usePackageList>["data"]>[number
  * agent uses, in a table, and the list's one "Actions" menu to add or import.
  *
  * The page editor lists the whole catalogue with a box per item, which stops
- * reading once an organisation has twenty skills. Here the rows are the
+ * reading once an organization has twenty skills. Here the rows are the
  * dependencies — stock shadcn `Table` — each with its version and, for an
  * integration, the tools it allows summed up in one line; changing those opens
  * a modal, from the row's "…" menu. Adding opens the catalogue in a modal too.

@@ -2,7 +2,7 @@
 
 /**
  * The marker a run leaves in its journal when the model chosen for it no longer
- * loaded and the organisation default served instead
+ * loaded and the organization default served instead
  * (`recordModelFallback`, `apps/api/src/services/run-context-builder.ts`).
  * The overview reads it off the logs the run page already holds: no extra call.
  */
@@ -10,7 +10,7 @@
 const MODEL_FALLBACK_EVENT = "model_fallback";
 
 export interface RunModelFallback {
-  /** What was asked for: an organisation model id, free text on the wire. */
+  /** What was asked for: an organization model id, free text on the wire. */
   pinnedModelId: string;
   /** The label of the model that served the run. */
   model: string;

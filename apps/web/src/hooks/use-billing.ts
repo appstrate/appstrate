@@ -38,18 +38,19 @@ export const PLAN_DESCRIPTION_KEYS: Record<BillingPlanDetail["id"], string> = {
  */
 export type CheckoutPlanId = components["schemas"]["EeCheckoutPlanId"];
 
-/** `billing:read` is an org grant a `guest` lacks, and the sidebar mounts this everywhere. */
+/**
+ * `billing:read` is an org grant a `guest` lacks, and the sidebar mounts this everywhere.
+ * Disabled, it reports no data: a cached answer outlives a narrowed grant.
+ */
 export function useBilling(options?: { enabled?: boolean }) {
   const { enabled, header } = useOrgOnlyScope();
   const { can } = usePermissions();
+  const active = (options?.enabled ?? true) && enabled && can("billing:read");
   return $api.useQuery(
     "get",
     "/api/billing",
     { params: { header } },
-    {
-      enabled: (options?.enabled ?? true) && enabled && can("billing:read"),
-      staleTime: 60_000,
-    },
+    { enabled: active, staleTime: 60_000, select: (billing) => (active ? billing : undefined) },
   );
 }
 

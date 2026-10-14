@@ -36,6 +36,17 @@ interface SpaceState {
   /** Last space per account and org ({@link rememberedSpaceKey}): candidates, never a scope. */
   remembered: Record<string, string>;
   setId: (id: string | null) => void;
+  /** Makes `spaceId` the candidate the resolver tries first in `orgId`, without scoping to it. */
+  remember: (orgId: string, spaceId: string) => void;
+}
+
+/** The persisted map with `spaceId` as the signed-in account's last space in `orgId`; null when signed out. */
+function rememberedWith(orgId: string, spaceId: string): Record<string, string> | null {
+  const userId = authStore.getState().user?.id;
+  if (!userId) return null;
+  return writeRemembered((map) => {
+    map[rememberedSpaceKey(userId, orgId)] = spaceId;
+  });
 }
 
 export const spaceStore = createStore<SpaceState>()((set) => ({
@@ -43,17 +54,12 @@ export const spaceStore = createStore<SpaceState>()((set) => ({
   remembered: persistedRemembered.read(),
   setId: (id) => {
     const orgId = getCurrentOrgId();
-    const userId = authStore.getState().user?.id;
-    if (!id || !orgId || !userId) {
-      set({ id });
-      return;
-    }
-    set({
-      id,
-      remembered: writeRemembered((map) => {
-        map[rememberedSpaceKey(userId, orgId)] = id;
-      }),
-    });
+    const remembered = id && orgId ? rememberedWith(orgId, id) : null;
+    set(remembered ? { id, remembered } : { id });
+  },
+  remember: (orgId, spaceId) => {
+    const remembered = rememberedWith(orgId, spaceId);
+    if (remembered) set({ remembered });
   },
 }));
 

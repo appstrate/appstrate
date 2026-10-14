@@ -19,6 +19,7 @@ import type {
   ProviderRegistryEntry,
 } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
+import { orgModelFixture as model } from "../../test/org-model-fixture.ts";
 import { personalServiceRows, providerRows } from "../../lib/model-providers.ts";
 
 installFakeStorage({
@@ -127,33 +128,6 @@ function rowOf(html: string, text: string): string {
   const next = html.indexOf("<tr", at);
   return html.slice(html.lastIndexOf("<tr", at), next === -1 ? undefined : next);
 }
-
-const model = (over: Partial<OrgModelInfo>): OrgModelInfo => ({
-  id: "mdl_1",
-  label: "Claude Sonnet",
-  apiShape: "anthropic-messages",
-  providerId: "anthropic",
-  provider_name: "Anthropic",
-  pi_provider: "anthropic",
-  pi_dialect: null,
-  base_url: "https://api.anthropic.com",
-  modelId: "claude-sonnet-4-5",
-  generation: null,
-  enabled: true,
-  is_default: false,
-  needs_reconnection: false,
-  aliased: false,
-  iconUrl: null,
-  source: "custom",
-  credentialId: "cred_org",
-  binding: "org",
-  billed_to: "org",
-  cost: { input: 3, output: 15 },
-  created_by: null,
-  createdAt: CREATED,
-  updatedAt: CREATED,
-  ...over,
-});
 
 const noop = () => {};
 function providersTable(

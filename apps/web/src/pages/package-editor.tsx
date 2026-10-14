@@ -12,6 +12,7 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { packageDetailPath, packageListPath } from "../lib/package-paths";
+import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { primaryDisplayFile } from "../lib/package-files";
 import { newPackageContent } from "../lib/package-file-drafts";
 import { skillFrontmatterError } from "../lib/skill-frontmatter";
@@ -487,8 +488,6 @@ function AgentEditorInner({
     </EditorShell>
   );
 }
-
-export type AgentDefinitionSection = "general" | "schema" | "skills" | "integrations" | "tools";
 
 /**
  * An agent's definition, edited where it is read: inside its settings, one

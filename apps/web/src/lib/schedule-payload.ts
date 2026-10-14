@@ -139,16 +139,16 @@ export function scheduleMovePayload(
 }
 
 /**
- * Any other PATCH of a schedule. The server takes no fallback for an armed schedule: a write that
- * names no connections and moves no actor is re-checked against the stored set, so it re-sends
- * `named` — the stored picks plus the set the viewer's fallback binds, for a schedule running as
- * them ({@link savedScheduleOverrides}).
+ * Any other PATCH of a schedule. The server takes no fallback for a schedule armed after the
+ * write (enabling it included): a write that names no connections and moves no actor is
+ * re-checked against the stored set, so it re-sends `named` — the stored picks plus the set the
+ * viewer's fallback binds, for a schedule running as them ({@link savedScheduleOverrides}).
  */
 export function armedScheduleWrite<T extends ScheduleUpdateBody>(
   variables: T,
   schedule: { enabled: boolean; named: Record<string, string[]> | undefined },
 ): T & Pick<ScheduleUpdateBody, "connection_overrides"> {
-  return schedule.enabled &&
+  return (variables.enabled ?? schedule.enabled) &&
     schedule.named &&
     !("connection_overrides" in variables) &&
     !("actor" in variables)

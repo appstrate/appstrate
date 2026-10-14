@@ -28,6 +28,7 @@ import { spaceLabel } from "../lib/space-label";
 import { isUnder } from "../lib/route-access";
 import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { useCanCreateOrg } from "../hooks/use-auth";
+import { spaceStore } from "../stores/space-store";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
@@ -118,9 +119,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
 
   /**
-   * The one place the context is applied — and it is applied whole. Switching
-   * org first would blank the workspace and let the auto-selector land the user
-   * anywhere for a frame; both stores are set in the same tick instead.
+   * The one place the context is applied — and it is applied whole. In a new
+   * organization the pick is remembered there first, so the space resolver
+   * enters it as soon as that organization's listing proves it enterable,
+   * instead of landing on its default.
    *
    * A new organization also means the current URL may not exist there (an agent
    * id, a run number), so the landing is the root of the product you are in.
@@ -129,8 +131,10 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
    */
   const applyContext = (orgId: string, spaceId: string) => {
     const orgChanged = orgId !== currentOrg.id;
-    if (orgChanged) switchOrg(orgId, spaceId);
-    else switchSpace(spaceId);
+    if (orgChanged) {
+      spaceStore.getState().remember(orgId, spaceId);
+      switchOrg(orgId);
+    } else switchSpace(spaceId);
     setOpen(false);
     const settingsRoute =
       overlayPath !== null &&

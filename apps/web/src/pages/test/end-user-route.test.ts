@@ -37,13 +37,11 @@ describe("end-user panel URL", () => {
   });
 
   it("remembers that a table deed must return to the list", () => {
-    const state = withEndUserEditReturn({ background: "/runs" }, "list");
-    expect(endUserEditReturn(state)).toBe("list");
-    expect(state.background).toBe("/runs");
+    expect(endUserEditReturn(withEndUserEditReturn("list"))).toBe("list");
   });
 
   it("remembers that detail-owned editing must return to detail", () => {
-    expect(endUserEditReturn(withEndUserEditReturn(null, "detail"))).toBe("detail");
+    expect(endUserEditReturn(withEndUserEditReturn("detail"))).toBe("detail");
   });
 
   it("makes an addressable edit URL return to the list by default", () => {

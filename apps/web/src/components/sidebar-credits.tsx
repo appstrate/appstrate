@@ -14,12 +14,11 @@ import { formatNumber } from "../lib/format-number";
 export function SidebarCredits() {
   const { t } = useTranslation();
   // The gauge links to the billing tab: fetched and drawn only where that tab
-  // opens (the billing module loaded and `billing:read` granted). A cached
-  // answer outlives a narrowed grant, hence both.
+  // opens (the billing module loaded and `billing:read` granted).
   const shown = useCanReach()("/org-settings/billing");
   const { data: billing } = useBilling({ enabled: shown });
 
-  if (!shown || !billing) return null;
+  if (!billing) return null;
 
   const percent = Math.min(billing.usage_percent, 100);
 

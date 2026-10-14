@@ -575,11 +575,16 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     stable address; (4) what is not a modal, such as the notification bell, a
     popover that becomes a sheet on a phone. Each one is listed.
   - **The guard**: `components/test/modals-have-urls.test.ts` reads the sources
-    and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open` or
-    `onClose` is driven by a `useState`, unless the pair is in its `EXCEPTIONS`
-    list with one line of reason. The list also fails when an entry matches no
-    code. Port the modal to `useModalParam` first; add an exception only
-    for the four cases above.
+    and fails on a `Modal`, `PanelDialog`, `Sheet` or `…Dialog` whose `open`,
+    `onClose` or guarding `cond &&` reads a `useState` of its file, directly or
+    through a component-level `const` derived from it (`const closure =
+closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
+    its case, one of the four above (`confirmation`, `secret`, `chat` — only in
+    `packages/module-chat` — or `not-a-modal`), and one line of reason. The list
+    also fails when an entry matches no code. A modal mounted only while its
+    `useModalParam` is set has its address, whatever local condition narrows it.
+    Port the modal to `useModalParam` first; add an exception only for the four
+    cases above.
 - **Closing a form modal abandons its input**, whichever way (Annuler, a click outside,
   Escape, Back): the form is mounted only while its param is set (`{param.value !== null && <Form />}`,
   or the host returns `null`), so it reopens empty on a creation and on the stored values on an

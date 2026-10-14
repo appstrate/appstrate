@@ -8,7 +8,7 @@
  * server that does not exist is dropped without a word
  * (`integration-spawn-resolver.ts`, `mcp_server_unresolved`) — the agent runs
  * without its tools. Only a version range no published version satisfies fails
- * the run. So the field lists the servers the organisation can actually run,
+ * the run. So the field lists the servers the organization can actually run,
  * lets one be imported without leaving the form, and says both of those
  * failures out loud before anyone publishes.
  */

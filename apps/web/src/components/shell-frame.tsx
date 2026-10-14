@@ -50,7 +50,7 @@ export function ShellSidebar({
   contentClassName?: string;
 }) {
   const { t } = useTranslation();
-  // Two organisation-wide destinations, each drawn only for a caller it admits:
+  // Two organization-wide destinations, each drawn only for a caller it admits:
   // settings when its own rail lists an entry for them, the catalogue when its
   // route does (`ROUTE_ACCESS`).
   const settingsSections = useSettingsSections();

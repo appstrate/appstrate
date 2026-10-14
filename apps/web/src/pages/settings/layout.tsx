@@ -37,6 +37,7 @@ import {
   activeSettingsItem,
   firstSettingsPath,
   isSettingsIndex,
+  SETTINGS_INDEX,
   settingsContentKey,
   settingsScopeFromPath,
   type SettingsScope,
@@ -115,7 +116,7 @@ export function UnifiedSettingsLayout() {
   useOverlayBreadcrumb(
     activeSectionLabel && activeItem && activeSectionHref
       ? [
-          { label: settingsBreadcrumbLabel, href: "/org-settings" },
+          { label: settingsBreadcrumbLabel, href: SETTINGS_INDEX[activeScope] },
           { label: activeSectionLabel, href: activeSectionHref },
           // A link once a page under the item (a webhook) extends the trail.
           {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The selector at the head of a rail group: which organisation, which
+ * The selector at the head of a rail group: which organization, which
  * workspace, which catalogue. One control, so a panel that switches context
  * always switches it the same way.
  */

@@ -74,7 +74,7 @@ export function usePackageColumns(holds?: PackageType): DataColumn<CardItem>[] {
               {t("list.badgeBuiltIn")}
             </span>
           )}
-          {/* The origin of a package the organisation made is said in the filter's own word, a column of blanks says nothing. */}
+          {/* The origin of a package the organization made is said in the filter's own word, a column of blanks says nothing. */}
           {item.source === "local" && !item.autoInstalled && (
             <span className="text-muted-foreground truncate text-xs">{t("list.filter.local")}</span>
           )}

@@ -27,6 +27,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { agentConnectionsTabVisible } from "../../lib/route-access";
 import {
   AGENT_DEFINITION_SECTIONS,
+  type AgentDefinitionSection,
   agentSettingsHref,
   settingsEditorPlace,
   type AgentSettingsSection,
@@ -40,7 +41,6 @@ import { AgentDetailSplit } from "./agent-detail-split";
 import { LoadingState } from "../page-states";
 import { PackageVersionsSection } from "../package-detail/package-versions-section";
 import { PackageFilesSection } from "../package-files/package-files-section";
-import type { AgentDefinitionSection } from "../../pages/package-editor";
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>

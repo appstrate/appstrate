@@ -3,10 +3,10 @@
 /**
  * Pending invitations, as a settings table.
  *
- * The organisation's Users page and a space's Members page show the SAME
+ * The organization's Users page and a space's Members page show the SAME
  * object — one org invitation that may carry space roles — so they share this
  * table rather than each drawing its own. A space page lists only the
- * invitations that assign that space. Tokens are organisation invitation
+ * invitations that assign that space. Tokens are organization invitation
  * authority, so the table shows to `members:invite` holders only, wherever it
  * is mounted.
  */

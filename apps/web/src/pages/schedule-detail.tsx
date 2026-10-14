@@ -27,16 +27,15 @@ import { NextRunPreview } from "../components/next-run-preview";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { useScheduleById, useUpdateSchedule, useDeleteSchedule } from "../hooks/use-schedules";
+import { useScheduleById, useDeleteSchedule } from "../hooks/use-schedules";
 import { useCanWriteSchedule } from "../hooks/use-can-write-schedule";
 import { isQueryInFlight } from "../lib/query-state";
-import { toastScheduleConnectionChoice } from "../lib/mutation-error";
 import { useAgents } from "../hooks/use-packages";
 import { canReadRuns } from "@appstrate/core/permissions";
-import { ScheduleSettings } from "../components/schedule-settings";
+import { ScheduleSettings, ScheduleToggleItem } from "../components/schedule-settings";
 import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
-import { Trash2, Play, Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
+import { Trash2, Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
 
 type ScheduleTab = "details" | "runs" | "settings";
 const SCHEDULE_TABS: readonly ScheduleTab[] = ["details", "runs", "settings"];
@@ -49,7 +48,6 @@ export function ScheduleDetailPage() {
 
   const scheduleQuery = useScheduleById(id);
   const { data: schedule, error } = scheduleQuery;
-  const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
   const mayWrite = useCanWriteSchedule(schedule);
 
@@ -64,13 +62,6 @@ export function ScheduleDetailPage() {
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)
     : null;
-
-  const handleToggle = () => {
-    updateSchedule.mutate(
-      { id: schedule.id, enabled: !schedule.enabled },
-      { onError: toastScheduleConnectionChoice },
-    );
-  };
 
   return (
     <div>
@@ -109,10 +100,7 @@ export function ScheduleDetailPage() {
               )}
               {can("schedules:write") && mayWrite && (
                 <PageActionsMenu>
-                  <DropdownMenuItem onSelect={handleToggle} disabled={updateSchedule.isPending}>
-                    {schedule.enabled ? <Pause size={14} /> : <Play size={14} />}
-                    {schedule.enabled ? t("schedule.disable") : t("schedule.enable")}
-                  </DropdownMenuItem>
+                  <ScheduleToggleItem schedule={schedule} />
                   {can("schedules:delete") && (
                     <>
                       <DropdownMenuSeparator />

@@ -4,7 +4,7 @@
  * The catalogue as a destination of its own.
  *
  * It belongs next to settings, at the bottom of the navigation: both are
- * organisation-wide surfaces that float over whatever you were doing, and both
+ * organization-wide surfaces that float over whatever you were doing, and both
  * are reachable from anywhere rather than from one list's action menu. Opening
  * it from a list lands on that list's kind — the way a settings link can point
  * straight at one settings page.

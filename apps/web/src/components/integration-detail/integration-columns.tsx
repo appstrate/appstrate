@@ -53,14 +53,14 @@ import {
  * uses it, and what may be done to it.
  *
  * ONE table for both tiers (`lib/integration-clients.ts` merges the space's and
- * the organisation's lists): a client appears once, and "used here" is the
+ * the organization's lists): a client appears once, and "used here" is the
  * single verdict that matters for a new connection. Use waits for a 36rem
  * table and level for the next tier: on a phone what matters is which clients
  * exist and how to remove one, and on a narrow table which one is in use.
  *
  * What a row offers follows its level: a space's own client can be edited,
- * shared with the organisation or deleted by whoever configures the space; an
- * organisation client only by an org integrations admin; the system's by nobody.
+ * shared with the organization or deleted by whoever configures the space; an
+ * organization client only by an org integrations admin; the system's by nobody.
  */
 export function useIntegrationClientColumns({
   canUseHere,
@@ -78,9 +78,9 @@ export function useIntegrationClientColumns({
   canUseHere: boolean;
   /** The caller holds `org-integrations:configure`. */
   canManageOrg: boolean;
-  /** Same rule for the organisation's own choice. */
+  /** Same rule for the organization's own choice. */
   canChooseOrgDefault: boolean;
-  /** Moving a space's own client up to the organisation. */
+  /** Moving a space's own client up to the organization. */
   canPromote: boolean;
   /** The row with a write in flight — only that row shows pending. */
   pendingClientRef: string | null;

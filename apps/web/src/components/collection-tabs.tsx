@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tabs that split ONE collection into parts: organisation and space roles,
+ * Tabs that split ONE collection into parts: organization and space roles,
  * remote and local integrations.
  *
  * Not the tabs of a detail page (`DetailTabsList`), which move between

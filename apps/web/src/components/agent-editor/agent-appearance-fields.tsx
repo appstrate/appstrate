@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { DynamicIcon } from "lucide-react/dynamic";
 import { asRecord } from "@appstrate/core/safe-json";
+import { AGENT_UI_META_KEY } from "@appstrate/core/validation";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -28,7 +29,6 @@ import {
 } from "../agent-identity-options";
 import { AgentIdentityTile } from "../agent-identity";
 
-const AGENT_UI_META_KEY = "dev.appstrate/ui";
 const COLOR_KEYS = Object.keys(AGENT_COLOR_CATALOG) as AgentColorKey[];
 const FEATURED_ICONS: AgentIconName[] = [
   "bot",

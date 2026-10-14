@@ -20,6 +20,9 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
+  the `_meta` key holding an agent's presentation (`color`), next to
+  `AGENT_RESOURCES_META_KEY`.
 - `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
   (`./integration`): the `http://` `authorized_uris` entries of the auths
   that inject a credential over HTTP, as write-path issues. `isTrustedHost`

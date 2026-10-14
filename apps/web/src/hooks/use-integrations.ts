@@ -169,7 +169,7 @@ export function useIntegrationNames(): (
  * Fetch the complete integration corpus for list surfaces that search and
  * filter client-side. The endpoint is paginated at 100 rows, so treating its
  * default first page as a complete catalogue would make the toolbar lie as
- * soon as an organisation crosses that boundary.
+ * soon as an organization crosses that boundary.
  */
 export function useAllIntegrations(options?: { enabled?: boolean }) {
   const scope = useIntegrationsReadScope();

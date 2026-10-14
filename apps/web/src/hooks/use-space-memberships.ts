@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Who reaches which space, across the organisation.
+ * Who reaches which space, across the organization.
  *
  * A member object does not carry its spaces, so the answer is one request per
  * space. Only an owner or admin can ask it, being admin in every space, and

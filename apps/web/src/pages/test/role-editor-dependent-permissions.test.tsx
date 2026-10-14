@@ -8,12 +8,18 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import i18n, { i18nReady } from "../../i18n.ts";
+import { render } from "../../test/render.tsx";
+import { ScopeMultiSelect } from "../../components/scope-multi-select.tsx";
 import {
   dependentsLabel,
   lockedReads,
   withRequiredReads,
   type RoleVocabularyEntry,
 } from "../../lib/role-permission-dependencies.ts";
+
+await i18nReady;
+await i18n.changeLanguage("fr");
 
 function entry(permission: string, requires_one_of: string[] = []): RoleVocabularyEntry {
   return {
@@ -68,8 +74,19 @@ describe("a read a selected action depends on", () => {
   });
 
   it("cannot be unticked while it is locked", () => {
-    // The picker hands back the selection without the read; the editor puts it back.
-    expect(complete(["schedules:write"]).includes("schedules:read")).toBe(true);
+    // Unticking hands the editor the selection minus the read; the editor's
+    // completion puts it back, and it stays locked.
+    const held = withRequiredReads(new Set(["schedules:write"]), vocabulary);
+    const unticked = new Set([...held].filter((permission) => permission !== "schedules:read"));
+    const next = withRequiredReads(unticked, vocabulary);
+    expect([...next].sort()).toEqual(["schedules:read", "schedules:write"]);
+    expect(lockedReads(next, vocabulary).has("schedules:read")).toBe(true);
+  });
+
+  it("is a free untick for a read no selected action needs", () => {
+    const held = withRequiredReads(new Set(["schedules:read", "runs:read"]), vocabulary);
+    const unticked = new Set([...held].filter((permission) => permission !== "runs:read"));
+    expect([...withRequiredReads(unticked, vocabulary)]).toEqual(["schedules:read"]);
   });
 
   it("names a dependent of another resource in full", () => {
@@ -92,5 +109,25 @@ describe("a read a selected action depends on", () => {
     // Unticking `runs:read` leaves `runs:read-all` alone holding the action.
     const alone = lockedReads(new Set(["runs:read-all", "runs:cancel"]), vocabulary);
     expect([...alone.keys()]).toEqual(["runs:read-all"]);
+  });
+});
+
+describe("the permission picker", () => {
+  const picker = (disabled?: boolean) =>
+    render(
+      <ScopeMultiSelect
+        available={["schedules:read", "schedules:write"]}
+        selected={["schedules:read"]}
+        onChange={() => {}}
+        disabled={disabled}
+      />,
+    );
+
+  it("cannot be opened while a save is pending", () => {
+    expect(picker(true)).toMatch(/<button[^>]*disabled=""/);
+  });
+
+  it("opens otherwise", () => {
+    expect(picker()).not.toContain('disabled=""');
   });
 });

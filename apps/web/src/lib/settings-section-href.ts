@@ -5,18 +5,18 @@
  * (the default one included), the tab in the hash. A link to a section carries
  * nothing else from the page it leaves, so a modal open there does not follow.
  */
-import type { AgentDefinitionSection } from "../pages/package-editor";
-
 export type ConfigurationSection = "model" | "proxy" | "inputs" | "connections" | "schedules";
 
 /** One editor, its sections switched without leaving it. */
-export const AGENT_DEFINITION_SECTIONS: readonly AgentDefinitionSection[] = [
+export const AGENT_DEFINITION_SECTIONS = [
   "general",
   "schema",
   "skills",
   "integrations",
   "tools",
-];
+] as const;
+
+export type AgentDefinitionSection = (typeof AGENT_DEFINITION_SECTIONS)[number];
 
 /** Package AFPS › Contenu is `bundle` in the URL: `files` is Explorer's tree. */
 export type AgentSettingsSection =

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { matchRoutes } from "react-router-dom";
 import {
   isOverlayPath,
+  OVERLAY_NOT_FOUND_PATHS,
   OVERLAY_PREFIXES,
   ROUTE_ACCESS,
   routeVerdict,
@@ -34,17 +35,6 @@ describe("route declarations", () => {
     expect(mounted.match(/<Route\s+path=/g)).toEqual(["<Route path="]);
     expect(mounted).toContain('<Route path="*"');
     expect(app).toMatch(/const PAGES: Record<RoutePath, ReactNode> =/);
-  });
-
-  it("answers an unknown address under an overlay inside the overlay", () => {
-    // Without it the overlay tree matches nothing and the dashboard stands
-    // in, unexplained.
-    const app = source("../../app.tsx");
-    const overlay = app.slice(app.indexOf("{/* Overlay tree"));
-    expect(overlay).toContain(
-      "<Route key={prefix} path={`${prefix}/*`} element={<OverlayNotFound />} />",
-    );
-    expect(overlay.indexOf("OVERLAY_PREFIXES.map")).toBeGreaterThan(0);
   });
 
   /** The shell: whatever renders on every page and links into the registry. */
@@ -153,14 +143,24 @@ describe("overlay paths", () => {
     expect(isOverlayPath("/org-settingsfoo")).toBe(false);
   });
 
+  // The overlay tree as `app.tsx` mounts it: the declared overlay pages, then the not-found routes.
+  const routes = [
+    ...Object.keys(ROUTE_ACCESS)
+      .filter(isOverlayPath)
+      .map((path) => ({ path })),
+    ...OVERLAY_NOT_FOUND_PATHS.map((path) => ({ path })),
+  ];
+  const matched = (url: string) => matchRoutes(routes, url)?.[0]?.route.path;
+
+  it("answer an unknown address under every overlay inside that overlay", () => {
+    for (const prefix of OVERLAY_PREFIXES) {
+      expect(matched(`${prefix}/no-such-page`)).toBe(`${prefix}/*`);
+    }
+    // Outside the overlays the main tree answers.
+    expect(matched("/agents/no-such-page")).toBeUndefined();
+  });
+
   it("leave every declared overlay page ahead of the not-found catch-all", () => {
-    const routes = [
-      ...Object.keys(ROUTE_ACCESS)
-        .filter(isOverlayPath)
-        .map((path) => ({ path })),
-      ...OVERLAY_PREFIXES.map((prefix) => ({ path: `${prefix}/*` })),
-    ];
-    const matched = (url: string) => matchRoutes(routes, url)?.[0]?.route.path;
     expect(matched("/org-settings/general")).toBe("/org-settings/general");
     expect(matched("/workspace-settings/webhooks/wh_1")).toBe("/workspace-settings/webhooks/:id");
     expect(matched("/catalogue/discover/agent")).toBe("/catalogue/:reading/:type");

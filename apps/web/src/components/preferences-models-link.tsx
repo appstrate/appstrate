@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 
-/**
- * A link to the caller's own keys (Preferences › Mes clés).
- * It carries the router state along, so from inside the settings overlay the
- * Preferences open over the same screen instead of turning into a full page.
- */
+/** A link to the caller's own keys (Preferences › Mes clés). */
 export function PreferencesModelsLink({ children }: { children: ReactNode }) {
-  const { state } = useLocation();
   return (
-    <Link to="/preferences/models" state={state} className="underline underline-offset-2">
+    <Link to="/preferences/models" className="underline underline-offset-2">
       {children}
     </Link>
   );

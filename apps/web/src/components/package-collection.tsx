@@ -4,7 +4,7 @@
  * A collection of packages: the bar, the body, the count.
  *
  * Everything the agents, skills and MCP-server pages draw below their title,
- * and everything the organisation's catalogue draws inside its panel. They are
+ * and everything the organization's catalogue draws inside its panel. They are
  * the SAME list of the same objects, so they are one component: the same
  * search, the same faceted filters, the same column set, the same view toggle,
  * the same empty states. The catalogue adds a tick per row and one action in

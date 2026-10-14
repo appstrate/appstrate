@@ -36,6 +36,8 @@ interface ScopeMultiSelectProps {
   hint?: (scope: string) => string | null;
   /** A short mark at the end of an entry, its meaning in `title`: a property, not a sentence. */
   tag?: (scope: string) => { label: string; title: string } | null;
+  /** The pending save: the picker cannot be opened. */
+  disabled?: boolean;
 }
 
 interface ResourceGroup {
@@ -74,6 +76,7 @@ export function ScopeMultiSelect({
   labels,
   hint,
   tag,
+  disabled = false,
 }: ScopeMultiSelectProps) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
@@ -111,7 +114,11 @@ export function ScopeMultiSelect({
     <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="w-full justify-between font-normal">
+          <Button
+            variant="outline"
+            className="w-full justify-between font-normal"
+            disabled={disabled}
+          >
             <span className="truncate">{label}</span>
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>

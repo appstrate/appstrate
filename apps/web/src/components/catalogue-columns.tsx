@@ -5,7 +5,7 @@
  * package is already active, and the deed.
  *
  * "Where it is already active" is the column this screen cannot do without.
- * There is no organisation-level install in this product — a package is in the
+ * There is no organization-level install in this product — a package is in the
  * org's catalogue, and then it is switched on space by space — so "activate"
  * with nothing beside it would never say WHERE. The row says where it already
  * runs, and the button names the space it would add.

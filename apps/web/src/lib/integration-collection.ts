@@ -63,8 +63,8 @@ export function integrationOrigin(integration: IntegrationSummaryWire): Integrat
 }
 
 /**
- * The organisation collection is not the catalogue. It contains every custom
- * integration the organisation owns, including inactive ones that still need
+ * The organization collection is not the catalogue. It contains every custom
+ * integration the organization owns, including inactive ones that still need
  * to be administrable, plus the system integrations activated in this
  * workspace.
  */

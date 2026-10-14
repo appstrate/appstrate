@@ -166,6 +166,16 @@ describe("armedScheduleWrite", () => {
     });
   });
 
+  it("re-sends it on the write that arms the schedule, not on the one that disarms it", () => {
+    const enable = { enabled: true };
+    expect(armedScheduleWrite(enable, { enabled: false, named })).toEqual({
+      ...enable,
+      connection_overrides: named,
+    });
+    const disable = { enabled: false };
+    expect(armedScheduleWrite(disable, { enabled: true, named })).toBe(disable);
+  });
+
   it("leaves the write alone when disarmed, nothing is named, or it decides the set itself", () => {
     expect(armedScheduleWrite(write, { enabled: false, named })).toBe(write);
     expect(armedScheduleWrite(write, { enabled: true, named: undefined })).toBe(write);

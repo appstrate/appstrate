@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The space-members column set — the organisation Users table's twin.
+ * The space-members column set — the organization Users table's twin.
  *
  * Same record, same order, same treatment: who, their address, then how they
  * reach this space and as what. The role column holds the CONTROL when the
