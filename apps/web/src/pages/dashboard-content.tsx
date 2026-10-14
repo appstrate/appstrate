@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -9,8 +8,6 @@ import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/sh
 import {
   ArrowRight,
   Bot,
-  ChevronLeft,
-  ChevronRight,
   MessageSquareText,
   Copy,
   LayoutDashboard,
@@ -19,7 +16,14 @@ import {
 } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { ScrollArea } from "@appstrate/ui/components/scroll-area";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@appstrate/ui/components/carousel";
+import { useCarousel } from "@appstrate/ui/components/carousel-context";
 import { AgentIdentityTile } from "../components/agent-identity";
 import { Badge } from "../components/status-badge";
 import { EmptyState } from "../components/page-states";
@@ -278,101 +282,50 @@ function RecentAgents({
   className?: string;
 }) {
   const { t } = useTranslation("agents");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [canScrollBack, setCanScrollBack] = useState(false);
-  const [canScrollForward, setCanScrollForward] = useState(false);
-
-  const viewport = useCallback(
-    () => rootRef.current?.querySelector<HTMLElement>("[data-radix-scroll-area-viewport]") ?? null,
-    [],
-  );
-
-  const updateScrollState = useCallback(() => {
-    const element = viewport();
-    if (!element) return;
-    const remaining = element.scrollWidth - element.clientWidth - element.scrollLeft;
-    setCanScrollBack(element.scrollLeft > 2);
-    setCanScrollForward(remaining > 2);
-  }, [viewport]);
-
-  useEffect(() => {
-    const element = viewport();
-    if (!element) return;
-    const frame = requestAnimationFrame(updateScrollState);
-    const observer = new ResizeObserver(updateScrollState);
-    observer.observe(element);
-    if (element.firstElementChild) observer.observe(element.firstElementChild);
-    element.addEventListener("scroll", updateScrollState, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      element.removeEventListener("scroll", updateScrollState);
-    };
-  }, [agents.length, updateScrollState, viewport]);
-
-  const scroll = (direction: -1 | 1) => {
-    const element = viewport();
-    if (!element) return;
-    element.scrollBy({
-      left: direction * Math.max(304, element.clientWidth * 0.72),
-      behavior: "smooth",
-    });
-  };
 
   return (
-    <div
-      className={cn("relative", className)}
-      role="region"
+    <Carousel
+      opts={{ align: "start", dragFree: true, slidesToScroll: "auto" }}
+      className={className}
       aria-label={t("dashboard.recentAgents")}
       data-dashboard-agent-carousel
     >
-      <ScrollArea ref={rootRef} className="w-full [&_[data-radix-scroll-area-scrollbar]]:hidden">
-        <div className="flex w-max gap-3 pb-1">
-          {agents.map((agent) => (
+      <CarouselContent className="-ml-3 pb-1">
+        {agents.map((agent) => (
+          <CarouselItem key={agent.id} className="basis-auto pl-3">
             <DashboardAgentCard
-              key={agent.id}
               agent={agent}
               unreadCount={unreadCounts?.[agent.id]}
-              className="w-[19rem] shrink-0"
+              className="w-[19rem]"
             />
-          ))}
-        </div>
-      </ScrollArea>
-
-      {canScrollBack && (
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="absolute top-1/2 left-2 z-10 size-8 -translate-y-1/2 rounded-full"
-          onClick={() => scroll(-1)}
-          aria-label={t("dashboard.previousAgents")}
-        >
-          <ChevronLeft />
-        </Button>
-      )}
-
-      <div
-        className={cn(
-          "from-canvas pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l to-transparent transition-opacity",
-          canScrollForward ? "opacity-100" : "opacity-0",
-        )}
-        aria-hidden="true"
-        data-carousel-end-fade
+          </CarouselItem>
+        ))}
+      </CarouselContent>
+      <CarouselPrevious
+        className="left-2 z-20 disabled:hidden"
+        aria-label={t("dashboard.previousAgents")}
       />
-      {canScrollForward && (
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="absolute top-1/2 right-2 z-10 size-8 -translate-y-1/2 rounded-full"
-          onClick={() => scroll(1)}
-          aria-label={t("dashboard.moreAgents")}
-        >
-          <ChevronRight />
-        </Button>
+      <RecentAgentsEndFade />
+      <CarouselNext
+        className="right-2 z-20 disabled:hidden"
+        aria-label={t("dashboard.moreAgents")}
+      />
+    </Carousel>
+  );
+}
+
+/** Fades the last visible card while more agents sit past the edge. */
+function RecentAgentsEndFade() {
+  const { canScrollNext } = useCarousel();
+  return (
+    <div
+      className={cn(
+        "from-canvas pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l to-transparent transition-opacity",
+        canScrollNext ? "opacity-100" : "opacity-0",
       )}
-    </div>
+      aria-hidden="true"
+      data-carousel-end-fade
+    />
   );
 }
 

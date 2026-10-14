@@ -54,6 +54,8 @@
   "btn.copyLink": "Copy link",
   "btn.copied": "Copied!",
   "btn.close": "Close",
+  "carousel.next": "Next item",
+  "carousel.previous": "Previous item",
   "btn.done": "Done",
   "btn.download": "Download",
   "error.generic": "An error occurred.",

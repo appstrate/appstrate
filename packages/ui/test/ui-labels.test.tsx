@@ -26,6 +26,8 @@ describe("UiLabelsContext", () => {
     const html = renderToStaticMarkup(
       <UiLabelsContext.Provider
         value={{
+          carouselNext: "Diapositive suivante",
+          carouselPrevious: "Diapositive précédente",
           close: "Fermer",
           sidebar: "Menu latéral",
           sidebarDescription: "Affiche le menu latéral sur mobile.",
