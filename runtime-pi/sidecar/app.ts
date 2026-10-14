@@ -184,10 +184,12 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
 
 /**
  * Per-call telemetry attached to `/llm/*` pass-throughs. Each observation
- * yields one info-level `llm.stream.observed` log on close (with TTFB,
- * max inter-chunk gap, total bytes) plus warn-level `llm.stream.error` /
- * `llm.stream.cancelled` on abnormal terminations. Without it, a silent
- * Bun.serve idleTimeout burning the run timeout in a retry loop is invisible.
+ * yields exactly one line carrying the same summary (TTFB, max inter-chunk
+ * gap, total bytes): info `llm.stream.observed` when the upstream ends, info
+ * `llm.stream.cancelled` when the client stops reading first (the normal end of
+ * most calls), warn `llm.stream.idle_timeout` / `llm.stream.error` on failure.
+ * Without it, a silent Bun.serve idleTimeout burning the run timeout in a retry
+ * loop is invisible.
  */
 interface LlmStreamObservation {
   targetUrl?: string;
@@ -258,10 +260,15 @@ async function passUpstream(
   // created when the read starts and cleared the moment it settles, so no
   // clock runs across a consumer-side pause. Do not "simplify" this into a
   // single long-lived timer; that is the bug, not the cleanup.
+  //
+  // Set by `cancel`: the pending read then settles (`done`, or a rejection) on
+  // an already-closed controller, which `pull` must neither touch nor report.
+  let cancelled = false;
   const observed = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
         const outcome = await withIdleBound(reader.read(), idleTimeoutMs);
+        if (cancelled) return;
         if (outcome === STREAM_IDLE) {
           // Not every api shape this platform maps honours pi-ai's own
           // `timeoutMs` (`pi-messages` ignores it), so this proxy is the only
@@ -310,6 +317,7 @@ async function passUpstream(
         chunks += 1;
         controller.enqueue(value);
       } catch (err) {
+        if (cancelled) return;
         logger.warn("llm.stream.error", {
           ...summary(),
           error: err instanceof Error ? err.message : String(err),
@@ -318,7 +326,8 @@ async function passUpstream(
       }
     },
     cancel(reason) {
-      logger.warn("llm.stream.cancelled", { ...summary(), reason: String(reason ?? "") });
+      cancelled = true;
+      logger.info("llm.stream.cancelled", summary());
       return reader.cancel(reason);
     },
   });

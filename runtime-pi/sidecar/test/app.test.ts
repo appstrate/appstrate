@@ -414,20 +414,25 @@ describe("ALL /llm/* — telemetry", () => {
       // `totalMs` is monotonically >= ttfbMs.
       expect(payload?.totalMs).toBeGreaterThanOrEqual(payload?.ttfbMs as number);
       expect(payload?.targetUrl).toBe(PROXY_INFERENCE_URL);
+      expect(infoSpy.mock.calls.find(([msg]) => msg === "llm.stream.cancelled")).toBeUndefined();
     } finally {
       infoSpy.mockRestore();
     }
   });
 
-  it("emits llm.stream.cancelled when the consumer aborts mid-stream", async () => {
+  it("logs one info llm.stream.cancelled, and nothing else, when the client stops reading", async () => {
+    // pi-ai cancels the body after its last useful event on every normal call,
+    // while a `pull` is pending on the still-open upstream. That pending read
+    // then settles on a cancelled stream: it must log nothing else (no
+    // `observed`, no `error`), and the cancel line itself is not a warning.
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      // Upstream that never closes — forces the consumer-side cancel
-      // path to fire (the failure mode that was burning the run
-      // timeout before #426).
+      const enc = new TextEncoder();
+      const sent = ["first-chunk", "second-chunk"];
       const stream = new ReadableStream({
         start(controller) {
-          controller.enqueue(new TextEncoder().encode("first-chunk"));
+          for (const chunk of sent) controller.enqueue(enc.encode(chunk));
           // Intentionally never close.
         },
       });
@@ -443,16 +448,30 @@ describe("ALL /llm/* — telemetry", () => {
       const app = createTestApp(deps);
       const res = await app.request("/llm/v1/messages", { method: "POST" });
       const reader = res.body!.getReader();
-      await reader.read(); // pull the first chunk
+      for (const chunk of sent) {
+        expect(new TextDecoder().decode((await reader.read()).value)).toBe(chunk);
+      }
+      // The queue is drained, so a `pull` is now awaiting the silent upstream.
       await reader.cancel("test-abort");
+      // Let the pending read settle so a stray line would have landed.
+      await new Promise((r) => setTimeout(r, 10));
 
-      const cancelled = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.cancelled");
-      expect(cancelled).toBeDefined();
-      const payload = cancelled?.[1] as Record<string, unknown> | undefined;
-      expect(payload).toMatchObject({ status: 200, authMode: "platform" });
-      expect(String(payload?.reason)).toContain("test-abort");
+      const streamWarnings = warnSpy.mock.calls
+        .map(([msg]) => msg)
+        .filter((msg) => String(msg).startsWith("llm.stream."));
+      expect(streamWarnings).toEqual([]);
+      expect(infoSpy.mock.calls.find(([msg]) => msg === "llm.stream.observed")).toBeUndefined();
+      const cancelled = infoSpy.mock.calls.filter(([msg]) => msg === "llm.stream.cancelled");
+      expect(cancelled).toHaveLength(1);
+      expect(cancelled[0]?.[1]).toMatchObject({
+        status: 200,
+        authMode: "platform",
+        bytes: sent.reduce((n, c) => n + enc.encode(c).byteLength, 0),
+        chunks: sent.length,
+      });
     } finally {
       warnSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
