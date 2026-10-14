@@ -2,9 +2,11 @@
 
 import { useEffect } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Alert } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { VIEW_AS_REFUSAL_CODES } from "@appstrate/core/permissions";
 import {
   exitViewAs,
@@ -13,7 +15,7 @@ import {
   useViewAsStopped,
 } from "../stores/view-as-store";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
+import { isSpaceEnterable, useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { roleI18nKey } from "../hooks/use-permissions";
 import { spaceRoleLabel } from "../hooks/use-roles";
 import { useSpaces } from "../hooks/use-spaces";
@@ -49,6 +51,8 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
   const currentSpaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const overlayOpen = useOverlayPath() !== null;
+  const { switchSpace } = useSpaceSwitcher();
+  const navigate = useNavigate();
 
   // The refusal typically lands on the boot org list, before `<Toaster/>`
   // subscribes; this is the first mount that can report it.
@@ -75,11 +79,24 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
   // "no access to this page" is all it says unless the banner explains.
   const noSpace = !inPersonaSpace && !!spaces && !spaces.some(isSpaceEnterable);
 
+  // Back to the space the preview moved the admin out of; the page they are
+  // on belongs to the persona's space, so home, as on the way in.
+  const exit = () => {
+    const back = exitViewAs();
+    if (!back || back === currentSpaceId) return;
+    switchSpace(back);
+    navigate("/", { replace: true });
+  };
+
   return (
     <Alert
       variant="warning"
       data-testid="view-as-banner"
-      className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-2"
+      className={cn(
+        "flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-none border-x-0 border-t-0 px-4 py-2",
+        // In an overlay the band runs under the dialog's close button.
+        inOverlay && "pr-14",
+      )}
     >
       <span className="min-w-64 flex-1">
         <Trans
@@ -106,7 +123,7 @@ export function ViewAsBanner({ inOverlay = false }: { inOverlay?: boolean } = {}
         {noSpace && <> {t("viewAs.bannerNoSpace")}</>}
         <span className="block text-xs font-normal opacity-80">{t("viewAs.bannerOwn")}</span>
       </span>
-      <Button variant="outline" size="sm" onClick={() => exitViewAs()}>
+      <Button variant="outline" size="sm" onClick={exit}>
         {t("viewAs.exit")}
       </Button>
     </Alert>
