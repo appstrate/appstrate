@@ -14,6 +14,7 @@
  */
 
 import { useTranslation } from "react-i18next";
+import { cn } from "@appstrate/ui/cn";
 import { Loader2 } from "lucide-react";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
@@ -21,6 +22,7 @@ import { ScheduleStatusBadge, ScheduleUnreadBadge } from "./schedule-status-badg
 import { ActorLabel } from "./actor-label";
 import { formatDateField } from "../lib/format-date";
 import { scheduleNextRunAt } from "../lib/schedule-options";
+import { describeSchedule } from "../lib/frequency-summary";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
@@ -57,16 +59,19 @@ export function useScheduleColumns({
     {
       id: "cron",
       header: t("schedules.column.cron"),
-      width: "128px",
+      width: "minmax(140px,1.2fr)",
       tier: 2,
-      cell: (schedule) => (
-        <span
-          className="bg-primary-soft text-primary relative z-10 truncate rounded px-1.5 py-0.5 font-mono text-[0.72rem]"
-          title={schedule.timezone ?? undefined}
-        >
-          {schedule.cron_expression}
-        </span>
-      ),
+      cell: (schedule) => {
+        const recurrence = describeSchedule(schedule);
+        return (
+          <span
+            className={cn("truncate text-xs", recurrence.isCron && "font-mono")}
+            title={recurrence.text}
+          >
+            {recurrence.text}
+          </span>
+        );
+      },
     },
     {
       id: "state",
@@ -92,7 +97,9 @@ export function useScheduleColumns({
       cell: (schedule) => {
         const nextRunAt = scheduleNextRunAt(schedule);
         return nextRunAt ? (
-          <span className="truncate text-xs">{formatDateField(nextRunAt)}</span>
+          <span className="truncate text-xs">
+            {formatDateField(nextRunAt, "datetime", schedule.timezone)}
+          </span>
         ) : (
           <span className="text-muted-foreground/50">—</span>
         );
@@ -106,7 +113,7 @@ export function useScheduleColumns({
       cell: (schedule) =>
         schedule.last_run_at ? (
           <span className="text-muted-foreground truncate text-xs">
-            {formatDateField(schedule.last_run_at)}
+            {formatDateField(schedule.last_run_at, "datetime", schedule.timezone)}
             {schedule.last_run_number > 0 && (
               <span className="ml-1 font-mono">#{schedule.last_run_number}</span>
             )}

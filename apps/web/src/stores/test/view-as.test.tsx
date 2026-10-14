@@ -121,6 +121,26 @@ describe("view-as store", () => {
   });
 });
 
+describe("way back", () => {
+  it("hands the space the preview moved the admin out of to the exit", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
+    expect(exitViewAs()).toBe("spc_home");
+    // Answered once: a second exit has nowhere to take anyone.
+    expect(exitViewAs()).toBeNull();
+  });
+
+  it("keeps the first preview's way back when another replaces it", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA, "spc_home");
+    enterViewAs({ orgId: "org_a", orgRole: "guest", space: null }, ORGS_AS_PERSONA, "spc_1");
+    expect(exitViewAs()).toBe("spc_home");
+  });
+
+  it("has none when the preview did not move the admin", () => {
+    enterViewAs(PERSONA, ORGS_AS_PERSONA);
+    expect(exitViewAs()).toBeNull();
+  });
+});
+
 describe("hydration", () => {
   it("reads a persisted persona back — this is what a reload resumes from", () => {
     fakeStorage.setItem(STORAGE_KEY, JSON.stringify(PERSONA));
@@ -454,9 +474,15 @@ describe("banner", () => {
       <OverlayProvider value={settings}>{node}</OverlayProvider>
     );
     expect(renderBanner(PERSONA, "org_a", here, underOverlay(<ViewAsBanner />))).toBe("");
-    expect(
-      renderBanner(PERSONA, "org_a", here, underOverlay(<ViewAsBanner inOverlay />)),
-    ).toContain("Quitter");
+    const inOverlay = renderBanner(
+      PERSONA,
+      "org_a",
+      here,
+      underOverlay(<ViewAsBanner inOverlay />),
+    );
+    expect(inOverlay).toContain("Quitter");
+    // The dialog's close button sits over the band's right end.
+    expect(inOverlay).toContain("pr-14");
     // No overlay open: an overlay's banner has nothing to stand in for.
     expect(renderBanner(PERSONA, "org_a", here, <ViewAsBanner inOverlay />)).toBe("");
   });

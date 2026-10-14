@@ -55,7 +55,7 @@ describe("the level-one collection cards", () => {
     expect(html).toContain("Rapport trimestriel");
     expect(html).toContain("#42");
     expect(html).toContain("Alice");
-    expect(html).toContain("4.2s");
+    expect(html).toContain("4,2\u202fs");
   });
 
   it("keeps an orphaned run visible without linking to a missing agent", () => {
@@ -76,8 +76,10 @@ describe("the level-one collection cards", () => {
     expect(html).toContain("Rapport du matin");
     expect(html).toContain("Rapport trimestriel");
     expect(html).toContain("Fréquence");
-    expect(html).toContain("0 7 * * *");
+    // The recurrence as a sentence, and every time in the schedule's own zone, named.
+    expect(html).toContain("Tous les jours à 7:00 (America/Toronto)");
     expect(html).toContain("Prochaine");
+    expect(html).toContain("24/08/2026 07:00 UTC−4");
     expect(html).toContain("Bob Martin");
   });
 

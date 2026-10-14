@@ -2,11 +2,18 @@
 
 import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
+import { PhoneNavigation } from "../phone-navigation";
 
 /** Shared two-pane frame for the Agent file and configuration destinations. */
 interface AgentDetailSplitProps extends HTMLAttributes<HTMLDivElement> {
   rail: ReactNode;
   railClassName?: string;
+  /**
+   * A rail of sections to pick from, named by this title: below `md` it moves
+   * into a Menu sheet above the content instead of stacking there in full. A
+   * rail that is the content's own outline (a file tree) leaves it unset.
+   */
+  phoneMenu?: string;
 }
 
 export function AgentDetailSplit({
@@ -14,6 +21,7 @@ export function AgentDetailSplit({
   children,
   className,
   railClassName,
+  phoneMenu,
   ...props
 }: AgentDetailSplitProps) {
   return (
@@ -25,11 +33,22 @@ export function AgentDetailSplit({
       )}
     >
       <aside
-        className={cn("bg-card min-w-0 border-r max-md:border-r-0 max-md:border-b", railClassName)}
+        className={cn(
+          "bg-card min-w-0 border-r max-md:border-r-0 max-md:border-b",
+          railClassName,
+          phoneMenu && "max-md:hidden",
+        )}
       >
         {rail}
       </aside>
-      <div className="min-w-0">{children}</div>
+      <div className="min-w-0">
+        {phoneMenu && (
+          <div className="p-4 pb-0 md:hidden">
+            <PhoneNavigation title={phoneMenu} rail={rail} className="mb-0" />
+          </div>
+        )}
+        {children}
+      </div>
     </div>
   );
 }

@@ -62,6 +62,15 @@ describe("viewAsSpace", () => {
     expect(space(null, null).spaceId).toBe(VIEW_AS_NO_SPACE);
   });
 
+  it("opens on no space when the home space is not one the dialog offers", () => {
+    // The admin's personal space is filtered out of the choices: nobody else stands in it.
+    expect(space(null, "spc_personal").spaceId).toBe(VIEW_AS_NO_SPACE);
+    expect(space({ kind: "space", key: "viewer" }, "spc_personal")).toEqual({
+      spaceId: VIEW_AS_NO_SPACE,
+      presetRoleKey: undefined,
+    });
+  });
+
   it("lets the user's pick, even no space, override the preset and drop its role", () => {
     expect(space({ kind: "org", role: "member" }, OPEN.id, VIEW_AS_NO_SPACE)).toEqual({
       spaceId: VIEW_AS_NO_SPACE,

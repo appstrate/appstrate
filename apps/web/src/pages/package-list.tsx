@@ -10,7 +10,7 @@ import { PACKAGE_WRITE_PERMISSIONS, spacePackagePermission } from "@appstrate/co
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
-import { usePackageViewStore } from "../stores/list-view-store";
+import { useListView } from "../stores/list-view-store";
 import { useListParams } from "../lib/list-params";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { PackageCollection } from "../components/package-collection";
@@ -37,6 +37,10 @@ export interface CardItem {
   autoInstalled?: boolean;
   /** A tile drawn left of the title: the package's icon on its tinted ground. */
   icon?: ReactNode;
+  /** An agent's chosen icon and colour: its identity tile, in the cards and the table alike. */
+  identity?: { icon?: string | null; color?: string | null };
+  /** An integration's logo (its manifest `icon`), next to its name in the table. */
+  logo?: string;
   /** The card's state, top right: what a browsing reader looks for first. */
   status?: ReactNode;
   /** One muted line under the description: who provides it, what it carries. */
@@ -75,8 +79,7 @@ export function PackageTab({
   holds,
   extraActions,
 }: PackageTabProps) {
-  const view = usePackageViewStore((s) => s.view);
-  const setView = usePackageViewStore((s) => s.setView);
+  const [view, setView] = useListView(holds);
   const list = useListParams(["origin", "activity"]);
 
   return (
@@ -90,6 +93,7 @@ export function PackageTab({
         />
       ) : null}
       <PackageCollection
+        tableId={`packages-${holds}`}
         items={items}
         isLoading={isLoading}
         error={error}
@@ -130,6 +134,7 @@ export function PackageList() {
     runningRuns: f.running_runs,
     keywords: f.keywords,
     unreadCount: unreadCounts?.[f.id],
+    identity: { icon: f.icon, color: f.color },
   }));
 
   return (

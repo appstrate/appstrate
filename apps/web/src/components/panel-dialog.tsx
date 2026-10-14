@@ -15,15 +15,12 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { ChevronDown } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { keepOpenWhileRenaming } from "../lib/keep-open-while-renaming";
 import { ErrorBoundary } from "./error-boundary";
+import { PhoneNavigation } from "./phone-navigation";
 import { ViewAsBanner } from "./view-as-banner";
 
 interface PanelDialogProps {
@@ -47,34 +44,6 @@ interface PanelDialogProps {
   contentHeader: (stuck: boolean) => ReactNode;
   children: ReactNode;
   onClose: () => void;
-}
-
-/** The rail on a phone. Remounted on every navigation, so picking an entry closes it. */
-function PhoneNavigation({ title, rail }: { title: string; rail: ReactNode }) {
-  const { t } = useTranslation("common");
-  const { pathname } = useLocation();
-  return (
-    <Sheet key={pathname}>
-      <SheetTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          className="mb-6 h-11 w-full justify-between bg-transparent px-3 md:hidden"
-        >
-          <span className="truncate">{t("panelDialog.menu")}</span>
-          <ChevronDown className="size-4 shrink-0" />
-        </Button>
-      </SheetTrigger>
-      <SheetContent
-        side="left"
-        aria-describedby={undefined}
-        className="bg-sidebar flex w-[min(20rem,85vw)] flex-col gap-0 p-0"
-      >
-        <SheetTitle className="sr-only">{title}</SheetTitle>
-        <ScrollArea className="min-h-0 flex-1">{rail}</ScrollArea>
-      </SheetContent>
-    </Sheet>
-  );
 }
 
 export function PanelDialog({ title, rail, contentHeader, children, onClose }: PanelDialogProps) {

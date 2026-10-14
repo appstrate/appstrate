@@ -40,7 +40,8 @@ interface ViewAsSpace {
  * is judged in the home space (the one the page is about). A Member reaches the open spaces
  * unasked, with the role each gives its members: the home space when open, with its default role.
  * A Guest reaches nothing unasked, hence no space. A picked space (`pickedSpaceId` not `null`),
- * even "no space", is the user's own and carries no preset role.
+ * even "no space", is the user's own and carries no preset role. A home space the dialog does not
+ * offer (someone's personal space) is no space at all.
  */
 export function viewAsSpace(input: {
   preset: ViewAsPreset | null | undefined;
@@ -49,7 +50,8 @@ export function viewAsSpace(input: {
   pickedSpaceId: string | null;
 }): { spaceId: string; presetRoleKey: string | undefined } {
   const { preset, spaces, pickedSpaceId } = input;
-  const homeSpaceId = input.homeSpaceId ?? VIEW_AS_NO_SPACE;
+  const offered = !spaces || spaces.some((s) => s.id === input.homeSpaceId);
+  const homeSpaceId = (offered && input.homeSpaceId) || VIEW_AS_NO_SPACE;
   const homeSpace = spaces?.find((s) => s.id === homeSpaceId);
   const presetSpaceId =
     preset?.kind !== "org"

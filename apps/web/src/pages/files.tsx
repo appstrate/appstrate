@@ -21,7 +21,7 @@ import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { useDocumentViewStore } from "../stores/list-view-store";
+import { useListView } from "../stores/list-view-store";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 
@@ -68,8 +68,7 @@ function DocumentsCollection({
 }) {
   const { t } = useTranslation(["files", "common"]);
   const canReach = useCanReach();
-  const view = useDocumentViewStore((state) => state.view);
-  const setView = useDocumentViewStore((state) => state.setView);
+  const [view, setView] = useListView("documents");
   const searchPlaceholder = useSearchPlaceholder(t("page.title"));
   const { storage, limitBytes: limit } = useOrgStorage();
   const query = useDebouncedValue(search);

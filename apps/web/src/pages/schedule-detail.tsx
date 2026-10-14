@@ -36,6 +36,8 @@ import { canReadRuns } from "@appstrate/core/permissions";
 import { ScheduleActionsMenu, ScheduleSettings } from "../components/schedule-settings";
 import { scheduleSettingsHref, type ScheduleSettingsSection } from "../lib/schedule-options";
 import { formatDateField } from "../lib/format-date";
+import { parseCron } from "../lib/cron-frequency";
+import { describeFrequency } from "../lib/frequency-summary";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { Pause, Clock, CalendarClock, FileInput, CirclePlay } from "lucide-react";
 
@@ -261,19 +263,23 @@ function ScheduleParams({
       >
         <FactGrid
           facts={[
-            { labelKey: "schedule.paramCron", value: schedule.cron_expression },
+            {
+              labelKey: "schedule.settings.recurrence",
+              value:
+                describeFrequency(parseCron(schedule.cron_expression)) ?? schedule.cron_expression,
+            },
             { labelKey: "schedule.paramTimezone", value: schedule.timezone },
             {
               labelKey: "schedule.paramNextRun",
               value:
                 schedule.enabled && schedule.next_run_at
-                  ? formatDateField(schedule.next_run_at)
+                  ? formatDateField(schedule.next_run_at, "datetime", schedule.timezone)
                   : t("schedule.noNextRun"),
             },
             {
               labelKey: "schedule.paramLastRun",
               value: schedule.last_run_at
-                ? formatDateField(schedule.last_run_at)
+                ? formatDateField(schedule.last_run_at, "datetime", schedule.timezone)
                 : t("schedule.notRunYet"),
             },
           ]}
@@ -350,6 +356,7 @@ function ScheduleHistory({
         agentName={agentName}
         schedule_name={schedule.name || t("schedule.unnamed")}
         next_run_at={schedule.next_run_at}
+        timezone={schedule.timezone}
       />
     ) : null;
 

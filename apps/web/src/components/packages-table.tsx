@@ -9,6 +9,7 @@ import type { CardItem } from "../pages/package-list";
 export function PackagesTable({
   items,
   columns,
+  tableId,
   rowAction,
   label,
   surface,
@@ -17,6 +18,12 @@ export function PackagesTable({
   items: CardItem[];
   /** From {@link usePackageColumns}, minus whatever the reader hid. */
   columns: DataColumn<CardItem>[];
+  /**
+   * Which list this is, for the widths its reader gives the columns. Agents,
+   * skills and the catalogue each keep their own: the same package table, but
+   * not the same reading.
+   */
+  tableId: string;
   /**
    * Read the package HERE rather than on its own page. The catalogue does
    * this: its page would throw away the panel and claim a space the package is
@@ -35,7 +42,7 @@ export function PackagesTable({
   // same props and branch on nothing.
   return (
     <DataTable
-      tableId="packages"
+      tableId={tableId}
       label={label ?? t("list.tableLabel")}
       columns={columns}
       rows={items}

@@ -23,6 +23,7 @@
  */
 
 import type { RunWireDto } from "@appstrate/shared-types";
+import i18n from "../i18n";
 
 /**
  * Pricing provenance as carried by the run DTO / the `run_metric` SSE frame.
@@ -76,8 +77,15 @@ export function describeRunCost(
     return { text: COST_UNAVAILABLE, tooltipKey: "run.costUnpricedTooltip" };
   }
   // Four decimals: a single cheap call rounds to $0.00 at two, and the readout
-  // is the only place a per-run spend is visible.
-  const text = `$${amount.toFixed(4)}`;
+  // is the only place a per-run spend is visible. Written the interface's way:
+  // « 0,0017 $ » in French.
+  const text = new Intl.NumberFormat(i18n.language, {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  }).format(amount);
   if (pricingStatus === "unpriced") return { text, tooltipKey: "run.costUnpricedFloorTooltip" };
   if (pricingStatus === "partial") return { text, tooltipKey: "run.costPartialTooltip" };
   return { text, tooltipKey: null };

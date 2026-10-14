@@ -13,7 +13,7 @@ import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
-import { useRunViewStore } from "../stores/list-view-store";
+import { useListView } from "../stores/list-view-store";
 import { usePermissions } from "../hooks/use-permissions";
 import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
@@ -50,8 +50,7 @@ export function RunsPage() {
   const kinds = list.values("kind", KINDS);
   const { statuses, filter: statusFilter } = useRunStatusFilter(list);
   const search = list.search;
-  const view = useRunViewStore((state) => state.view);
-  const setView = useRunViewStore((state) => state.setView);
+  const [view, setView] = useListView("runs");
 
   const filters: FilterSpec[] = [
     ...(canSeeEveryRun

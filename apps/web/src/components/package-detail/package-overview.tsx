@@ -7,6 +7,7 @@ import { Markdown } from "../markdown";
 import { ManifestOverview } from "../package-manifest/manifest-overview";
 import { McpServerDetails } from "../package-manifest/mcp-server-details";
 import { readMcpServerDetails } from "../../lib/package-manifest";
+import { skillBody } from "../../lib/skill-frontmatter";
 
 const roleFallbackKeys = {
   skill: "packageOverview.roleFallback.skill",
@@ -38,6 +39,7 @@ export function PackageOverview({
 }) {
   const { t } = useTranslation("agents");
   const server = readMcpServerDetails(manifest);
+  const instructions = type === "skill" && content ? skillBody(content) : "";
   return (
     <div className="space-y-6" data-testid="package-overview">
       <div className="grid items-start gap-6 lg:grid-cols-2">
@@ -67,10 +69,10 @@ export function PackageOverview({
             icon={FileCode}
             headerAction={{ label: t("packageOverview.openInstructions"), onClick: onOpenFiles }}
           >
-            {content?.trim() ? (
+            {instructions.trim() ? (
               <div className="max-h-52 overflow-hidden">
                 <Markdown inert className="text-sm [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm">
-                  {content}
+                  {instructions}
                 </Markdown>
               </div>
             ) : (

@@ -4,6 +4,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import i18n from "../i18n";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
 import {
   ArrowRight,
@@ -438,7 +439,9 @@ function DashboardScheduleRow({
       <div className="shrink-0 text-right">
         <ScheduleStatusBadge schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
-          {schedule.next_run_at ? formatDateField(schedule.next_run_at) : t("dashboard.noDate")}
+          {schedule.next_run_at
+            ? formatDateField(schedule.next_run_at, "datetime", schedule.timezone)
+            : t("dashboard.noDate")}
         </p>
       </div>
     </Link>
@@ -473,7 +476,12 @@ function dashboardMetrics(
   const running = data.runs.filter((run) => run.status === "running").length;
   const terminal = data.runs.filter((run) => !["running", "pending"].includes(run.status));
   const successful = terminal.filter((run) => run.status === "success").length;
-  const successRate = terminal.length ? Math.round((successful / terminal.length) * 100) : 0;
+  // No finished run has no rate: « 0 % » would read as every run failing.
+  const successRate = terminal.length
+    ? new Intl.NumberFormat(i18n.language, { style: "percent" }).format(
+        successful / terminal.length,
+      )
+    : "—";
   const activeSchedules = data.schedules.filter((schedule) => schedule.enabled);
   // The five that fire soonest; an active schedule with no next run is counted, not listed.
   const upcomingSchedules = data.schedules
@@ -487,7 +495,6 @@ function dashboardMetrics(
 
   return {
     running,
-    successRate,
     upcomingSchedules,
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
@@ -505,7 +512,7 @@ function dashboardMetrics(
       },
       sections.recentRuns && {
         label: t("dashboard.metric.success"),
-        value: `${successRate} %`,
+        value: successRate,
         detail: t("dashboard.metric.successDetail", { successful, count: terminal.length }),
       },
       sections.schedules && {
@@ -513,7 +520,11 @@ function dashboardMetrics(
         value: activeSchedules.length,
         detail: upcomingSchedules[0]?.next_run_at
           ? t("dashboard.metric.schedulesNext", {
-              date: formatDateField(upcomingSchedules[0].next_run_at),
+              date: formatDateField(
+                upcomingSchedules[0].next_run_at,
+                "datetime",
+                upcomingSchedules[0].timezone,
+              ),
             })
           : t("dashboard.metric.schedulesNone"),
       },
