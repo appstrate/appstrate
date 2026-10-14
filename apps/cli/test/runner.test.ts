@@ -16,9 +16,12 @@ import {
   generateRunnerToken,
   renderRunnerEnvFile,
   parseRunnerEnvFile,
+  parseSystemdEnvironment,
   renderRunnerUnit,
   firewallCommands,
   withArtifactsVersionPin,
+  droppedRunnerEnvKeys,
+  RUNNER_ENV_MANAGED_KEYS,
   type RunnerConfig,
 } from "../src/lib/runner/config-files.ts";
 import {
@@ -34,6 +37,7 @@ import {
   runnerDataPaths,
   daemonAssetName,
   RUNNER_ENV_PATH,
+  RUNNER_ENV_PREVIOUS_PATH,
   RUNNER_BIN_PATH,
   RUNNER_UNIT_PATH,
   RUNNER_ETC_DIR,
@@ -44,6 +48,7 @@ import {
 import {
   resolveDaemonVersion,
   resolveInstallConfig,
+  writeHostFiles,
   runnerUpdateCommand,
   runnerUninstallCommand,
   runnerDoctor,
@@ -91,13 +96,16 @@ function fakeFs(seed: Record<string, string> = {}): {
   installed: { dest: string; bytes: Uint8Array; mode: number }[];
   removed: string[];
   files: Record<string, string>;
+  modes: Record<string, number>;
 } {
   const files: Record<string, string> = { ...seed };
+  const modes: Record<string, number> = {};
   const installed: { dest: string; bytes: Uint8Array; mode: number }[] = [];
   const removed: string[] = [];
   const fs: RunnerFs = {
-    async writeFile(path, data) {
+    async writeFile(path, data, mode) {
       files[path] = typeof data === "string" ? data : "<bytes>";
+      if (mode !== undefined) modes[path] = mode;
     },
     async readFile(path) {
       return files[path] ?? null;
@@ -106,7 +114,9 @@ function fakeFs(seed: Record<string, string> = {}): {
       return files[path] !== undefined ? new TextEncoder().encode(files[path]) : null;
     },
     async mkdirp() {},
-    async chmod() {},
+    async chmod(path, mode) {
+      modes[path] = mode;
+    },
     async exists(path) {
       return files[path] !== undefined;
     },
@@ -130,7 +140,7 @@ function fakeFs(seed: Record<string, string> = {}): {
       delete files[staged];
     },
   };
-  return { fs, installed, removed, files };
+  return { fs, installed, removed, files, modes };
 }
 
 const CHANNEL_MANIFEST_URL = "https://get.appstrate.dev/channels/latest.json";
@@ -433,6 +443,131 @@ describe("renderRunnerEnvFile / parseRunnerEnvFile", () => {
     expect(() =>
       renderRunnerEnvFile({ ...config, socketPath: "/run/x.sock\nFIRECRACKER_ARTIFACTS_LOCAL=1" }),
     ).toThrow(/must not contain a newline/);
+  });
+});
+
+describe("RUNNER_ENV_MANAGED_KEYS / droppedRunnerEnvKeys", () => {
+  const pubkey = Buffer.alloc(32, 7).toString("base64");
+  const branches: RunnerConfig[] = [
+    config,
+    { ...config, socketPath: RUNNER_DEFAULT_SOCKET_PATH },
+    { ...config, artifactsVersion: "1.2.3", artifactsPubkey: pubkey },
+    {
+      ...config,
+      socketPath: RUNNER_DEFAULT_SOCKET_PATH,
+      artifactsVersion: "1.2.3",
+      artifactsPubkey: pubkey,
+    },
+  ];
+
+  it("covers every key the renderer emits, on every branch", () => {
+    const emitted = new Set<string>();
+    for (const branch of branches) {
+      for (const key of Object.keys(parseRunnerEnvFile(renderRunnerEnvFile(branch)))) {
+        expect(RUNNER_ENV_MANAGED_KEYS as readonly string[]).toContain(key);
+        emitted.add(key);
+      }
+    }
+    // No dead entry either: every managed key is reachable by some branch.
+    expect([...emitted].sort()).toEqual([...RUNNER_ENV_MANAGED_KEYS].sort());
+  });
+
+  it("ignores managed keys and returns unknown keys sorted", () => {
+    expect(
+      droppedRunnerEnvKeys({
+        FIRECRACKER_RUNNER_TOKEN: "t",
+        ZZZ: "1",
+        EGRESS_ALLOW_INTERNAL_HOSTS: "h",
+        FIRECRACKER_RUNNER_SOCKET: "/run/x.sock",
+        FIRECRACKER_EGRESS_DENY_CIDRS: "c",
+      }),
+    ).toEqual(["EGRESS_ALLOW_INTERNAL_HOSTS", "FIRECRACKER_EGRESS_DENY_CIDRS", "ZZZ"]);
+  });
+
+  it("returns nothing for an empty file", () => {
+    expect(droppedRunnerEnvKeys({})).toEqual([]);
+  });
+
+  it("points the operator at a systemd drop-in in the env file header", () => {
+    expect(renderRunnerEnvFile(config)).toContain("`systemctl edit appstrate-runner`");
+  });
+});
+
+describe("install over an env file with unmanaged keys", () => {
+  const base = { platformUrl: "http://10.0.0.5:3000", yes: true };
+  const existing = renderRunnerEnvFile(config) + "EGRESS_ALLOW_INTERNAL_HOSTS=secret-ish-value\n";
+  const depsWith = (seed: Record<string, string> = {}) => {
+    const fake = fakeFs(seed);
+    const deps = {
+      exec: fakeExec().exec,
+      fs: fake.fs,
+      http: fakeHttp({}),
+      getuid: () => 0,
+      preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
+    } as unknown as Parameters<typeof resolveInstallConfig>[1];
+    return { fake, deps };
+  };
+
+  it("resolveInstallConfig hands back the previous text and its dropped keys", async () => {
+    const { deps } = depsWith({ [RUNNER_ENV_PATH]: existing });
+    const { previousEnv, tokenSource } = await resolveInstallConfig(base, deps);
+    expect(tokenSource).toBe("preserved");
+    expect(previousEnv).toEqual({ text: existing, droppedKeys: ["EGRESS_ALLOW_INTERNAL_HOSTS"] });
+  });
+
+  it("resolveInstallConfig carries no previousEnv on a clean re-install or first install", async () => {
+    const clean = depsWith({
+      [RUNNER_ENV_PATH]: renderRunnerEnvFile({ ...config, artifactsVersion: "1.2.3" }),
+    });
+    expect((await resolveInstallConfig(base, clean.deps)).previousEnv).toBeUndefined();
+    const first = depsWith();
+    const resolved = await resolveInstallConfig({ ...base, token: "x".repeat(16) }, first.deps);
+    expect(resolved.previousEnv).toBeUndefined();
+  });
+
+  it("writeHostFiles keeps the previous file (0600) and warns with keys, never values", async () => {
+    const { fake, deps } = depsWith({ [RUNNER_ENV_PATH]: existing });
+    const warning = await writeHostFiles(config, deps, {
+      text: existing,
+      droppedKeys: ["EGRESS_ALLOW_INTERNAL_HOSTS"],
+    });
+    expect(fake.files[RUNNER_ENV_PREVIOUS_PATH]).toBe(existing);
+    expect(fake.modes[RUNNER_ENV_PREVIOUS_PATH]).toBe(0o600);
+    expect(fake.files[RUNNER_ENV_PATH]).not.toContain("EGRESS_ALLOW_INTERNAL_HOSTS");
+    expect(warning).toContain("EGRESS_ALLOW_INTERNAL_HOSTS");
+    expect(warning).toContain(RUNNER_ENV_PREVIOUS_PATH);
+    expect(warning).toContain("systemctl edit appstrate-runner");
+    expect(warning).toContain("Environment=KEY=value");
+    expect(warning).not.toContain("secret-ish-value");
+  });
+
+  it("writeHostFiles without previousEnv writes no backup and returns null", async () => {
+    const { fake, deps } = depsWith({ [RUNNER_ENV_PATH]: renderRunnerEnvFile(config) });
+    expect(await writeHostFiles(config, deps)).toBeNull();
+    expect(fake.files[RUNNER_ENV_PREVIOUS_PATH]).toBeUndefined();
+  });
+});
+
+describe("parseSystemdEnvironment", () => {
+  it("parses plain space-separated assignments", () => {
+    expect(parseSystemdEnvironment("PATH=/usr/bin:/bin FIRECRACKER_JAILER=off\n")).toEqual({
+      PATH: "/usr/bin:/bin",
+      FIRECRACKER_JAILER: "off",
+    });
+  });
+
+  it("unquotes an assignment holding a space, and C-style escapes", () => {
+    expect(parseSystemdEnvironment('A=1 "B=two words" "C=say \\"hi\\" \\\\ done" D=4')).toEqual({
+      A: "1",
+      B: "two words",
+      C: 'say "hi" \\ done',
+      D: "4",
+    });
+  });
+
+  it("ignores tokens without = and returns nothing for empty output", () => {
+    expect(parseSystemdEnvironment("junk =x K=v")).toEqual({ K: "v" });
+    expect(parseSystemdEnvironment("")).toEqual({});
   });
 });
 
@@ -972,18 +1107,21 @@ describe("runnerDoctor", () => {
     expect(report.ok).toBe(false);
   });
 
-  it("stays ok without the jailer when FIRECRACKER_JAILER=off in the env file", async () => {
+  // Operator settings live in a systemd drop-in; doctor reads them back
+  // through `systemctl show`, overlaid by the env file (EnvironmentFile= wins).
+  const doctorWithDropIn = (envText: string, shownEnvironment: string) => {
     const marker = runnerDataPaths(config.dataDir).artifactsMarker;
     const { fs } = fakeFs({
-      "/etc/appstrate-runner/env": `${renderRunnerEnvFile(config)}\nFIRECRACKER_JAILER=off\n`,
+      "/etc/appstrate-runner/env": envText,
       "/etc/systemd/system/appstrate-runner.service": "unit",
       [marker]: JSON.stringify({ version: "1.2.3", guest_protocol: 1 }),
     });
     const { exec } = fakeExec({
       "systemctl is-active": () => ({ ok: true, exitCode: 0, stdout: "active\n", stderr: "" }),
       "systemctl is-enabled": () => ({ ok: true, exitCode: 0, stdout: "enabled\n", stderr: "" }),
+      "systemctl show": () => ({ ok: true, exitCode: 0, stdout: shownEnvironment, stderr: "" }),
     });
-    const report = await runnerDoctor({
+    return runnerDoctor({
       deps: {
         fs,
         exec,
@@ -991,8 +1129,24 @@ describe("runnerDoctor", () => {
         preflight: async () => ({ ok: true, arch: "x86_64", checks: [] }),
       },
     });
+  };
+
+  it("stays ok without the jailer when a drop-in sets FIRECRACKER_JAILER=off", async () => {
+    const report = await doctorWithDropIn(
+      renderRunnerEnvFile(config),
+      "PATH=/usr/sbin:/usr/bin FIRECRACKER_JAILER=off\n",
+    );
     expect(report.jailer.installed).toBe(false);
     expect(report.ok).toBe(true);
+  });
+
+  it("lets the env file win over a drop-in for the same key", async () => {
+    const report = await doctorWithDropIn(
+      `${renderRunnerEnvFile(config)}FIRECRACKER_JAILER=on\n`,
+      "FIRECRACKER_JAILER=off\n",
+    );
+    expect(report.jailer.installed).toBe(false);
+    expect(report.ok).toBe(false);
   });
 
   it("UDS install: probes /v1/health through the socket and reports it as the endpoint", async () => {

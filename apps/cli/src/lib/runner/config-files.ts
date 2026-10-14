@@ -13,6 +13,7 @@ import {
   RUNNER_BIN_PATH,
   RUNNER_ENV_PATH,
   RUNNER_RUNTIME_DIR,
+  RUNNER_SERVICE_NAME,
   runnerDataPaths,
 } from "./constants.ts";
 
@@ -66,6 +67,42 @@ export function generateRunnerToken(): string {
 }
 
 /**
+ * Every key `renderRunnerEnvFile` can write, across all of its branches (TCP
+ * vs UDS, artifacts pin and pubkey present or absent). The renderer only
+ * emits keys typed against this list, so the two cannot drift. Install
+ * re-renders the file whole: any other key in an existing file is dropped
+ * (see `droppedRunnerEnvKeys`).
+ */
+export const RUNNER_ENV_MANAGED_KEYS = [
+  "FIRECRACKER_RUNNER_TOKEN",
+  "FIRECRACKER_RUNNER_PLATFORM_URL",
+  "FIRECRACKER_RUNNER_SOCKET",
+  "FIRECRACKER_RUNNER_HOST",
+  "FIRECRACKER_RUNNER_PORT",
+  "FIRECRACKER_BIN",
+  "FIRECRACKER_JAILER_BIN",
+  "FIRECRACKER_KERNEL_PATH",
+  "FIRECRACKER_ROOTFS_PATH",
+  "FIRECRACKER_DATA_DIR",
+  "FIRECRACKER_ARTIFACTS_VERSION",
+  "FIRECRACKER_ARTIFACTS_PUBKEY",
+] as const;
+
+type RunnerEnvKey = (typeof RUNNER_ENV_MANAGED_KEYS)[number];
+
+const MANAGED_KEY_SET: ReadonlySet<string> = new Set(RUNNER_ENV_MANAGED_KEYS);
+
+/**
+ * Keys of an existing env file that a re-install is about to drop (not
+ * managed), sorted. Keys only: values may be secrets, never echo them.
+ */
+export function droppedRunnerEnvKeys(existing: Record<string, string>): string[] {
+  return Object.keys(existing)
+    .filter((key) => !MANAGED_KEY_SET.has(key))
+    .sort();
+}
+
+/**
  * Render the daemon EnvironmentFile. Systemd's EnvironmentFile format is
  * `KEY=value`, one per line, no `export`, no quoting needed for our values
  * (hex token, IPv4 URL, integer port, absolute paths — none contain spaces
@@ -114,37 +151,39 @@ export function renderRunnerEnvFile(config: RunnerConfig): string {
   }
 
   const paths = runnerDataPaths(config.dataDir);
+  const kv = (key: RunnerEnvKey, value: string | number): string => `${key}=${value}`;
   const lines = [
-    "# Managed by `appstrate runner install` — edit with care.",
-    "# Regenerate with `appstrate runner install` (existing token is preserved).",
+    "# Managed by `appstrate runner install`, which re-renders it whole (the token is kept).",
+    `# Your variables go in a systemd drop-in: \`systemctl edit ${RUNNER_SERVICE_NAME}\`, then`,
+    "# `Environment=KEY=value` under [Service]. A key set here wins over the drop-in.",
     "",
     "# --- Daemon listen/link surface (runner/env.ts) ---",
-    `FIRECRACKER_RUNNER_TOKEN=${config.token}`,
-    `FIRECRACKER_RUNNER_PLATFORM_URL=${config.platformUrl}`,
+    kv("FIRECRACKER_RUNNER_TOKEN", config.token),
+    kv("FIRECRACKER_RUNNER_PLATFORM_URL", config.platformUrl),
     // UDS transport replaces the TCP listen surface entirely: the daemon
     // binds the socket (mode 0660 by default) and never opens a port.
     ...(config.socketPath
-      ? [`FIRECRACKER_RUNNER_SOCKET=${config.socketPath}`]
-      : [`FIRECRACKER_RUNNER_HOST=${config.host}`, `FIRECRACKER_RUNNER_PORT=${config.port}`]),
+      ? [kv("FIRECRACKER_RUNNER_SOCKET", config.socketPath)]
+      : [kv("FIRECRACKER_RUNNER_HOST", config.host), kv("FIRECRACKER_RUNNER_PORT", config.port)]),
     "",
     "# --- Engine host config (runner/host-env.ts) — absolute paths so the",
     "#     compiled daemon does not depend on its launch working directory. ---",
-    `FIRECRACKER_BIN=${paths.firecrackerBin}`,
-    `FIRECRACKER_JAILER_BIN=${paths.jailerBin}`,
-    `FIRECRACKER_KERNEL_PATH=${paths.kernelPath}`,
-    `FIRECRACKER_ROOTFS_PATH=${paths.rootfsPath}`,
-    `FIRECRACKER_DATA_DIR=${paths.runsDir}`,
+    kv("FIRECRACKER_BIN", paths.firecrackerBin),
+    kv("FIRECRACKER_JAILER_BIN", paths.jailerBin),
+    kv("FIRECRACKER_KERNEL_PATH", paths.kernelPath),
+    kv("FIRECRACKER_ROOTFS_PATH", paths.rootfsPath),
+    kv("FIRECRACKER_DATA_DIR", paths.runsDir),
     // Lock the guest kernel/rootfs to the SAME release as the daemon binary so
     // the two always agree on the guest protocol. Omitted for a dev "latest"
     // install (config.artifactsVersion undefined) — the daemon then tracks the
     // latest release, matching a latest binary.
     ...(config.artifactsVersion
-      ? [`FIRECRACKER_ARTIFACTS_VERSION=${config.artifactsVersion}`]
+      ? [kv("FIRECRACKER_ARTIFACTS_VERSION", config.artifactsVersion)]
       : []),
     // Manifest-signature key OVERRIDE (bring-your-own-artifacts / dev). The
     // released daemon pins the official key at compile time — only written
     // when the operator explicitly provided one at install time.
-    ...(config.artifactsPubkey ? [`FIRECRACKER_ARTIFACTS_PUBKEY=${config.artifactsPubkey}`] : []),
+    ...(config.artifactsPubkey ? [kv("FIRECRACKER_ARTIFACTS_PUBKEY", config.artifactsPubkey)] : []),
     "",
   ];
   return lines.join("\n");
@@ -195,6 +234,35 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
     const key = line.slice(0, eq).trim();
     const value = line.slice(eq + 1).trim();
     out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Parse `systemctl show <unit> -p Environment --value`: the unit's (and its
+ * drop-ins') `Environment=` assignments, space-separated, with an assignment
+ * holding spaces or special chars double-quoted with C-style escapes.
+ * Tokens without `=` are ignored; a later assignment wins, as in systemd.
+ */
+export function parseSystemdEnvironment(output: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let i = 0;
+  while (i < output.length) {
+    while (i < output.length && /\s/.test(output[i]!)) i++;
+    if (i >= output.length) break;
+    let token = "";
+    if (output[i] === '"') {
+      i++;
+      while (i < output.length && output[i] !== '"') {
+        if (output[i] === "\\" && i + 1 < output.length) i++;
+        token += output[i++];
+      }
+      i++; // closing quote
+    } else {
+      while (i < output.length && !/\s/.test(output[i]!)) token += output[i++];
+    }
+    const eq = token.indexOf("=");
+    if (eq > 0) out[token.slice(0, eq)] = token.slice(eq + 1);
   }
   return out;
 }

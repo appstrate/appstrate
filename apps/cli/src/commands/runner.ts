@@ -25,6 +25,7 @@ import {
   cancel,
   confirm,
   exitWithError,
+  logWarn,
   note,
   select,
   withSpinner,
@@ -33,6 +34,7 @@ import { CLI_VERSION, DEV_CLI_VERSION } from "../lib/version.ts";
 import {
   RUNNER_BIN_PATH,
   RUNNER_ENV_PATH,
+  RUNNER_ENV_PREVIOUS_PATH,
   RUNNER_ETC_DIR,
   RUNNER_SERVICE_NAME,
   RUNNER_UNIT_PATH,
@@ -58,6 +60,8 @@ import {
   generateRunnerToken,
   renderRunnerEnvFile,
   parseRunnerEnvFile,
+  parseSystemdEnvironment,
+  droppedRunnerEnvKeys,
   renderRunnerUnit,
   firewallCommands,
   withArtifactsVersionPin,
@@ -188,7 +192,7 @@ export async function runnerInstallCommand(opts: RunnerInstallOptions = {}): Pro
 
     // 2. Resolve config. Existing token is preserved across re-installs so a
     //    re-run never silently rotates the secret the platform paired with.
-    const { config, tokenSource } = await resolveInstallConfig(opts, d);
+    const { config, tokenSource, previousEnv } = await resolveInstallConfig(opts, d);
 
     // 3. Download + install the daemon binary (lockstep version) + firecracker.
     const version = resolveDaemonVersion();
@@ -201,8 +205,9 @@ export async function runnerInstallCommand(opts: RunnerInstallOptions = {}): Pro
     // install deterministic and bootable instead of tracking a moving `latest`.
     config.artifactsVersion = version === "latest" ? undefined : version;
 
-    // 4. Provision state dirs + config + unit.
-    await writeHostFiles(config, d);
+    // 4. Provision state dirs + config + unit (warning only once the backup exists).
+    const warning = await writeHostFiles(config, d, previousEnv);
+    if (warning) logWarn(warning);
 
     // 5. Enable + start via systemd, then verify.
     await enableService(d);
@@ -225,6 +230,25 @@ export async function runnerInstallCommand(opts: RunnerInstallOptions = {}): Pro
 
 type TokenSource = "flag" | "preserved" | "generated";
 
+/** The existing env file, carried only when the re-render drops keys from it. */
+interface PreviousEnv {
+  text: string;
+  droppedKeys: string[];
+}
+
+/**
+ * Warning for keys of an existing env file that the re-render drops. Takes
+ * keys only, so no value (the file holds the bearer token) can reach it.
+ */
+function droppedEnvKeysWarning(keys: readonly string[]): string {
+  return (
+    `${RUNNER_ENV_PATH} is re-rendered whole: it drops ${keys.join(", ")} ` +
+    `(previous file kept at ${RUNNER_ENV_PREVIOUS_PATH}). Set each in a systemd drop-in ` +
+    `instead: \`systemctl edit ${RUNNER_SERVICE_NAME}\`, then \`Environment=KEY=value\` ` +
+    `under [Service].`
+  );
+}
+
 /**
  * Resolve + validate the install config from flags / prompts / existing env.
  * Exported for unit testing (the --platform-url validation is the interesting
@@ -233,7 +257,11 @@ type TokenSource = "flag" | "preserved" | "generated";
 export async function resolveInstallConfig(
   opts: RunnerInstallOptions,
   d: ResolvedDeps,
-): Promise<{ config: RunnerConfig; tokenSource: TokenSource }> {
+): Promise<{
+  config: RunnerConfig;
+  tokenSource: TokenSource;
+  previousEnv?: PreviousEnv;
+}> {
   const dataDir = opts.dataDir?.trim() || RUNNER_DATA_DIR;
   const host = opts.host?.trim() || "0.0.0.0";
 
@@ -321,7 +349,9 @@ export async function resolveInstallConfig(
   // firecracker installer hand us the pairing token off-argv (so it never
   // shows up in `ps aux`); see RUNNER_TOKEN_ENV.
   // Existing env file (re-install): token + artifacts-pubkey overrides are
-  // preserved across re-installs so a re-run never silently drops them.
+  // preserved across re-installs so a re-run never silently drops them; any
+  // key install does not manage is dropped, and the file is handed back
+  // (previousEnv) so writeHostFiles keeps a copy and warns.
   const existingEnv = await d.fs.readFile(RUNNER_ENV_PATH);
   const existingVars = existingEnv ? parseRunnerEnvFile(existingEnv) : {};
 
@@ -352,9 +382,12 @@ export async function resolveInstallConfig(
     existingVars.FIRECRACKER_ARTIFACTS_PUBKEY ||
     undefined;
 
+  const droppedKeys = droppedRunnerEnvKeys(existingVars);
   return {
     config: { token, platformUrl, port, host, dataDir, artifactsPubkey, socketPath },
     tokenSource,
+    previousEnv:
+      existingEnv && droppedKeys.length > 0 ? { text: existingEnv, droppedKeys } : undefined,
   };
 }
 
@@ -429,7 +462,16 @@ async function downloadAndInstallBinaries(
   );
 }
 
-async function writeHostFiles(config: RunnerConfig, d: ResolvedDeps): Promise<void> {
+/**
+ * Provision state dirs, the env file and the unit. With `previousEnv`, the
+ * old env file is first copied verbatim to RUNNER_ENV_PREVIOUS_PATH, and the
+ * returned warning names the dropped keys; null otherwise. Exported for tests.
+ */
+export async function writeHostFiles(
+  config: RunnerConfig,
+  d: Pick<ResolvedDeps, "fs">,
+  previousEnv?: PreviousEnv,
+): Promise<string | null> {
   const paths = runnerDataPaths(config.dataDir);
   await d.fs.mkdirp(config.dataDir);
   await d.fs.mkdirp(paths.runsDir);
@@ -437,11 +479,16 @@ async function writeHostFiles(config: RunnerConfig, d: ResolvedDeps): Promise<vo
   await d.fs.chmod(RUNNER_ETC_DIR, 0o700);
 
   // Env file 0600: it carries the bearer token that guards the daemon's
-  // credential-bearing /v1/sidecars surface.
+  // credential-bearing /v1/sidecars surface. Same for its backup.
+  if (previousEnv) {
+    await d.fs.writeFile(RUNNER_ENV_PREVIOUS_PATH, previousEnv.text, 0o600);
+    await d.fs.chmod(RUNNER_ENV_PREVIOUS_PATH, 0o600);
+  }
   await d.fs.writeFile(RUNNER_ENV_PATH, renderRunnerEnvFile(config), 0o600);
   await d.fs.chmod(RUNNER_ENV_PATH, 0o600);
 
   await d.fs.writeFile(RUNNER_UNIT_PATH, renderRunnerUnit(config), 0o644);
+  return previousEnv ? droppedEnvKeysWarning(previousEnv.droppedKeys) : null;
 }
 
 export async function enableService(d: ResolvedDeps): Promise<void> {
@@ -653,9 +700,21 @@ export async function runnerDoctor(opts: RunnerDoctorOptions = {}): Promise<Runn
     state: active.stdout.trim() || active.stderr.trim() || "unknown",
   };
 
-  // Health probe using the token from the env file.
+  // The daemon's effective environment, built the way systemd builds it: the
+  // unit's `Environment=` (operator drop-ins live there) overlaid by the env
+  // file, since EnvironmentFile= wins. A failed `show` (no unit) = no drop-in.
+  const shown = await d.exec.run("systemctl", [
+    "show",
+    RUNNER_SERVICE_NAME,
+    "-p",
+    "Environment",
+    "--value",
+  ]);
   const envText = await d.fs.readFile(RUNNER_ENV_PATH);
-  const env = envText ? parseRunnerEnvFile(envText) : {};
+  const env = {
+    ...(shown.ok ? parseSystemdEnvironment(shown.stdout) : {}),
+    ...(envText ? parseRunnerEnvFile(envText) : {}),
+  };
   const token = env.FIRECRACKER_RUNNER_TOKEN ?? "";
   // UDS install (FIRECRACKER_RUNNER_SOCKET) has no TCP listener — the health
   // probe must dial the socket the daemon actually binds.
