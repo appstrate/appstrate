@@ -1,19 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pairing-token UI the credential modal renders for an OAuth model provider.
- * It shows the `npx @appstrate/connect-helper <token>` command of a pairing,
- * polls it, and calls `onConnected` once the helper's redeem has produced a
- * credential. A redeem the server refuses, or a pairing it does not state, ends
- * on the same "generate a new command" state as an expired token.
- *
- * A pairing outlives this body: closing the modal or switching provider cancels
- * nothing, and `<PendingPairingsWatcher>` polls every pairing of `pairingStore`
- * to its end and owns the global side effects (toasts, list invalidation). So a
- * body that mounts shows the pairing already in flight for its org, provider
- * and target, and mints one only when there is none: the command on screen is
- * the one the user copied. While it shows a pairing it says so (`markPairingShown`),
- * and the watcher leaves the failure to the inline message.
+ * Pairing-token UI the credential modal renders for an OAuth model provider. Closing the modal
+ * or switching provider cancels nothing: `<PendingPairingsWatcher>` polls the pairing to its end
+ * and owns the global side effects.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -49,7 +39,6 @@ interface OAuthPairingBodyProps {
   onBusyChange?: (busy: boolean) => void;
 }
 
-/** A pairing is minted in an organization: without one there is nothing to show. */
 export function OAuthPairingBody(props: OAuthPairingBodyProps) {
   const orgId = useCurrentOrgId();
   if (!orgId) return null;
@@ -71,17 +60,14 @@ function PairingBody({
   const createPairing = useCreateModelProviderPairing();
   const { state, credentialId } = useModelProviderPairingStatus(pairingId);
 
-  // Guards single-shot completion.
   const firedRef = useRef(false);
 
-  // Mint on mount when there is no pairing to resume.
   useEffect(() => {
     if (pairing || createPairing.isPending) return;
     void generatePairing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The watcher leaves the failure of a shown pairing to the inline message.
   useEffect(() => (pairingId ? markPairingShown(pairingId) : undefined), [pairingId]);
 
   // Notify the parent for in-context behavior (auto-select the resulting
@@ -106,7 +92,7 @@ function PairingBody({
   }, [busy]);
   useEffect(() => () => onBusyChangeRef.current?.(false), []);
 
-  // A refused redeem and a lost pairing end like an expired token: the command is spent.
+  // A refused redeem ends like an expired token: the command is spent.
   const isSpent = state === "expired" || state === "failed" || state === "lost";
   const command = pairing?.command ?? "";
 
@@ -117,8 +103,6 @@ function PairingBody({
         body: pairingRequestBody({ providerId, ...target }),
       });
       setPairing({ id: res.id, command: res.command });
-      // Registered so `<PendingPairingsWatcher>` polls it to its end whether or
-      // not this body is still mounted.
       addPendingPairing(
         { id: res.id, providerId, target, expiresAt: res.expiresAt, orgId },
         res.command,

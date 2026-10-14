@@ -5,25 +5,10 @@
  * in-flight `npx @appstrate/connect-helper` connection survives the modal
  * being closed (tab switch, accidental dismiss) or even a full page reload.
  *
- * Only non-secret fields are stored: the pairing row id (`pair_...`), the
- * provider id, what the pairing produces, the TTL, and the org it was minted
- * in. The bearer token — the secret half of the command — is NEVER persisted;
- * resuming the poll needs only the id, and the helper already holds the token
- * it needs to complete the redeem. The command is held in memory, by the tab
- * that minted the pairing and for as long as the store holds it, so a modal
- * opened again shows the same command (`resumablePairing`).
- *
  * `<PendingPairingsWatcher>` reads this store to poll each pairing to
  * completion regardless of which modal (if any) is currently open. The
  * store is also synced across tabs via the `storage` event so a pairing
  * minted (or completed) in one tab is reflected in the others.
- *
- * An entry leaves the store when its poll ends: the server is the one that
- * states the outcome, and a pairing redeemed while the tab was hidden or
- * closed is still read as `connected` after its TTL. The client clock also
- * drops any entry `UNPOLLED_RETENTION_MS` past its expiry, a margin wide
- * enough that only the entries no poll reaches get that far. The end of a
- * session empties the store.
  */
 
 import { createStore } from "zustand/vanilla";
@@ -32,21 +17,14 @@ import type { PairingTarget } from "../lib/oauth-pairing";
 
 export const STORAGE_KEY = "appstrate_pending_pairings";
 
-/**
- * How long past its `expiresAt` an entry stays in the store, by the client
- * clock and for every entry. It bounds the entries no poll ends (minted in an
- * org the user never returns to) and is not what completes a pairing: it is
- * sized past the lifetime of the server row (1 h of grace after the TTL + a
- * 15 min sweep), so a polled entry reaches its outcome first on any client
- * clock within that margin of the server's.
- */
+// Bounds the entries no poll ends; it does not complete a pairing. Sized past the server row's
+// lifetime (1 h grace + 15 min sweep), so a polled entry reaches its outcome first.
 export const UNPOLLED_RETENTION_MS = 2 * 60 * 60_000;
 
 export interface PendingPairing {
   /** Pairing row id (`pair_...`) — NOT the secret token. */
   id: string;
   providerId: string;
-  /** What the redeem produces: a new subscription, or a credential reconnected. */
   target: PairingTarget;
   /** ISO timestamp — when the pairing TTL elapses. */
   expiresAt: string;
@@ -58,9 +36,7 @@ interface PairingState {
   pairings: PendingPairing[];
   add: (p: PendingPairing) => void;
   remove: (id: string) => void;
-  /** Drop pairings past `UNPOLLED_RETENTION_MS` (keeps the list bounded). */
   prune: () => void;
-  /** Empty the list and its persisted copy (session teardown). */
   clear: () => void;
   /** Re-read the persisted list (used by the cross-tab `storage` sync). */
   hydrate: () => void;
@@ -86,7 +62,6 @@ function isPendingPairing(p: unknown): p is PendingPairing {
   );
 }
 
-/** Whether the store still holds `p` at `now` (epoch ms). */
 function isRetained(p: PendingPairing, now: number): boolean {
   return new Date(p.expiresAt).getTime() + UNPOLLED_RETENTION_MS > now;
 }
@@ -106,7 +81,7 @@ function getStorage(): Storage | null {
   }
 }
 
-/** Read + validate the persisted list, minus unretained entries. Exported for tests. */
+/** Read + validate + retention-filter the persisted list. Exported for tests. */
 export function readPersistedPairings(): PendingPairing[] {
   const storage = getStorage();
   if (!storage) return [];
@@ -178,10 +153,8 @@ export function usePendingPairings(): PendingPairing[] {
   return useStore(pairingStore, (s) => s.pairings);
 }
 
-/**
- * The `npx` command of each pairing this tab minted, by pairing id. It carries
- * the bearer token: memory only, dropped with the store entry.
- */
+// Each command carries its pairing's bearer token: memory only, never in storage (the poll
+// needs only the id, and the helper holds the token).
 const commands = new Map<string, string>();
 
 pairingStore.subscribe(({ pairings }) => {
@@ -190,7 +163,6 @@ pairingStore.subscribe(({ pairings }) => {
   }
 });
 
-/** The pairings a modal shows, whose outcome it states itself. */
 const shown = new Set<string>();
 
 /** Non-hook accessors for use from event handlers / effects. */
@@ -207,14 +179,8 @@ export function clearPendingPairings(): void {
   pairingStore.getState().clear();
 }
 
-/**
- * The most recent pairing of that org, provider and target a modal can show
- * again: its TTL has not elapsed and this tab holds its command. The command
- * lives in this tab's memory, so after a reload or in another tab nothing is
- * resumable and the body mints. No margin is asked of the remaining TTL: the
- * pairing shown stays the one whose command the user may already be running,
- * and one that expires under the user says so in the body.
- */
+// No margin is asked of the remaining TTL: the pairing shown may be the one whose command the
+// user is already running.
 export function resumablePairing(
   match: Pick<PendingPairing, "orgId" | "providerId" | "target">,
 ): { id: string; command: string } | null {
@@ -236,7 +202,6 @@ export function resumablePairing(
   return resumable;
 }
 
-/** Marks `id` as shown by a modal; returns the cleanup that unmarks it. */
 export function markPairingShown(id: string): () => void {
   shown.add(id);
   return () => {

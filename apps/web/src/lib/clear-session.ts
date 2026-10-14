@@ -10,8 +10,7 @@ import { rememberSignedIn } from "./session-read";
 
 /**
  * Session teardown: nothing of the ended session (user, cached answers,
- * org/space scope, persona, pending pairings and their commands) may ride the
- * next one's requests.
+ * org/space scope, persona) may ride the next one's requests.
  */
 export function clearSession(): void {
   rememberSignedIn(localStorage, false);

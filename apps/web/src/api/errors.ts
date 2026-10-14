@@ -28,12 +28,7 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Whether asking again can change the answer. An error that is not an
- * `ApiError` carries no answer from the API (a network failure, a proxy's own
- * page); a 5xx, a 408 and a 429 are answers a second attempt can change. Any
- * other 4xx is the server's answer.
- */
+/** Whether asking again can change the answer: a non-`ApiError` carries no answer from the API. */
 export function isTransientError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return true;
   return error.status >= 500 || error.status === 408 || error.status === 429;

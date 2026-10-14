@@ -11,12 +11,11 @@
  * each pending pairing and fires the global side effects — the success toast
  * and credential/model-list invalidation once the redeem produces a credential,
  * the failure toast when it is refused, unless a modal shows that pairing and
- * states the failure inline. An entry leaves the store when its poll ends, on
- * a terminal status or lost.
+ * states it inline — then drops it from the store.
  *
  * Polling is scoped to the active org: the status route 404s cross-tenant
- * reads, so a pairing minted in another org is polled again once the user
- * switches back to it, for as long as the store holds it.
+ * reads, so a pairing minted in another org resumes only once the user
+ * switches back to it.
  */
 
 import { useEffect } from "react";
@@ -59,8 +58,6 @@ export function PendingPairingsWatcher() {
   const pairings = usePendingPairings();
   const currentOrgId = useCurrentOrgId();
 
-  // Bounds the entries no poll reaches (another org's): the store drops them
-  // `UNPOLLED_RETENTION_MS` past their expiry.
   useEffect(() => {
     pairingStore.getState().prune();
     const handle = window.setInterval(() => pairingStore.getState().prune(), 30_000);

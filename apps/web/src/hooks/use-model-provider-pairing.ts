@@ -6,11 +6,7 @@
  * matching `npx @appstrate/connect-helper <token>` command to the user,
  * and polls the pairing until the server states the outcome of the helper's
  * redeem: `connected` (the OAuth dance completed and the credential is stored),
- * `failed` (the redeem was refused), or `expired`. A pairing the server refuses
- * to state is `lost`.
- *
- * The dashboard never cancels a pairing: closing its modal leaves the helper
- * free to redeem it, and an abandoned token is reaped by its TTL (5 min).
+ * `failed` (the redeem was refused), or `expired`.
  */
 
 import { $api } from "../api/client";
@@ -24,15 +20,10 @@ export function useCreateModelProviderPairing() {
 }
 
 /**
- * Poll a pairing and state where the poll stands. `id: null` polls nothing.
- *
- * Polls every 2.5s while the state is `pending`, which a transient error (a
- * 5xx, a network failure) leaves standing; it stops on a terminal status
- * (connected / failed / expired) and on `lost`.
+ * Poll a pairing's status. `id: null` polls nothing.
  */
 export function useModelProviderPairingStatus(id: string | null): {
   state: PairingPollState;
-  /** The credential the redeem created or reconnected; `null` unless `connected`. */
   credentialId: string | null;
 } {
   // Guarded like the route: either permission that mints a pairing reads it. A
@@ -48,8 +39,9 @@ export function useModelProviderPairingStatus(id: string | null): {
       enabled: !!id && mayRead,
       refetchInterval: (q) =>
         pairingPollState(q.state.data?.status, q.state.error) === "pending" ? 2500 : false,
-      // A pairing's status is only meaningful while something observes it:
-      // nothing is cached beyond that.
+      // The next tick is the retry: React Query's own would double each failed tick.
+      retry: false,
+      // A pairing's status means something only while observed: nothing is cached past that.
       staleTime: 0,
       gcTime: 0,
     },

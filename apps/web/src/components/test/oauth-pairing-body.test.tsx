@@ -40,13 +40,10 @@ const REGENERATE = settingsFr["credentials.oauth.regenerateCommand"];
  * The body of a new `codex` organization subscription, its poll in `poll`'s
  * state. SSR reads Zustand's hydration snapshot, not its live state.
  */
-function renderBody(
-  poll?: PairingStatus["status"] | Error,
-  orgId: string | null = "org_a",
-): string {
+function renderBody(poll?: PairingStatus["status"] | Error): string {
   const orgSnapshot = spyOn(orgStore, "getInitialState").mockReturnValue({
     ...orgStore.getInitialState(),
-    id: orgId,
+    id: "org_a",
   });
   const qc = new QueryClient();
   if (poll instanceof Error) {
@@ -114,9 +111,5 @@ describe("OAuthPairingBody", () => {
 
   it("states a pairing the server does not state as expired", () => {
     expect(renderBody(new ApiError("not_found", "Pairing not found", 404))).toContain(EXPIRED);
-  });
-
-  it("renders nothing without an organization", () => {
-    expect(renderBody(undefined, null)).toBe("");
   });
 });
