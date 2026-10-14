@@ -341,7 +341,7 @@ jobs:
           rm -f ci-keyring-probe
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.asset }}
           path: apps/cli/${{ matrix.asset }}
@@ -476,7 +476,7 @@ jobs:
           subject-path: out/appstrate-*
 
       - name: Upload signed bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-signed-bundle
           path: |
@@ -564,7 +564,7 @@ jobs:
           cat "fragment-${ARCH}.json"
 
       - name: Upload guest artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: firecracker-${{ matrix.arch }}
           path: |
@@ -677,7 +677,7 @@ jobs:
           echo "Runner daemon smoke passed: compiled, env-decoupled, reached host preflight."
 
       - name: Upload runner daemon binary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appstrate-runner-${{ matrix.arch }}
           # No same-origin `.sha256` sidecar: the daemon binary is verified
