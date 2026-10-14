@@ -513,13 +513,24 @@ export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
 }
 
 /**
+ * A credential's scope ceiling as the request context holds it: its scope list
+ * closed under the core implications (`withImpliedPermissions`), so a key
+ * scoped `runs:read-all` reaches what `runs:read` gates. Every writer of
+ * `scopeCeiling` builds it here, and every reader (`effectivePermissions`,
+ * `ceilingAllows`, the MCP catalog) takes it as it is.
+ */
+export function toScopeCeiling(scopes: Iterable<string>): ReadonlySet<string> {
+  return withImpliedPermissions(scopes);
+}
+
+/**
  * Effective permissions for one request: org-level set ∪ space-level set
  * (empty outside a space context), intersected with the credential ceiling.
- * `scopeCeiling` is the API-key scope list or the OIDC scope claim; a cookie
- * session has none. Both sides are closed under the core implications
- * (`withImpliedPermissions`) before they meet: a role naming
+ * `scopeCeiling` is the API-key scope list or the OIDC scope claim, built by
+ * {@link toScopeCeiling}; a cookie session has none. The grant side is closed
+ * under the same implications before the two meet: a role naming
  * `credential-proxy:call` under a key scoped `credential-proxy:call-own`
- * holds `call-own`, and a ceiling naming the wider grant admits the narrower
+ * holds `call-own`, and a key scoped to the wider grant admits the narrower
  * one the role holds.
  */
 export function effectivePermissions(input: {
@@ -529,10 +540,9 @@ export function effectivePermissions(input: {
 }): Set<Permission> {
   const { orgPermissions: org, spacePermissions, scopeCeiling } = input;
   const granted = withImpliedPermissions([...org, ...(spacePermissions ?? [])]);
-  const ceiling = scopeCeiling && withImpliedPermissions(scopeCeiling);
   const effective = new Set<Permission>();
   for (const perm of granted) {
-    if (!ceiling || ceiling.has(perm)) effective.add(perm as Permission);
+    if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
   }
   return effective;
 }

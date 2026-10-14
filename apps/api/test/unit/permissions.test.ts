@@ -14,6 +14,7 @@ import {
   effectivePermissions,
   orgPermissions,
   presetPermissions,
+  toScopeCeiling,
   validateScopes,
   API_KEY_ALLOWED_SCOPES,
   type Permission,
@@ -468,7 +469,7 @@ describe("implied permissions across a delegation", () => {
   it("serves such a key: the role's wider grant meets the key's narrower scope", () => {
     const keyed = effectivePermissions({
       orgPermissions: customRole("credential-proxy:call", "runs:read-all"),
-      scopeCeiling: new Set(["credential-proxy:call-own", "runs:read"]),
+      scopeCeiling: toScopeCeiling(["credential-proxy:call-own", "runs:read"]),
     });
     expect(keyed.has("credential-proxy:call-own")).toBe(true);
     expect(keyed.has("runs:read")).toBe(true);
@@ -479,7 +480,7 @@ describe("implied permissions across a delegation", () => {
   it("caps a key scoped to the wider grant at the narrower one its creator holds", () => {
     const keyed = effectivePermissions({
       orgPermissions: customRole("credential-proxy:call-own"),
-      scopeCeiling: new Set(["credential-proxy:call"]),
+      scopeCeiling: toScopeCeiling(["credential-proxy:call"]),
     });
     expect(keyed.has("credential-proxy:call-own")).toBe(true);
     expect(keyed.has("credential-proxy:call")).toBe(false);

@@ -93,16 +93,6 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
   that the consent left out, on a successful completion. (#1913)
 
-- **`AuthResolution`** (`@appstrate/core/module`) is a union of an inline
-  resolution and a deferred one (`deferOrgResolution: true`), each declaring
-  its ceiling in one place. Inline, `permissions` is the ceiling over
-  `orgRole` (or the whole grant without one) and `scopeCeiling` is absent.
-  Deferred, there is no `orgRole`, `permissions` is empty, and
-  **`scopeCeiling`** is the ceiling over the org role resolved later (absent,
-  the caller is uncapped). A strategy mixing the two does not compile, and the
-  pipeline refuses one the compiler never saw with a 500. `deferOrgResolution`
-  is `true`, `false` or absent; a non-literal `boolean` no longer type-checks.
-  (#1911, #1963)
 - **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
   before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
   `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**
@@ -186,6 +176,21 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   `off`, or when what it sends is not known. (#1774)
 
 ### Changed
+
+- **BREAKING: `AuthResolution`** (`@appstrate/core/module`) is a union of an
+  inline resolution and a deferred one (`deferOrgResolution: true`), each
+  declaring its ceiling in one place, where 15.0.0 accepted any mix. Inline,
+  `permissions` is the ceiling over `orgRole` (or the whole grant without one),
+  and `scopeCeiling` is absent. Deferred, there is no `orgRole`, `permissions`
+  is empty, and the new **`scopeCeiling`** is the ceiling over the org role
+  resolved later (absent, the caller is uncapped). A strategy that sets
+  `orgRole` or a non-empty `permissions` on a deferred resolution, or
+  `scopeCeiling` on an inline one, fails to compile, and the pipeline answers
+  one the compiler never saw with a 500. `deferOrgResolution` is `true`,
+  `false` or absent: a non-literal `boolean` no longer type-checks. A deferred
+  resolution that carried `orgRole` with `permissions` as its ceiling declares
+  that list as `scopeCeiling` instead; the `X-Org-Id` middleware already
+  replaced the role. (#1911, #1963)
 
 - **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
   `scopesGranted` and `missingScopes`, and a
