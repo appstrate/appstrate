@@ -10,14 +10,14 @@
  * that changes is owned by the only node that shows it, and a tick re-renders
  * one `<span>`.
  *
- * The formatting itself is the platform's (`@appstrate/core/format`), so a run
- * reads the same here as in its Info tab — and a five-minute run reads
- * "5m 12s" rather than "312.0s".
+ * The formatting is `lib/format-duration`, so a run reads the same here as in
+ * its log — in the interface's language, and a five-minute run reads
+ * « 5 min 12 s » rather than « 312,0 s ».
  */
 
 import { useState, useEffect } from "react";
 import { ACTIVE_RUN_STATUSES } from "@appstrate/shared-types";
-import { formatDuration } from "@appstrate/core/format";
+import { formatDuration } from "../lib/format-duration";
 import { cn } from "@appstrate/ui/cn";
 
 /** The statuses that mean "still going" are owned by the wire contract. */
