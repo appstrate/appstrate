@@ -180,9 +180,12 @@ export function AgentActions({
       <RunWithOptionsModal
         open={runOptions.value !== null && canRunWithOptions}
         onClose={runOptions.close}
+        onLeave={runOptions.leave}
         agent={detail}
         isPending={launcher.isPending}
-        onSubmit={(submit) => launcher.launch(launchFromOptions(submit), { replace: true })}
+        onSubmit={(submit) =>
+          launcher.launch(launchFromOptions(submit), { leave: runOptions.leave })
+        }
       />
       <RunLaunchRecovery
         launcher={launcher}

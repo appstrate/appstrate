@@ -43,7 +43,7 @@ export type IntegrationSettingsSection =
 /** `extra` names what opens inside the section: a file, a modal. */
 type Extra = Record<string, string>;
 
-function sectionHref(
+export function sectionHref(
   pathname: string,
   tab: string,
   param: string,

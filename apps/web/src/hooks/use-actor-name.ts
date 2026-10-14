@@ -2,7 +2,7 @@
 
 import type { ActorValue } from "../lib/schedule-payload";
 import { useOrgDetail } from "./use-org";
-import { useEndUser } from "./use-end-users";
+import { useEndUser, type EndUserInfo } from "./use-end-users";
 
 /** Primary line for an option — name, falling back to email then id. */
 export function primaryLabel(
@@ -15,17 +15,26 @@ export function primaryLabel(
 
 /**
  * The name of the actor a value designates: a member from the organization's list, an end-user
- * from its own read (so it resolves whether or not a search page lists it). The id stands in
- * while the name is unread; `null` for no actor.
+ * from `listed` when a page already holds it, else from its own read. The id stands in while the
+ * name is unread; `null` for no actor.
  */
-export function useActorName(value: ActorValue | undefined): string | null {
+export function useActorName(
+  value: ActorValue | undefined,
+  listed: readonly EndUserInfo[] = [],
+): string | null {
   const { data: orgData } = useOrgDetail();
-  const { data: endUser } = useEndUser(value?.endUserId ?? "");
+  const listedEndUser = value?.endUserId
+    ? listed.find((eu) => eu.id === value.endUserId)
+    : undefined;
+  const { data: readEndUser } = useEndUser(
+    value?.endUserId && !listedEndUser ? value.endUserId : "",
+  );
   if (value?.userId) {
     const m = orgData?.members?.find((mm) => mm.userId === value.userId);
     return m ? primaryLabel(m.displayName, m.email ?? null, m.userId) : value.userId;
   }
   if (value?.endUserId) {
+    const endUser = listedEndUser ?? readEndUser;
     return endUser
       ? primaryLabel(endUser.name, endUser.email, endUser.externalId || endUser.id)
       : value.endUserId;

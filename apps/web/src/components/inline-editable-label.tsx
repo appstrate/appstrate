@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@appstrate/ui/components/input";
 import { Spinner } from "./spinner";
+import { commitRename } from "../lib/inline-rename";
 
 /**
  * A table row's name, renamed in place. **It opens only when something drives it**: the row's
@@ -64,23 +65,13 @@ export function InlineEditableLabel({
 
   const commit = async () => {
     if (savingRef.current) return;
-    const next = draft.trim();
-    if (next === value || !next) {
-      setEditing(false);
-      return;
-    }
     savingRef.current = true;
     setSaving(true);
-    try {
-      await onSave(next);
-      setEditing(false);
-    } catch {
-      // The caller owns the error message. Keeping edit mode and `draft` here
-      // is what prevents a failed commit-on-blur write from erasing the input.
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
+    const outcome = await commitRename(draft, value, onSave);
+    savingRef.current = false;
+    setSaving(false);
+    // A failed write keeps edit mode and the draft, so a commit on blur erases nothing.
+    if (outcome !== "failed") setEditing(false);
   };
 
   if (!editable || !editing) {

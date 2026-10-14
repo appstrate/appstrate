@@ -5,9 +5,7 @@ import { AlertTriangle, CreditCard } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "../../lib/format-bytes";
-import { useAppConfig } from "../../hooks/use-app-config";
 import { usePermissions } from "../../hooks/use-permissions";
-import { UnavailableState } from "../../components/route-gate";
 import type { components } from "../../api/client";
 import {
   useBilling,
@@ -45,7 +43,6 @@ const STATUS_I18N: Record<components["schemas"]["EeBillingAccount"]["status"], s
 export function OrgSettingsBillingPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
-  const { features } = useAppConfig();
   // The route opens on `billing:read` under the `billing` feature
   // (`lib/route-access.ts`), both only `@appstrate/module-ee` contributes, so
   // `/api/billing` answers.
@@ -64,11 +61,6 @@ export function OrgSettingsBillingPage() {
   // The two admin sections below are MOUNTED on `billing:manage`, not merely
   // hidden by it, so their queries never fire for a caller the routes would 403.
   const canManageBilling = can("billing:manage");
-
-  // Reachable by URL even when the module is absent: redirect rather than
-  // render a page whose API answers 404. Below every hook on purpose — an
-  // early return above them changes the hook order between renders.
-  if (!features.billing) return <UnavailableState />;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState error={error} />;

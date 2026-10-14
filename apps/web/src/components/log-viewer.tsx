@@ -16,6 +16,7 @@ import {
   CircleHelp,
   MessageSquareText,
   Bug,
+  ScrollText,
   SearchX,
   X,
 } from "lucide-react";
@@ -203,7 +204,8 @@ interface LogViewerProps {
   focusError?: boolean;
   headerActions?: ReactNode;
   selectedEntryId?: string | null;
-  onSelectEntry: (entry: ExecutionEntry | null) => void;
+  onSelectEntry: (entryId: string | null) => void;
+  /** Read once at mount: the caller keys the viewer on it to apply a new focus. */
   initialFocus?: JournalOverviewFilter;
 }
 
@@ -215,6 +217,16 @@ function journalType(entry: ExecutionEntry): JournalTypeFilter {
   if (entry.kind === "agent") return "message";
   if (entry.kind === "tool") return entry.status === "running" ? "tool_call" : "tool_result";
   return "diagnostic";
+}
+
+function focusLevelFilters(focus: JournalOverviewFilter | undefined): JournalLevelFilter[] {
+  if (focus === "warnings") return ["warn"];
+  if (focus === "errors") return ["error"];
+  return [];
+}
+
+function focusTypeFilters(focus: JournalOverviewFilter | undefined): JournalTypeFilter[] {
+  return focus === "tools" ? ["tool_call", "tool_result"] : [];
 }
 
 function journalSearchText(entry: ExecutionEntry): string {
@@ -243,32 +255,13 @@ export function LogViewer({
   const [showTimestamps, setShowTimestamps] = useState(false);
   const [showTools, setShowTools] = useState(true);
   const [query, setQuery] = useState("");
-  const [levelFilters, setLevelFilters] = useState<JournalLevelFilter[]>([]);
-  const [typeFilters, setTypeFilters] = useState<JournalTypeFilter[]>([]);
+  const [levelFilters, setLevelFilters] = useState(() => focusLevelFilters(initialFocus));
+  const [typeFilters, setTypeFilters] = useState(() => focusTypeFilters(initialFocus));
   const displayFilters = [
     ...(showTimestamps ? ["timestamps"] : []),
     ...(!showTools ? ["hide_tools"] : []),
   ];
 
-  useEffect(() => {
-    if (initialFocus === "tools") {
-      setLevelFilters([]);
-      setTypeFilters(["tool_call", "tool_result"]);
-      return;
-    }
-    if (initialFocus === "warnings") {
-      setLevelFilters(["warn"]);
-      setTypeFilters([]);
-      return;
-    }
-    if (initialFocus === "errors") {
-      setLevelFilters(["error"]);
-      setTypeFilters([]);
-      return;
-    }
-    setLevelFilters([]);
-    setTypeFilters([]);
-  }, [initialFocus]);
   const normalizedQuery = query.trim().toLocaleLowerCase(i18n.language);
   const visibleEntries = useMemo(() => {
     return entries.filter((entry) => {
@@ -356,8 +349,7 @@ export function LogViewer({
       let errorIndex = -1;
       if (focusError) {
         for (let index = visibleEntries.length - 1; index >= 0; index -= 1) {
-          const entry = visibleEntries[index]!;
-          if (entry.level === "error" || (entry.kind === "tool" && entry.status === "failed")) {
+          if (journalLevel(visibleEntries[index]!) === "error") {
             errorIndex = index;
             break;
           }
@@ -372,7 +364,7 @@ export function LogViewer({
     if (autoScroll) {
       virtualizer.scrollToIndex(visibleEntries.length - 1, { align: "end" });
     }
-  }, [visibleEntries, autoScroll, focusError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visibleEntries, autoScroll, focusError, virtualizer]);
 
   // Disable auto-scroll when user scrolls up
   useEffect(() => {
@@ -455,20 +447,23 @@ export function LogViewer({
       <div className="overflow-x-auto">
         <div className={cn("min-w-[640px]", showTimestamps && "min-w-[760px]")}>
           <div
-            role="row"
             className={cn(
               "border-border bg-muted/20 text-muted-foreground grid items-center gap-4 border-y px-4 py-2 text-xs font-semibold tracking-wide uppercase",
               journalGrid,
             )}
           >
-            {showTimestamps && <span role="columnheader">{t("log.timestamp")}</span>}
-            <span role="columnheader">{t("log.filterType")}</span>
-            <span role="columnheader">{t("log.columnEvent")}</span>
-            <span role="columnheader">{t("log.columnDuration")}</span>
+            {showTimestamps && <span>{t("log.timestamp")}</span>}
+            <span>{t("log.filterType")}</span>
+            <span>{t("log.columnEvent")}</span>
+            <span>{t("log.columnDuration")}</span>
           </div>
 
-          <div className="h-[400px] overflow-y-auto" ref={scrollRef} role="rowgroup">
-            {visibleEntries.length === 0 ? (
+          <div className="h-[400px] overflow-y-auto" ref={scrollRef}>
+            {entries.length === 0 ? (
+              <div className="flex h-full items-center justify-center">
+                <EmptyState compact icon={ScrollText} message={t("log.empty")} />
+              </div>
+            ) : visibleEntries.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center px-6 text-center">
                 <SearchX className="text-muted-foreground mb-3 size-7" />
                 <p className="text-sm font-medium">{t("log.noMatches")}</p>
@@ -505,21 +500,14 @@ export function LogViewer({
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                     >
-                      <div
-                        role="row"
+                      <button
+                        type="button"
                         className={cn(
-                          "hover:bg-muted/20 grid min-h-10 cursor-pointer items-center gap-4 px-4 py-2 text-sm transition-colors",
+                          "hover:bg-muted/20 grid min-h-10 w-full cursor-pointer items-center gap-4 px-4 py-2 text-left text-sm transition-colors",
                           journalGrid,
                           isSelected && "bg-muted/40",
                         )}
-                        onClick={() => onSelectEntry(isSelected ? null : entry)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            onSelectEntry(isSelected ? null : entry);
-                          }
-                        }}
-                        tabIndex={0}
+                        onClick={() => onSelectEntry(isSelected ? null : entry.id)}
                         aria-pressed={isSelected}
                       >
                         {showTimestamps && (
@@ -541,7 +529,8 @@ export function LogViewer({
                         </span>
                         <span
                           className={cn(
-                            "text-foreground min-w-0 truncate",
+                            "text-foreground min-w-0",
+                            entry.kind === "tool" ? "truncate" : "break-words whitespace-pre-wrap",
                             entry.level && levelColors[entry.level],
                           )}
                         >
@@ -561,7 +550,7 @@ export function LogViewer({
                             ? formatDuration(entry.durationMs)
                             : ""}
                         </span>
-                      </div>
+                      </button>
                     </div>
                   );
                 })}
@@ -609,7 +598,10 @@ export function LogEntryInspector({
                 value={formatTimestamp(entry.createdAt, i18n.language)}
               />
             )}
-            {entry.level && <InspectorFact label={t("log.filterLevel")} value={entry.level} />}
+            <InspectorFact
+              label={t("log.filterLevel")}
+              value={t(`log.level.${journalLevel(entry)}`)}
+            />
             {entry.kind === "tool" && (
               <>
                 <InspectorFact label={t("log.tool")} value={entry.tool} />

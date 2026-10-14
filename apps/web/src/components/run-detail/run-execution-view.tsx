@@ -18,7 +18,10 @@ export function RunExecutionView({
   headerActions?: ReactNode;
   initialFilter?: JournalOverviewFilter;
 }) {
-  const [selectedEntry, setSelectedEntry] = useState<ExecutionEntry | null>(null);
+  // The id, not the entry: a live tool row settles in place, and the inspector
+  // must show the row as it is now.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedEntry = selectedId ? (logs.find((entry) => entry.id === selectedId) ?? null) : null;
 
   return (
     <div
@@ -31,18 +34,19 @@ export function RunExecutionView({
       <section className="min-w-0">
         <div className="p-4 md:p-6">
           <LogViewer
+            key={initialFilter ?? "all"}
             entries={logs}
             focusError={run.status === "failed"}
             headerActions={headerActions}
-            selectedEntryId={selectedEntry?.id}
-            onSelectEntry={setSelectedEntry}
+            selectedEntryId={selectedId}
+            onSelectEntry={setSelectedId}
             initialFocus={initialFilter}
           />
         </div>
       </section>
       {selectedEntry && (
         <aside className="border-border min-w-0 border-t lg:border-t-0 lg:border-l">
-          <LogEntryInspector entry={selectedEntry} onClose={() => setSelectedEntry(null)} />
+          <LogEntryInspector entry={selectedEntry} onClose={() => setSelectedId(null)} />
         </aside>
       )}
     </div>

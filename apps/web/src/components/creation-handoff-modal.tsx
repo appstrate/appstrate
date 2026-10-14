@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Bot, MessageSquareText, PencilLine } from "lucide-react";
+import { MessageSquareText, PencilLine } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
-import { useAppConfig } from "../hooks/use-app-config";
+import { useCanReach } from "../hooks/use-can-reach";
 import { Modal } from "./modal";
 
 interface CreationHandoffModalProps {
@@ -29,11 +29,12 @@ export function CreationHandoffModal({
   onChat,
 }: CreationHandoffModalProps) {
   const { t } = useTranslation("settings");
-  const { features } = useAppConfig();
+  const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
   const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
   const manualIsImport = resource === "mcp-server";
-  const chatAvailable = Boolean(features.chat);
+  // The chat route gate covers both the feature flag and the `chat:read` permission.
+  const chatAvailable = canReach("/chat");
 
   const methods = [
     {
@@ -55,14 +56,6 @@ export function CreationHandoffModal({
       ),
       onClick: () => onChat(chatPrompt),
       disabled: !chatAvailable,
-    },
-    {
-      id: "coding-agent",
-      icon: Bot,
-      title: t("creation.codingAgent.title"),
-      description: t("creation.codingAgent.unavailableDescription"),
-      onClick: undefined,
-      disabled: true,
     },
   ];
 

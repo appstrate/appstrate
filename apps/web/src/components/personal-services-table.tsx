@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { KeyRound } from "lucide-react";
 import { DataTable } from "./data-table";
 import { EmptyState, ErrorState } from "./page-states";
-import { usePersonalServiceColumns } from "../pages/org-settings/personal-service-columns";
+import { usePersonalServiceColumns } from "./personal-service-columns";
 import type { PersonalServiceRow } from "../lib/model-providers";
 
 export function PersonalServicesTable({

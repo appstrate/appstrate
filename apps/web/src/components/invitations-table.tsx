@@ -18,6 +18,7 @@ import { $api, type components } from "../api/client";
 import { useOrg } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useSpaces } from "../hooks/use-spaces";
+import { invitationUrl } from "../lib/invitation-url";
 import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -75,7 +76,7 @@ export function InvitationsTable({
   // shows the clipboard changed, hence the toast. A refused copy toasts its own
   // error instead.
   const copyLink = async (invitation: Invitation) => {
-    if (await copy(`${window.location.origin}/invite/${invitation.token}`)) {
+    if (await copy(invitationUrl(invitation.token))) {
       toast.success(t("orgSettings.invitationLinkCopied"));
     }
   };

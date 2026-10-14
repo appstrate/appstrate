@@ -72,6 +72,8 @@ interface FileTreeProps {
   directories?: readonly string[];
   /** Directories collapsed on first mount without changing the shared default. */
   initialCollapsedPaths?: readonly string[];
+  /** Displayed name of a directory, by path, when its path is a stable key rather than a word. */
+  directoryLabels?: Readonly<Record<string, string>>;
   /** Path of the node (file or directory) whose preview is showing, or `null`. */
   selectedPath: string | null;
   onSelect: (path: string) => void;
@@ -92,6 +94,7 @@ export function FileTree({
   entries,
   directories = NO_DIRECTORIES,
   initialCollapsedPaths = NO_COLLAPSED_PATHS,
+  directoryLabels,
   selectedPath,
   onSelect,
   onSelectNode,
@@ -299,7 +302,9 @@ export function FileTree({
                   <span className="w-3 shrink-0" aria-hidden />
                 )}
                 <Icon size={13} className="shrink-0 opacity-70" aria-hidden />
-                <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {(node.kind === "dir" && directoryLabels?.[node.path]) || node.name}
+                </span>
                 {editable && node.kind === "file" && (
                   // `tabIndex={-1}`: a `treeitem` owns exactly one tab stop, and
                   // the roving tabindex above IS that stop. The keyboard path to

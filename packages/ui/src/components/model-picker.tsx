@@ -83,6 +83,11 @@ interface ListProps {
   renderIcon?: (model: PickerModel) => ReactNode;
   /** The host's link to where the person adds or reconnects a key of their own. */
   fixLink?: (label: string) => ReactNode;
+  /**
+   * Which models can be picked; by default the unblocked ones. A blocked model made pickable
+   * keeps its reason.
+   */
+  selectable?: (model: PickerModel) => boolean;
   className?: string;
   listClassName?: string;
 }
@@ -95,6 +100,7 @@ export function ModelPickerList({
   inherit,
   renderIcon,
   fixLink,
+  selectable,
   className,
   listClassName,
 }: ListProps) {
@@ -136,40 +142,45 @@ export function ModelPickerList({
                   {fixLink(labels.fix(group.needs.fix, group.needs.service))}
                 </div>
               )}
-              {group.entries.map(({ model, isDefault, blocked }) => (
-                <CommandItem
-                  key={model.id}
-                  value={model.id}
-                  keywords={[model.label ?? "", title, model.provider_name ?? ""]}
-                  disabled={blocked !== null}
-                  onSelect={() => onSelect(model.id)}
-                  // The reason must stay legible: only the name is greyed.
-                  className="items-start data-[disabled=true]:opacity-100"
-                >
-                  {renderIcon?.(model)}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={cn("truncate", blocked && "text-muted-foreground")}>
-                        {model.label ?? model.modelId}
-                      </span>
-                      {isDefault && (
-                        <Badge variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                          {labels.isDefault}
-                        </Badge>
+              {group.entries.map(({ model, isDefault, blocked }) => {
+                const pickable = selectable ? selectable(model) : blocked === null;
+                return (
+                  <CommandItem
+                    key={model.id}
+                    value={model.id}
+                    keywords={[model.label ?? "", title, model.provider_name ?? ""]}
+                    disabled={!pickable}
+                    onSelect={() => onSelect(model.id)}
+                    // The reason must stay legible: only the name is greyed.
+                    className="items-start data-[disabled=true]:opacity-100"
+                  >
+                    {renderIcon?.(model)}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("truncate", blocked && "text-muted-foreground")}>
+                          {model.label ?? model.modelId}
+                        </span>
+                        {isDefault && (
+                          <Badge variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
+                            {labels.isDefault}
+                          </Badge>
+                        )}
+                      </div>
+                      {blocked && (
+                        <div className="text-muted-foreground text-xs">
+                          {labels.reasons[blocked]}
+                        </div>
                       )}
                     </div>
-                    {blocked && (
-                      <div className="text-muted-foreground text-xs">{labels.reasons[blocked]}</div>
-                    )}
-                  </div>
-                  <Check
-                    className={cn(
-                      "mt-0.5 size-3.5",
-                      model.id === value ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                </CommandItem>
-              ))}
+                    <Check
+                      className={cn(
+                        "mt-0.5 size-3.5",
+                        model.id === value ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           );
         })}

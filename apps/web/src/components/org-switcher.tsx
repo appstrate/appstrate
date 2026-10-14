@@ -19,10 +19,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useLandAfterOrgSwitch } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings } from "lucide-react";
+import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings, Star } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
-import { $api } from "../api/client";
-import { useSpaces } from "../hooks/use-spaces";
+import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
+import { spaceRoleLabel } from "../hooks/use-roles";
 import { usePermissions } from "../hooks/use-permissions";
 import { spaceLabel } from "../lib/space-label";
 import { matchesSearch } from "../lib/strings";
@@ -34,17 +34,20 @@ import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 import { cn } from "@appstrate/ui/cn";
 import { OrganizationAvatar } from "./organization-avatar";
+import { NEW_SPACE_PARAM } from "./space-create-modal";
 
 function ColumnHeader({
   label,
   onAdd,
   addState,
   addLabel,
+  onNavigate,
 }: {
   label: string;
   onAdd?: string;
   addState?: unknown;
   addLabel: string;
+  onNavigate: () => void;
 }) {
   return (
     <div className="flex items-center justify-between px-2 pt-1 pb-2">
@@ -55,6 +58,7 @@ function ColumnHeader({
         <Link
           to={onAdd}
           state={addState}
+          onClick={onNavigate}
           className="text-primary flex items-center gap-1 text-xs font-medium"
         >
           {addLabel}
@@ -91,17 +95,8 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
     setOpenMobile(false);
   };
 
-  // Spaces of the EXPLORED organization. The header is passed explicitly,
-  // so it is part of the query key and the client middleware leaves it alone
-  // (it only fills headers a request does not already carry). Exploring your
-  // own org therefore hits the very same key as `useSpaces()` — same
-  // cache entry, no second request.
-  const exploredSpaces = $api.useQuery(
-    "get",
-    "/api/spaces",
-    { params: { header: { "X-Org-Id": exploredId ?? undefined } } },
-    { enabled: open && !!exploredId, select: (e) => e.data },
-  );
+  // Spaces of the EXPLORED organization; your own org shares `useSpaces()`'s cache entry.
+  const exploredSpaces = useOrgSpaces(open ? exploredId : null);
 
   if (loading) return <Skeleton className="h-6 w-40" />;
   if (!currentOrg) return null;
@@ -129,7 +124,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
       switchOrg(orgId);
       landAfterOrgSwitch();
     } else switchSpace(spaceId);
-    setOpen(false);
+    closeSwitcherAndSidebar();
   };
 
   return (
@@ -226,6 +221,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("switcher.searchPlaceholder")}
+            aria-label={t("switcher.searchAriaLabel")}
             className="w-full border-none bg-transparent p-0 text-sm shadow-none focus:ring-0 focus:outline-none"
           />
         </div>
@@ -239,6 +235,7 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               onAdd={canCreateOrg ? "/onboarding/create" : undefined}
               // Without it the create step forwards a user who already has an org.
               addState={{ fromSwitcher: true }}
+              onNavigate={closeSwitcherAndSidebar}
             />
             {shownOrgs.map((org) => {
               const isCurrent = org.id === currentOrg.id;
@@ -310,14 +307,19 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
               label={t("switcher.workspacesColumn")}
               addLabel={t("switcher.add")}
               onAdd={
-                isExploringElsewhere || !can("spaces:write") ? undefined : "/org-settings/spaces"
+                isExploringElsewhere || !can("spaces:write")
+                  ? undefined
+                  : `/org-settings/spaces?${NEW_SPACE_PARAM}=1`
               }
+              onNavigate={closeSwitcherAndSidebar}
             />
             {exploredSpaces.isPending ? (
               <div className="space-y-1 p-2">
                 <Skeleton className="h-5 w-2/3" />
                 <Skeleton className="h-5 w-1/2" />
               </div>
+            ) : exploredSpaces.isError ? (
+              <p className="text-destructive px-2 py-4 text-xs">{t("error.generic")}</p>
             ) : shownSpaces.length === 0 ? (
               <p className="text-muted-foreground px-2 py-4 text-xs">
                 {t("switcher.workspacesEmpty")}
@@ -363,7 +365,19 @@ export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
                         onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
                         className="flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <span className="truncate text-sm font-medium">{spaceLabel(space, t)}</span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                            {spaceLabel(space, t)}
+                            {space.isDefault && (
+                              <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
+                            )}
+                          </span>
+                          {isSpaceEnterable(space) && space.role && (
+                            <span className="text-muted-foreground truncate text-xs">
+                              {spaceRoleLabel(space.role, t)}
+                            </span>
+                          )}
+                        </span>
                         {!isSpaceEnterable(space) && (
                           <span className="text-muted-foreground ml-auto shrink-0 text-xs">
                             {t("switcher.spaceOnRequest")}

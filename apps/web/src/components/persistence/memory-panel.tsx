@@ -17,7 +17,7 @@ import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
 import { ConfirmModal } from "../confirm-modal";
 import { formatDateField } from "../../lib/format-date";
-import { matchesSearch } from "../../lib/strings";
+import { filterMemoryItems, memoryText } from "../../lib/memory-items";
 import { useCopyToClipboard } from "../../hooks/use-copy-to-clipboard";
 import { useModalParam } from "../../hooks/use-modal-param";
 import {
@@ -39,12 +39,6 @@ interface MemoryPanelProps {
 }
 
 /**
- * Unified memory view: pinned slots (always-in-prompt blocks
- * including `checkpoint`) on top, archive memories below.
- * Mirrors the Letta ADE pattern of one inspector with two tiers visible
- * side by side.
- */
-/**
  * A tier with nothing in it. Quiet on purpose: the panel already draws the
  * ringed empty state when BOTH tiers are empty, and two of those stacked on one
  * screen would read as two failures rather than as one calm answer.
@@ -53,15 +47,20 @@ function SectionEmpty({ message }: { message: string }) {
   return <p className="text-muted-foreground/70 px-2 py-2 text-xs italic">{message}</p>;
 }
 
+/**
+ * Unified memory view: pinned slots (always-in-prompt blocks
+ * including `checkpoint`) and archive memories in one filterable list.
+ * Mirrors the Letta ADE pattern of one inspector over both tiers.
+ */
 export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps) {
   const { t } = useTranslation(["agents", "common"]);
   const isRunView = !!runId;
 
   // The hook union narrows nicely if we just call both forms conditionally
   // and pick the active one — they share the same shape under the hood.
-  const agentPinnedQ = useAgentPinned(isRunView ? undefined : packageId, "all");
+  const agentPinnedQ = useAgentPinned(isRunView ? undefined : packageId);
   const runPinnedQ = useRunPinned(isRunView ? packageId : undefined, runId);
-  const agentMemoriesQ = useAgentMemories(isRunView ? undefined : packageId, "all");
+  const agentMemoriesQ = useAgentMemories(isRunView ? undefined : packageId);
   const runMemoriesQ = useRunMemories(isRunView ? packageId : undefined, runId);
 
   const pinnedQ = isRunView ? runPinnedQ : agentPinnedQ;
@@ -86,7 +85,7 @@ export function MemoryPanel({ packageId, runId, initialTypes }: MemoryPanelProps
   // 500 on the endpoint must not draw "no memory yet". Failure and loading are
   // answered per section by `ItemList`; this return says only that both tiers
   // are empty.
-  if (isRunView && !isLoading && !isError && pinnedCount + memoriesCount === 0) {
+  if (!isLoading && !isError && pinnedCount + memoriesCount === 0) {
     return (
       <EmptyState
         message={isRunView ? t("run.memoryEmpty") : t("detail.memoryEmptyAll")}
@@ -139,12 +138,7 @@ interface MemoryCollectionItem {
 }
 
 const EMPTY_MEMORY_TYPES: Array<"pinned" | "archive"> = [];
-
-function memoryText(content: unknown): string {
-  return typeof content === "string"
-    ? content
-    : (JSON.stringify(content, null, 2) ?? String(content));
-}
+const CHECKPOINT_KEY = "checkpoint";
 
 function AgentMemoryCollection({
   pinned,
@@ -223,14 +217,7 @@ function AgentMemoryCollection({
   // The entry read in the modal: `?memory=pinned:12`. One the list no longer holds shows nothing.
   const selected = allItems.find((item) => `${item.kind}:${item.id}` === memoryParam.value) ?? null;
 
-  const filteredItems = allItems.filter((item) => {
-    const scope = item.actor_type === "shared" ? "shared" : "mine";
-    const scopeMatches = scopes.length === 0 || scopes.includes(scope);
-    const typeMatches = types.length === 0 || types.includes(item.kind);
-    return (
-      scopeMatches && typeMatches && matchesSearch(query, [item.key, memoryText(item.content)])
-    );
-  });
+  const filteredItems = filterMemoryItems(allItems, { query, scopes, types });
 
   const filters: FilterSpec[] = [
     {
@@ -258,25 +245,25 @@ function AgentMemoryCollection({
         ]
       : []),
   ];
-  const tableLoading = pinnedLoading || memoriesLoading;
-  const tableError = pinnedError || memoriesError;
+  const canDelete = Boolean(onDeletePinned || onDeleteMemory);
   const activeTable = (
     <MemoryTableSection
       title={t("agents:detail.tabMemory")}
-      count={tableLoading || tableError ? undefined : filteredItems.length}
       items={filteredItems}
-      isLoading={tableLoading}
-      isError={tableError}
+      isLoading={pinnedLoading || memoriesLoading}
+      isError={pinnedError || memoriesError}
       empty={t("agents:detail.memoryEmptyAll")}
       onOpen={(item) => memoryParam.open(`${item.kind}:${item.id}`)}
       onCopy={(item) => void copy(memoryText(item.content))}
-      onDelete={(item) => {
-        if (item.kind === "pinned") onDeletePinned?.(item.id);
-        else onDeleteMemory?.(item.id);
-      }}
-      canDelete={Boolean(onDeletePinned || onDeleteMemory)}
+      onDelete={
+        canDelete
+          ? (item) => {
+              if (item.kind === "pinned") onDeletePinned?.(item.id);
+              else onDeleteMemory?.(item.id);
+            }
+          : undefined
+      }
       isDeleting={isDeleting}
-      hideHeading
     />
   );
 
@@ -295,6 +282,9 @@ function AgentMemoryCollection({
           setScopes([]);
         }}
       />
+      {!embedded && (
+        <p className="text-muted-foreground mb-2 text-xs">{t("agents:detail.memoryHelp")}</p>
+      )}
       <div>{activeTable}</div>
     </section>
   );
@@ -340,7 +330,6 @@ function AgentMemoryCollection({
 
 function MemoryTableSection({
   title,
-  count,
   items,
   isLoading,
   isError,
@@ -348,12 +337,10 @@ function MemoryTableSection({
   onOpen,
   onCopy,
   onDelete,
-  canDelete = true,
   isDeleting,
-  hideHeading = false,
 }: {
+  /** Accessible name of the table. */
   title: string;
-  count: number | undefined;
   items: MemoryCollectionItem[];
   isLoading: boolean;
   isError: boolean;
@@ -361,24 +348,11 @@ function MemoryTableSection({
   onOpen: (item: MemoryCollectionItem) => void;
   onCopy: (item: MemoryCollectionItem) => void;
   onDelete?: (item: MemoryCollectionItem) => void;
-  canDelete?: boolean;
   isDeleting: boolean;
-  hideHeading?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   return (
     <section>
-      {!hideHeading && (
-        <div className="border-border flex items-center gap-2 border-b pb-2">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          {count !== undefined && (
-            <span className="bg-muted text-muted-foreground inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-medium">
-              {count}
-            </span>
-          )}
-        </div>
-      )}
-
       {isLoading ? (
         <LoadingState />
       ) : isError ? (
@@ -406,7 +380,7 @@ function MemoryTableSection({
                 item={item}
                 onOpen={() => onOpen(item)}
                 onCopy={() => onCopy(item)}
-                onDelete={canDelete && onDelete ? () => onDelete(item) : undefined}
+                onDelete={onDelete ? () => onDelete(item) : undefined}
                 isDeleting={isDeleting}
               />
             ))}
@@ -459,6 +433,11 @@ function MemoryCollectionRow({
       </span>
       <span role="cell" className="min-w-0">
         {item.key && <code className="mr-2 text-xs font-semibold">{item.key}</code>}
+        {item.key === CHECKPOINT_KEY && (
+          <span className="text-muted-foreground mr-2 text-[10px] tracking-wide uppercase">
+            {t("agents:detail.pinnedCheckpointHint")}
+          </span>
+        )}
         <span className="text-muted-foreground block truncate text-sm" title={content}>
           {content}
         </span>

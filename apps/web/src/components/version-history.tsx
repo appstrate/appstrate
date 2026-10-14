@@ -66,7 +66,7 @@ export function VersionHistory({
         filters={[
           {
             id: "status",
-            label: t("runs.filterStatus"),
+            label: t("version.status"),
             values: states,
             options: [
               { value: "published", label: t("version.published") },
@@ -104,7 +104,7 @@ export function VersionHistory({
         columns={[
           {
             id: "version",
-            header: t("run.infoVersion"),
+            header: t("version.version"),
             width: "minmax(120px,1fr)",
             cell: (version) =>
               type === "integration" ? (
@@ -126,7 +126,7 @@ export function VersionHistory({
           },
           {
             id: "status",
-            header: t("runs.filterStatus"),
+            header: t("version.status"),
             width: "minmax(160px,1fr)",
             cell: (version) => (
               <Badge variant={version.yanked ? "warning" : "secondary"}>

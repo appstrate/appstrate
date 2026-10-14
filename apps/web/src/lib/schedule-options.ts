@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** The schedule's Paramètres tab: its sections, their URLs, the inherit sentinel. */
+/**
+ * The schedule's Paramètres tab: its sections, their URLs, the version choices; and when a
+ * schedule fires next, as every list says it.
+ */
 
+import type { TFunction } from "i18next";
+import type { ScheduleWireDto } from "@appstrate/shared-types";
 import {
   BrainCircuit,
   CalendarClock,
@@ -11,11 +16,36 @@ import {
   UserRound,
 } from "lucide-react";
 import { scheduleDetailPath } from "./package-paths";
+import { sectionHref } from "./settings-section-href";
 
 // Sentinel for the schedule's "inherit" version choice — nothing stored; the
 // agent's version resolution applies at fire time, which means the latest
 // published version.
 export const VERSION_INHERIT = "__inherit__";
+
+/**
+ * The choices a schedule's version select leads with: inherit, then the working copy when
+ * `draftOffered` — it is its writers' to run, anyone else would be refused at every fire
+ * (403 `draft_not_writable`).
+ */
+export function scheduleVersionOptions(t: TFunction, { draftOffered }: { draftOffered: boolean }) {
+  return [
+    { value: VERSION_INHERIT, label: t("run.overrides.versionPublished", { ns: "agents" }) },
+    ...(draftOffered
+      ? [{ value: "draft", label: t("run.overrides.versionDraft", { ns: "agents" }) }]
+      : []),
+  ];
+}
+
+/**
+ * When the schedule fires next; `null` when it does not. A disabled schedule keeps a
+ * `next_run_at` in the database: saying it would promise a run that is not coming.
+ */
+export function scheduleNextRunAt(
+  schedule: Pick<ScheduleWireDto, "enabled" | "next_run_at">,
+): string | null {
+  return schedule.enabled ? (schedule.next_run_at ?? null) : null;
+}
 
 export const SCHEDULE_SETTINGS_SECTIONS = [
   {
@@ -60,5 +90,5 @@ export type ScheduleSettingsSection = (typeof SCHEDULE_SETTINGS_SECTIONS)[number
 
 /** The URL of one section of a schedule's Paramètres tab. */
 export function scheduleSettingsHref(scheduleId: string, section: ScheduleSettingsSection) {
-  return `${scheduleDetailPath(scheduleId)}?scheduleSettings=${section}#settings`;
+  return sectionHref(scheduleDetailPath(scheduleId), "settings", "scheduleSettings", section);
 }

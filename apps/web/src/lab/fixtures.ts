@@ -22,6 +22,7 @@ import {
  * shape the backend stopped returning.
  */
 import type { paths, components } from "../api/schema";
+import { readIntegrationSource } from "../lib/package-manifest";
 import {
   resolveIntegrationToolSurface,
   type IntegrationManifest,
@@ -4519,31 +4520,41 @@ export const integrationAuthLabFiles = mcpServerFileIndex(integrationAuthLabDeta
 export const integrationPackageList: Json200<"/api/packages/integrations", "get"> = {
   object: "list",
   hasMore: false,
-  data: integrations.data.map((integration) => ({
-    id: integration.id,
-    orgId: integration.orgId,
-    name:
-      typeof integration.manifest?.display_name === "string"
-        ? integration.manifest.display_name
-        : integration.id,
-    description:
-      typeof integration.manifest?.description === "string" ? integration.manifest.description : "",
-    source: integration.source ?? "local",
-    version:
-      typeof integration.manifest?.version === "string" ? integration.manifest.version : "1.0.0",
-    created_by: integration.source === "system" ? null : USER_ID,
-    used_by_agents: 1,
-    auto_installed: false,
-    home_space_id: "app_lab_default",
-    home_writable: true,
-    home_deletable: true,
-    home_shareable: true,
-    icon: null,
-    keywords: [],
-    forked_from: null,
-    createdAt: ago(200000),
-    updatedAt: ago(4000),
-  })),
+  data: integrations.data.map((integration) => {
+    const source = readIntegrationSource(integration.manifest?.source);
+    return {
+      id: integration.id,
+      orgId: integration.orgId,
+      name:
+        typeof integration.manifest?.display_name === "string"
+          ? integration.manifest.display_name
+          : integration.id,
+      description:
+        typeof integration.manifest?.description === "string"
+          ? integration.manifest.description
+          : "",
+      source: integration.source ?? "local",
+      version:
+        typeof integration.manifest?.version === "string" ? integration.manifest.version : "1.0.0",
+      created_by: integration.source === "system" ? null : USER_ID,
+      used_by_agents: 1,
+      auto_installed: false,
+      home_space_id: "app_lab_default",
+      home_writable: true,
+      home_deletable: true,
+      home_shareable: true,
+      icon: null,
+      keywords: [],
+      forked_from: null,
+      source_kind: source?.kind ?? "none",
+      server:
+        source?.kind === "local"
+          ? { name: source.serverName, version: source.serverVersion }
+          : null,
+      createdAt: ago(200000),
+      updatedAt: ago(4000),
+    };
+  }),
 };
 
 export function integrationVersionHistory(

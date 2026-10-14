@@ -5,10 +5,15 @@
  *
  * The run readiness gate remains authoritative for blocking bundle, dependency,
  * integration and configuration checks. This service enriches those errors
- * with stable routing metadata so Overview, the header and the future rich map
- * can consume the same result without each rebuilding readiness rules.
+ * with their correction destination and the map node they point at, so
+ * Overview, the header and the agent map consume the same result without each
+ * rebuilding readiness rules.
  */
 
+import {
+  CONNECTION_RESOLUTION_ERROR_REMEDY,
+  type ConnectionResolutionErrorCode,
+} from "@appstrate/core/integration";
 import type { LoadedPackage } from "../types/index.ts";
 import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -75,21 +80,19 @@ export interface AgentDiagnosticsResult {
   diagnostics: AgentDiagnostic[];
 }
 
-const CONNECTION_CODES = new Set([
-  "not_connected",
-  "needs_reconnection",
-  "pinned_connection_unavailable",
-  "override_connection_unavailable",
-  "must_choose_connection",
-  "insufficient_scopes",
-  "auth_key_mismatch",
-]);
+/** A resolver code cleared on the connections page rather than in the agent's bundle. */
+function isConnectionRemedied(code: string): boolean {
+  return (
+    Object.hasOwn(CONNECTION_RESOLUTION_ERROR_REMEDY, code) &&
+    CONNECTION_RESOLUTION_ERROR_REMEDY[code as ConnectionResolutionErrorCode] === "connection"
+  );
+}
 
-function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severity"> {
+/** Where a readiness error is corrected. */
+export function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severity"> {
   const configKey = error.field.match(/^config\.(.+)$/)?.[1] ?? null;
   const skillId = error.field.match(/^dependencies\.skills\.(.+)$/)?.[1] ?? null;
   const integrationId = error.field.match(/^integrations\.(.+)$/)?.[1] ?? null;
-  const connectionIssue = CONNECTION_CODES.has(error.code);
 
   if (error.field === "prompt") {
     return {
@@ -112,8 +115,7 @@ function routeError(error: ValidationFieldError): Omit<AgentDiagnostic, "severit
     };
   }
   if (integrationId) {
-    const section =
-      connectionIssue || error.code === "integration_not_active" ? "connections" : "integrations";
+    const section = isConnectionRemedied(error.code) ? "connections" : "integrations";
     return {
       code: error.code,
       title: error.title ?? "Integration unavailable",

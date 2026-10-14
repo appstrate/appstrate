@@ -2,10 +2,8 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { PlayCircle } from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
-import { EmptyState } from "./page-states";
 import { runDetailPath } from "../lib/package-paths";
 
 export function RunsTable({
@@ -29,8 +27,8 @@ export function RunsTable({
   isError?: boolean;
   /** Says WHY it failed. `DataTable` draws a default when no caller does. */
   error?: ReactNode;
-  /** Replaces the default "no runs" state, for a surface that can say more. */
-  empty?: ReactNode;
+  /** What an empty list says; `RunList` resolves the default. */
+  empty: ReactNode;
   /** Pinned above the first row (e.g. a scheduled next run). */
   banner?: ReactNode;
   /** Level-one collections keep every reader-selected column reachable. */
@@ -52,7 +50,7 @@ export function RunsTable({
       // fold one into the other again.
       isError={isError}
       error={error}
-      empty={empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />}
+      empty={empty}
       banner={banner}
       columnMode={columnMode}
       surface={surface}

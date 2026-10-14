@@ -6,7 +6,8 @@
  * the chosen preset id; the panel forwards it per turn via the `X-Model-Id`
  * header. The list itself is the dashboard's: `ModelPickerList` from
  * `@appstrate/ui`, models grouped by who pays, the unusable ones greyed with
- * their reason.
+ * their reason. Only a dead model is disabled: one nothing pays for yet stays
+ * pickable, the server answering its turn with the "add your key" path.
  */
 
 import { useMemo, useState } from "react";
@@ -21,6 +22,7 @@ import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-la
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
+import { isModelLive } from "../model-liveness.ts";
 import { useChatHost } from "./runtime-context.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -97,6 +99,7 @@ export function ModelSelect({
               groups={groups}
               value={selectedId}
               onSelect={(id) => id !== null && onSelect(id)}
+              selectable={isModelLive}
               // `settings:` — the picker's labels live in the settings bundle (a boot
               // namespace, so already loaded); the host binds `t` to `chat`.
               labels={buildModelPickerLabels((key, options) => t(`settings:${key}`, options))}

@@ -141,14 +141,8 @@ function useFormats(timezone: string) {
     new Intl.DateTimeFormat(lang, { weekday: width, timeZone: "UTC" }).format(
       Date.UTC(2024, 0, 7 + day),
     );
-  // `Intl.ListFormat` is ES2021; the app's TS lib stops at ES2020.
-  const ListFormat = (
-    Intl as unknown as {
-      ListFormat: new (lang: string, opts: object) => { format: (items: string[]) => string };
-    }
-  ).ListFormat;
   const list = (items: string[]) =>
-    new ListFormat(lang, { style: "long", type: "conjunction" }).format(items);
+    new Intl.ListFormat(lang, { style: "long", type: "conjunction" }).format(items);
   const fire = (date: Date) =>
     new Intl.DateTimeFormat(lang, {
       weekday: "short",

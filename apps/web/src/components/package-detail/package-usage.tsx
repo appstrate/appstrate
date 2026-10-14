@@ -5,9 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Layers } from "lucide-react";
 import { useAgents } from "../../hooks/use-packages";
 import type { CardItem } from "../../pages/package-list";
-import { packageDetailPath } from "../../lib/package-paths";
 import { matchesSearch } from "../../lib/strings";
-import { DataTable } from "../data-table";
+import { PackagesTable } from "../packages-table";
 import { usePackageColumns } from "../package-columns";
 import { ListToolbar } from "../list-toolbar";
 import { EmptyState } from "../page-states";
@@ -37,18 +36,13 @@ export function PackageUsage({ agentIds }: { agentIds: string[] }) {
         filters={[]}
         onReset={() => setSearch("")}
       />
-      <DataTable
-        tableId="package-usage"
+      <PackagesTable
         label={t("packages.usedBy")}
         columns={columns}
-        rows={items.filter((item) =>
+        items={items.filter((item) =>
           matchesSearch(search, [item.displayName, item.id, item.description]),
         )}
-        rowKey={(item) => item.id}
-        rowHref={(item) => packageDetailPath("agent", item.id)}
-        rowLabel={(item) => item.displayName}
         surface="integrated"
-        columnMode="scroll"
         isLoading={isLoading}
         isError={Boolean(error)}
         empty={<EmptyState message={t("packages.noAgents")} icon={Layers} compact />}

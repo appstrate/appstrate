@@ -16,6 +16,7 @@ import { usePackageDetail } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
 import { isNeverPublishedForReader } from "../hooks/use-agent-readiness";
 import type { AgentDetail } from "@appstrate/shared-types";
+import { agentHasInput, runInputOpens } from "../lib/run-input";
 
 interface RunAgentButtonProps {
   packageId: string;
@@ -62,18 +63,19 @@ export function RunAgentButton({
   const launcher = useRunLauncher(packageId);
   // The input form's address: `?run=<agent>`, so the agent's own button answers it.
   const runParam = useModalParam("run");
-  const inputOpen = inputDialog && runParam.value === packageId;
+  const inputRequested = inputDialog && runParam.value === packageId;
 
   // Skip the fetch when the parent already provided the detail (detail page
-  // case). Otherwise the query stays DISABLED — list pages render N of these
-  // buttons and eagerly fetching full agent detail per card caused an N+1
-  // request burst on mount. The detail is fetched on demand via `refetch()`
-  // in `handleClick` instead (and cached by React Query for the next click).
+  // case). Otherwise it runs only for the agent `?run=` names: list pages
+  // render N of these buttons, and fetching every detail on mount is an N+1.
+  // A click fetches on demand via `refetch()` in `handleClick`.
   const {
     data: fetchedDetail,
     isFetching,
     refetch,
-  } = usePackageDetail("agent", providedDetail ? undefined : packageId, { enabled: inputOpen });
+  } = usePackageDetail("agent", providedDetail ? undefined : packageId, {
+    enabled: inputRequested,
+  });
 
   const detail: AgentDetail | undefined = providedDetail ?? fetchedDetail;
   // Draft for whoever authors the package, no selector at all for everyone
@@ -89,10 +91,7 @@ export function RunAgentButton({
       toast.error(t("detail.titleNeverPublished"));
       return;
     }
-    const agentHasInput =
-      !!agentDetail.input?.schema?.properties &&
-      Object.keys(agentDetail.input.schema.properties).length > 0;
-    if (!agentHasInput) {
+    if (!agentHasInput(agentDetail)) {
       launcher.launch({ version: version ?? defaultRunVersion(agentDetail.home_writable) });
       return;
     }
@@ -120,6 +119,12 @@ export function RunAgentButton({
   };
 
   const neverPublished = isNeverPublishedForReader(detail);
+  const inputOpen = runInputOpens({
+    requested: inputRequested,
+    disabled: !!disabled,
+    canRun: can("agents:run"),
+    detail,
+  });
   const isPending = isFetching || launcher.isPending;
   const isDisabled = disabled || isPending || neverPublished;
   const blockedTitle =
@@ -184,7 +189,9 @@ export function RunAgentButton({
           open={inputOpen}
           onClose={runParam.close}
           agent={detail}
-          onSubmit={(input) => launcher.launch({ input, version: runVersion }, { replace: true })}
+          onSubmit={(input) =>
+            launcher.launch({ input, version: runVersion }, { leave: runParam.leave })
+          }
           isPending={launcher.isPending}
         />
       )}

@@ -633,6 +633,48 @@ describe("Runs API", () => {
         timeout: 1,
       });
     });
+
+    it("counts only the runs of the space it is read in", async () => {
+      const packageId = "@runorg/activity-spaces";
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, packageId);
+      await seedPackageShare(spaceB.id, packageId);
+      await activatePackage({ orgId: ctx.orgId, spaceId: spaceB.id }, packageId);
+
+      const startedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      await seedRun({
+        packageId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        status: "success",
+        startedAt,
+      });
+      for (const status of ["failed", "failed"] as const) {
+        await seedRun({
+          packageId,
+          orgId: ctx.orgId,
+          spaceId: spaceB.id,
+          userId: ctx.user.id,
+          status,
+          startedAt,
+        });
+      }
+
+      const activity = async (headers: Record<string, string>) => {
+        const res = await app.request(`/api/agents/${packageId}/run-activity`, { headers });
+        expect(res.status, await res.clone().text()).toBe(200);
+        return res.json();
+      };
+
+      expect(await activity(authHeaders(ctx))).toMatchObject({ total: 1, success: 1, failed: 0 });
+      expect(await activity({ ...authHeaders(ctx), "X-Space-Id": spaceB.id })).toMatchObject({
+        total: 2,
+        success: 0,
+        failed: 2,
+      });
+    });
   });
 
   // ─── GET /api/runs/:id ─────────────────────────────────────

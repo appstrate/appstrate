@@ -11,7 +11,8 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import type { ModelPickRow } from "../../lib/model-source.ts";
 import { refusalMessage } from "../../lib/mutation-error.ts";
 import { orgModelFixture } from "../../test/org-model-fixture.ts";
-import { applyModelChoice } from "../use-apply-model-choice.ts";
+import { knownModels } from "../../lib/model-choice.ts";
+import { applyModelChoice, attemptTarget } from "../use-apply-model-choice.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -141,5 +142,28 @@ describe("applyModelChoice", () => {
     });
     await expect(choice).rejects.toBeInstanceOf(ApiError);
     expect(calls).toEqual(["key"]);
+  });
+
+  it("retries a refused model on the key the first attempt minted, without minting a second", async () => {
+    const draft = { label: "Anthropic", providerId: "anthropic", apiKey: "sk-test" };
+    const base = { credentialId: null, providerId: "anthropic", newCredential: draft };
+    const first = recorder({ mini: new Error("network") });
+    const outcome = await applyModelChoice(first.writes, {
+      plan: { add: [row("opus"), row("mini")], grant: [], withdraw: [], defaultModelId: null },
+      existing: [],
+      ...attemptTarget(null, base),
+    });
+    expect(first.calls).toEqual(["key", "add opus", "add mini"]);
+
+    // The dialog keeps the key and the models created, and asks only for the rest.
+    const existing = knownModels([], outcome.createdModels);
+    const retry = recorder();
+    await applyModelChoice(retry.writes, {
+      plan: { add: [row("mini")], grant: [], withdraw: [], defaultModelId: "opus" },
+      existing,
+      ...attemptTarget(outcome.credentialId, base),
+    });
+    expect(retry.calls).toEqual(["add mini", "default mdl_opus"]);
+    expect(retry.bodies).toEqual([{ modelId: "mini", credentialId: "cred_new" }]);
   });
 });

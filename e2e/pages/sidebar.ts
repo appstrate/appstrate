@@ -60,11 +60,6 @@ export class Sidebar {
     );
   }
 
-  /** Open the switcher and click a workspace of the current org by id. */
-  async switchSpaceById(spaceId: string) {
-    await this.clickSpaceItem(this.page.getByTestId(`space-item-${spaceId}`));
-  }
-
   private async clickSpaceItem(item: Locator) {
     await this.openSwitcher();
     await expect(item).toBeVisible();

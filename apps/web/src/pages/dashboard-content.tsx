@@ -29,6 +29,7 @@ import { PageHeader } from "../components/page-header";
 import { RunDuration } from "../components/run-duration";
 import { RunAgentButton } from "../components/run-agent-button";
 import { ScheduleStatusBadge } from "../components/schedule-status-badge";
+import { scheduleNextRunAt } from "../lib/schedule-options";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
@@ -47,6 +48,7 @@ export interface DashboardData {
   agents: AgentListItem[];
   runs: EnrichedRun[];
   runTotal: number;
+  /** Every schedule: the active ones are counted, the soonest listed. */
   schedules: EnrichedSchedule[];
   agentName: (run: EnrichedRun) => string;
   /** Unread run notifications per agent id. */
@@ -499,7 +501,7 @@ function UpcomingSchedules({
 }) {
   return (
     <div className="border-border bg-card divide-border divide-y rounded-xl border shadow-sm">
-      {schedules.slice(0, 5).map((schedule) => (
+      {schedules.map((schedule) => (
         <DashboardScheduleRow
           key={schedule.id}
           schedule={schedule}
@@ -519,12 +521,21 @@ function dashboardMetrics(
   const terminal = data.runs.filter((run) => !["running", "pending"].includes(run.status));
   const successful = terminal.filter((run) => run.status === "success").length;
   const successRate = terminal.length ? Math.round((successful / terminal.length) * 100) : 0;
-  const activeSchedules = data.schedules.filter((schedule) => schedule.enabled !== false);
+  const activeSchedules = data.schedules.filter((schedule) => schedule.enabled);
+  // The five that fire soonest; an active schedule with no next run is counted, not listed.
+  const upcomingSchedules = data.schedules
+    .flatMap((schedule) => {
+      const nextRunAt = scheduleNextRunAt(schedule);
+      return nextRunAt ? [{ schedule, at: new Date(nextRunAt).getTime() }] : [];
+    })
+    .sort((a, b) => a.at - b.at)
+    .slice(0, 5)
+    .map(({ schedule }) => schedule);
 
   return {
     running,
     successRate,
-    activeSchedules,
+    upcomingSchedules,
     // A card whose read is closed to the caller is dropped, not shown as 0.
     cards: [
       sections.recentRuns && {
@@ -547,9 +558,9 @@ function dashboardMetrics(
       sections.schedules && {
         label: t("dashboard.metric.schedules"),
         value: activeSchedules.length,
-        detail: activeSchedules[0]?.next_run_at
+        detail: upcomingSchedules[0]?.next_run_at
           ? t("dashboard.metric.schedulesNext", {
-              date: formatDateField(activeSchedules[0].next_run_at),
+              date: formatDateField(upcomingSchedules[0].next_run_at),
             })
           : t("dashboard.metric.schedulesNone"),
       },
@@ -570,7 +581,7 @@ export function DashboardContent(data: DashboardData) {
   const shown = {
     recentAgents: sections.recentAgents && data.agents.length > 0,
     recentRuns: sections.recentRuns && data.runs.length > 0,
-    schedules: sections.schedules && metrics.activeSchedules.length > 0,
+    schedules: sections.schedules && metrics.upcomingSchedules.length > 0,
   };
 
   if (!shown.recentAgents && !shown.recentRuns && !shown.schedules) {
@@ -637,7 +648,7 @@ export function DashboardContent(data: DashboardData) {
               href="/schedules"
               action={t("dashboard.schedules")}
             />
-            <UpcomingSchedules schedules={metrics.activeSchedules} agentById={agentById} />
+            <UpcomingSchedules schedules={metrics.upcomingSchedules} agentById={agentById} />
           </section>
         )}
       </div>

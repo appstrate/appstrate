@@ -2122,7 +2122,7 @@ export const packagesPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
+                    items: { $ref: "#/components/schemas/IntegrationIndexItem" },
                   },
                   hasMore: { type: "boolean" },
                 },

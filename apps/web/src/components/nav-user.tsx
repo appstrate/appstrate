@@ -7,6 +7,7 @@ import { BookOpen, Check, FileText, LifeBuoy, LogOut, Palette, Settings } from "
 import { useAuth } from "../hooks/use-auth";
 import { useTheme } from "../stores/theme-store";
 import { themeOptions } from "../lib/theme";
+import { initials } from "../lib/initials";
 import { Avatar, AvatarFallback } from "@appstrate/ui/components/avatar";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -20,15 +21,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
-
-function getInitials(name: string): string {
-  return name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((s) => s[0] ?? "")
-    .join("")
-    .toUpperCase();
-}
 
 interface NavUserProps {
   /**
@@ -55,7 +47,7 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
   if (!user) return null;
 
   const displayName = profile?.displayName || user.email || "";
-  const initials = getInitials(displayName);
+  const userInitials = initials(profile?.displayName, user.email);
 
   return (
     <DropdownMenu>
@@ -68,7 +60,7 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
           >
             <Avatar className="size-7 shrink-0 rounded-full">
               <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-xs font-medium">
-                {initials}
+                {userInitials}
               </AvatarFallback>
             </Avatar>
             <span className="grid min-w-0 flex-1 leading-tight">
@@ -85,7 +77,7 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
           >
             <Avatar className="size-8 rounded-full">
               <AvatarFallback className="bg-spark text-spark-foreground rounded-full text-sm font-medium">
-                {initials}
+                {userInitials}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -101,7 +93,7 @@ export function NavUser({ minimal = false, variant = "avatar" }: NavUserProps) {
           <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
             <Avatar className="size-8 rounded-lg">
               <AvatarFallback className="bg-spark text-spark-foreground rounded-lg text-sm font-medium">
-                {initials}
+                {userInitials}
               </AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">

@@ -22,7 +22,11 @@ import { Spinner } from "./spinner";
 import { ErrorState, LoadingState } from "./page-states";
 import { ModelChoiceList } from "./model-choice";
 import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
-import { useApplyModelChoice, type NewProviderCredential } from "../hooks/use-apply-model-choice";
+import {
+  attemptTarget,
+  useApplyModelChoice,
+  type NewProviderCredential,
+} from "../hooks/use-apply-model-choice";
 import {
   useProvidersRegistry,
   type ModelProviderCredentialInfo,
@@ -87,7 +91,7 @@ function ChoiceDialog({
     hasDefault,
   });
   const { apply, isPending } = useApplyModelChoice();
-  // The key a refused submission already minted: a retry binds to it instead of minting a second.
+  // The key a refused submission already minted (`attemptTarget`).
   const [minted, setMinted] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ ids: string[]; refusal: string | null } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -99,8 +103,7 @@ function ChoiceDialog({
       const outcome = await apply({
         plan: choice.plan,
         existing,
-        target: { credentialId: minted ?? credentialId, providerId: provider.providerId },
-        newCredential: minted ? undefined : newCredential,
+        ...attemptTarget(minted, { credentialId, providerId: provider.providerId, newCredential }),
       });
       if (outcome.credentialId) setMinted(outcome.credentialId);
       setCreated((models) => [...models, ...outcome.createdModels]);

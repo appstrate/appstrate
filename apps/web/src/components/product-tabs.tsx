@@ -10,15 +10,10 @@
  * which a launcher would be the right answer instead.
  *
  * The icons are plain, not coloured tiles: the only coloured mark in the
- * column should be the organization's own, one line up — two competing brands
- * in eight lines of chrome is one too many. Selection is carried by the
- * segmented control itself (white fill, shadow), which is what a tab strip is
- * for. In the icon rail the labels go and the icons stack, which is the only
- * part of this control that survives 48px.
+ * column should be the organization's own, one line up. Selection is carried
+ * by the segmented control itself (white fill, shadow).
  *
- * Docs & API left the set: it is a link out, not a place in the app, and the
- * profile menu already carries it — where people look for documentation by
- * reflex anyway.
+ * Docs & API is not a product: it is a link out, carried by the profile menu.
  */
 
 import type { ReactNode } from "react";
@@ -30,6 +25,7 @@ import { useCanReach } from "@/hooks/use-can-reach";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useChatUnreadCount, useHasChatSessions } from "@appstrate/module-chat/unread";
 import { buildScopingHeaders } from "@/lib/scoping-headers";
+import { isChatTabShown } from "@/lib/chat-tab";
 import { useViewAsHeader } from "@/stores/view-as-store";
 
 interface Product {
@@ -53,15 +49,13 @@ export function ProductTabs() {
   // The chat has no entry in the Studio's navigation: its unread count rides
   // on the tab that switches to it.
   const chatUnread = useChatUnreadCount(buildScopingHeaders, chatReachable);
-  // Conversations are each person's own. A role that may read but not write
-  // the chat (a viewer) only ever rereads what it wrote before: without any,
-  // the tab would lead to a page with nothing to do.
   const hasChatSessions = useHasChatSessions(buildScopingHeaders, chatReachable);
-  // A preview restricts the caller without replacing them, so the sessions it
-  // finds are the previewer's own: the persona is judged on its grants alone,
-  // the way a fresh account of that role would see the product tabs.
-  const chatShown =
-    chatReachable && (can("chat:write") || (!previewing && hasChatSessions === true));
+  const chatShown = isChatTabShown({
+    reachable: chatReachable,
+    canWrite: can("chat:write"),
+    previewing,
+    hasOwnSessions: hasChatSessions,
+  });
 
   // Studio owns every route the chat does not, so it cannot be matched by
   // prefix — it is the active one whenever the chat is not.
@@ -88,8 +82,7 @@ export function ProductTabs() {
   ].filter((p) => p.enabled);
 
   return (
-    <div
-      role="tablist"
+    <nav
       aria-label={t("products.ariaLabel")}
       className="bg-sidebar-accent/40 flex gap-0.5 rounded-lg p-0.5"
     >
@@ -97,11 +90,9 @@ export function ProductTabs() {
         <Link
           key={p.id}
           to={p.to}
-          role="tab"
-          aria-selected={p.active}
+          aria-current={p.active ? "page" : undefined}
           className={cn(
             "flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors",
-            "",
             p.active
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground",
@@ -119,6 +110,6 @@ export function ProductTabs() {
           )}
         </Link>
       ))}
-    </div>
+    </nav>
   );
 }

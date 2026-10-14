@@ -12,6 +12,7 @@ import {
   agentDiagnosticCorrectionTarget,
   agentDiagnosticLocateTarget,
   agentDiagnosticText,
+  agentDiagnosticsTitle,
 } from "../../lib/agent-diagnostics";
 import { OverviewCardAction } from "../overview-card-action";
 import { HealthCard, HealthCardItem, HealthAction } from "../health-card";
@@ -52,11 +53,7 @@ export function AgentHealthSection({
   const visible = result?.diagnostics.slice(0, 3) ?? [];
   const isUnknown = diagnostics.isError || !result;
   const tone = isUnknown ? "unknown" : result.status;
-  const title = isUnknown
-    ? t("detail.diagnostics.unknownTitle")
-    : result.status === "blocking"
-      ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
-      : t("detail.diagnostics.warningTitle", { count: result.warning_count });
+  const title = isUnknown ? t("detail.diagnostics.unknownTitle") : agentDiagnosticsTitle(result, t);
   return (
     <>
       <HealthCard

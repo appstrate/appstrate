@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge } from "./status-badge";
@@ -40,18 +40,17 @@ export function PackageCard({
   const href = packageDetailPath(type, id);
   const navigate = useNavigate();
 
+  // With `onOpen` the package may have no page in this space (the catalogue
+  // lists packages it does not run), so a modified click opens it in place too.
   const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (window.getSelection()?.toString()) return;
-    if (onOpen && !e.metaKey && !e.ctrlKey) {
-      onOpen();
-      return;
-    }
-    if (e.metaKey || e.ctrlKey) {
-      window.open(href, "_blank");
-    } else {
-      navigate(href);
-    }
+    if (onOpen) onOpen();
+    else if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
+    else navigate(href);
   };
+  // The title is the card's keyboard target; the surface's click is the pointer's.
+  const titleClass =
+    "focus-visible:ring-ring truncate rounded-sm outline-none focus-visible:ring-2";
 
   return (
     <div
@@ -65,7 +64,24 @@ export function PackageCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="text-foreground truncate text-sm font-medium">{displayName}</h2>
+              <h2 className="text-foreground truncate text-sm font-medium">
+                {onOpen ? (
+                  <button
+                    type="button"
+                    className={titleClass}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpen();
+                    }}
+                  >
+                    {displayName}
+                  </button>
+                ) : (
+                  <Link to={href} className={titleClass} onClick={(e) => e.stopPropagation()}>
+                    {displayName}
+                  </Link>
+                )}
+              </h2>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               {source === "system" && (

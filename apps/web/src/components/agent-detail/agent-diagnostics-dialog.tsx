@@ -14,16 +14,8 @@ import {
   agentDiagnosticKey,
   agentDiagnosticLocateTarget,
   agentDiagnosticText,
+  agentDiagnosticsTitle,
 } from "../../lib/agent-diagnostics";
-
-function agentDiagnosticsLabel(
-  result: AgentDiagnostics,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  return result.status === "blocking"
-    ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
-    : t("detail.diagnostics.warningTitle", { count: result.warning_count });
-}
 
 export function AgentDiagnosticsIssueBadge({
   result,
@@ -36,7 +28,7 @@ export function AgentDiagnosticsIssueBadge({
   if (result.status === "healthy") return null;
   return (
     <HealthIssueBadge blocking={result.status === "blocking"} className={className}>
-      {agentDiagnosticsLabel(result, t)}
+      {agentDiagnosticsTitle(result, t)}
     </HealthIssueBadge>
   );
 }

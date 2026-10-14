@@ -13,7 +13,7 @@ import type {
   INTEGRATION_MANIFEST_FAILURE_CODES,
   ReadinessErrorCode,
 } from "@appstrate/core/integration";
-import type { AgentDiagnostic } from "../hooks/use-agent-diagnostics";
+import type { AgentDiagnostic, AgentDiagnostics } from "../hooks/use-agent-diagnostics";
 import { primaryDisplayFile } from "./package-files";
 import { agentSettingsHref, type AgentSettingsSection } from "./settings-section-href";
 
@@ -155,6 +155,16 @@ export function agentDiagnosticText(
     inspected_version: version(params.inspected_version),
   };
   return { title: t(keys.title, values), explanation: t(keys.explanation, values) };
+}
+
+/** The count line of a verdict that is not healthy: blockers when any, else warnings. */
+export function agentDiagnosticsTitle(
+  result: Pick<AgentDiagnostics, "status" | "blocking_count" | "warning_count">,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  return result.status === "blocking"
+    ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
+    : t("detail.diagnostics.warningTitle", { count: result.warning_count });
 }
 
 export function agentDiagnosticKey(diagnostic: AgentDiagnostic): string {

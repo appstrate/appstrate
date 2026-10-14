@@ -17,9 +17,10 @@ import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { DataColumn } from "./data-table";
-import { ScheduleStatusBadge } from "./schedule-status-badge";
+import { ScheduleStatusBadge, ScheduleUnreadBadge } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
 import { formatDateField } from "../lib/format-date";
+import { scheduleNextRunAt } from "../lib/schedule-options";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
 export function useScheduleColumns({
@@ -42,11 +43,7 @@ export function useScheduleColumns({
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-medium">{schedule.name || t("schedule.unnamed")}</span>
-            {schedule.unread_count > 0 && (
-              <span className="bg-destructive text-destructive-foreground relative z-10 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-                {schedule.unread_count > 99 ? "99+" : schedule.unread_count}
-              </span>
-            )}
+            <ScheduleUnreadBadge count={schedule.unread_count} className="relative z-10 shrink-0" />
           </span>
           {/* Which agent it fires: the whole point of a schedule, and the card
               only showed it inside the next-run strip, so a disabled schedule
@@ -92,14 +89,14 @@ export function useScheduleColumns({
       header: t("schedules.column.next"),
       width: "minmax(110px,1fr)",
       tier: 3,
-      cell: (schedule) =>
-        // A disabled schedule keeps a `next_run_at` in the database; showing it
-        // would promise a run that is not coming.
-        schedule.enabled && schedule.next_run_at ? (
-          <span className="truncate text-xs">{formatDateField(schedule.next_run_at)}</span>
+      cell: (schedule) => {
+        const nextRunAt = scheduleNextRunAt(schedule);
+        return nextRunAt ? (
+          <span className="truncate text-xs">{formatDateField(nextRunAt)}</span>
         ) : (
           <span className="text-muted-foreground/50">—</span>
-        ),
+        );
+      },
     },
     {
       id: "last",

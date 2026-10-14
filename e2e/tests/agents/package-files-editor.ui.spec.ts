@@ -69,9 +69,8 @@ for (const type of ["skills", "agents", "integrations", "mcp-servers"]) {
     }
     const editor = new PackageEditorPage(page, scope, name, type);
     await editor.goto();
-    await editor.openFilesTab();
     await editor.createFile("scripts/run.py");
-    await editor.typeIntoEditor("scripts/run.py", "print(1)");
+    await editor.editFile("scripts/run.py", "print(1)");
     expect((await listFiles(apiClient, id)).map((entry) => entry.path)).not.toContain(
       "scripts/run.py",
     );
@@ -81,7 +80,9 @@ for (const type of ["skills", "agents", "integrations", "mcp-servers"]) {
         writes.push(request.postDataJSON());
     });
     await editor.saveButton.click();
-    await expect(page).toHaveURL(`/${type}/${scope}/${name}`);
+    // Saved in place: the bar of pending changes leaves, the section stays.
+    await expect(editor.saveButton).toHaveCount(0);
+    await expect(editor.fileRow("scripts/run.py")).toBeVisible();
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({
       manifest: { name: id },
@@ -105,7 +106,6 @@ test("rename, delete and discard leave server files unchanged until Save", async
   await writeElsewhere(apiClient, id, "run.py", "print(1)");
   const editor = new PackageEditorPage(page, scope, name);
   await editor.goto();
-  await editor.openFilesTab();
   await editor.renameFile("run.py", "main.py");
   await editor.deleteFile("main.py");
   expect((await listFiles(apiClient, id)).map((entry) => entry.path)).toContain("run.py");
@@ -115,15 +115,14 @@ test("rename, delete and discard leave server files unchanged until Save", async
   await expect(page).toHaveURL("/agents");
   expect((await listFiles(apiClient, id)).map((entry) => entry.path)).toContain("run.py");
   await editor.goto();
-  await editor.openFilesTab();
   await editor.renameFile("run.py", "main.py");
   await editor.saveButton.click();
-  await expect(page).toHaveURL(`/skills/${id}`);
+  await expect(editor.saveButton).toHaveCount(0);
   expect((await listFiles(apiClient, id)).map((entry) => entry.path)).toContain("main.py");
   expect((await listFiles(apiClient, id)).map((entry) => entry.path)).not.toContain("run.py");
 });
 
-test("an in-flight save locks Monaco and structural actions", async ({
+test("an in-flight save locks the staged changes and structural actions", async ({
   authedPage: page,
   apiClient,
   browserCtx,
@@ -134,9 +133,8 @@ test("an in-flight save locks Monaco and structural actions", async ({
   await createSkill(apiClient, scope, name);
   const editor = new PackageEditorPage(page, scope, name);
   await editor.goto();
-  await editor.openFilesTab();
   await editor.createFile("notes.txt");
-  await editor.typeIntoEditor("notes.txt", "BEFORE");
+  await editor.editFile("notes.txt", "BEFORE");
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => {
     release = resolve;
@@ -154,17 +152,18 @@ test("an in-flight save locks Monaco and structural actions", async ({
   await editor.saveButton.click();
   await captured;
   try {
-    const pane = page.getByRole("region", { name: "notes.txt", includeHidden: true });
-    await expect(pane.locator("textarea")).toHaveAttribute("readonly", "true");
+    // Nothing can be staged under the write in flight: no new file, no second
+    // save, no discard, no edit of a file.
+    await expect(page.getByRole("button", { name: "Nouveau fichier" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Importer", exact: true })).toBeDisabled();
+    await expect(editor.saveButton).toBeDisabled();
     await expect(
-      page.getByRole("button", { name: "Nouveau fichier", includeHidden: true }),
+      editor.fileRow("notes.txt").getByRole("button", { name: "Renommer" }),
     ).toBeDisabled();
-    await page.keyboard.type("AFTER");
-    await expect(pane.locator(".view-lines")).not.toContainText("AFTER");
   } finally {
     release();
   }
-  await expect(page).toHaveURL(`/skills/${id}`);
+  await expect(editor.saveButton).toHaveCount(0);
   expect((await listFiles(apiClient, id)).find((entry) => entry.path === "notes.txt")?.inline).toBe(
     "BEFORE",
   );
@@ -181,9 +180,8 @@ test("a concurrent manifest update refuses repeated saves and preserves the whol
   await createSkill(apiClient, scope, name);
   const editor = new PackageEditorPage(page, scope, name);
   await editor.goto();
-  await editor.openFilesTab();
   await editor.createFile("notes.txt");
-  await editor.typeIntoEditor("notes.txt", "MINE");
+  await editor.editFile("notes.txt", "MINE");
   const read = await apiClient.get(`/packages/skills/${id}`);
   const before = await read.json();
   const changed = await apiClient.patch(
@@ -199,9 +197,9 @@ test("a concurrent manifest update refuses repeated saves and preserves the whol
     await editor.saveButton.click();
     await refused;
     await expect(page.getByText(/Vos changements sont conservés/)).toBeVisible();
-    await expect(
-      page.getByRole("region", { name: "notes.txt" }).locator(".view-lines"),
-    ).toContainText("MINE");
+    // The staged file and its text are still there, previewed from the draft.
+    await editor.fileRow("notes.txt").click();
+    await expect(page.locator("#agent-file-preview")).toContainText("MINE");
   }
   expect((await (await apiClient.get(`/packages/skills/${id}`)).json()).manifest.description).toBe(
     "COLLEAGUE",
@@ -220,9 +218,8 @@ test("Save draft in the navigation guard uses the same save", async ({
   await createSkill(apiClient, scope, name);
   const editor = new PackageEditorPage(page, scope, name);
   await editor.goto();
-  await editor.openFilesTab();
   await editor.createFile("notes.txt");
-  await editor.typeIntoEditor("notes.txt", "Saved via guard");
+  await editor.editFile("notes.txt", "Saved via guard");
   await page.getByRole("link", { name: "Agents", exact: true }).click();
   await editor.dialog.getByRole("button", { name: "Enregistrer le brouillon" }).click();
   await expect(page).toHaveURL("/agents");
@@ -243,7 +240,6 @@ test("required files are protected and new paths reject canonical directory coll
   await writeElsewhere(apiClient, id, "scripts", "file");
   const editor = new PackageEditorPage(page, scope, name);
   await editor.goto();
-  await editor.openFilesTab();
   for (const path of ["SKILL.md", "manifest.json"])
     await expect(editor.fileRow(path).getByRole("button")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -268,13 +264,8 @@ test("import refuses collisions without losing local edits; Replace remains expl
   await writeElsewhere(apiClient, id, "run.py", "SERVER");
   const editor = new PackageEditorPage(page, scope, name);
   await editor.goto();
-  await editor.openFilesTab();
-  await editor.fileRow("run.py").click();
-  const pane = page.getByRole("region", { name: "run.py", exact: true });
-  const lines = pane.locator(".monaco-editor .view-lines");
-  await lines.click();
-  await page.keyboard.press("ControlOrMeta+End");
-  await page.keyboard.type(" LOCAL");
+  await editor.editFile("run.py", "SERVER LOCAL");
+  const preview = page.locator("#agent-file-preview");
 
   for (const filenames of [
     ["fresh.txt", "run.py"],
@@ -293,7 +284,7 @@ test("import refuses collisions without losing local edits; Replace remains expl
       })),
     );
     await expect(page.getByText(/Pour remplacer un fichier/).first()).toBeVisible();
-    await expect(lines).toContainText("SERVER LOCAL");
+    await expect(preview).toContainText("SERVER LOCAL");
     await expect(editor.fileRow("fresh.txt")).toHaveCount(0);
     expect((await listFiles(apiClient, id)).find((entry) => entry.path === "run.py")?.inline).toBe(
       "SERVER",
@@ -301,16 +292,16 @@ test("import refuses collisions without losing local edits; Replace remains expl
   }
 
   const choosing = page.waitForEvent("filechooser");
-  await pane.getByRole("button", { name: "Remplacer", exact: true }).click();
+  await editor.fileAction("run.py", "Remplacer");
   await (
     await choosing
   ).setFiles({ name: "replacement.txt", mimeType: "text/plain", buffer: Buffer.from("REPLACED") });
-  await expect(lines).toContainText("REPLACED");
+  await expect(preview).toContainText("REPLACED");
   expect((await listFiles(apiClient, id)).find((entry) => entry.path === "run.py")?.inline).toBe(
     "SERVER",
   );
   await editor.saveButton.click();
-  await expect(page).toHaveURL(`/skills/${id}`);
+  await expect(editor.saveButton).toHaveCount(0);
   expect((await listFiles(apiClient, id)).find((entry) => entry.path === "run.py")?.inline).toBe(
     "REPLACED",
   );
@@ -332,13 +323,12 @@ for (const nonInline of [false, true]) {
     expect(indexed.inline === undefined).toBe(nonInline);
     const editor = new PackageEditorPage(page, scope, name);
     await editor.goto();
-    await editor.openFilesTab();
-    await editor.fileRow("z-notes.txt").click();
-    const lines = page.getByRole("region", { name: "z-notes.txt" }).locator(".view-lines");
-    await expect(lines).toContainText("OLD");
-    await lines.click();
-    await page.keyboard.press("ControlOrMeta+A");
-    await page.keyboard.type("NEW ".repeat(50));
+    await editor.editFile("z-notes.txt", "NEW ".repeat(50));
+    await editor.saveButton.click();
+    await expect(editor.saveButton).toHaveCount(0);
+    // Reopened in the same SPA session, which is the whole point: the editor
+    // must wait for a fresh index (and, for a file the index does not inline,
+    // fresh content) instead of seeding Monaco from what the save left cached.
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => {
       release = resolve;
@@ -347,26 +337,15 @@ for (const nonInline of [false, true]) {
       await blocked;
       await route.continue().catch(() => {});
     });
-    await editor.saveButton.click();
-    await expect(page).toHaveURL(`/skills/${id}`);
-    // Reopened WITHOUT a page reload, which is the whole point: the explorer
-    // must wait for a fresh index instead of seeding Monaco from the cache the
-    // save left behind. Files are reached through Paramètres › Explorer ›
-    // Fichiers; the detail page's actions menu offers no Modifier.
-    await page.getByRole("tab", { name: "Paramètres", exact: true }).click();
-    // Scoped to the settings rail: the main navigation carries a "Fichiers"
-    // link of its own, for the org's files, and an unscoped match takes it.
-    await page
-      .getByRole("navigation", { name: "Paramètres" })
-      .getByRole("link", { name: "Fichiers", exact: true })
-      .click();
+    await editor.fileAction("z-notes.txt", "Modifier");
+    const lines = page
+      .getByRole("dialog", { name: "Modifier z-notes.txt" })
+      .locator(".monaco-editor .view-lines");
     try {
-      await expect(editor.tree).not.toBeVisible();
+      await expect(lines).not.toContainText("OLD");
     } finally {
       release();
     }
-    await expect(editor.tree).toBeVisible();
-    await editor.fileRow("z-notes.txt").click();
     await expect(lines).toContainText("NEW");
     await expect(lines).not.toContainText("OLD");
   });
@@ -534,9 +513,8 @@ test("a MCP home author edits files while browsing a read-only placement", async
     const page = await context.newPage();
     const editor = new PackageEditorPage(page, scope, name, "mcp-servers");
     await editor.goto();
-    await editor.openFilesTab();
     await editor.createFile("notes.txt");
-    await editor.typeIntoEditor("notes.txt", "Written by the home author");
+    await editor.editFile("notes.txt", "Written by the home author");
     const saved = page.waitForResponse(
       (response) =>
         response.request().method() === "PATCH" &&

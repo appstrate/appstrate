@@ -230,7 +230,7 @@ export function OrgCatalogueModal({
   const all = ofKind.filter((item) => {
     if (active === "integration") {
       const row = integrationById.get(item.id);
-      if (row && integrationExecution(row) !== execution) return false;
+      if (row && integrationExecution(row.manifest.source.kind) !== execution) return false;
     }
     // Découvrir is the WHOLE catalogue, the way a store keeps showing what you
     // already own with a tick beside it. Were it the complement of the other
@@ -339,24 +339,7 @@ export function OrgCatalogueModal({
     ],
     onChange: list.setValues("state"),
   };
-  // Provenance: an attribute of the package, not the question a reader asks
-  // first — which is why it is a filter and not the rail's axis.
-  const origins = list.values("origin", ["org", "system"] as const);
-  const shown = rows.filter(
-    (item) => origins.length === 0 || origins.includes(item.source === "system" ? "system" : "org"),
-  );
-  const originFilter: FilterSpec = {
-    id: "origin",
-    label: t("catalogue.filter.origin"),
-    values: origins,
-    options: [
-      { value: "org", label: t("catalogue.sourceOrg", { name: orgName }) },
-      { value: "system", label: t("catalogue.sourceSystem") },
-    ],
-    onChange: list.setValues("origin"),
-  };
-
-  const offered: CardItem[] = shown.map((item) => {
+  const offered: CardItem[] = rows.map((item) => {
     const row: CardItem = {
       id: item.id,
       displayName: item.name || item.id,
@@ -545,7 +528,7 @@ export function OrgCatalogueModal({
   });
   const protocolColumn = useCatalogueProtocolColumn((item) => {
     const row = integrationById.get(item.id);
-    return row ? integrationProtocol(row) : undefined;
+    return row ? integrationProtocol(row.manifest.source.kind) : undefined;
   });
   const actionsColumn = useCatalogueActionsColumn({
     isPending: activate.isPending || revoke.isPending,
@@ -724,7 +707,7 @@ export function OrgCatalogueModal({
           agents={library?.packages.agent ?? []}
           protocol={
             active === "integration" && integrationById.get(previewed.id)
-              ? integrationProtocol(integrationById.get(previewed.id)!)
+              ? integrationProtocol(integrationById.get(previewed.id)!.manifest.source.kind)
               : undefined
           }
           actionsMenu={
@@ -790,11 +773,14 @@ export function OrgCatalogueModal({
           }
           // The library says where a package is placed, not what runs or uses
           // it, so the activity dimension would filter on nothing. Provenance
-          // is one of this bar's own filters, in the shape every other filter
-          // here has, rather than the collection's built-in one.
+          // is an attribute of the package, a filter rather than the rail's axis.
           activityFilter={false}
-          originFilter={false}
-          extraFilters={discovering ? [originFilter] : [stateFilter, originFilter]}
+          originLabels={{
+            title: t("catalogue.filter.origin"),
+            local: t("catalogue.sourceOrg", { name: orgName }),
+            system: t("catalogue.sourceSystem"),
+          }}
+          extraFilters={discovering ? [] : [stateFilter]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
           // A tick is a table affordance; in cards, each card carries its own
@@ -873,7 +859,8 @@ export function OrgCatalogueModal({
         />
       )}
 
-      {moveHome.value && (
+      {/* A URL names a package; the dialog mounts only when its deed is the reader's. */}
+      {moveHome.value && deedsOf({ id: moveHome.value })?.moveHome && (
         <MoveHomeSpaceDialog
           onClose={moveHome.close}
           packageId={moveHome.value}
@@ -881,7 +868,7 @@ export function OrgCatalogueModal({
           homeSpaceId={placementById.get(moveHome.value)?.homeSpaceId}
         />
       )}
-      {share.value && (
+      {share.value && deedsOf({ id: share.value })?.share && (
         <SharePackageDialog
           onClose={share.close}
           packageId={share.value}

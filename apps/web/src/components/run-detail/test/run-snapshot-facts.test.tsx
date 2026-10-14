@@ -2,8 +2,8 @@
 
 /**
  * The overview's facts about a run: which definition it executed, the schedule
- * that fired it, its id, its context occupancy, and an inline run whose details
- * compaction cleared.
+ * that fired it, its id, its token usage, its context occupancy, and an inline
+ * run whose details compaction cleared.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -57,6 +57,29 @@ describe("RunSnapshotInspector — the run's facts", () => {
   it("says an inline run's details expired once compaction cleared them", () => {
     const html = overview(makeRun({ inline_prompt: null, inline_manifest: null }));
     expect(html).toContain(agentsFr["runs.detailsExpired"]);
+  });
+
+  it("tells a never-measured usage from a measured zero", () => {
+    // `token_usage` is NULL on a run that failed before reaching the model:
+    // that is "never measured", not a confident 0.
+    const never = overview(published({ status: "failed", token_usage: null }));
+    expect(never).not.toContain(agentsFr["run.usageInputTokens"]);
+    expect(never).not.toContain(agentsFr["run.usageOutputTokens"]);
+
+    const measured = overview(
+      published({
+        status: "success",
+        token_usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      }),
+    );
+    for (const label of [agentsFr["run.usageInputTokens"], agentsFr["run.usageOutputTokens"]]) {
+      expect(measured).toMatch(new RegExp(`${label}</dt><dd[^>]*>0</dd>`));
+    }
   });
 
   it("reads the context occupancy off the turns", () => {

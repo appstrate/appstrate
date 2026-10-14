@@ -16,12 +16,11 @@ import { spaceStore } from "../../stores/space-store.ts";
 import { render } from "../../test/render.tsx";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+import { routeVerdict } from "../../lib/route-access.ts";
 
 // The org General page reaches the auth client, which reads `window.location` at import.
-// Module flags are read off this object at render: a case sets the ones it turns on.
-const features: Record<string, boolean> = {};
 installFakeStorage({
-  __APP_CONFIG__: { features, trustedOrigins: [] },
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
   location: { origin: "http://localhost" },
 });
 const { EndUsersPage } = await import("../end-users-page.tsx");
@@ -30,10 +29,7 @@ const { OrgSettingsGeneralPage } = await import("../org-settings/general.tsx");
 const { OrgSettingsSpacesPage } = await import("../org-settings/spaces.tsx");
 const { OrgSettingsModelsPage } = await import("../org-settings/models.tsx");
 const { OrgSettingsProxiesPage } = await import("../org-settings/proxies.tsx");
-const { OrgSettingsBillingPage } = await import("../org-settings/billing.tsx");
-const { OrgSettingsOAuthPage } = await import("../org-settings/oauth.tsx");
 const { WorkspaceSettingsAuthPage } = await import("../workspace-settings/auth.tsx");
-const { WorkspaceSettingsOAuthPage } = await import("../workspace-settings/oauth.tsx");
 const { SettingsPageActionTargetProvider } =
   await import("../../components/settings/settings-page-actions.tsx");
 
@@ -43,7 +39,6 @@ await i18n.changeLanguage("fr");
 const restores: Array<() => void> = [];
 afterEach(() => {
   restores.splice(0).forEach((restore) => restore());
-  for (const flag of Object.keys(features)) delete features[flag];
 });
 
 type Space = components["schemas"]["SpaceObject"];
@@ -180,7 +175,6 @@ describe("the organization's general settings", () => {
 
 describe("a settings page its own guard refuses", () => {
   const DENIED = "Vous n'avez pas accès à cette page.";
-  const UNAVAILABLE = "Cette page n'existe pas ici.";
 
   it("says « no access » in place to whoever lacks the page's read", () => {
     expect(renderAs(<OrgSettingsModelsPage />, { permissions: [] })).toContain(DENIED);
@@ -190,17 +184,20 @@ describe("a settings page its own guard refuses", () => {
     );
   });
 
-  it("says the page does not exist here when its module is off", () => {
-    expect(renderAs(<OrgSettingsBillingPage />, { permissions: [] })).toContain(UNAVAILABLE);
-    expect(renderAs(<OrgSettingsOAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
-    expect(renderAs(<WorkspaceSettingsOAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
-    expect(renderAs(<WorkspaceSettingsAuthPage />, { permissions: [] })).toContain(UNAVAILABLE);
-    features.oidc = true;
-    expect(renderAs(<OrgSettingsOAuthPage />, { permissions: [] })).not.toContain(UNAVAILABLE);
+  // The route gate answers « absent » for these before the page mounts.
+  it("leaves a page whose module is off to its route's feature", () => {
+    const all = () => true;
+    for (const path of [
+      "/org-settings/billing",
+      "/org-settings/oauth",
+      "/workspace-settings/oauth",
+      "/workspace-settings/auth",
+    ] as const) {
+      expect(routeVerdict(path, all, {}, false)).toBe("absent");
+    }
   });
 
-  it("tells a module that is on from a write that is missing", () => {
-    features.oidc = true;
+  it("says « no access » to a caller without the write", () => {
     expect(renderAs(<WorkspaceSettingsAuthPage />, { permissions: [] })).toContain(DENIED);
     expect(
       renderAs(<WorkspaceSettingsAuthPage />, { permissions: ["space-settings:write"] }),

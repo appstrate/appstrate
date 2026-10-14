@@ -1,34 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What the catalogue knows about one package, read off its PLACEMENTS.
- *
- * The placement model has three axes and the catalogue is their one
- * projection: a package is placed in a space by its home or by a share, and
- * that placement is separately switched on. So a row has three possible states
- * in a given space, and they are not degrees of one another:
- *
- * - **active** — placed here and switched on. It runs.
- * - **inactive** — placed here, switched off. Its per-space settings are kept,
- *   and switching it back on costs nothing.
- * - **offered** — placed here by a share and switched on by NOBODY yet. This is
- *   what a pending offer is: not an inbox item to accept, a placement whose
- *   state is `none` (RBAC spec §6.10).
- *
- * A package with no placement at all is not in this vocabulary: it is not
- * placed, which is what the catalogue's second tab is for.
- *
- * A SYSTEM package has a placement in every space by construction and, with no
- * row of its own, the wire already answers `active` there
- * (`placementState` / `isActiveHere`, `services/package-activation.ts`). It is
- * not a fourth state and it is not switch-less: a space switches it OFF by
- * materialising the row that says so — the sticky opt-out — and back on the
- * same way. The screen treats it like any other row, which is what the server
- * does.
- *
- * A pure function with its own test because it is the rule the whole screen
- * reads from, and because the wire says `none` where the interface says
- * "offered" — a word swap nobody should have to make twice.
+ * What the catalogue reads off a package's placements. In a space a row is
+ * `active`, `inactive` (settings kept) or `offered` (placed by a share, switched on
+ * by nobody: the wire's `none`). A system package answers `active` without a row
+ * and is switched off by the sticky opt-out row, like any other.
  */
 
 import type { LibraryPackageItem, LibraryPlacement } from "../hooks/use-library";
@@ -57,12 +33,8 @@ export interface CataloguePlacement {
 }
 
 /**
- * The wire's `none` means "no row in this space", whatever put the package
- * there — and only one of those reasons is an OFFER. A placement made by a
- * share and switched on by nobody asks somebody for a decision; a SYSTEM
- * integration nobody switched on, or a package at home nobody enabled, is
- * simply off. Reading every `none` as an offer made the navigation count one
- * "offer" per Appstrate integration per space — dozens on a real instance.
+ * The wire's `none` means "no row in this space", and only a share's `none` is an
+ * offer: a system integration or a home package nobody enabled is simply off.
  */
 function stateOf(placement: LibraryPlacement): PlacementState {
   if (placement.state === "active") return "active";

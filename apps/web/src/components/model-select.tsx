@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useMemo } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
 import { ModelPicker } from "@appstrate/ui/components/model-picker";
@@ -17,6 +16,7 @@ import type { OrgModelInfo } from "../hooks/use-models";
 import { pickerCredentials } from "../lib/model-picker";
 import { authStore } from "../stores/auth-store";
 import { getModelIcon } from "./icons";
+import { PreferencesModelsLink } from "./preferences-models-link";
 
 /**
  * The one model picker of the dashboard (an agent's Modèle section, a schedule's Exécution, a
@@ -79,11 +79,7 @@ export function ModelSelect({
         const Icon = full && getModelIcon(full, registry ?? []);
         return Icon ? <Icon className="size-3.5 shrink-0" /> : null;
       }}
-      fixLink={(label) => (
-        <Link to="/preferences/models" className="underline underline-offset-2">
-          {label}
-        </Link>
-      )}
+      fixLink={(label) => <PreferencesModelsLink>{label}</PreferencesModelsLink>}
     />
   );
 }

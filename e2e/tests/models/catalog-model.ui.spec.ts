@@ -176,6 +176,9 @@ test.describe("Catalogued model — UI", () => {
     for (const field of CATALOG_DERIVABLE) expect(body[field] ?? null).toBeNull();
 
     await expect(dialog).toBeHidden();
+    await expect(
+      page.getByRole("row").filter({ hasText: PROVIDER }).getByText(NEW_LABEL),
+    ).toBeVisible();
     const renamed = (await listModels(apiClient)).find((m) => m.modelId === MODEL_ID);
     expect(renamed).toMatchObject({ label: NEW_LABEL, contextWindow });
   });

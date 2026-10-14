@@ -353,7 +353,7 @@ its fixtures.
   (`?tab=personal`, the first leaves it out), and both are read by a member with no write right
   (no Actions menu, no click on a row). Each tab places its own deed in the page's Actions menu.
   - **« Clés org »** (`components/providers-table.tsx`, columns in
-    `pages/org-settings/provider-columns.tsx`, rows from `lib/model-providers.ts`): one row per
+    `components/provider-columns.tsx`, rows from `lib/model-providers.ts`): one row per
     organization key (an organization subscription included), then the instance's row, named « Système » (its Fournisseur says « Livrés avec
     l'instance »). Columns: Nom (no badge beside it), Fournisseur, Modèles (the models
     this key makes usable, a short list, the default one marked with a small star, « Aucun »
@@ -367,7 +367,7 @@ its fixtures.
     the default from the instance's row says so in a toast (« « X » est maintenant le modèle par
     défaut. »).
   - **« Clés perso »** (`components/personal-services-table.tsx`, columns in
-    `pages/org-settings/personal-service-columns.tsx`): first the organization's
+    `components/personal-service-columns.tsx`): first the organization's
     `personal_model_credentials` switch (`components/settings/personal-credentials-setting.tsx`,
     the same write as in General), then one row per PROVIDER open to personal keys
     (`personalServiceRows`: a provider with a model left to personal keys, or one somebody

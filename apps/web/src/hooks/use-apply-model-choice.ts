@@ -129,10 +129,26 @@ export async function applyModelChoice(
   };
 }
 
+/**
+ * Where an attempt at a choice writes: once a refused attempt minted the key, a retry binds to it
+ * instead of minting a second one.
+ */
+export function attemptTarget(
+  minted: string | null,
+  base: { credentialId: string | null; providerId: string; newCredential?: NewProviderCredential },
+): { target: ModelChoiceTarget; newCredential?: NewProviderCredential } {
+  return minted
+    ? { target: { credentialId: minted, providerId: base.providerId } }
+    : {
+        target: { credentialId: base.credentialId, providerId: base.providerId },
+        newCredential: base.newCredential,
+      };
+}
+
 export function useApplyModelChoice() {
   const createModel = useCreateModel();
   const updateModel = useUpdateModel();
-  const setDefault = useSetDefaultModel();
+  const setDefault = useSetDefaultModel({ errorHandledByCaller: true });
   const createCredential = useCreateModelProviderCredential({ errorHandledByCaller: true });
   const [isPending, setPending] = useState(false);
 

@@ -37,7 +37,6 @@ import { InputFieldRow } from "./settings/input-field-row";
 import { SaveFeedback } from "./settings/save-feedback";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
-import { ScheduleConnectionRefusals } from "./schedule-connection-refusals";
 import { EmptyState, ErrorState, LoadingState } from "./page-states";
 import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
@@ -57,27 +56,26 @@ import {
 import { authorDefaults, getOrderedKeys } from "@appstrate/core/form";
 import { useSchemaFormLabels } from "../hooks/use-schema-form-labels";
 import { useUploadClient } from "../hooks/use-upload";
-import {
-  refusalForActor,
-  refusedScheduleWrite,
-  scheduleConnectionChoices,
-} from "../lib/connection-choice";
+import { refusedScheduleWrite, scheduleConnectionChoices } from "../lib/connection-choice";
 import { type ConnectionSet, withConnectionOverride } from "../lib/connection-set";
 import {
   type ActorValue,
   type RunOverridesValue,
   type ScheduleOverridesState,
   armedScheduleWrite,
+  dueScheduleMove,
   sameActor,
   savedScheduleOverrides,
   scheduleConnectionPickPayload,
-  scheduleMovePayload,
+  scheduleExecutionPayload,
+  scheduleRefusalAnswerPayload,
 } from "../lib/schedule-payload";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 import {
   SCHEDULE_SETTINGS_SECTIONS as SECTIONS,
   type ScheduleSettingsSection,
   scheduleSettingsHref,
+  scheduleVersionOptions,
   VERSION_INHERIT,
 } from "../lib/schedule-options";
 
@@ -200,58 +198,71 @@ export function ScheduleActionsMenu({
 
 /** What a move changes; an absent key does not move. */
 type Move = { actor?: ActorValue; versionOverride?: string | null };
+type ScheduleMove = ReturnType<typeof useScheduleMove>;
 
 /**
- * A move of the actor or the version, sent once the NEXT state's facts have settled: the
- * connections it writes are those that state fires with ({@link scheduleMovePayload}).
- * `onError` runs on its failure; `pending` from the request to the answer.
+ * A move of the actor or the version, sent once the NEXT state's facts have settled
+ * ({@link dueScheduleMove}). Held by the tab, not by a section: a section left before they
+ * settle would drop it. `held` from the request to the answer.
  */
 function useScheduleMove(schedule: Schedule, update: Save) {
-  const [move, setMove] = useState<{ next: Move; onError: (err: Error) => void } | null>(null);
-  const sent = useRef<typeof move>(null);
-  const actor = move?.next.actor ?? storedActor(schedule);
+  const [move, setMove] = useState<Move | null>(null);
+  const sent = useRef<Move | null>(null);
+  const actor = move?.actor ?? storedActor(schedule);
   const version =
-    move?.next.versionOverride !== undefined
-      ? move.next.versionOverride
-      : schedule.version_override;
+    move?.versionOverride !== undefined ? move.versionOverride : schedule.version_override;
   const runsAsViewer = useIsViewer(actor);
   const facts = useFiredFacts(schedule.packageId, firedVersion(version), runsAsViewer);
   useEffect(() => {
-    if (!move || !facts.ready || sent.current === move) return;
-    sent.current = move;
-    update.mutate(
-      {
-        id: schedule.id,
-        ...scheduleMovePayload({
-          stored: {
-            actor: storedActor(schedule),
-            versionOverride: schedule.version_override ?? null,
-            picks: schedule.connection_overrides ?? null,
-          },
-          next: move.next,
-          runsAsViewer,
-          viewerReadiness: facts.viewerReadiness,
-          declared: facts.integrations?.map((i) => i.id),
-        }),
+    if (!move || sent.current === move) return;
+    const body = dueScheduleMove({
+      ready: facts.ready,
+      stored: {
+        actor: storedActor(schedule),
+        versionOverride: schedule.version_override ?? null,
+        picks: schedule.connection_overrides ?? null,
       },
-      { onError: move.onError, onSettled: () => setMove(null) },
-    );
+      next: move,
+      runsAsViewer,
+      viewerReadiness: facts.viewerReadiness,
+      declared: facts.integrations?.map((i) => i.id),
+    });
+    if (!body) return;
+    sent.current = move;
+    update.mutate({ id: schedule.id, ...body }, { onSettled: () => setMove(null) });
   });
+  return { request: setMove, held: move };
+}
+
+/** The write's open refusal over connections, if its last write was refused over them. */
+function openRefusal(schedule: Schedule, write: Save) {
+  return refusedScheduleWrite(write.error, write.variables, {
+    actor: storedActor(schedule),
+    picks: schedule.connection_overrides ?? null,
+  });
+}
+
+/**
+ * Where the moves stand: the move held or in flight, else the one an open refusal waits on (its
+ * answer re-sends it), else nothing — the stored value. A failed write leaves nothing shown.
+ */
+function shownMove(schedule: Schedule, move: ScheduleMove, moveWrite: Save): Move {
+  if (move.held) return move.held;
+  const sent =
+    moveWrite.isPending || openRefusal(schedule, moveWrite) ? moveWrite.variables : undefined;
+  if (!sent) return {};
   return {
-    request: (next: Move, onError: (err: Error) => void) => setMove({ next, onError }),
-    pending: move !== null,
+    ...(sent.actor ? { actor: sent.actor } : {}),
+    ...("version_override" in sent ? { versionOverride: sent.version_override } : {}),
   };
 }
 
 /**
- * The open refusal of the last write over connections, answered in place: the same write sent
- * again with the picks. The Connexions section answers its own with its pickers.
+ * The open refusal of the last write over connections, answered in place in every section,
+ * Connexions included: the same write sent again with the picks.
  */
 function RefusedWriteAnswer({ schedule, update }: { schedule: Schedule; update: Save }) {
-  const refused = refusedScheduleWrite(update.error, update.variables, {
-    actor: storedActor(schedule),
-    picks: schedule.connection_overrides ?? null,
-  });
+  const refused = openRefusal(schedule, update);
   if (!refused || !update.variables) return null;
   // A new refusal, new picks.
   return (
@@ -301,12 +312,7 @@ function RefusedWriteForm({
       <Button
         type="button"
         disabled={update.isPending}
-        onClick={() =>
-          update.mutate({
-            ...sent,
-            connection_overrides: Object.keys(picks).length > 0 ? picks : null,
-          })
-        }
+        onClick={() => update.mutate(scheduleRefusalAnswerPayload(sent, picks))}
       >
         {t("schedule.settings.saveWithConnections")}
       </Button>
@@ -326,6 +332,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
   // Moves write through their own: a field saved while a move is in flight
   // would take over the move's answer.
   const moveWrite = useScheduleWrite(schedule);
+  const move = useScheduleMove(schedule, moveWrite);
 
   return (
     <AgentDetailSplit
@@ -359,12 +366,8 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
           </RoleLimitNotice>
         ) : (
           <>
-            {active.id !== "connections" && (
-              <>
-                <RefusedWriteAnswer schedule={schedule} update={update} />
-                <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
-              </>
-            )}
+            <RefusedWriteAnswer schedule={schedule} update={update} />
+            <RefusedWriteAnswer schedule={schedule} update={moveWrite} />
             {/* Every control writes: none is offered before its write can name the
                 connections the server re-checks. */}
             {update.ready ? (
@@ -373,6 +376,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
                 schedule={schedule}
                 update={update}
                 moveWrite={moveWrite}
+                move={move}
               />
             ) : (
               <LoadingState />
@@ -388,13 +392,14 @@ interface SectionWrites {
   schedule: Schedule;
   update: Save;
   moveWrite: Save;
+  move: ScheduleMove;
 }
 
 function SectionBody({ section, ...writes }: SectionWrites & { section: ScheduleSettingsSection }) {
-  const { schedule, update, moveWrite } = writes;
+  const { schedule, update } = writes;
   if (section === "general") return <GeneralSection schedule={schedule} update={update} />;
   if (section === "recurrence") return <RecurrenceSection schedule={schedule} update={update} />;
-  if (section === "identity") return <IdentitySection schedule={schedule} moveWrite={moveWrite} />;
+  if (section === "identity") return <IdentitySection {...writes} />;
   return <AgentBoundSection section={section} {...writes} />;
 }
 
@@ -477,33 +482,27 @@ function RecurrenceSection({ schedule, update }: { schedule: Schedule; update: S
 
 // ─── Identité ────────────────────────────────────────────
 
-function IdentitySection({ schedule, moveWrite }: { schedule: Schedule; moveWrite: Save }) {
+function IdentitySection({ schedule, moveWrite, move }: SectionWrites) {
   const { t } = useTranslation(["agents"]);
   const stored = storedActor(schedule);
-  const [actor, setActor] = useState<ActorValue>(stored);
-  const move = useScheduleMove(schedule, moveWrite);
+  const actor = shownMove(schedule, move, moveWrite).actor ?? stored;
 
   return (
     <>
       <SettingRow label={t("schedule.actorTitle")} description={t("schedule.actorHint")}>
         <ActorSelect
           value={actor}
-          disabled={move.pending}
+          disabled={move.held !== null}
           onChange={(next) => {
             const nextActor = next ?? stored;
-            setActor(nextActor);
             // Back on the stored identity nothing moves, and a refusal spoken for another is stale.
             if (sameActor(nextActor, stored)) return moveWrite.reset();
-            move.request({ actor: nextActor }, (err) => {
-              // A connection choice is answered with the picked identity; any other refusal
-              // changed nothing.
-              if (scheduleConnectionChoices(err).length === 0) setActor(stored);
-            });
+            move.request({ actor: nextActor });
           }}
         />
       </SettingRow>
-      {/* A refusal puts the field back and is toasted: no « Erreur d'enregistrement » under a
-          field that shows the stored value. */}
+      {/* A refusal other than over connections puts the field back and is toasted: no « Erreur
+          d'enregistrement » under a field that shows the stored value. */}
       <SaveFeedback pending={moveWrite.isPending} success={moveWrite.isSuccess} error={false} />
     </>
   );
@@ -513,10 +512,9 @@ function IdentitySection({ schedule, moveWrite }: { schedule: Schedule; moveWrit
 
 function AgentBoundSection({
   section,
-  schedule,
-  update,
-  moveWrite,
+  ...writes
 }: SectionWrites & { section: "inputs" | "execution" | "connections" }) {
+  const { schedule, update } = writes;
   const { deps, error, denied } = useScheduleFormDeps(schedule.packageId);
   if (error) return <ErrorState error={error} />;
   if (denied) return <NoAccessState />;
@@ -525,16 +523,8 @@ function AgentBoundSection({
   if (section === "inputs")
     return <InputsSection key={schedule.id} schedule={schedule} deps={deps} update={update} />;
   if (section === "execution")
-    return (
-      <ExecutionSection
-        key={schedule.id}
-        schedule={schedule}
-        deps={deps}
-        update={update}
-        moveWrite={moveWrite}
-      />
-    );
-  return <ConnectionsSection schedule={schedule} update={update} moveWrite={moveWrite} />;
+    return <ExecutionSection key={schedule.id} deps={deps} {...writes} />;
+  return <ConnectionsSection {...writes} />;
 }
 
 // ─── Entrées ─────────────────────────────────────────────
@@ -619,7 +609,13 @@ function InputsSection({
 
 // ─── Exécution ───────────────────────────────────────────
 
-function ExecutionSection({ schedule, deps, update, moveWrite }: SectionWrites & { deps: Deps }) {
+function ExecutionSection({
+  schedule,
+  deps,
+  update,
+  moveWrite,
+  move,
+}: SectionWrites & { deps: Deps }) {
   const { t } = useTranslation(["agents"]);
   const [overrides, setOverrides] = useState<RunOverridesValue>(() => ({
     ...(schedule.model_id_override ? { model_id_override: schedule.model_id_override } : {}),
@@ -632,18 +628,12 @@ function ExecutionSection({ schedule, deps, update, moveWrite }: SectionWrites &
   useSaveAfterPause(
     overrides,
     edited,
-    (next) =>
-      update.mutate({
-        id: schedule.id,
-        model_id_override: next.model_id_override ?? null,
-        generation_config_override: next.generation_config_override ?? null,
-        proxy_id_override: next.proxy_id_override ?? null,
-      }),
+    (next) => update.mutate({ id: schedule.id, ...scheduleExecutionPayload(next) }),
     () => setEdited(false),
   );
   const storedVersion = schedule.version_override ?? VERSION_INHERIT;
-  const [version, setVersion] = useState(storedVersion);
-  const move = useScheduleMove(schedule, moveWrite);
+  const moving = shownMove(schedule, move, moveWrite).versionOverride;
+  const version = moving === undefined ? storedVersion : (moving ?? VERSION_INHERIT);
 
   return (
     <>
@@ -662,23 +652,19 @@ function ExecutionSection({ schedule, deps, update, moveWrite }: SectionWrites &
           type="agent"
           packageId={schedule.packageId}
           value={version}
-          disabled={move.pending}
+          disabled={move.held !== null}
           // Only a real change is sent: naming the working copy is an author's
           // act the route judges (403 `draft_not_writable`), and echoing the
           // stored value back would claim it for whoever touched the select.
           onChange={(next) => {
             if (next === version) return;
-            setVersion(next);
-            move.request({ versionOverride: next === VERSION_INHERIT ? null : next }, (err) => {
-              if (scheduleConnectionChoices(err).length === 0) setVersion(storedVersion);
-            });
+            // Back on the stored version nothing moves, and a refusal spoken for another is stale.
+            if (next === storedVersion) return moveWrite.reset();
+            move.request({ versionOverride: next === VERSION_INHERIT ? null : next });
           }}
-          leadingOptions={[
-            { value: VERSION_INHERIT, label: t("run.overrides.versionPublished") },
-            ...(deps.homeWritable || version === "draft"
-              ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
-              : []),
-          ]}
+          leadingOptions={scheduleVersionOptions(t, {
+            draftOffered: deps.homeWritable || version === "draft",
+          })}
         />
       </SettingRow>
       <RunOverridesPanel
@@ -708,23 +694,17 @@ function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
   const version = firedVersion(schedule.version_override);
   const fired = usePackageDetail("agent", schedule.packageId, { version });
   const integrations = fired.data?.dependencies.integrations;
-  const actorName = useActorName(actor);
   const picks = schedule.connection_overrides ?? {};
-  // A write refused over connections, from any section, unless it moved the actor: those
-  // candidates are another identity's.
-  const stored = { actor, picks: schedule.connection_overrides ?? null };
-  const refused =
-    refusedScheduleWrite(update.error, update.variables, stored) ??
-    refusedScheduleWrite(moveWrite.error, moveWrite.variables, stored);
-  const choices = refusalForActor(refused?.choices, refused, actor);
   // The pickers judge the VIEWER's connections: the agent's table speaks only
   // for a schedule that runs as the viewer. Another actor's connections are
   // named from the candidates the server offers when it refuses a write.
   const actorIsViewer = useIsViewer(actor);
 
-  const pick = (integrationId: string, connectionIds: ConnectionSet) => {
-    // The pick answers the refusal, whichever write it came from.
-    moveWrite.reset();
+  // An open refusal is answered above by re-sending the refused write: a pick sent on its own
+  // would drop that write, and be judged against the stored version's integrations.
+  if (openRefusal(schedule, update) || openRefusal(schedule, moveWrite)) return null;
+
+  const pick = (integrationId: string, connectionIds: ConnectionSet) =>
     update.mutate({
       id: schedule.id,
       ...scheduleConnectionPickPayload({
@@ -734,7 +714,6 @@ function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
         connectionIds,
       }),
     });
-  };
 
   if (fired.error) return <ErrorState error={fired.error} />;
   if (!integrations) return <LoadingState />;
@@ -748,23 +727,18 @@ function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
       />
     );
   }
-  return (
-    <div className="space-y-4">
-      <ScheduleConnectionRefusals choices={choices} actorName={actorName} />
-      {actorIsViewer ? (
-        <AgentIntegrationsBlock
-          entries={integrations}
-          agentPackageId={schedule.packageId}
-          scheduleOverrides={{ value: picks, onChange: pick, version }}
-        />
-      ) : (
-        <ScheduleActorConnectionChoice
-          choices={choices}
-          integrations={integrations}
-          value={picks}
-          onChange={pick}
-        />
-      )}
-    </div>
+  return actorIsViewer ? (
+    <AgentIntegrationsBlock
+      entries={integrations}
+      agentPackageId={schedule.packageId}
+      scheduleOverrides={{ value: picks, onChange: pick, version }}
+    />
+  ) : (
+    <ScheduleActorConnectionChoice
+      choices={[]}
+      integrations={integrations}
+      value={picks}
+      onChange={pick}
+    />
   );
 }
