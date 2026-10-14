@@ -171,13 +171,15 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
             `auth strategy '${strategy.id}': principal '${resolution.principalKind}' and endUser ${resolution.endUser ? "present" : "absent"} disagree`,
           );
         }
+        // `AuthResolution` keeps the two ceilings apart; this holds a strategy the
+        // compiler never saw to the same rule.
         if (
-          resolution.deferOrgResolution &&
-          resolution.orgRole === undefined &&
-          resolution.permissions.length > 0
+          resolution.deferOrgResolution
+            ? resolution.orgRole !== undefined || resolution.permissions.length > 0
+            : resolution.scopeCeiling !== undefined
         ) {
           throw new Error(
-            `auth strategy '${strategy.id}': a deferred resolution declares its ceiling in scopeCeiling, not permissions`,
+            `auth strategy '${strategy.id}': a deferred resolution declares its ceiling in scopeCeiling alone (no orgRole, no permissions), an inline one in permissions alone`,
           );
         }
         c.set("principalKind", resolution.principalKind);

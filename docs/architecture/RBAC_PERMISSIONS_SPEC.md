@@ -304,7 +304,7 @@ effective(space) = ceiling( orgPermissions ∪ spacePermissions(resolveSpaceRole
 
 `orgPermissions = ORG_ROLE_PERMISSIONS[orgRole] ∪ module org-level grants ∪ principalPermissions(user, org)`.
 `principalPermissions` is consulted for a **`user`** principal only (§7): a delegate's ceiling never contains a `mayGrant` string, so the skipped lookup changes nothing but the query.
-`ceiling(S) = scopeCeiling ? S ∩ scopeCeiling : S` — the API-key scope list or the OIDC scope claim; absent for cookie sessions.
+`ceiling(S) = scopeCeiling ? implied(S) ∩ implied(scopeCeiling) : implied(S)` — the API-key scope list or the OIDC scope claim; absent for cookie sessions. `implied` closes a set under the core implications (`withImpliedPermissions`, `@appstrate/core/permissions`: `runs:read-all` ⇒ `runs:read`, `credential-proxy:call` ⇒ `credential-proxy:call-own`).
 
 `null` on a space-scoped route is a **403 `not_a_space_member`** for `open`/`closed` spaces and a **404** for `private` ones (the space does not exist for that caller; the same reasoning that makes an unreachable package id answer the opaque `agent_not_found` instead of naming itself, §6.9).
 
@@ -718,7 +718,7 @@ A new strategy declares its kind or is refused at its first request: the pipelin
 
 `permissions = scopes ∩ the creator's effective set in the key's space`.
 
-- Mint: `validateScopes(scopes, creatorEffective)` where `creatorEffective` is the creator's effective set in the key's space. Non-grantable → 400; beyond the creator → filtered. Unchanged in kind.
+- Mint: `validateScopes(scopes, creatorEffective)` where `creatorEffective` is the creator's effective set in the key's space. Non-grantable → 400; beyond the creator → filtered. Unchanged in kind. A scope a held grant implies is held: a creator whose role names `credential-proxy:call` alone mints a `call-own` key, and `runs:read-all` alone a `runs:read` key.
 - Request: the pipeline pins `spaceId` from the key row; `requireSpaceContext` resolves the **creator's** membership in that space and applies the ceiling `scopes`. A creator who lost the space (removed, demoted to guest without a row) leaves the key with `scopes ∩ orgPermissions` — nearly nothing, and the key 403s in that space. That is the live-ceiling semantics this design chose; no revocation sweep for a SPACE change. Leaving or being removed from the ORG is different: the exit revokes the creator's keys in that org (§3.6 Offboarding), because `validateApiKey` only inner-joins `org_members` and an unrevoked key would come back to life on a re-invite.
 - `principalKind: "delegate"` — a key is its creator's authority, not their privacy: it never reaches a personal space (§3.6, `callerPersonalOwnerId` is `null` for it) and never takes its creator's per-principal grants, whose strings its scope ceiling could not hold anyway.
 - `api-keys:*` is a space-level permission held by preset `admin`. A `builder` cannot mint keys.

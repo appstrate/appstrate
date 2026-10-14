@@ -20,6 +20,11 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- **`MODEL_BINDINGS`** / **`ModelBinding`** and **`MODEL_CREDENTIAL_OWNERS`** /
+  **`ModelCredentialOwner`** (`@appstrate/core/model-payer`): whose credential
+  serves a listed model, `system` | `org` | `user` | `managed` (`MODEL_PAYERS`
+  plus `managed`, an alias), and who owns a stored model credential, `org` |
+  `user`, a subset of `ModelPayer`.
 - `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
   (`./integration`): the `http://` `authorized_uris` entries of the auths
   that inject a credential over HTTP, as write-path issues. `isTrustedHost`
@@ -52,6 +57,12 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   `PROXY_CALL_PERMISSIONS` (`["credential-proxy:call-own",
 "credential-proxy:call"]`) is the tuple every guard of a call outside a run
   accepts, as `RUNS_READ_PERMISSIONS` is for `runs:read`. (#1894, #1963)
+- **`withImpliedPermissions(held)`** (`@appstrate/core/permissions`): `held`
+  plus every permission a held one implies. The implications are
+  `RUNS_READ_PERMISSIONS` and `PROXY_CALL_PERMISSIONS`, the last element of
+  each tuple implying the others (`runs:read-all` ⇒ `runs:read`,
+  `credential-proxy:call` ⇒ `credential-proxy:call-own`); other strings pass
+  through. (#1963)
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus
@@ -82,9 +93,16 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
   that the consent left out, on a successful completion. (#1913)
 
-- **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
-  ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
-  over the org role resolved later. Absent, the caller is uncapped. (#1911)
+- **`AuthResolution`** (`@appstrate/core/module`) is a union of an inline
+  resolution and a deferred one (`deferOrgResolution: true`), each declaring
+  its ceiling in one place. Inline, `permissions` is the ceiling over
+  `orgRole` (or the whole grant without one) and `scopeCeiling` is absent.
+  Deferred, there is no `orgRole`, `permissions` is empty, and
+  **`scopeCeiling`** is the ceiling over the org role resolved later (absent,
+  the caller is uncapped). A strategy mixing the two does not compile, and the
+  pipeline refuses one the compiler never saw with a 500. `deferOrgResolution`
+  is `true`, `false` or absent; a non-literal `boolean` no longer type-checks.
+  (#1911, #1963)
 - **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
   before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
   `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**

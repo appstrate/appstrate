@@ -180,6 +180,32 @@ export const PROXY_CALL_PERMISSIONS = [
 ] as const satisfies readonly CorePermission[];
 
 /**
+ * The implications between core permissions, one tuple each: the LAST element is the wider grant
+ * and implies every element before it.
+ */
+const IMPLICATION_TUPLES: readonly (readonly CorePermission[])[] = [
+  RUNS_READ_PERMISSIONS,
+  PROXY_CALL_PERMISSIONS,
+];
+
+const IMPLIED_BY: ReadonlyMap<string, readonly CorePermission[]> = new Map(
+  IMPLICATION_TUPLES.map((tuple) => [tuple[tuple.length - 1]!, tuple.slice(0, -1)]),
+);
+
+/**
+ * `held` plus every permission a held one implies ({@link IMPLICATION_TUPLES}); other strings
+ * pass through. For a set compared literally against another one — a ceiling, a delegation — so
+ * that a holder of `runs:read-all` holds `runs:read` there too.
+ */
+export function withImpliedPermissions(held: Iterable<string>): Set<string> {
+  const closed = new Set<string>(held);
+  for (const permission of closed) {
+    for (const implied of IMPLIED_BY.get(permission) ?? []) closed.add(implied);
+  }
+  return closed;
+}
+
+/**
  * The permission resource each package family's routes guard on. Declared, not
  * derived from `PACKAGE_TYPE_ROUTE_SEGMENT`: a URL segment and an RBAC resource
  * are two vocabularies that merely agree today.

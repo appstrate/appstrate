@@ -60,6 +60,7 @@ import {
   getModuleRoleScopes,
   getModulePresetScopes,
   getModuleApiKeyScopes,
+  withImpliedPermissions,
 } from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
@@ -515,7 +516,11 @@ export function spaceLevelVocabulary(): SpaceVocabularyGroup[] {
  * Effective permissions for one request: org-level set ∪ space-level set
  * (empty outside a space context), intersected with the credential ceiling.
  * `scopeCeiling` is the API-key scope list or the OIDC scope claim; a cookie
- * session has none.
+ * session has none. Both sides are closed under the core implications
+ * (`withImpliedPermissions`) before they meet: a role naming
+ * `credential-proxy:call` under a key scoped `credential-proxy:call-own`
+ * holds `call-own`, and a ceiling naming the wider grant admits the narrower
+ * one the role holds.
  */
 export function effectivePermissions(input: {
   orgPermissions: ReadonlySet<string>;
@@ -523,14 +528,11 @@ export function effectivePermissions(input: {
   scopeCeiling?: ReadonlySet<string>;
 }): Set<Permission> {
   const { orgPermissions: org, spacePermissions, scopeCeiling } = input;
+  const granted = withImpliedPermissions([...org, ...(spacePermissions ?? [])]);
+  const ceiling = scopeCeiling && withImpliedPermissions(scopeCeiling);
   const effective = new Set<Permission>();
-  for (const perm of org) {
-    if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
-  }
-  if (spacePermissions) {
-    for (const perm of spacePermissions) {
-      if (!scopeCeiling || scopeCeiling.has(perm)) effective.add(perm as Permission);
-    }
+  for (const perm of granted) {
+    if (!ceiling || ceiling.has(perm)) effective.add(perm as Permission);
   }
   return effective;
 }
@@ -585,6 +587,8 @@ export function listedOrgPermissions(role: OrgRole): string[] {
  *
  * `creatorEffective` is the creator's effective set in the key's space — the
  * `permissions` the pipeline computed for the minting request (RBAC spec §7.1).
+ * A scope a held grant implies is held (`withImpliedPermissions`): a creator
+ * whose role names `runs:read-all` alone delegates `runs:read`.
  *
  * @throws ApiError 400 `invalid_request` when a scope is not grantable to an
  *   API key.
@@ -602,5 +606,6 @@ export function validateScopes(
       "scopes",
     );
   }
-  return scopes.filter((s): s is Permission => creatorEffective.has(s));
+  const held = withImpliedPermissions(creatorEffective);
+  return scopes.filter((s): s is Permission => held.has(s));
 }

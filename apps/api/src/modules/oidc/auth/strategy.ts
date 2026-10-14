@@ -188,9 +188,7 @@ export const oidcAuthStrategy: AuthStrategy = {
 function capToSpaceKeyScopes(resolution: AuthResolution): AuthResolution {
   if (resolution.principalKind === "end_user") return resolution;
   const keyScopes = getApiKeyAllowedScopes();
-  if (resolution.deferOrgResolution && resolution.orgRole === undefined) {
-    return { ...resolution, scopeCeiling: [...keyScopes] };
-  }
+  if (resolution.deferOrgResolution) return { ...resolution, scopeCeiling: [...keyScopes] };
   return { ...resolution, permissions: resolution.permissions.filter((p) => keyScopes.has(p)) };
 }
 
