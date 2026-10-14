@@ -31,7 +31,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   line names the spaces that supply none. Each command names its space in every
   call. The same agent active in two spaces is two commands: the first keeps
   `run-<name>`, the next is `run-<space name>-<name>`, and from the second sync
-  on, a command keeps its name when its agent is activated in another space.
+  on, a command keeps its name when its agent is activated in another space or
+  when the space holding `run-<name>` leaves the selection.
   `code sync` no longer reads the pinned space and no longer requires one. The
   pin set by `appstrate space switch` is now only the default space of the
   CLI's REST commands (`appstrate api`, `run --integrations=remote`,

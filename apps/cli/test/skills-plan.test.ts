@@ -330,7 +330,7 @@ describe("assignSlugs — an installed name stays with its package", () => {
     });
   });
 
-  it("keeps a fallback holder on its fallback, and gives it the name once its holder left", () => {
+  it("keeps an agent on its fallback, even once the name's holder left", () => {
     const agents = [view("@alpha/report"), view("@zeta/report")];
     const both = holding(
       [
@@ -344,8 +344,13 @@ describe("assignSlugs — an installed name stays with its package", () => {
       "@zeta/report": "run-report",
     });
 
+    // An agent's command is never renamed under it: `/appstrate:run-alpha-report` keeps working.
     const left = holding([["run-alpha-report", "@alpha/report"]], SPACE);
     expect(slugsOf(assignSlugs([], [view("@alpha/report")], left).planned)).toEqual({
+      "@alpha/report": "run-alpha-report",
+    });
+    // A newcomer, holding nothing, takes the freed name.
+    expect(slugsOf(assignSlugs([], [view("@alpha/report")]).planned)).toEqual({
       "@alpha/report": "run-report",
     });
   });

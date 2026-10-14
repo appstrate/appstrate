@@ -358,8 +358,10 @@ interface SlugAssignment {
  * any agent (D23). `incumbents` (slug → wanted claimant) are never handed to
  * another claimant this run: an unattended sync must never make
  * `/appstrate:<slug>` launch a different one, nor the same agent in another
- * space. A claimant takes its preferred slug when free, else the one it holds,
- * else a fallback: `run-<space>-<name>` when the same agent has a command in
+ * space. A skill takes its preferred slug when free, else the one it holds; an
+ * agent the one it holds, else its preferred slug when free — a name that
+ * frees up may have launched the same agent in another space. Otherwise, a
+ * fallback: `run-<space>-<name>` when the same agent has a command in
  * another space (claimed this run, or held), `<scope>-<name>` otherwise.
  */
 export function assignSlugs(
@@ -373,6 +375,7 @@ export function assignSlugs(
     claimant: Claimant,
     preferred: string,
     fallback: (blocked: ReadonlySet<string>) => string,
+    keepsOwn = false,
   ): SlugClaim => {
     const key = claimKey(claimant);
     const blocked = new Set(taken.keys());
@@ -381,7 +384,8 @@ export function assignSlugs(
       if (claimKey(holder) !== key) blocked.add(slug);
       else own ??= slug;
     }
-    const slug = !blocked.has(preferred) ? preferred : (own ?? fallback(blocked));
+    const slug =
+      keepsOwn && own ? own : !blocked.has(preferred) ? preferred : (own ?? fallback(blocked));
     // Keeping the fallback it already holds is not news: only a new name is reported.
     return slug === preferred || slug === own ? { slug } : { slug, renamedFrom: preferred };
   };
@@ -402,10 +406,16 @@ export function assignSlugs(
       (claimant) => claimant.packageId === packageId && claimKey(claimant) !== key,
     );
     try {
-      const naming = pick({ packageId, spaceId }, agentSlug(name), (blocked) =>
-        inAnotherSpace
-          ? spaceCollisionSlug(name, spaceName, blocked)
-          : collisionSlug(packageId, blocked, AGENT_SLUG_PREFIX),
+      // An agent keeps the command it holds even when its preferred name
+      // frees up: that name may have launched the same agent in another space.
+      const naming = pick(
+        { packageId, spaceId },
+        agentSlug(name),
+        (blocked) =>
+          inAnotherSpace
+            ? spaceCollisionSlug(name, spaceName, blocked)
+            : collisionSlug(packageId, blocked, AGENT_SLUG_PREFIX),
+        true,
       );
       const files = materializeAgent(naming.slug, view);
       taken.set(naming.slug, { packageId, spaceId });

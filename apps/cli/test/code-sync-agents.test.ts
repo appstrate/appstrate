@@ -284,6 +284,30 @@ describe("code sync — agents come from the selected spaces (#1972)", () => {
     });
   }
 
+  // A name that frees up may have launched the same agent in another space:
+  // handing it over would silently move `/appstrate:run-<name>` to another space.
+  it("keeps run-<space>-<name> when the space holding run-<name> leaves the selection", async () => {
+    serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    const { io, stderr } = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"], space: [TWO] }, io);
+
+    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-space-two-report"]);
+    expect(await spaceOf("run-space-two-report")).toBe(TWO);
+    expect(stderr()).not.toContain("Renamed");
+  });
+
+  it("keeps run-<name> when the other space leaves the selection", async () => {
+    serve([{ ...REPORT, activeIn: [ONE, TWO] }]);
+    await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
+
+    await codeSyncCommand({ target: ["claude-plugin"], space: [ONE] }, createMemoryIO().io);
+
+    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
+    expect(await spaceOf("run-report")).toBe(ONE);
+  });
+
   it("narrows agents with --space exactly as it narrows skills", async () => {
     serve([REPORT, TRIAGE]);
 
@@ -532,12 +556,12 @@ describe("code sync — an installed name stays with its package", () => {
     await codeSyncCommand({ target: ["claude-plugin"] }, again.io);
     expect(again.stderr()).not.toContain("Renamed");
 
-    // Once the incumbent leaves, the name goes to the newcomer.
+    // Once the incumbent leaves, the newcomer keeps the command it has.
     serve([alpha]);
     await codeSyncCommand({ target: ["claude-plugin"] }, createMemoryIO().io);
 
-    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-report"]);
-    expect(await readText(commandFile("run-report"))).toContain("@alpha/report");
+    expect((await readdir(pluginSkills())).sort()).toEqual(["pdf-tools", "run-alpha-report"]);
+    expect(await readText(commandFile("run-alpha-report"))).toContain("@alpha/report");
   });
 
   it("settles two disagreeing ledgers by target order, the plugin first", async () => {
