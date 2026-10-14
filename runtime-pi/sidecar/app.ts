@@ -183,11 +183,12 @@ const HEADER_CANONICAL_CASE: Record<string, string> = {
 };
 
 /**
- * Per-call telemetry attached to `/llm/*` pass-throughs. Each observation
- * yields exactly one line carrying the same summary (TTFB, max inter-chunk
- * gap, total bytes): info `llm.stream.observed` when the upstream ends, info
- * `llm.stream.cancelled` when the client stops reading first (the normal end of
- * most calls), warn `llm.stream.idle_timeout` / `llm.stream.error` on failure.
+ * Per-call telemetry attached to `/llm/*` pass-throughs. Each streamed
+ * response yields exactly one line carrying the same summary (TTFB, max
+ * inter-chunk gap, total bytes): info `llm.stream.observed` when the upstream
+ * ends, info `llm.stream.cancelled` when the client stops reading first (the
+ * normal end of most calls), warn `llm.stream.idle_timeout` /
+ * `llm.stream.error` on failure.
  * Without it, a silent Bun.serve idleTimeout burning the run timeout in a retry
  * loop is invisible.
  */
