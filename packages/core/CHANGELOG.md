@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [16.0.0] — 2026-10-14
-
 ### Added
 
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
@@ -21,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`ORG_LOGO_MAX_LENGTH`** (`@appstrate/core/validation`): the organization
   logo's wire form — `emoji:<grapheme>` or a `data:image/webp;base64,` URL —
   and its longest accepted value, 48 000 characters.
+- **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
+  **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
+  catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
+  inventory of every tool the integration names, each with its `origin`
+  (`mcp_package`, `manifest`, `appstrate`), its `exposure` (`available`,
+  `hidden`, `not_in_catalog`) and why it is hidden. Read by an integration's
+  Outils tab; never an agent allowlist.
+
+## [16.0.0] — 2026-10-14
+
+### Added
+
 - **`MODEL_BINDINGS`** / **`ModelBinding`** and **`MODEL_CREDENTIAL_OWNERS`** /
   **`ModelCredentialOwner`** (`@appstrate/core/model-payer`): whose credential
   serves a listed model, `system` | `org` | `user` | `managed` (`MODEL_PAYERS`
@@ -58,13 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus every permission a held one implies. The implications are
   `runs:read-all` ⇒ `runs:read` and `credential-proxy:call` ⇒
   `credential-proxy:call-own`; other strings pass through. (#1963)
-- **`resolveIntegrationToolSurface`**, **`IntegrationToolInspection`** and
-  **`IntegrationToolInspectionEntry`** (`@appstrate/core/integration`): the
-  catalog `resolveIntegrationToolCatalog` returns, plus an explanatory
-  inventory of every tool the integration names, each with its `origin`
-  (`mcp_package`, `manifest`, `appstrate`), its `exposure` (`available`,
-  `hidden`, `not_in_catalog`) and why it is hidden. Read by an integration's
-  Outils tab; never an agent allowlist.
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus
@@ -108,6 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings as served, with `personal_model_credentials` read as its effective
   value (`true` when absent). The stored and PATCH shape `orgSettingsSchema` is
   unchanged.
+
 - **`personal_model_credentials` org setting** (`orgSettingsSchema`, absent =
   allowed) and the **`model-provider-credentials:connect`** permission action
   (`@appstrate/core/permissions`): a member brings their own model credential.
