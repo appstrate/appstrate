@@ -3,8 +3,9 @@
 /**
  * Idempotency key storage — backed by KeyValueCache adapter.
  *
- * Pattern: Stripe `Idempotency-Key` header. Cache key format:
- * `idem:{orgId}:{spaceId}:{key}`.
+ * Pattern: Stripe `Idempotency-Key` header, a key being scoped to the caller's credentials.
+ * Cache key format: `idem:{orgId}:{spaceId}:{principal}:{key}` ({@link idempotencyPrincipal}),
+ * so another principal reusing a key — even with the same body — is a fresh request, never a replay.
  * TTL: 24 hours. Request hash SHA-256 for conflict detection.
  *
  * The space id is part of the key so the SAME `Idempotency-Key` used by
@@ -15,6 +16,7 @@
  */
 
 import { getCache } from "../infra/index.ts";
+import type { Actor } from "./actor.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +35,14 @@ type LockResult =
   | { status: "cached"; result: CachedResult }
   | { status: "request_mismatch" };
 
+/** The namespace one `Idempotency-Key` lives in. */
+export interface IdempotencyScope {
+  orgId: string;
+  spaceId: string | undefined;
+  /** {@link idempotencyPrincipal} of the authenticated caller. */
+  principal: string;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -40,8 +50,30 @@ type LockResult =
 const TTL = 86_400; // 24 hours
 const MAX_CACHED_BODY = 1_048_576; // 1 MB
 
-function cacheKey(orgId: string, spaceId: string | undefined, key: string): string {
-  return `idem:${orgId}:${spaceId ?? "_org"}:${key}`;
+/**
+ * The caller a stored response belongs to: the auth method, the credential the request was
+ * authenticated with — the API key, or the OAuth client a bearer token was issued to — and the
+ * actor — the member, or the end-user an `Appstrate-User` header or an end-user token names. Each
+ * key and each client is its own principal, whichever user it acts for. JSON-encoded so no two
+ * tuples share a spelling, whatever an auth strategy puts in its method name.
+ */
+export function idempotencyPrincipal(caller: {
+  authMethod: string;
+  apiKeyId: string | null;
+  clientId: string | null;
+  actor: Actor;
+}): string {
+  return JSON.stringify([
+    caller.authMethod,
+    caller.apiKeyId,
+    caller.clientId,
+    caller.actor.type,
+    caller.actor.id,
+  ]);
+}
+
+function cacheKey(scope: IdempotencyScope, key: string): string {
+  return `idem:${scope.orgId}:${scope.spaceId ?? "_org"}:${scope.principal}:${key}`;
 }
 
 export function computeRequestHash(request: Request, body: string): string {
@@ -56,12 +88,11 @@ export function computeRequestHash(request: Request, body: string): string {
 // ---------------------------------------------------------------------------
 
 export async function acquireIdempotencyLock(
-  orgId: string,
-  spaceId: string | undefined,
+  scope: IdempotencyScope,
   key: string,
   requestHash: string,
 ): Promise<LockResult> {
-  const ck = cacheKey(orgId, spaceId, key);
+  const ck = cacheKey(scope, key);
   const processingValue = JSON.stringify({ status: "processing", requestHash });
   const cache = await getCache();
 
@@ -89,27 +120,21 @@ export async function acquireIdempotencyLock(
 }
 
 export async function storeIdempotencyResult(
-  orgId: string,
-  spaceId: string | undefined,
+  scope: IdempotencyScope,
   key: string,
   result: CachedResult,
 ): Promise<void> {
   // Don't cache oversized responses
   if (result.body.length > MAX_CACHED_BODY) {
-    await releaseIdempotencyLock(orgId, spaceId, key);
+    await releaseIdempotencyLock(scope, key);
     return;
   }
 
-  const ck = cacheKey(orgId, spaceId, key);
   const value = JSON.stringify(result);
 
-  await (await getCache()).set(ck, value, { ttlSeconds: TTL });
+  await (await getCache()).set(cacheKey(scope, key), value, { ttlSeconds: TTL });
 }
 
-export async function releaseIdempotencyLock(
-  orgId: string,
-  spaceId: string | undefined,
-  key: string,
-): Promise<void> {
-  await (await getCache()).del(cacheKey(orgId, spaceId, key));
+export async function releaseIdempotencyLock(scope: IdempotencyScope, key: string): Promise<void> {
+  await (await getCache()).del(cacheKey(scope, key));
 }
