@@ -246,21 +246,10 @@ export function parseRunnerEnvFile(text: string): Record<string, string> {
  */
 export function parseSystemdEnvironment(output: string): Record<string, string> {
   const out: Record<string, string> = {};
-  let i = 0;
-  while (i < output.length) {
-    while (i < output.length && /\s/.test(output[i]!)) i++;
-    if (i >= output.length) break;
-    let token = "";
-    if (output[i] === '"') {
-      i++;
-      while (i < output.length && output[i] !== '"') {
-        if (output[i] === "\\" && i + 1 < output.length) i++;
-        token += output[i++];
-      }
-      i++; // closing quote
-    } else {
-      while (i < output.length && !/\s/.test(output[i]!)) token += output[i++];
-    }
+  // Group 1 is a quoted token's inner text: the closing quote (optional, so an
+  // unterminated one still parses) is outside it and can never be an escaped one.
+  for (const [raw, quoted] of output.matchAll(/"((?:\\.|[^"\\])*)"?|\S+/g)) {
+    const token = quoted !== undefined ? quoted.replace(/\\(.)/g, "$1") : raw;
     const eq = token.indexOf("=");
     if (eq > 0) out[token.slice(0, eq)] = token.slice(eq + 1);
   }

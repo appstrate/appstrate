@@ -579,9 +579,11 @@ describe("parseSystemdEnvironment", () => {
     expect(parseSystemdEnvironment("")).toEqual({});
   });
 
-  it("tolerates an unterminated quote and a trailing backslash", () => {
+  it("handles an unterminated quote, an escaped closing quote and a trailing backslash", () => {
     expect(parseSystemdEnvironment('"A=b c')).toEqual({ A: "b c" });
-    expect(parseSystemdEnvironment('"A=b\\')).toEqual({ A: "b\\" });
+    // The stray backslash after an unterminated quote is its own `=`-less token.
+    expect(parseSystemdEnvironment('"A=b\\')).toEqual({ A: "b" });
+    expect(parseSystemdEnvironment('"A=x\\"" "B=y\\"')).toEqual({ A: 'x"', B: 'y"' });
     expect(parseSystemdEnvironment("A=b\\")).toEqual({ A: "b\\" });
   });
 });
