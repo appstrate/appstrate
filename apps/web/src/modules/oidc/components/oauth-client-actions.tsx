@@ -149,10 +149,10 @@ export function OAuthClientActions({
 
       {rotatedSecret && (
         <SecretRevealModal
-          open
           onClose={() => setRotatedSecret(null)}
           title={t("oauthClients.newSecret")}
           secret={rotatedSecret}
+          warning={t("oauthClients.secretWarning")}
         />
       )}
 

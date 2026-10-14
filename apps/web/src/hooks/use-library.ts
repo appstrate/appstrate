@@ -401,8 +401,8 @@ export function usePackageActivation(type: PackageType, packageId: string) {
     if (spaceId) setActive.mutate({ spaceId, packageId, active }, options);
   };
   return {
-    mayActivate: maySetPackageActive(grant, type, true),
-    mayDeactivate: maySetPackageActive(grant, type, false),
+    mayActivate: !!spaceId && maySetPackageActive(grant, type, true),
+    mayDeactivate: !!spaceId && maySetPackageActive(grant, type, false),
     activate: (options?: { onSuccess?: () => void }) => set(true, options),
     deactivate: (options?: { onSuccess?: () => void }) => set(false, options),
     pending: setActive.isPending,

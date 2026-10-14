@@ -14,7 +14,6 @@ import {
   DetailTabPanel,
   type DetailTab,
 } from "../components/detail-tabs";
-import { activeTabLabel } from "../lib/active-tab-label";
 import { DetailSectionCard } from "../components/detail-section-card";
 import { Fact, FactGrid } from "../components/fact-grid";
 import { ManifestFacts } from "../components/package-manifest/manifest-fact";
@@ -103,7 +102,7 @@ export function ScheduleDetailPage() {
               label: schedule.name || t("schedule.unnamed"),
               href: scheduleDetailPath(schedule.id),
             },
-            { label: activeTabLabel(tabs, activeTab) },
+            { label: tabs.find((item) => item.value === activeTab)?.label ?? activeTab },
           ]}
           actions={
             <>

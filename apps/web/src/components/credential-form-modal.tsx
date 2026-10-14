@@ -28,6 +28,7 @@ import { useWatch } from "react-hook-form";
 import { useAppForm } from "../hooks/use-app-form";
 import { useTranslation } from "react-i18next";
 import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "./spinner";
 import { TestResultSpan } from "./test-result-span";
@@ -76,7 +77,6 @@ export interface CredentialFormData {
 }
 
 interface CredentialFormModalProps {
-  open: boolean;
   onClose: () => void;
   credential: ModelProviderCredentialInfo | null;
   isPending: boolean;
@@ -125,23 +125,19 @@ function buildOptions(registry: readonly ProviderRegistryEntry[]): PickerOption[
   }));
 }
 
-function CredentialFormBody({
+/**
+ * Mounted by the caller while open, one per credential (`key`): the picked provider, the typed
+ * values and any pairing token start fresh on every open.
+ */
+export function CredentialFormModal({
   credential,
   isPending,
   onSubmit,
   onClose,
-  personal,
+  personal = false,
   initial,
   submitLabel,
-}: {
-  credential: ModelProviderCredentialInfo | null;
-  isPending: boolean;
-  onSubmit: (data: CredentialFormData) => void;
-  onClose: () => void;
-  personal: boolean;
-  initial?: CredentialFormData;
-  submitLabel?: string;
-}) {
+}: CredentialFormModalProps) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   const registry = registryQuery.data ?? [];
@@ -362,91 +358,84 @@ function CredentialFormBody({
   }
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
       title={title}
-      actions={
-        <>
-          <div className="mr-auto flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleTest}
-              disabled={!canTest || testMutation.isPending}
-            >
-              {testMutation.isPending ? <Spinner /> : t("credentials.test")}
-            </Button>
-            {testResult && (
-              <TestResultSpan
-                result={testResult}
-                successKey="credentials.testSuccess"
-                failedKey="credentials.testFailed"
-              />
-            )}
-          </div>
-          <Button type="button" variant="outline" onClick={onClose}>
-            {t("btn.cancel")}
+      onSubmit={onFormSubmit}
+      isPending={isPending}
+      submitLabel={submitLabel}
+      submitDisabled={!selectedProvider}
+      formProps={{ noValidate: true }}
+      secondaryActions={
+        <div className="mr-auto flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleTest}
+            disabled={!canTest || testMutation.isPending}
+          >
+            {testMutation.isPending && <Spinner />}
+            {t("credentials.test")}
           </Button>
-          <Button type="submit" form="pk-form" disabled={isPending || !selectedProvider}>
-            {isPending ? <Spinner /> : (submitLabel ?? t("btn.save"))}
-          </Button>
-        </>
-      }
-    >
-      <form id="pk-form" onSubmit={onFormSubmit} noValidate className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
-          {providerPicker}
-          {/* The organization's form: a member's own subscription is connected elsewhere. */}
-          {!personal && !isEditing && (
-            <p className="text-muted-foreground text-sm">
-              {t("credentials.form.subscriptionNote")}{" "}
-              <PreferencesModelsLink>
-                {t("credentials.form.subscriptionNoteLink")}
-              </PreferencesModelsLink>
-            </p>
+          {testResult && (
+            <TestResultSpan
+              result={testResult}
+              successKey="credentials.testSuccess"
+              failedKey="credentials.testFailed"
+            />
           )}
         </div>
-
-        {!isEditing && labelField}
-
-        {needsBaseUrlOverride ? (
-          <EndpointFields
-            idPrefix="pk"
-            providers={overridableProviders}
-            provider={selectedProvider}
-            onApiTypeChange={handleApiTypeChange}
-            // `apiShape` and `baseUrl` are pinned by `providerId` at create
-            // time — delete and re-create to point the key elsewhere.
-            providerLocked={isEditing}
-            baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
-            baseUrlLocked={isEditing}
-            baseUrlError={
-              showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined
-            }
-            apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
-            apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
-            apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
-          />
-        ) : (
-          !!selectedProvider && (
-            <FormItem
-              id="pk-apiKey"
-              label={t("credentials.form.apiKey")}
-              hint={credential ? t("credentials.form.apiKeyHint") : undefined}
-              error={showError("apiKey") ? errors.apiKey?.message : undefined}
-            >
-              <Input
-                type="password"
-                {...register("apiKey", { validate: apiKeyValidate })}
-                placeholder={t("credentials.form.apiKeyPlaceholder")}
-              />
-            </FormItem>
-          )
+      }
+    >
+      <div className="space-y-2">
+        <Label htmlFor="pk-provider">{t("credentials.form.provider")}</Label>
+        {providerPicker}
+        {/* The organization's form: a member's own subscription is connected elsewhere. */}
+        {!personal && !isEditing && (
+          <p className="text-muted-foreground text-sm">
+            {t("credentials.form.subscriptionNote")}{" "}
+            <PreferencesModelsLink>
+              {t("credentials.form.subscriptionNoteLink")}
+            </PreferencesModelsLink>
+          </p>
         )}
-      </form>
-    </Modal>
+      </div>
+
+      {!isEditing && labelField}
+
+      {needsBaseUrlOverride ? (
+        <EndpointFields
+          idPrefix="pk"
+          providers={overridableProviders}
+          provider={selectedProvider}
+          onApiTypeChange={handleApiTypeChange}
+          // `apiShape` and `baseUrl` are pinned by `providerId` at create
+          // time — delete and re-create to point the key elsewhere.
+          providerLocked={isEditing}
+          baseUrlProps={register("baseUrlOverride", { validate: baseUrlValidate })}
+          baseUrlLocked={isEditing}
+          baseUrlError={showError("baseUrlOverride") ? errors.baseUrlOverride?.message : undefined}
+          apiKeyProps={register("apiKey", { validate: apiKeyValidate })}
+          apiKeyError={showError("apiKey") ? errors.apiKey?.message : undefined}
+          apiKeyHint={credential ? t("credentials.form.apiKeyHint") : undefined}
+        />
+      ) : (
+        !!selectedProvider && (
+          <FormItem
+            id="pk-apiKey"
+            label={t("credentials.form.apiKey")}
+            hint={credential ? t("credentials.form.apiKeyHint") : undefined}
+            error={showError("apiKey") ? errors.apiKey?.message : undefined}
+          >
+            <Input
+              type="password"
+              {...register("apiKey", { validate: apiKeyValidate })}
+              placeholder={t("credentials.form.apiKeyPlaceholder")}
+            />
+          </FormItem>
+        )
+      )}
+    </FormModal>
   );
 }
 
@@ -473,33 +462,5 @@ function PickerOptionItem({
         )}
       </span>
     </SelectItem>
-  );
-}
-
-export function CredentialFormModal({
-  open,
-  onClose,
-  credential,
-  isPending,
-  onSubmit,
-  personal = false,
-  initial,
-  submitLabel,
-}: CredentialFormModalProps) {
-  if (!open) return null;
-  // Re-mount on every (re)open so internal state (selected provider,
-  // form values, pairing token if any) resets cleanly.
-  const key = credential?.id ?? "__create__";
-  return (
-    <CredentialFormBody
-      key={key}
-      credential={credential}
-      isPending={isPending}
-      onSubmit={onSubmit}
-      onClose={onClose}
-      personal={personal}
-      initial={initial}
-      submitLabel={submitLabel}
-    />
   );
 }

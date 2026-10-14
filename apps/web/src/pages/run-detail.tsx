@@ -43,7 +43,6 @@ import {
   DetailTabPanel,
   type DetailTab,
 } from "../components/detail-tabs";
-import { activeTabLabel } from "../lib/active-tab-label";
 import { Badge } from "../components/status-badge";
 import { RunProvenanceBadges } from "../components/run-cells";
 import type { JournalOverviewFilter } from "../components/log-viewer";
@@ -294,7 +293,7 @@ export function RunDetailPage() {
           { label: t("detail.tabRuns"), href: `/agents/${packageId}#runs` },
           { label: runCrumbLabel, href: location.pathname },
         ]),
-    { label: activeTabLabel(tabs, tab) },
+    { label: tabs.find((item) => item.value === tab)?.label ?? tab },
   ];
 
   return (

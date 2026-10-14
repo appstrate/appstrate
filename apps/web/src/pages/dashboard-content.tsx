@@ -19,6 +19,7 @@ import {
 import { useCarousel } from "@appstrate/ui/components/carousel-context";
 import { PackageIcon } from "../components/package-icon";
 import { EmptyState } from "../components/page-states";
+import { ChoiceCard } from "../components/choice-card";
 import { Modal } from "../components/modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { PageHeader } from "../components/page-header";
@@ -119,42 +120,20 @@ function DashboardHeader({ firstName, runningCount }: { firstName: string; runni
           <div className="space-y-2">
             {/* Offered where `/chat` opens: the module loaded AND the caller's grants. */}
             {canChat && (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
+              <ChoiceCard
+                icon={MessageSquareText}
+                title={t("dashboard.askAi.chat")}
+                description={t("dashboard.askAi.chatDescription")}
                 onClick={openChat}
-              >
-                <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
-                  <MessageSquareText />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold">{t("dashboard.askAi.chat")}</span>
-                  <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
-                    {t("dashboard.askAi.chatDescription")}
-                  </span>
-                </span>
-              </Button>
+              />
             )}
-            <Button
-              type="button"
-              variant="outline"
-              className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
+            <ChoiceCard
+              icon={Bot}
+              title={t("dashboard.askAi.codingAgent")}
+              adornment={<Copy className="size-3.5" />}
+              description={t("dashboard.askAi.codingAgentDescription")}
               onClick={() => void copyCodingAgentSetup()}
-            >
-              <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
-                <Bot />
-              </span>
-              <span className="min-w-0">
-                <span className="flex items-center gap-2 text-sm font-semibold">
-                  {t("dashboard.askAi.codingAgent")}
-                  <Copy className="size-3.5" />
-                </span>
-                <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
-                  {t("dashboard.askAi.codingAgentDescription")}
-                </span>
-              </span>
-            </Button>
+            />
           </div>
         </Modal>
       )}

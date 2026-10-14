@@ -130,7 +130,8 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {/* Save */}
       {canWrite && (
         <Button onClick={handleSave} disabled={updateMutation.isPending}>
-          {updateMutation.isPending ? <Spinner /> : t("settings:webhooks.saveSettings")}
+          {updateMutation.isPending && <Spinner />}
+          {t("settings:webhooks.saveSettings")}
         </Button>
       )}
 
@@ -165,10 +166,10 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       {/* Rotated secret display */}
       {rotatedSecret && (
         <SecretRevealModal
-          open={!!rotatedSecret}
           onClose={() => setRotatedSecret(null)}
           title={t("settings:webhooks.newSecret")}
           secret={rotatedSecret}
+          warning={t("settings:webhooks.secretWarning")}
         />
       )}
 
@@ -181,7 +182,8 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
             onClick={handleTest}
             disabled={testMutation.isPending}
           >
-            {testMutation.isPending ? <Spinner /> : t("settings:webhooks.sendTest")}
+            {testMutation.isPending && <Spinner />}
+            {t("settings:webhooks.sendTest")}
           </Button>
         </div>
       )}
@@ -198,7 +200,8 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
             onClick={() => setDeleteConfirmOpen(true)}
             disabled={deleteMutation.isPending}
           >
-            {deleteMutation.isPending ? <Spinner /> : t("settings:webhooks.deleteBtn")}
+            {deleteMutation.isPending && <Spinner />}
+            {t("settings:webhooks.deleteBtn")}
           </Button>
         </div>
       )}

@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useWatch } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Mail } from "lucide-react";
@@ -14,10 +13,10 @@ import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { client } from "../../api/client";
 import { GoogleIcon, GitHubIcon } from "../../components/icons";
+import { NewPasswordFields } from "../../components/auth-fields";
 import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
-import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { errorMessage, toastError } from "../../lib/mutation-error";
 import { ApiError } from "../../api/errors";
 
@@ -205,19 +204,17 @@ function PasswordChangeForm() {
   const { updatePassword } = useAuth();
   const [success, setSuccess] = useState("");
 
+  const form = useAppForm<PasswordFormData>({
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+  });
   const {
     register,
     handleSubmit,
     setError,
     reset,
-    control,
     showError,
     formState: { errors, isSubmitting },
-  } = useAppForm<PasswordFormData>({
-    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
-  });
-
-  const newPasswordValue = useWatch({ control, name: "newPassword" });
+  } = form;
 
   const onSubmit = async (data: PasswordFormData) => {
     setSuccess("");
@@ -250,40 +247,7 @@ function PasswordChangeForm() {
             autoComplete="current-password"
           />
         </FormItem>
-        <FormItem
-          id="new-password"
-          label={t("preferences.newPassword")}
-          error={showError("newPassword") ? errors.newPassword?.message : undefined}
-        >
-          <Input
-            type="password"
-            {...register("newPassword", {
-              required: t("validation.required", { ns: "common" }),
-              // Better Auth's own minimum, imported rather than restated.
-              minLength: {
-                value: MIN_PASSWORD_LENGTH,
-                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
-              },
-            })}
-            minLength={MIN_PASSWORD_LENGTH}
-            autoComplete="new-password"
-          />
-        </FormItem>
-        <FormItem
-          id="confirm-password"
-          label={t("preferences.confirmPassword")}
-          error={showError("confirmPassword") ? errors.confirmPassword?.message : undefined}
-        >
-          <Input
-            type="password"
-            {...register("confirmPassword", {
-              required: t("validation.required", { ns: "common" }),
-              validate: (v) =>
-                v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
-            })}
-            autoComplete="new-password"
-          />
-        </FormItem>
+        <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
         {success && <div className="text-success text-sm">{success}</div>}
         <Button type="submit" disabled={isSubmitting}>
@@ -309,19 +273,15 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
   const { user, requestPasswordReset } = useAuth();
   const [resetEmailState, setResetEmailState] = useState<"idle" | "sending" | "sent">("idle");
 
+  const form = useAppForm<SetPasswordFormData>({
+    defaultValues: { newPassword: "", confirmPassword: "" },
+  });
   const {
-    register,
     handleSubmit,
     setError,
     reset,
-    control,
-    showError,
     formState: { errors, isSubmitting },
-  } = useAppForm<SetPasswordFormData>({
-    defaultValues: { newPassword: "", confirmPassword: "" },
-  });
-
-  const newPasswordValue = useWatch({ control, name: "newPassword" });
+  } = form;
 
   const onSubmit = async (data: SetPasswordFormData) => {
     try {
@@ -357,40 +317,7 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
         {t("preferences.setPasswordDescription")}
       </p>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
-        <FormItem
-          id="new-password"
-          label={t("preferences.newPassword")}
-          error={showError("newPassword") ? errors.newPassword?.message : undefined}
-        >
-          <Input
-            type="password"
-            {...register("newPassword", {
-              required: t("validation.required", { ns: "common" }),
-              // Better Auth's own minimum, imported rather than restated.
-              minLength: {
-                value: MIN_PASSWORD_LENGTH,
-                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
-              },
-            })}
-            minLength={MIN_PASSWORD_LENGTH}
-            autoComplete="new-password"
-          />
-        </FormItem>
-        <FormItem
-          id="confirm-password"
-          label={t("preferences.confirmPassword")}
-          error={showError("confirmPassword") ? errors.confirmPassword?.message : undefined}
-        >
-          <Input
-            type="password"
-            {...register("confirmPassword", {
-              required: t("validation.required", { ns: "common" }),
-              validate: (v) =>
-                v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
-            })}
-            autoComplete="new-password"
-          />
-        </FormItem>
+        <NewPasswordFields form={form} />
         {errors.root && <FieldError>{errors.root.message}</FieldError>}
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}

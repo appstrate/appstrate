@@ -21,6 +21,7 @@ import {
 } from "@appstrate/ui/components/dropdown-menu";
 import { PageActionsMenu } from "../page-actions-menu";
 import type { PackageType } from "@appstrate/core/validation";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import { packagePermission } from "@appstrate/core/permissions";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useDeletePackage } from "../../hooks/use-packages";
@@ -36,42 +37,20 @@ import { useModalParam } from "../../hooks/use-modal-param";
 /**
  * What the menu reads off the package's own detail response (`AgentDetail` or
  * `OrgPackageItemDetail`): the home contract, whose verdicts gate every act on
- * the live object, and the facts the confirmations name.
+ * the live object, and the facts the confirmations name. `agents` (the agents
+ * using it) is on the non-agent shape only; deleting a package that is used is
+ * refused.
  */
-export interface PackageActionsDetail {
-  id: string;
-  name?: string | null;
-  display_name?: string;
-  source: "system" | "local";
-  /**
-   * The package's home space, for the move dialog's "everything but the
-   * current home" list. `null` when the caller does not reach that space — the
-   * server withholds the id (RBAC spec §6.9).
-   */
-  home_space_id: string | null;
-  /**
-   * Whether this caller holds the type's `write` in its home space. Editing,
-   * publishing and moving are gated on it, because it IS the predicate the server
-   * enforces (`assertPackageMutationAccess`) — the SPA derives no write
-   * authority of its own.
-   */
-  home_writable: boolean;
-  /**
-   * Whether this caller holds the type's `delete` in the home space. Gates
-   * "Supprimer" on its own, because `<type>:delete` is an independent permission
-   * string and `DELETE` enforces it in its own right — a custom space role
-   * granting `write` without it made the item appear and 403 on click.
-   */
-  home_deletable: boolean;
-  /**
-   * Whether this caller holds the type's `share` in the home space. Gates
-   * "Share…" on its own — a custom role may grant `write` without it, or it
-   * without `write` (RBAC spec §6.10).
-   */
-  home_shareable: boolean;
-  /** Skills, MCP servers and integrations: the agents using it. Deleting one that is used is refused. */
-  agents?: unknown[];
-}
+type PackageActionsDetail = Pick<
+  AgentDetail,
+  | "source"
+  | "display_name"
+  | "home_space_id"
+  | "home_writable"
+  | "home_deletable"
+  | "home_shareable"
+> &
+  Partial<Pick<OrgPackageItemDetail, "name" | "agents">>;
 
 interface PackageActionsDropdownProps {
   packageId: string;
@@ -160,7 +139,13 @@ export function PackageActionsDropdown({
   const moveHome = useModalParam(MOVE_HOME_PARAM);
   const share = useModalParam(SHARE_PARAM);
   const fork = useModalParam("fork");
-  const [confirm, setConfirm] = useState<"delete" | "deactivate" | null>(null);
+  // `confirm` keeps its value while the dialog fades out, so the wording does not change under it.
+  const [confirm, setConfirm] = useState<"delete" | "deactivate">("delete");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const askConfirm = (kind: "delete" | "deactivate") => {
+    setConfirm(kind);
+    setConfirmOpen(true);
+  };
 
   const isOwned = isOwnedSource(detail?.source);
   const displayName = detail?.display_name || detail?.name || packageId;
@@ -243,7 +228,7 @@ export function PackageActionsDropdown({
         </DropdownMenuItem>
       )}
       {showDeactivate && (
-        <DropdownMenuItem disabled={activation.pending} onSelect={() => setConfirm("deactivate")}>
+        <DropdownMenuItem disabled={activation.pending} onSelect={() => askConfirm("deactivate")}>
           <PackagePlus size={14} className="rotate-180" />
           {t("packages.deactivate", { ns: "settings" })}
         </DropdownMenuItem>
@@ -394,7 +379,7 @@ export function PackageActionsDropdown({
                 <DropdownMenuSeparator />
                 {placementItems}
                 {showDelete && canDeletePackage && (
-                  <DropdownMenuItem onSelect={() => setConfirm("delete")} variant="destructive">
+                  <DropdownMenuItem onSelect={() => askConfirm("delete")} variant="destructive">
                     <Trash2 size={14} />
                     {t("btn.delete")}
                   </DropdownMenuItem>
@@ -428,7 +413,6 @@ export function PackageActionsDropdown({
       )}
       {fork.value !== null && showFork && (
         <ForkPackageModal
-          open
           onClose={fork.close}
           onLeave={fork.leave}
           packageId={packageId}
@@ -438,8 +422,8 @@ export function PackageActionsDropdown({
       )}
 
       <ConfirmModal
-        open={confirm !== null}
-        onClose={() => setConfirm(null)}
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
         title={t(confirm === "deactivate" ? "detail.deactivateTitle" : "detail.deletePackageTitle")}
         description={
           confirm === "deactivate"
@@ -457,7 +441,7 @@ export function PackageActionsDropdown({
         }
         isPending={activation.pending || deletePkg.isPending}
         onConfirm={() => {
-          const onSuccess = () => setConfirm(null);
+          const onSuccess = () => setConfirmOpen(false);
           if (confirm === "deactivate") activation.deactivate({ onSuccess });
           else deletePkg.mutate(packageId, { onSuccess });
         }}

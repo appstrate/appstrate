@@ -252,7 +252,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | A time                                                               | `TimeField` (`components/time-field.tsx`): hour and minute selects, a period select only where the app's language counts in 12 hours. Never `Input type="time"`: the browser draws it in ITS locale, not the app's                                                                                                                                                                          |
 | A schedule's rhythm                                                  | `FrequencyComposer` (`components/frequency-composer.tsx`; the cron model is `lib/cron-frequency.ts`), never raw presets                                                                                                                                                                                                                                                                     |
 | A value to copy exactly (endpoint, redirect URI)                     | `CopyBlock` (`components/copy-block.tsx`); programmatic copies go through `useCopyToClipboard`                                                                                                                                                                                                                                                                                              |
-| A secret shown once                                                  | `RevealedSecret` / `SecretRevealModal`                                                                                                                                                                                                                                                                                                                                                      |
+| A secret shown once                                                  | `SecretRevealModal`                                                                                                                                                                                                                                                                                                                                                                         |
 
 A `Select` never holds hundreds of entries.
 
@@ -574,7 +574,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     (`ConfirmModal`, the re-authentication that confirms one, the activation
     closure, the deletion of a chat thread): reopening « Supprimer X » from a
     link would be a trap; (2) what exists only in memory after an act: the
-    single display of a secret (`RevealedSecret`, `SecretRevealModal`, the key
+    single display of a secret (`SecretRevealModal`, the key
     just created), the connections a refused launch asks for
     (`RunLaunchRecovery`), the models step of a provider whose key was just
     typed (`ProviderAddFlow`): none of it is there after a reload; (3) the chat (`packages/module-chat`), whose message cards have no

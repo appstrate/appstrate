@@ -4,7 +4,7 @@
  * Tabs that split ONE collection into parts: organization and space roles,
  * remote and local integrations.
  *
- * Not the tabs of a detail page (`DetailTabsList`), which move between
+ * Not the tabs of a detail page (`DetailTabs`), which move between
  * different views of one object. These sit at the head of a list's bar, on the
  * same line as its search and at its height, so the reader sees what part of
  * the collection they are in and how to narrow it in one glance — the view

@@ -160,14 +160,16 @@ export function PreferencesModelsPage() {
         onDelete={setConfirmDelete}
       />
 
-      <CredentialFormModal
-        open={formOpen}
-        onClose={closeForm}
-        credential={editCredential}
-        isPending={createCredential.isPending || updateCredential.isPending}
-        onSubmit={submitForm}
-        personal
-      />
+      {formOpen && (
+        <CredentialFormModal
+          key={editCredential?.id ?? "__create__"}
+          onClose={closeForm}
+          credential={editCredential}
+          isPending={createCredential.isPending || updateCredential.isPending}
+          onSubmit={submitForm}
+          personal
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmDelete}

@@ -2,8 +2,8 @@
 
 /**
  * A published version beside the package's stored draft. The version is the
- * value of the modal's query parameter; both sides are read here, so the diff
- * never depends on what the page holding the modal happens to have loaded.
+ * value of the modal's query parameter; the draft is read here, and so is the
+ * version unless the page already holds it as `latestVersion`.
  */
 import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
@@ -17,15 +17,20 @@ export function CompareWithDraftModal({
   type,
   packageId,
   compare,
+  latestVersion,
 }: {
   type: PackageType;
   packageId: string;
   compare: ReturnType<typeof useModalParam>;
+  /** The latest version when the page already holds it: comparing it reads nothing more. */
+  latestVersion?: ReturnType<typeof useVersionDetail>["data"];
 }) {
   const { t } = useTranslation("agents");
   const version = compare.value ?? undefined;
   const { data: draft } = usePackageDetail(type, version && packageId);
-  const { data: compared } = useVersionDetail(type, packageId, version);
+  const isLatest = version !== undefined && latestVersion?.version === version;
+  const { data: fetched } = useVersionDetail(type, packageId, isLatest ? undefined : version);
+  const compared = isLatest ? latestVersion : fetched;
 
   return (
     <Modal

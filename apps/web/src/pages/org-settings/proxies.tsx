@@ -103,36 +103,38 @@ export function OrgSettingsProxiesPage() {
         }
       />
 
-      <ProxyFormModal
-        open={proxyModalOpen}
-        onClose={closeProxyModal}
-        proxy={editProxy}
-        isPending={createMutation.isPending || updateMutation.isPending}
-        onSubmit={(data) => {
-          if (editProxy) {
-            // The credential-bearing URL is never returned to the client, so the
-            // edit form starts blank. An empty field means "keep the current
-            // URL" — omit it entirely (`url` is optional on PATCH); sending `""`
-            // fails the server's `z.url()` and 400s a label-only edit.
-            updateMutation.mutate(
-              {
-                params: { path: { id: editProxy.id } },
-                body: data.url ? data : { label: data.label },
-              },
-              {
-                onSuccess: closeProxyModal,
-              },
-            );
-          } else {
-            createMutation.mutate(
-              { body: data },
-              {
-                onSuccess: closeProxyModal,
-              },
-            );
-          }
-        }}
-      />
+      {proxyModalOpen && (
+        <ProxyFormModal
+          key={editProxy?.id ?? "__create__"}
+          onClose={closeProxyModal}
+          proxy={editProxy}
+          isPending={createMutation.isPending || updateMutation.isPending}
+          onSubmit={(data) => {
+            if (editProxy) {
+              // The credential-bearing URL is never returned to the client, so the
+              // edit form starts blank. An empty field means "keep the current
+              // URL" — omit it entirely (`url` is optional on PATCH); sending `""`
+              // fails the server's `z.url()` and 400s a label-only edit.
+              updateMutation.mutate(
+                {
+                  params: { path: { id: editProxy.id } },
+                  body: data.url ? data : { label: data.label },
+                },
+                {
+                  onSuccess: closeProxyModal,
+                },
+              );
+            } else {
+              createMutation.mutate(
+                { body: data },
+                {
+                  onSuccess: closeProxyModal,
+                },
+              );
+            }
+          }}
+        />
+      )}
 
       <ConfirmModal
         open={!!confirmState}

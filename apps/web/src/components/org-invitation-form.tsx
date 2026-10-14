@@ -2,8 +2,8 @@
 
 import { useImperativeHandle, type Ref } from "react";
 import { toast } from "sonner";
-import { useSpaces } from "../hooks/use-spaces";
-import { spaceRoleValue, useSpaceRoleOptions } from "../hooks/use-roles";
+import { useAssignmentCatalog } from "../hooks/use-assignment-catalog";
+import { spaceRoleValue } from "../hooks/use-roles";
 import { z } from "zod";
 import { useTranslation } from "react-i18next";
 import { Controller, useForm, useWatch } from "react-hook-form";
@@ -16,7 +16,6 @@ import { $api, type components } from "../api/client";
 import { OrgRoleOptions } from "./org-role-options";
 import {
   hasUnavailableAssignments,
-  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
@@ -67,11 +66,7 @@ export function OrgInvitationForm({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const queryClient = useQueryClient();
-  const spacesQuery = useSpaces();
-  const rolesQuery = useSpaceRoleOptions();
-  const spaces = assignableSpaces(spacesQuery.data ?? []);
-  const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
-  const catalogError = spacesQuery.error || rolesQuery.error;
+  const catalog = useAssignmentCatalog();
   const form = useForm<InviteFormValues>({
     defaultValues: {
       email: invitation?.email ?? "",
@@ -186,9 +181,9 @@ export function OrgInvitationForm({
         rules={{
           validate: (value) => {
             if (form.getValues("role") === "admin") return true;
-            if (value.length && (catalogLoading || catalogError))
+            if (value.length && (catalog.loading || catalog.error))
               return t("orgSettings.assignmentsNotReady");
-            if (hasUnavailableAssignments(value, spaces, rolesQuery.options))
+            if (hasUnavailableAssignments(value, catalog.spaces, catalog.roleOptions))
               return t("orgSettings.assignmentsUnavailable");
             // No role requires a grant: a guest with none lands in their own
             // personal space, which is where a shared package is accepted.
@@ -198,14 +193,11 @@ export function OrgInvitationForm({
         render={({ field, fieldState }) => (
           <div className="flex flex-col gap-2">
             <SpaceAssignmentsField
-              spaces={spaces}
-              roleOptions={rolesQuery.options}
-              loading={catalogLoading}
-              error={catalogError}
-              onRetry={() => {
-                void spacesQuery.refetch();
-                void rolesQuery.refetch();
-              }}
+              spaces={catalog.spaces}
+              roleOptions={catalog.roleOptions}
+              loading={catalog.loading}
+              error={catalog.error}
+              onRetry={catalog.retry}
               value={field.value}
               onChange={(value) => {
                 field.onChange(value);

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The email + password fields shared by the sign-in and sign-up forms.
+ * The email + password fields shared by the sign-in and sign-up forms, and the
+ * new-password pair (`NewPasswordFields`) of the reset, set and change forms.
  *
  * The two forms carried ~55 lines of identical field markup each, and that
  * copy is what let the password minimum drift: both restated it, both said 6,
@@ -19,7 +20,12 @@
 
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import type { FieldValues, Path, UseFormRegister } from "react-hook-form";
+import {
+  type FieldErrors,
+  type FieldValues,
+  type Path,
+  type UseFormRegister,
+} from "react-hook-form";
 import { cn } from "@appstrate/ui/cn";
 import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
@@ -136,5 +142,69 @@ export function PasswordField<T extends FieldValues>({
       />
       <FieldError>{invalid ? error : undefined}</FieldError>
     </div>
+  );
+}
+
+export interface NewPasswordValues {
+  newPassword: string;
+  confirmPassword: string;
+}
+
+/**
+ * The "new password + confirm" pair of the reset, set and change forms. The form must carry
+ * `newPassword` / `confirmPassword` fields; `showError` comes from `useAppForm`.
+ */
+export function NewPasswordFields({
+  form: {
+    register,
+    showError,
+    formState: { errors },
+  },
+}: {
+  form: {
+    register: UseFormRegister<NewPasswordValues>;
+    showError: (field: keyof NewPasswordValues) => boolean;
+    formState: { errors: FieldErrors<NewPasswordValues> };
+  };
+}) {
+  const { t } = useTranslation(["settings", "common"]);
+  return (
+    <>
+      <FormItem
+        id="new-password"
+        label={t("preferences.newPassword")}
+        error={showError("newPassword") ? errors.newPassword?.message : undefined}
+      >
+        <Input
+          type="password"
+          placeholder="••••••••"
+          {...register("newPassword", {
+            required: t("validation.required", { ns: "common" }),
+            minLength: {
+              value: MIN_PASSWORD_LENGTH,
+              message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
+            },
+          })}
+          minLength={MIN_PASSWORD_LENGTH}
+          autoComplete="new-password"
+        />
+      </FormItem>
+      <FormItem
+        id="confirm-password"
+        label={t("preferences.confirmPassword")}
+        error={showError("confirmPassword") ? errors.confirmPassword?.message : undefined}
+      >
+        <Input
+          type="password"
+          placeholder="••••••••"
+          {...register("confirmPassword", {
+            required: t("validation.required", { ns: "common" }),
+            validate: (v, values) =>
+              v === values.newPassword || t("validation.passwordMismatch", { ns: "common" }),
+          })}
+          autoComplete="new-password"
+        />
+      </FormItem>
+    </>
   );
 }

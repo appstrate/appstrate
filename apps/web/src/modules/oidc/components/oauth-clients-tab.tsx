@@ -9,6 +9,7 @@
  * so the OIDC module is always loaded here.
  */
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, KeyRound } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -19,7 +20,8 @@ import { EmptyState, EmptyStateAction } from "@/components/page-states";
 import { usePermissions } from "@/hooks/use-permissions";
 import { useModalParam, useModalTarget } from "@/hooks/use-modal-param";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
-import { OAuthClientFormModal } from "./oauth-client-form-modal";
+import { SecretRevealModal } from "@/components/secret-reveal-modal";
+import { OAuthClientFormModal, type CreatedSecret } from "./oauth-client-form-modal";
 import { useOAuthClientColumns } from "./oauth-client-columns";
 
 interface OAuthClientsTabProps {
@@ -34,6 +36,8 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
   const newClient = useModalParam("newOauthClient");
   const editClient = useModalTarget("editOauthClient", data, (client) => client.clientId);
   const selectedClient = editClient.target ?? null;
+  // Shown once, and with no address: the creation's one (`?newOauthClient`) goes away as it appears.
+  const [createdSecret, setCreatedSecret] = useState<CreatedSecret | null>(null);
 
   const columns = useOAuthClientColumns({
     onEdit: (client) => editClient.open(client.clientId),
@@ -85,12 +89,27 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         }
       />
 
-      <OAuthClientFormModal
-        open={canWrite && (newClient.value !== null || selectedClient !== null)}
-        onClose={selectedClient ? editClient.close : newClient.close}
-        client={selectedClient}
-        level={level}
-      />
+      {canWrite && (newClient.value !== null || selectedClient !== null) && (
+        <OAuthClientFormModal
+          key={selectedClient?.clientId ?? "__create__"}
+          onClose={selectedClient ? editClient.close : newClient.close}
+          client={selectedClient}
+          level={level}
+          onCreated={(secret) => {
+            setCreatedSecret(secret);
+            newClient.close();
+          }}
+        />
+      )}
+
+      {createdSecret && (
+        <SecretRevealModal
+          onClose={() => setCreatedSecret(null)}
+          title={t("settings:oauthClients.createdTitle")}
+          secret={`Client ID: ${createdSecret.clientId}\nClient Secret: ${createdSecret.clientSecret}`}
+          warning={t("settings:oauthClients.secretWarning")}
+        />
+      )}
     </div>
   );
 }

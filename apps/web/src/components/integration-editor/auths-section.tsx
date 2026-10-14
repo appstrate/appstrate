@@ -9,6 +9,7 @@ import { Checkbox, CheckboxField } from "@appstrate/ui/components/checkbox";
 import { FieldError } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
+import { RowsEditor } from "../rows-editor";
 import { EditorSection, type EditorSurface } from "./editor-section";
 import { StringListInput } from "./string-list-input";
 import {
@@ -234,46 +235,29 @@ function ScopeCatalogEditor({
   onChange: (entries: ScopeCatalogEntry[]) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const update = (i: number, patch: Partial<ScopeCatalogEntry>) =>
-    onChange(entries.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label>{t("integrationEditor.auths.scopeCatalog")}</Label>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => onChange([...entries, { value: "" }])}
-        >
-          <Plus size={14} />
-          {t("integrationEditor.auths.scopeAdd")}
-        </Button>
-      </div>
-      {entries.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2">
+    <RowsEditor
+      label={t("integrationEditor.auths.scopeCatalog")}
+      rows={entries}
+      onChange={onChange}
+      newRow={{ value: "" }}
+      addLabel={t("integrationEditor.auths.scopeAdd")}
+      renderRow={(entry, update) => (
+        <>
           <Input
             value={entry.value}
-            onChange={(e) => update(i, { value: e.target.value })}
+            onChange={(e) => update({ ...entry, value: e.target.value })}
             placeholder={t("integrationEditor.auths.scopeValue")}
             className="font-mono"
           />
           <Input
             value={entry.label ?? ""}
-            onChange={(e) => update(i, { label: e.target.value || undefined })}
+            onChange={(e) => update({ ...entry, label: e.target.value || undefined })}
             placeholder={t("integrationEditor.auths.scopeLabel")}
           />
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            onClick={() => onChange(entries.filter((_, idx) => idx !== i))}
-          >
-            <Trash2 size={14} className="text-destructive" />
-          </Button>
-        </div>
-      ))}
-    </div>
+        </>
+      )}
+    />
   );
 }

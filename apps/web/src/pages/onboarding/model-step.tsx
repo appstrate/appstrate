@@ -113,13 +113,14 @@ export function OnboardingModelStep() {
         </Button>
       </div>
 
-      <ModelFormModal
-        open={newModel.value !== null}
-        onClose={newModel.close}
-        model={null}
-        isPending={isPending}
-        onSubmit={onSubmit}
-      />
+      {newModel.value !== null && (
+        <ModelFormModal
+          onClose={newModel.close}
+          model={null}
+          isPending={isPending}
+          onSubmit={onSubmit}
+        />
+      )}
     </OnboardingLayout>
   );
 }

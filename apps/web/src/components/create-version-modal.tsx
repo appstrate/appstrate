@@ -96,7 +96,7 @@ export function CreateVersionModal({
       title={t("version.createVersion")}
       actions={
         <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
-          {createVersion.isPending && <Spinner />}{" "}
+          {createVersion.isPending && <Spinner />}
           {targetVersion && hasUnarchivedChanges
             ? t("version.createVersionX", { version: targetVersion })
             : t("version.createVersion")}

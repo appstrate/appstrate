@@ -48,13 +48,13 @@ import { CopyLinkButton } from "../../components/copy-link-button";
 import { DataTable } from "../../components/data-table";
 import { InvitationsTable } from "../../components/invitations-table";
 import { Modal } from "../../components/modal";
+import { FormModal } from "../../components/form-modal";
 import { PageActionsMenu } from "../../components/page-actions-menu";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { SpaceRoleSelect } from "../../components/space-role-select";
 import { ViewAsDialog } from "../../components/view-as-dialog";
 import { EmptyState, EmptyStateAction } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
 import { spaceMemberLabel, useSpaceMemberColumns } from "./space-member-columns";
 import { memberLabel } from "../../lib/members";
 import { spaceMemberRemoval, spaceMembersPageDeeds } from "../org-settings/rbac-deeds";
@@ -299,26 +299,25 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
         }}
       />
 
-      <AddSpaceMemberModal
-        key={`${spaceId}:${addParam.value}`}
-        open={canInvite && addParam.value !== null}
-        onClose={addParam.close}
-        spaceId={spaceId}
-        orgId={currentOrg?.id}
-        excludedUserIds={explicitUserIds}
-      />
+      {canInvite && addParam.value !== null && (
+        <AddSpaceMemberModal
+          key={`${spaceId}:${addParam.value}`}
+          onClose={addParam.close}
+          spaceId={spaceId}
+          orgId={currentOrg?.id}
+          excludedUserIds={explicitUserIds}
+        />
+      )}
     </>
   );
 }
 
 function AddSpaceMemberModal({
-  open,
   onClose,
   spaceId,
   orgId,
   excludedUserIds,
 }: {
-  open: boolean;
   onClose: () => void;
   spaceId: string;
   orgId: string | undefined;
@@ -373,7 +372,7 @@ function AddSpaceMemberModal({
     isLoading: usersLoading,
     error: usersError,
     refetch: refetchUsers,
-  } = useOrgDetail({ enabled: open && selectingUser });
+  } = useOrgDetail({ enabled: selectingUser });
   // Owners and admins reach every space through their org role, so adding one
   // as a space member grants nothing and the route refuses it (409).
   const candidates = (orgData?.members ?? []).filter(
@@ -445,31 +444,9 @@ function AddSpaceMemberModal({
     );
   };
 
-  return (
-    <Modal
-      open={open}
-      onClose={() => {
-        if (!isPending) onClose();
-      }}
-      title={t("spaceMembers.addTitle")}
-      actions={
-        invitationToken ? undefined : (
-          <>
-            <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>
-              {t("btn.cancel", { ns: "common" })}
-            </Button>
-            <Button type="submit" form="space-member-form" disabled={!canSubmit}>
-              {isPending ? (
-                <Spinner />
-              ) : (
-                t(invitingExternal ? "spaceMembers.inviteGuest" : "btn.add")
-              )}
-            </Button>
-          </>
-        )
-      }
-    >
-      {invitationToken ? (
+  if (invitationToken) {
+    return (
+      <Modal open onClose={onClose} title={t("spaceMembers.addTitle")}>
         <div className="flex flex-col items-start gap-4">
           <p>{t("spaceMembers.invited", { email: email.trim() })}</p>
           <p className="text-muted-foreground text-sm">{t("spaceMembers.invitationLinkHint")}</p>
@@ -483,153 +460,158 @@ function AddSpaceMemberModal({
             </Link>
           )}
         </div>
-      ) : (
-        <form id="space-member-form" onSubmit={submit}>
-          <FieldGroup>
-            {canInviteExternal && (
-              <fieldset disabled={isPending} className="flex flex-col gap-3">
-                <legend className="mb-3 text-sm font-medium">{t("spaceMembers.addMode")}</legend>
-                <RadioGroup
-                  value={mode}
-                  onValueChange={(value) => {
-                    setMode(value);
-                    setFormError(null);
-                    setPendingConflict(false);
-                  }}
-                  disabled={isPending}
-                >
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="space-member-existing" value="existing" />
-                    <Label htmlFor="space-member-existing">{t("spaceMembers.existingUser")}</Label>
-                  </Field>
-                  <Field orientation="horizontal">
-                    <RadioGroupItem id="space-member-external" value="external" />
-                    <Label htmlFor="space-member-external">{t("spaceMembers.externalGuest")}</Label>
-                  </Field>
-                </RadioGroup>
-                {invitingExternal && (
-                  <FieldDescription>{t("spaceMembers.externalHint")}</FieldDescription>
-                )}
-              </fieldset>
-            )}
-            {selectingUser ? (
-              <Field data-disabled={usersLoading || !!usersError || isPending}>
-                <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
-                <Select
-                  value={userId}
-                  onValueChange={(value) => {
-                    setUserId(value);
-                    setFormError(null);
-                  }}
-                  disabled={usersLoading || !!usersError || isPending}
-                >
-                  <SelectTrigger id="space-member-user">
-                    <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {candidates.map((member) => (
-                        <SelectItem key={member.userId} value={member.userId}>
-                          {memberLabel(member)}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                {usersLoading && (
-                  <FieldDescription role="status">
-                    {t("spaceMembers.usersLoading")}
-                  </FieldDescription>
-                )}
-                {usersError && (
-                  <Alert variant="destructive">
-                    <AlertDescription>
-                      <p>{t("spaceMembers.usersLoadError")}</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void refetchUsers()}
-                      >
-                        {t("btn.retry", { ns: "common" })}
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {!usersLoading && !usersError && candidates.length === 0 && (
-                  <FieldDescription>{t("spaceMembers.noCandidates")}</FieldDescription>
-                )}
+      </Modal>
+    );
+  }
+
+  return (
+    <FormModal
+      onClose={onClose}
+      title={t("spaceMembers.addTitle")}
+      onSubmit={submit}
+      isPending={isPending}
+      submitLabel={t(invitingExternal ? "spaceMembers.inviteGuest" : "btn.add")}
+      submitDisabled={!canSubmit}
+    >
+      <FieldGroup>
+        {canInviteExternal && (
+          <fieldset disabled={isPending} className="flex flex-col gap-3">
+            <legend className="mb-3 text-sm font-medium">{t("spaceMembers.addMode")}</legend>
+            <RadioGroup
+              value={mode}
+              onValueChange={(value) => {
+                setMode(value);
+                setFormError(null);
+                setPendingConflict(false);
+              }}
+              disabled={isPending}
+            >
+              <Field orientation="horizontal">
+                <RadioGroupItem id="space-member-existing" value="existing" />
+                <Label htmlFor="space-member-existing">{t("spaceMembers.existingUser")}</Label>
               </Field>
-            ) : (
-              <Field data-invalid={!!formError} data-disabled={isPending}>
-                <Label htmlFor="space-member-email">
-                  {t(invitingExternal ? "spaceMembers.guestEmailLabel" : "spaceMembers.emailLabel")}
-                </Label>
-                <Input
-                  id="space-member-email"
-                  type="email"
-                  required
-                  autoFocus
-                  autoComplete="email"
-                  value={email}
-                  disabled={isPending}
-                  aria-invalid={!!formError}
-                  aria-describedby="space-member-email-hint"
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    setFormError(null);
-                    setPendingConflict(false);
-                  }}
-                  onInvalid={() => setFormError(t("spaceMembers.emailInvalid"))}
-                  placeholder="email@example.com"
-                />
-                <FieldDescription id="space-member-email-hint">
-                  {t(
-                    invitingExternal ? "spaceMembers.externalEmailHint" : "spaceMembers.emailHint",
-                  )}
-                </FieldDescription>
+              <Field orientation="horizontal">
+                <RadioGroupItem id="space-member-external" value="external" />
+                <Label htmlFor="space-member-external">{t("spaceMembers.externalGuest")}</Label>
               </Field>
+            </RadioGroup>
+            {invitingExternal && (
+              <FieldDescription>{t("spaceMembers.externalHint")}</FieldDescription>
             )}
-            <Field data-disabled={roleFieldLocked}>
-              <Label htmlFor="space-member-role">{t("spaceMembers.colRole")}</Label>
-              <SpaceRoleSelect
-                id="space-member-role"
-                value={effectiveRole}
-                options={roleOptions}
-                fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
-                placeholder={t("spaceMembers.noAssignableRoles")}
-                disabled={roleFieldLocked}
-                onValueChange={(value) => {
-                  setRole(value);
-                  setFormError(null);
-                }}
-              />
-              <RoleCatalogState
-                isLoading={rolesLoading}
-                rolesKnown={rolesKnown}
-                error={rolesError}
-                refetch={() => void refetchRoles()}
-                emptyMessage={roleOptions.length === 0 ? t("spaceMembers.noAssignableRoles") : null}
-              />
-              {!rolesLoading && !rolesError && roleDescription && (
-                <FieldDescription>{roleDescription}</FieldDescription>
-              )}
-            </Field>
-            {formError && (
+          </fieldset>
+        )}
+        {selectingUser ? (
+          <Field data-disabled={usersLoading || !!usersError || isPending}>
+            <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
+            <Select
+              value={userId}
+              onValueChange={(value) => {
+                setUserId(value);
+                setFormError(null);
+              }}
+              disabled={usersLoading || !!usersError || isPending}
+            >
+              <SelectTrigger id="space-member-user">
+                <SelectValue placeholder={t("spaceMembers.userPlaceholder")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {candidates.map((member) => (
+                    <SelectItem key={member.userId} value={member.userId}>
+                      {memberLabel(member)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {usersLoading && (
+              <FieldDescription role="status">{t("spaceMembers.usersLoading")}</FieldDescription>
+            )}
+            {usersError && (
               <Alert variant="destructive">
                 <AlertDescription>
-                  <p>{formError}</p>
-                  {pendingConflict && canManageInvitations && (
-                    <Link to="/org-settings/members" className="underline underline-offset-4">
-                      {t("spaceMembers.manageInvitations")}
-                    </Link>
-                  )}
+                  <p>{t("spaceMembers.usersLoadError")}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void refetchUsers()}
+                  >
+                    {t("btn.retry", { ns: "common" })}
+                  </Button>
                 </AlertDescription>
               </Alert>
             )}
-          </FieldGroup>
-        </form>
-      )}
-    </Modal>
+            {!usersLoading && !usersError && candidates.length === 0 && (
+              <FieldDescription>{t("spaceMembers.noCandidates")}</FieldDescription>
+            )}
+          </Field>
+        ) : (
+          <Field data-invalid={!!formError} data-disabled={isPending}>
+            <Label htmlFor="space-member-email">
+              {t(invitingExternal ? "spaceMembers.guestEmailLabel" : "spaceMembers.emailLabel")}
+            </Label>
+            <Input
+              id="space-member-email"
+              type="email"
+              required
+              autoFocus
+              autoComplete="email"
+              value={email}
+              disabled={isPending}
+              aria-invalid={!!formError}
+              aria-describedby="space-member-email-hint"
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setFormError(null);
+                setPendingConflict(false);
+              }}
+              onInvalid={() => setFormError(t("spaceMembers.emailInvalid"))}
+              placeholder="email@example.com"
+            />
+            <FieldDescription id="space-member-email-hint">
+              {t(invitingExternal ? "spaceMembers.externalEmailHint" : "spaceMembers.emailHint")}
+            </FieldDescription>
+          </Field>
+        )}
+        <Field data-disabled={roleFieldLocked}>
+          <Label htmlFor="space-member-role">{t("spaceMembers.colRole")}</Label>
+          <SpaceRoleSelect
+            id="space-member-role"
+            value={effectiveRole}
+            options={roleOptions}
+            fallbackLabel={t("orgSettings.assignmentUnavailableRole")}
+            placeholder={t("spaceMembers.noAssignableRoles")}
+            disabled={roleFieldLocked}
+            onValueChange={(value) => {
+              setRole(value);
+              setFormError(null);
+            }}
+          />
+          <RoleCatalogState
+            isLoading={rolesLoading}
+            rolesKnown={rolesKnown}
+            error={rolesError}
+            refetch={() => void refetchRoles()}
+            emptyMessage={roleOptions.length === 0 ? t("spaceMembers.noAssignableRoles") : null}
+          />
+          {!rolesLoading && !rolesError && roleDescription && (
+            <FieldDescription>{roleDescription}</FieldDescription>
+          )}
+        </Field>
+        {formError && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              <p>{formError}</p>
+              {pendingConflict && canManageInvitations && (
+                <Link to="/org-settings/members" className="underline underline-offset-4">
+                  {t("spaceMembers.manageInvitations")}
+                </Link>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+      </FieldGroup>
+    </FormModal>
   );
 }

@@ -272,22 +272,25 @@ export function OrgSettingsModelsPage() {
         <ProviderAddFlow credentials={credentials ?? []} onClose={addProvider.close} />
       )}
 
-      <CredentialFormModal
-        open={editKey.target !== undefined}
-        onClose={editKey.close}
-        credential={editKey.target ?? null}
-        isPending={updateCredential.isPending}
-        onSubmit={(data) => {
-          const target = editKey.target;
-          if (!target) return;
-          // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
-          // by `providerId` at create time.
-          updateCredential.mutate(
-            { params: { path: { id: target.id } }, body: credentialUpdateBody(target, data) },
-            { onSuccess: editKey.close },
-          );
-        }}
-      />
+      {editKey.target && (
+        <CredentialFormModal
+          key={editKey.target.id}
+          onClose={editKey.close}
+          credential={editKey.target}
+          isPending={updateCredential.isPending}
+          onSubmit={(data) => {
+            // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
+            // by `providerId` at create time.
+            updateCredential.mutate(
+              {
+                params: { path: { id: editKey.target!.id } },
+                body: credentialUpdateBody(editKey.target!, data),
+              },
+              { onSuccess: editKey.close },
+            );
+          }}
+        />
+      )}
 
       {chooseModels.target && (
         <ProviderModelsModal
@@ -308,14 +311,15 @@ export function OrgSettingsModelsPage() {
         />
       )}
 
-      <ModelFormModal
-        open={editModel.target !== undefined}
-        onClose={editModel.close}
-        model={editModel.target ?? null}
-        isPending={modelForm.isPending}
-        onSubmit={modelForm.onSubmit}
-        onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
-      />
+      {editModel.target && (
+        <ModelFormModal
+          onClose={editModel.close}
+          model={editModel.target}
+          isPending={modelForm.isPending}
+          onSubmit={modelForm.onSubmit}
+          onDelete={canDeleteModels ? () => setDeletingModel(editModel.target ?? null) : undefined}
+        />
+      )}
 
       {/* Over the model form (or the instance's row), which closes with it once the model is gone. */}
       <ConfirmModal

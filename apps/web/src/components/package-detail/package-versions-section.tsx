@@ -68,7 +68,12 @@ export function PackageVersionsSection({
         onCreate={onCreate}
         onCompare={(version) => compare.open(version)}
       />
-      <CompareWithDraftModal type={type} packageId={packageId} compare={compare} />
+      <CompareWithDraftModal
+        type={type}
+        packageId={packageId}
+        compare={compare}
+        latestVersion={latestVersion}
+      />
     </div>
   );
 }

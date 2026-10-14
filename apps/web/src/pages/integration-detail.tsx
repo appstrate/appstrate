@@ -34,10 +34,9 @@ import {
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { ErrorState, ResourceErrorState } from "../components/page-states";
 import { SettingsSkeleton } from "../components/loading-skeletons";
-import { DetailTabsList, DetailTabsTrigger } from "../components/detail-tabs";
+import { DetailTabs, DetailTabBar, DetailTabPanel } from "../components/detail-tabs";
 import { SettingsHeading } from "../components/settings/settings-heading";
 import type { SectionRailItem } from "../components/settings/section-rail";
 import {
@@ -443,28 +442,17 @@ export function IntegrationDetailPage() {
         draftReadOnly={pkg?.definition === "draft" && !homeWritable}
       />
 
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(v as (typeof INTEGRATION_TABS)[number])}
-        className="mt-2"
-      >
-        <DetailTabsList>
-          <DetailTabsTrigger value="overview" data-testid="tab-overview">
-            {t("integration.tabs.overview")}
-          </DetailTabsTrigger>
-          <DetailTabsTrigger value="connections" data-testid="tab-connections">
-            {t("integration.tabs.connections")}
-          </DetailTabsTrigger>
-          <DetailTabsTrigger value="configuration" data-testid="tab-configuration">
-            {t("integration.tabs.configuration")}
-          </DetailTabsTrigger>
-        </DetailTabsList>
+      <DetailTabs value={tab} onChange={setTab}>
+        <DetailTabBar
+          tabs={[
+            { value: "overview", label: t("integration.tabs.overview") },
+            { value: "connections", label: t("integration.tabs.connections") },
+            { value: "configuration", label: t("integration.tabs.configuration") },
+          ]}
+        />
 
         {/* One connected-accounts table, with each row retaining its auth context. */}
-        <TabsContent
-          value="connections"
-          className="bg-card mt-0 space-y-8 rounded-lg border p-6 shadow-sm"
-        >
+        <DetailTabPanel value="connections">
           {!active ? (
             <ActivationHint packageId={packageId} />
           ) : detail.auths.length === 0 ? (
@@ -477,13 +465,10 @@ export function IntegrationDetailPage() {
               onConfigure={openAuthentication}
             />
           )}
-        </TabsContent>
+        </DetailTabPanel>
 
         {/* Configuration is admin-only; package files stay readable for every member. */}
-        <TabsContent
-          value="configuration"
-          className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-        >
+        <DetailTabPanel value="configuration" flush>
           <IntegrationSettings
             packageId={packageId}
             detail={detail}
@@ -497,20 +482,20 @@ export function IntegrationDetailPage() {
               canDelete: isOwned && !!homeDeletable,
             }}
           />
-        </TabsContent>
+        </DetailTabPanel>
 
         {/* ─── Outils (effective tool catalog — read-only) ─── */}
 
         {/* Capabilities, connected accounts and package usage are distinct concepts. */}
-        <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+        <DetailTabPanel value="overview">
           <IntegrationOverview
             detail={detail}
             dependentIds={pkg?.agents.map((agent) => agent.id)}
             onOpenConnections={openConnections}
             onConfigureAuth={canConfigure ? openAuthentication : undefined}
           />
-        </TabsContent>
-      </Tabs>
+        </DetailTabPanel>
+      </DetailTabs>
     </div>
   );
 }

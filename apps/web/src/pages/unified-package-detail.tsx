@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useParams, Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
-import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { Button } from "@appstrate/ui/components/button";
 import { TriangleAlert } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
@@ -43,7 +42,12 @@ import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent
 import { AgentInactiveAlert } from "../components/package-detail/agent-inactive-alert";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentSettingsView } from "../components/agent-detail/agent-settings-view";
-import { DetailTabsList, DetailTabsTrigger } from "../components/detail-tabs";
+import {
+  DetailTabs,
+  DetailTabBar,
+  DetailTabPanel,
+  type DetailTab,
+} from "../components/detail-tabs";
 import { AgentRunButton } from "../components/package-detail/agent-run-button";
 import { PackageUsage } from "../components/package-detail/package-usage";
 import { PackageSettingsView } from "../components/package-detail/package-settings-view";
@@ -51,7 +55,7 @@ import { RoleLimitNotice } from "../components/role-limit-notice";
 import { useAgentModelBlocker } from "../hooks/use-agent-readiness";
 import { EditorDirtyReportContext } from "../hooks/use-editor-state";
 
-type DetailTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
+type PackageTab = "overview" | "runs" | "settings" | "memory" | "usedBy";
 
 const AGENT_DETAIL_TABS = ["overview", "runs", "memory", "settings"] as const;
 
@@ -194,12 +198,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // An agent's tabs are the same for every role: a tab whose read the caller
   // lacks says so in its panel (`RoleLimitNotice`) instead of disappearing, so
   // the page reads the same whatever the role and only its content changes.
-  const allValidTabs: readonly DetailTab[] =
+  const allValidTabs: readonly PackageTab[] =
     type === "agent" ? AGENT_DETAIL_TABS : ["overview", "settings", "usedBy"];
   // Every detail opens on its summary; an agent the reader may only run opens on
   // its runs when that role reads them.
-  const defaultTab: DetailTab = !fullRead && tabReads.runs ? "runs" : "overview";
-  const [tab, setTab] = useTabWithHash<DetailTab>(allValidTabs, defaultTab);
+  const defaultTab: PackageTab = !fullRead && tabReads.runs ? "runs" : "overview";
+  const [tab, setTab] = useTabWithHash<PackageTab>(allValidTabs, defaultTab);
   const newVersion = useModalParam("newVersion");
   const [editorDirty, setEditorDirty] = useState(false);
   // ── Loading / Error ──
@@ -293,8 +297,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // Determine available tabs based on type
 
   // The rendered manifest, next to the raw artifact it comes from.
-  const overviewTab: { id: DetailTab; label: string } = {
-    id: "overview",
+  const overviewTab: DetailTab<PackageTab> = {
+    value: "overview",
     label: t("detail.overview.summary"),
   };
 
@@ -304,20 +308,20 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     memory: t("detail.tabMemory"),
     settings: t("detail.tabSettings"),
   };
-  const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
-    id,
-    label: agentTabLabels[id],
+  const agentTabs: Array<DetailTab<PackageTab>> = AGENT_DETAIL_TABS.map((value) => ({
+    value,
+    label: agentTabLabels[value],
   }));
 
-  const pkgTabs: Array<{ id: DetailTab; label: string }> = [
+  const pkgTabs: Array<DetailTab<PackageTab>> = [
     overviewTab,
-    { id: "settings", label: t("detail.tabSettings") },
-    { id: "usedBy", label: t("packages.usedBy") },
+    { value: "settings", label: t("detail.tabSettings") },
+    { value: "usedBy", label: t("packages.usedBy") },
   ];
 
   const tabDefs = type === "agent" ? agentTabs : pkgTabs;
 
-  // The triggers' own verdicts, which also bound their `?newVersion` / `?fork` URLs.
+  // The trigger's own verdict, which also bounds its `?newVersion` URL.
   const canCreateVersion = !!homeWritable && !isBuiltIn && !isHistoricalVersion && isOwned;
   // Publishing or running reads the stored draft, not the edits held on screen.
   const unsavedReason = editorDirty ? t("detail.unsavedBlocksAction") : undefined;
@@ -350,7 +354,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           }
           latestPublishedVersion={versionInfo?.latest_published_version}
           activeSubpage={{
-            label: tabDefs.find((item) => item.id === tab)?.label ?? overviewTab.label,
+            label: tabDefs.find((item) => item.value === tab)?.label ?? overviewTab.label,
           }}
           actionsLeft={
             type === "agent" ? (
@@ -422,19 +426,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
 
         {type === "agent" && agentDetail && (
           <div className="overflow-visible" data-agent-detail-surface>
-            <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)}>
-              <DetailTabsList>
-                {agentTabs.map((item) => (
-                  <DetailTabsTrigger key={item.id} value={item.id}>
-                    {item.label}
-                  </DetailTabsTrigger>
-                ))}
-              </DetailTabsList>
+            <DetailTabs value={tab} onChange={setTab}>
+              <DetailTabBar tabs={agentTabs} />
 
-              <TabsContent
-                value="overview"
-                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-              >
+              <DetailTabPanel value="overview">
                 {fullRead ? (
                   <AgentOverviewTab
                     packageId={packageId}
@@ -453,21 +448,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                     )}
                   </div>
                 )}
-              </TabsContent>
-              <TabsContent
-                value="runs"
-                className="bg-card mt-0 overflow-hidden rounded-lg border p-6 shadow-sm"
-              >
+              </DetailTabPanel>
+              <DetailTabPanel value="runs">
                 {tabReads.runs ? (
                   <AgentRunsTab packageId={packageId} versionLabel={versionLabel} />
                 ) : (
                   <RoleLimitNotice>{t("detail.roleLimit.runs")}</RoleLimitNotice>
                 )}
-              </TabsContent>
-              <TabsContent
-                value="settings"
-                className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-              >
+              </DetailTabPanel>
+              <DetailTabPanel value="settings" flush>
                 <AgentSettingsView
                   versions={versionsProps}
                   packageId={packageId}
@@ -476,34 +465,25 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   isHistorical={isHistoricalVersion}
                   inputWrapperOverride={historicalInputWrapper}
                 />
-              </TabsContent>
-              <TabsContent
-                value="memory"
-                className="bg-card mt-0 overflow-hidden rounded-lg border shadow-sm"
-              >
+              </DetailTabPanel>
+              <DetailTabPanel value="memory" flush>
                 {tabReads.memory ? (
                   <AgentMemoryTab packageId={packageId} />
                 ) : (
                   <RoleLimitNotice className="m-6">{t("detail.roleLimit.memory")}</RoleLimitNotice>
                 )}
-              </TabsContent>
-            </Tabs>
+              </DetailTabPanel>
+            </DetailTabs>
           </div>
         )}
 
         {type !== "agent" && (
-          <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)}>
-            <DetailTabsList>
-              {tabDefs.map((td) => (
-                <DetailTabsTrigger key={td.id} value={td.id}>
-                  {td.label}
-                </DetailTabsTrigger>
-              ))}
-            </DetailTabsList>
+          <DetailTabs value={tab} onChange={setTab}>
+            <DetailTabBar tabs={tabDefs} />
             {/* Non-Agent tab content */}
             {/* Both follow the version being viewed: the explorer through
           `versionLabel`, the overview through the manifest picked above. */}
-            <TabsContent value="overview" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            <DetailTabPanel value="overview">
               {pkgDetail && (
                 <PackageOverview
                   type={type}
@@ -517,13 +497,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   onOpenUsage={() => setTab("usedBy")}
                 />
               )}
-            </TabsContent>
+            </DetailTabPanel>
 
             {(type === "skill" || type === "mcp-server") && (
-              <TabsContent
-                value="settings"
-                className="bg-card mt-0 overflow-clip rounded-lg border shadow-sm"
-              >
+              <DetailTabPanel value="settings" flush>
                 <PackageSettingsView
                   versions={versionsProps}
                   type={type}
@@ -531,17 +508,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   detail={pkgDetail}
                   version={versionLabel}
                 />
-              </TabsContent>
+              </DetailTabPanel>
             )}
 
-            <TabsContent value="usedBy" className="bg-card mt-0 rounded-lg border p-6 shadow-sm">
+            <DetailTabPanel value="usedBy">
               {!tabReads.usedBy ? (
                 <RoleLimitNotice>{t("detail.roleLimit.usedBy")}</RoleLimitNotice>
               ) : (
                 pkgDetail && <PackageUsage agentIds={pkgDetail.agents.map((agent) => agent.id)} />
               )}
-            </TabsContent>
-          </Tabs>
+            </DetailTabPanel>
+          </DetailTabs>
         )}
 
         {/* Mounted only while open: any way of closing a form modal abandons its input. */}

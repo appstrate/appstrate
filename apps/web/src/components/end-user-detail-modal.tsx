@@ -1,22 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { jsonText } from "@appstrate/afps-shared/json-text";
 import { Modal } from "./modal";
+import { FormModal } from "./form-modal";
 import { ConfirmModal } from "./confirm-modal";
 import { CopyButton } from "./copy-button";
 import { Button } from "@appstrate/ui/components/button";
-import { FieldError, FormItem } from "@appstrate/ui/components/field";
-import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { usePermissions } from "../hooks/use-permissions";
 import { formatDateField } from "../lib/format-date";
-import { EndUserMetadataEditor } from "./end-user-metadata-editor";
-import { entriesToMetadata, metadataToEntries, type MetadataEntry } from "../lib/end-user-metadata";
+import { EndUserFields, type EndUserFormValues } from "./end-user-fields";
+import { entriesToMetadata, metadataToEntries } from "../lib/end-user-metadata";
 import { errorMessage } from "../lib/mutation-error";
 
 interface Props {
@@ -28,6 +26,15 @@ interface Props {
   /** Leaves the edition for the detail it was entered from. */
   onShowDetail: () => void;
   onDeleted?: (id: string) => void;
+}
+
+function formValues(endUser: EndUserInfo | null): EndUserFormValues {
+  return {
+    name: endUser?.name ?? "",
+    email: endUser?.email ?? "",
+    externalId: endUser?.externalId ?? "",
+    metadata: metadataToEntries(endUser?.metadata ?? null),
+  };
 }
 
 function CopyableField({ label, value }: { label: string; value: string }) {
@@ -70,12 +77,7 @@ export function EndUserDetailModal({
   // deed, or straight from its address, closes.
   const [enteredFromDetail] = useState(!editing);
 
-  const [editName, setEditName] = useState(endUser?.name ?? "");
-  const [editEmail, setEditEmail] = useState(endUser?.email ?? "");
-  const [editExternalId, setEditExternalId] = useState(endUser?.externalId ?? "");
-  const [editMetadata, setEditMetadata] = useState<MetadataEntry[]>(() =>
-    metadataToEntries(endUser?.metadata ?? null),
-  );
+  const [editValues, setEditValues] = useState(() => formValues(endUser));
 
   useEffect(() => {
     mounted.current = true;
@@ -86,10 +88,7 @@ export function EndUserDetailModal({
 
   const startEditing = () => {
     if (!endUser) return;
-    setEditName(endUser.name ?? "");
-    setEditEmail(endUser.email ?? "");
-    setEditExternalId(endUser.externalId ?? "");
-    setEditMetadata(metadataToEntries(endUser.metadata));
+    setEditValues(formValues(endUser));
     updateMutation.reset();
     onEdit();
   };
@@ -101,15 +100,16 @@ export function EndUserDetailModal({
   const metadata = endUser.metadata;
   const metaEntries = metadata ? Object.entries(metadata) : [];
 
-  const handleSave = async () => {
+  const handleSave = async (e: FormEvent) => {
+    e.preventDefault();
     try {
       await updateMutation.mutateAsync({
         params: { path: { id: endUser.id } },
         body: {
-          name: editName.trim() || undefined,
-          email: editEmail.trim() || undefined,
-          externalId: editExternalId.trim() || undefined,
-          metadata: entriesToMetadata(editMetadata),
+          name: editValues.name.trim() || undefined,
+          email: editValues.email.trim() || undefined,
+          externalId: editValues.externalId.trim() || undefined,
+          metadata: entriesToMetadata(editValues.metadata),
         },
       });
       if (!mounted.current) return;
@@ -121,70 +121,15 @@ export function EndUserDetailModal({
 
   if (editing) {
     return (
-      <>
-        <Modal
-          open
-          onClose={onClose}
-          preventClose={updateMutation.isPending}
-          title={t("spaces.editEndUser")}
-          actions={
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={stopEditing}
-                disabled={updateMutation.isPending}
-              >
-                {t("common:btn.cancel")}
-              </Button>
-              <Button type="submit" form="edit-end-user-form" disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? (
-                  <Spinner label={t("common:loading")} />
-                ) : (
-                  t("common:btn.save")
-                )}
-              </Button>
-            </>
-          }
-        >
-          <form
-            id="edit-end-user-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSave();
-            }}
-            className="space-y-4"
-          >
-            <FormItem id="eu-edit-name" label={t("spaces.endUserName")}>
-              <Input
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder={t("spaces.endUserNamePlaceholder")}
-                autoFocus
-              />
-            </FormItem>
-            <FormItem id="eu-edit-email" label={t("spaces.endUserEmail")}>
-              <Input
-                type="email"
-                value={editEmail}
-                onChange={(e) => setEditEmail(e.target.value)}
-                placeholder="alice@example.com"
-              />
-            </FormItem>
-            <FormItem id="eu-edit-extid" label={t("spaces.endUserExternalId")}>
-              <Input
-                value={editExternalId}
-                onChange={(e) => setEditExternalId(e.target.value)}
-                placeholder="my_user_123"
-              />
-            </FormItem>
-
-            <EndUserMetadataEditor entries={editMetadata} onChange={setEditMetadata} />
-
-            {updateMutation.error && <FieldError>{errorMessage(updateMutation.error)}</FieldError>}
-          </form>
-        </Modal>
-      </>
+      <FormModal
+        onClose={stopEditing}
+        title={t("spaces.editEndUser")}
+        onSubmit={handleSave}
+        isPending={updateMutation.isPending}
+        error={updateMutation.error ? errorMessage(updateMutation.error) : null}
+      >
+        <EndUserFields values={editValues} onChange={setEditValues} />
+      </FormModal>
     );
   }
 
