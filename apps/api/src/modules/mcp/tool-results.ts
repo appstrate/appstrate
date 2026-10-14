@@ -2,6 +2,7 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { RunAndWaitArgumentCode } from "@appstrate/core/run-and-wait-client";
+import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 
 /**
  * A tool's JSON answer: `structuredContent` plus the same JSON as text (MCP 2025-06-18);
@@ -14,6 +15,32 @@ export function jsonResult(payload: Record<string, unknown>, isError = false): C
 
 export function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * The headers of an in-process dispatch: the caller's auth context and the trusted re-entry
+ * marker (`lib/internal-dispatch.ts`), written onto `into`.
+ */
+export function dispatchHeaders(authHeaders: Headers, into = new Headers()): Headers {
+  authHeaders.forEach((value, name) => into.set(name, value));
+  into.set(...internalDispatchHeader());
+  return into;
+}
+
+/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
+export function trySetHeader(headers: Headers, name: string, value: string): boolean {
+  try {
+    headers.set(name, value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

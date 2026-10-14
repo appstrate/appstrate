@@ -44,16 +44,15 @@ export function RunLaunchRecovery({
       }
     >
       <MissingConnectionsModal
-        open
         onClose={launcher.dismiss}
         errors={launcher.missingErrors}
         agentPackageId={packageId}
         version={launcher.missingVersion}
-        {...(integrationEntries ? { integrationEntries } : {})}
+        integrationEntries={integrationEntries}
         retrying={launcher.isPending}
-        // The modal stays open until the retry lands, so the picker is still
-        // there if the server answers a fresh 409 (picks gone mid-flight).
-        onRetryWithOverrides={launcher.retry}
+        // The modal stays open until the retry lands, so the pickers are still
+        // there if the server answers a fresh 409.
+        onRetry={launcher.retry}
       />
     </Suspense>
   );

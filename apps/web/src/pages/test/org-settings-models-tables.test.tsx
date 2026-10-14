@@ -10,6 +10,8 @@ import { describe, expect, it } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 import settingsFr from "../../locales/fr/settings.json";
+import agentsFr from "../../locales/fr/agents.json";
+import commonFr from "../../locales/fr/common.json";
 import type { ModelProviderCredentialInfo } from "../../hooks/use-model-provider-credentials.ts";
 import type { OrgModelInfo } from "../../hooks/use-models.ts";
 
@@ -17,7 +19,7 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { ModelsList } = await import("../org-settings/models.tsx");
+const { ModelsList, ModelTestResult } = await import("../org-settings/models.tsx");
 const { CredentialsSection } = await import("../../components/model-credentials-section.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
@@ -118,7 +120,7 @@ describe("the credentials table, as Bob sees it", () => {
     expect(row(ORG_KEY.id)).toContain(`>${settingsFr["source.org"]}<`);
   });
 
-  it("names the holder for a personal credential", () => {
+  it("names the owner for a personal credential", () => {
     expect(row(BOB_SUBSCRIPTION.id)).toContain(">Bob<");
     expect(row(ALICE_SUBSCRIPTION.id)).toContain(">Alice<");
   });
@@ -145,13 +147,42 @@ describe("the credentials table, where a subscription needs reconnecting", () =>
   ]);
   const row = (id: string) => rowOf(html, `data-testid="credential-row-${id}"`);
 
-  it("offers the reconnect to the holder only", () => {
+  it("offers the reconnect on the row whose allowed actions list it, and on no other", () => {
     expect(row(BOB_SUBSCRIPTION.id)).toContain(settingsFr["credentials.oauth.reconnect"]);
     expect(row(ALICE_SUBSCRIPTION.id)).not.toContain(settingsFr["credentials.oauth.reconnect"]);
   });
 });
 
-describe("the credentials table, where a subscription the holder may re-pair is healthy", () => {
+describe("the credentials table, where an organization subscription needs reconnecting", () => {
+  const ORG_SUBSCRIPTION = credential({
+    id: "cred_org_sub",
+    label: "Abonnement de l'équipe",
+    providerId: "claude-code",
+    authMode: "oauth2",
+    oauth_email: "team@example.com",
+    needs_reconnection: true,
+    allowed_actions: ["edit", "delete", "reconnect"],
+  });
+  const reconnect = settingsFr["credentials.oauth.reconnect"];
+  const rowFor = (c: ModelProviderCredentialInfo) =>
+    rowOf(credentialsPage([c]), `data-testid="credential-row-${c.id}"`);
+
+  it("names the organization as its owner", () => {
+    expect(rowFor(ORG_SUBSCRIPTION)).toContain(`>${settingsFr["source.org"]}<`);
+  });
+
+  it("offers the reconnect where the server lists it", () => {
+    expect(rowFor(ORG_SUBSCRIPTION)).toContain(reconnect);
+  });
+
+  it("withholds it from a reader the server does not allow, with the badge still shown", () => {
+    const row = rowFor({ ...ORG_SUBSCRIPTION, allowed_actions: ["test"] });
+    expect(row).not.toContain(reconnect);
+    expect(row).toContain(settingsFr["credentials.oauth.needsReconnection"]);
+  });
+});
+
+describe("the credentials table, where a subscription that lists the reconnect is healthy", () => {
   const html = credentialsPage([
     { ...BOB_SUBSCRIPTION, allowed_actions: ["edit", "delete", "test", "reconnect"] },
   ]);
@@ -192,7 +223,7 @@ describe("the models table, for the credential each model names", () => {
   const bound = model({ id: "mdl_bound" });
   const unbound = model({
     id: "mdl_each",
-    binding: "member",
+    binding: "user",
     credentialId: null,
     billed_to: null,
   });
@@ -219,5 +250,22 @@ describe("the models table, for the credential each model names", () => {
 
   it("says that each member brings their own credential, for an unbound model", () => {
     expect(row(unbound.id)).toContain(settingsFr["models.credentialEachMember"]);
+  });
+});
+
+describe("a model's connection-test result", () => {
+  const line = (error: string) =>
+    render(<ModelTestResult result={{ ok: false, latency: 0, error, message: "server detail" }} />);
+
+  it("words a dead credential as a model's, not as an integration connection", () => {
+    const html = line("NEEDS_RECONNECTION");
+    expect(html).toContain(settingsFr["models.credentialUnavailableHint"]);
+    expect(html).not.toContain(agentsFr["error.needsReconnection"]);
+  });
+
+  it("leaves every other failure to the shared result line", () => {
+    const html = line("AUTH_FAILED");
+    expect(html).toContain(commonFr["apiError.auth_failed"]);
+    expect(html).not.toContain(settingsFr["models.credentialUnavailableHint"]);
   });
 });

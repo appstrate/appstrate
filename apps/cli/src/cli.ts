@@ -65,6 +65,7 @@ import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
+import { parseConnectionFlags } from "./commands/run/connection-flag.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
 import {
   startCommand,
@@ -233,7 +234,7 @@ program
   )
   .option(
     "--app-url <url>",
-    "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL + TRUSTED_ORIGINS and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
+    "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
   )
   .option(
     "--force",
@@ -1112,7 +1113,7 @@ program
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",
-    "Stream events to the Appstrate instance: auto (default — on when a profile is present), true (force on), false (off)",
+    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first)",
   )
   .option(
     "--report-fallback <mode>",
@@ -1125,6 +1126,12 @@ program
   .option(
     "--proxy <id>",
     "Proxy id to associate with the run (overrides per-space run-config inheritance)",
+  )
+  .option(
+    "--connection <integration>=<connection-id>",
+    "Connection the run binds to an integration (repeatable). Several values for one integration form its set under --remote; a run executed locally binds one connection per integration. Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
+    collect,
+    [],
   )
   .option(
     "--no-inherit",
@@ -1162,6 +1169,7 @@ program
       reportFallback: parseReportFallback(opts.reportFallback),
       sinkTtl: parseSinkTtl(opts.sinkTtl),
       proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
+      connectionOverrides: parseConnectionFlags(opts.connection as string[]),
       // Same `--no-X` mapping: commander stores the negated flag at
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.

@@ -26,7 +26,7 @@ import {
   PERMISSION_REQUIREMENT_MARKER,
   reportPermissionDenial,
 } from "@appstrate/core/permissions";
-import { forbidden } from "../lib/errors.ts";
+import { forbidden, type ApiError } from "../lib/errors.ts";
 import { ceilingAllows, type Resource, type Action, type Permission } from "../lib/permissions.ts";
 import { hasHandlerMarker, markHandler, readHandlerMarker } from "./handler-marker.ts";
 
@@ -63,9 +63,15 @@ export function requirePermission<R extends Resource>(resource: R, action: Actio
 }
 
 /**
- * Assert a permission from inside a handler — same audit hook and same 403 as
- * {@link requirePermission}, for a check that can only run once a row is loaded.
+ * The 403 of a missing permission decided inside a handler — same audit hook and
+ * same body as {@link requirePermission}.
  */
+export function permissionDenied(c: Context<AppEnv>, required: string): ApiError {
+  reportPermissionDenial(c, required);
+  return forbidden(`Insufficient permissions: ${required} required`);
+}
+
+/** Assert a permission from inside a handler, for a check that can only run once a row is loaded. */
 export function assertPermission<R extends Resource>(
   c: Context<AppEnv>,
   resource: R,
@@ -73,8 +79,7 @@ export function assertPermission<R extends Resource>(
 ): void {
   const required = `${resource as string}:${action as string}`;
   if (c.get("permissions")?.has(required)) return;
-  reportPermissionDenial(c, required);
-  throw forbidden(`Insufficient permissions: ${required} required`);
+  throw permissionDenied(c, required);
 }
 
 /**

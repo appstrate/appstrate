@@ -52,6 +52,8 @@ Adding a built-in module is mechanical: drop a directory with `index.ts` and `te
 | Auth in tests | Real Better Auth sign-up → session cookie (not mock auth)           |
 | DB cleanup    | `DELETE FROM` in FK-safe order (not `TRUNCATE` — avoids deadlocks)  |
 
+**Temp files** go under `os.tmpdir()`: a preload (`ownTmpdir()`, `test/setup/temp-dirs.ts`) points it at one directory per process (`apst-<pid>`), removed after the last test file and swept by the next run when the process was killed. Bun reads `bunfig.toml` from the working directory only, so this holds from the repository root and the module directories (root preload) and from `apps/cli`, `packages/{core,afps-runtime,runner-pi}`, `runtime-pi`, `runtime-pi/sidecar` and `scripts/conformance` (light `test/setup/tmpdir-preload.ts`); elsewhere nothing redirects (`apps/api`, `packages/connect` and `packages/db` run from the root). Only a child started through `Bun.spawn` / `Bun.spawnSync` without an explicit `env` keeps the tmpdir bun started with; `node:child_process` and `Bun.$` children inherit the redirect.
+
 Instead of `mock.module()` (banned, see root `AGENTS.md`), use dependency injection: optional `deps` parameter with production defaults, constructor injection, or function-parameter injection (runtime-pi pattern). For middleware that calls services (e.g. `requireAgent` → `getPackage`), use integration tests with real DB instead of mocking the service layer.
 
 ## Helpers (`apps/api/test/helpers/`)

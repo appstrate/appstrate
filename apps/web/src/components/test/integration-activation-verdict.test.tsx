@@ -97,6 +97,7 @@ function cardFor(permissions: string[], personal: boolean): string {
     return render(
       <AgentIntegrationsBlock
         entries={[{ id: "@acme/gmail", version: "1.0.0", tools: undefined, scopes: undefined }]}
+        agentPackageId="@acme/agent"
       />,
       { queryClient: qc },
     );

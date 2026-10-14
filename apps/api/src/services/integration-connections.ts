@@ -99,6 +99,7 @@ import {
   forbidden,
   validationFailed,
 } from "../lib/errors.ts";
+import { proxyProblem } from "../lib/proxy-status.ts";
 import {
   evaluateJsonPath,
   JsonPathSyntaxError,
@@ -109,7 +110,9 @@ import { actorFromIds, actorInsert, actorFilter, actorOwns } from "../lib/actor.
 import {
   connectionActions,
   meConnectionAuthorityFilter,
+  OLDEST_FIRST,
   ownRowInSpace,
+  ownUsableInSpace,
   sharedInto,
   usableInSpace,
   type ConnectionCaller,
@@ -154,7 +157,7 @@ import {
   renderRemoteSource,
   toSupportedTokenEndpointAuthMethod,
 } from "./integration-manifest-helpers.ts";
-import { fetchMcpServerManifest } from "./integration-service.ts";
+import { fetchMcpServerManifest, readMcpServerTools } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
   disableSchedules,
@@ -164,6 +167,11 @@ import {
   schedulesNamingAny,
 } from "./schedules-naming-connection.ts";
 import {
+  disableSchedulesLeftUnnamed,
+  pinLayer,
+  schedulesLayerMayName,
+} from "./schedules-named-by-layer.ts";
+import {
   actorIdentityOf,
   candidateOf,
   proxyRequirement,
@@ -171,11 +179,14 @@ import {
   toLaunchOverrides,
   translateResolutionError,
 } from "./integration-connection-resolver.ts";
-import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
+import {
+  listOrgDefaultsForResolver,
+  type OrgDefaultPick,
+} from "./integration-org-defaults-service.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
-import { getIntegration, getOrgWideIntegrationManifest } from "./integration-service.ts";
+import { readIntegrationManifestForConnect } from "./integration-service.ts";
 import { assertSpaceInScope } from "./spaces.ts";
 
 // ─────────────────────────────────────────────
@@ -224,17 +235,18 @@ function lookupAuth(
   return auth;
 }
 
+/** The manifest connecting reads ({@link readIntegrationManifestForConnect}), or a 404. */
 async function loadManifestOrThrow(
   scope: SpaceScope | OrgScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
-  const manifest = isSpaceOwner(scope)
-    ? (await getIntegration(scope, packageId))?.manifest
-    : await getOrgWideIntegrationManifest(scope.orgId, packageId);
-  if (!manifest) {
-    throw notFound(`Integration '${packageId}' not found in this organization`);
-  }
-  return manifest;
+  const read = await readIntegrationManifestForConnect(scope, packageId);
+  if (read.ok) return read.manifest;
+  throw notFound(
+    read.reason === "no_usable_version"
+      ? `Integration '${packageId}' has no usable published version to connect through: publish one`
+      : `Integration '${packageId}' not found in this organization`,
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -280,7 +292,6 @@ export interface ReconnectTarget {
   id: string;
   /** `null`: the row serves its whole org, so its reconnect resolves no space client. */
   spaceId: string | null;
-  label: string;
   scopesGranted: string[];
 }
 
@@ -293,17 +304,24 @@ export async function assertConnectionBelongsToActor(
 ): Promise<ReconnectTarget> {
   const target = await readReconnectTarget({ ...input, connectionId, actor: principal.actor });
   if (!target) throw notFound("Connection not found");
-  if (principal.kind === "delegated" && target.spaceId !== input.spaceId) {
-    throw delegatedReconnectRefused();
-  }
+  assertDelegatedReconnect(principal.kind === "delegated", target.spaceId, input.spaceId);
   return target;
 }
 
-/** A delegated credential (API key, third-party token) acts from its space only. */
-function delegatedReconnectRefused(): ApiError {
-  return forbidden(
-    "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
-  );
+/**
+ * A delegated credential (API key, third-party token) reconnects only a row scoped to the space it
+ * acts in. Asked at the door and again under the write's row lock.
+ */
+function assertDelegatedReconnect(
+  delegated: boolean | undefined,
+  rowSpaceId: string | null,
+  spaceId: string,
+): void {
+  if (delegated && rowSpaceId !== spaceId) {
+    throw forbidden(
+      "A delegated credential cannot reconnect a connection serving the whole organization: its owner reconnects it from their own session",
+    );
+  }
 }
 
 function scopeNarrowingRefused(remedy: string): ApiError {
@@ -413,16 +431,20 @@ export interface RunBoundSelection {
   boundSet: () => Promise<readonly { connectionId: string }[]>;
 }
 
-interface ConnectionSelectionContext {
-  spaceId: string;
-  actor: Actor;
-  run?: RunBoundSelection;
-}
+export type ProxyReach = "own" | "usable";
+
+/** What a proxy call selects from: a run's bound set, or the caller's reach outside a run. */
+export type ProxySelectionPath<R extends RunBoundSelection = RunBoundSelection> =
+  { run: R; reach?: never } | { reach: ProxyReach; run?: never };
+
+type ConnectionSelectionContext = { spaceId: string; actor: Actor } & ProxySelectionPath;
 
 /**
- * The credential proxy's connection of `packageId`: under a run, a member of its bound set; else
- * the resolver's cascade without pins, `namedConnectionId` as the launch override. Either way the
- * pick passes the resolver's health checks.
+ * The credential proxy's connection of `packageId`. Under a run, a member of its bound set, a
+ * colleague's shared row included: the kickoff applied every layer. Outside a run, one of the
+ * rows in reach: `usable` walks the cascade, pins aside; under `own` no org default
+ * applies, and an integration an ENFORCED one governs answers `call_permission_required`. `null` when nothing
+ * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -432,12 +454,14 @@ export async function selectAccessibleConnection(
 ): Promise<ResolvedConnectionRow | null> {
   let named = namedConnectionId?.toLowerCase() ?? null;
   const identity = actorIdentityOf(context.actor);
-  const candidatesOf = (rows: readonly SelectableRow[]) =>
-    rows.map((r) => candidateOf(identity, r, []));
-  const { run } = context;
-  let bound: readonly { connectionId: string }[] = [];
+  const candidatesOf = (set: readonly SelectableRow[]) =>
+    set.map((r) => candidateOf(identity, r, []));
+  const { run, reach } = context;
+  let rows: SelectableRow[];
+  // A run's bound set passed governance at kickoff, and the `own` reach skips every layer.
+  let orgDefaults: Record<string, OrgDefaultPick> | null = null;
   if (run) {
-    bound = await run.boundSet();
+    const bound = await run.boundSet();
     if (named) {
       requireRunBoundMember({
         runId: run.id,
@@ -451,28 +475,36 @@ export async function selectAccessibleConnection(
     } else if (bound.length === 0) {
       return null;
     }
+    rows = await listReachableConnections(context, "usable", [packageId]);
+    if (!named) {
+      const ids = new Set(bound.map((m) => m.connectionId));
+      throw mustChoose(
+        packageId,
+        candidatesOf(rows.filter((r) => ids.has(r.id))),
+        `Run '${run.id}' bound several connections`,
+      );
+    }
+  } else {
+    const spaceDefaults = await listOrgDefaultsForResolver(context.spaceId);
+    if (reach === "usable") {
+      orgDefaults = spaceDefaults;
+    } else if (spaceDefaults[packageId]?.enforce) {
+      throw proxyProblem(
+        "call_permission_required",
+        `Integration '${packageId}' is governed by an enforced org default in this space: it is ` +
+          `reached by a caller holding credential-proxy:call, or through an agent run the ` +
+          `platform executes.`,
+      );
+    }
+    rows = await listReachableConnections(context, reach, [packageId]);
   }
 
-  // Under a run the bound set already passed governance at kickoff: no org default re-applies.
-  const [rows, orgDefaults] = await Promise.all([
-    loadSelectableRows(packageId, context),
-    run ? null : listOrgDefaultsForResolver(context.spaceId),
-  ]);
-  if (run && !named) {
-    const ids = new Set(bound.map((m) => m.connectionId));
-    throw mustChoose(
-      packageId,
-      candidatesOf(rows.filter((r) => ids.has(r.id))),
-      `Run '${run.id}' bound several connections`,
-    );
-  }
   const { resolved, errors } = resolveConnections({
     requirements: [proxyRequirement(packageId, manifest)],
     accessibleConnections: rows,
     pins: [],
     orgDefaults,
     launchOverrides: toLaunchOverrides(named ? { [packageId]: [named] } : null, "run_override"),
-    spaceId: context.spaceId,
     ...identity,
   });
   const error = errors[0];
@@ -481,40 +513,54 @@ export async function selectAccessibleConnection(
   }
   if (error?.code === "must_choose_connection") {
     const candidates = error.candidateConnections ?? [];
-    throw mustChoose(packageId, candidates, "No single own connection applies");
+    const reason = candidates.some((c) => c.ownedByActor)
+      ? "No single connection applies"
+      : "Only connections shared by other members exist";
+    throw mustChoose(packageId, candidates, reason);
   }
   if (error?.code === "override_outranked") {
-    throw new ApiError({
-      status: 400,
-      code: "connection_not_in_org_default",
-      title: "Connection Not In The Enforced Org Default",
-      detail:
-        `Connection '${namedConnectionId}' is not in the enforced org default of ` +
-        `'${packageId}' (members: ${orgDefaults?.[packageId]?.connectionIds.join(", ")}), ` +
-        `which binds every call in this space.`,
-      param: "X-Connection-Id",
-    });
+    throw proxyProblem(
+      "connection_not_in_org_default",
+      `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
+        `which binds every call in this space: name one of its members, or none.`,
+      "X-Connection-Id",
+    );
   }
   if (error) throw resolutionConflict(error);
 
-  // A named connection binds alone; otherwise an org default may bind several.
-  const set = (resolved[packageId] ?? []).map((m) => rows.find((r) => r.id === m.connectionId)!);
+  const set = resolved[packageId]!.map((m) => rows.find((r) => r.id === m.connectionId)!);
   if (set.length === 1) return toResolvedRow(set[0]!);
   throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
 
-/** The actor's accessible rows (own + shared) of `packageId` in the space, in a stable order. */
-function loadSelectableRows(packageId: string, context: { spaceId: string; actor: Actor }) {
+/**
+ * The rows the actor reaches in `spaceId`, {@link OLDEST_FIRST}: under `usable` what it may bind
+ * there ({@link usableInSpace}), under `own` its own ({@link ownUsableInSpace}); of
+ * `integrationIds` when given, of every integration otherwise.
+ */
+export async function listReachableConnections(
+  context: { spaceId: string; actor: Actor },
+  reach: ProxyReach,
+  integrationIds?: string[],
+): Promise<SelectableRow[]> {
+  if (integrationIds?.length === 0) return [];
+  const inReach = reach === "own" ? ownUsableInSpace : usableInSpace;
+  return loadSelectableRows(
+    and(
+      integrationIds === undefined
+        ? undefined
+        : inArray(integrationConnections.integrationId, integrationIds),
+      inReach(context.spaceId, context.actor),
+    ),
+  );
+}
+
+function loadSelectableRows(where: SQL | undefined) {
   return db
     .select({ ...getTableColumns(integrationConnections), credentialRevision })
     .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.integrationId, packageId),
-        usableInSpace(context.spaceId, context.actor),
-      ),
-    )
-    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
+    .where(where)
+    .orderBy(...OLDEST_FIRST);
 }
 
 type SelectableRow = Awaited<ReturnType<typeof loadSelectableRows>>[number];
@@ -2327,6 +2373,14 @@ export async function deleteIntegrationOAuthClient(
   const connectionSpaces = isSpaceOwner(owner)
     ? eq(integrationConnections.spaceId, owner.spaceId)
     : eq(integrationConnections.orgId, owner.orgId);
+  const mintedBefore = await db
+    .select({ id: integrationConnections.id, userId: integrationConnections.userId })
+    .from(integrationConnections)
+    .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces));
+  const schedulesByPin = await schedulesByPinNaming(
+    mintedBefore.map((c) => c.id),
+    mintedBefore.flatMap((c) => (c.userId ? [c.userId] : [])),
+  );
   return db.transaction(async (tx) => {
     // The client, then its rows — the order a connect and a promote take.
     const [client] = await tx
@@ -2374,8 +2428,8 @@ export async function deleteIntegrationOAuthClient(
             )
             .returning(deletedConnectionOwner);
     // Each forget below locks its connection's rows: the owner's member pins naming it, then every
-    // schedule naming it. Locked here first for all of them, in the plan's order, so two batches
-    // cannot each hold a row the other waits on.
+    // schedule naming it or that a pin it may drop names a set for. Locked here first for all of
+    // them, in the plan's order, so two batches cannot each hold a row the other waits on.
     const forgotten = deletedConns.map((c) => c.id);
     const owners = [...new Set(deletedConns.flatMap((c) => (c.userId ? [c.userId] : [])))];
     if (owners.length > 0) {
@@ -2399,13 +2453,13 @@ export async function deleteIntegrationOAuthClient(
       await tx
         .select({ id: schedules.id })
         .from(schedules)
-        .where(schedulesNamingAny(forgotten))
+        .where(or(schedulesNamingAny(forgotten), schedulesIn(schedulesByPin)))
         .orderBy(asc(schedules.id))
         .for("update");
     }
     const disabledScheduleIds: string[] = [];
     for (const row of deletedConns) {
-      disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row)));
+      disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row, schedulesByPin)));
     }
     return {
       client: toPublicClient(projectClientWithSecret(deleted!)),
@@ -2586,6 +2640,8 @@ interface StoreConnectionInput {
   oauthResource?: string;
   /** See {@link PersistTarget}. */
   delegated?: boolean;
+  /** See {@link PersistTarget}; a reconnect only. */
+  onScopeWidened?: (widened: WidenedConnection) => void;
 }
 
 /**
@@ -2624,6 +2680,8 @@ export type PersistTarget =
       authKey: string;
       /** A delegated credential's write: the row must be scoped to `scope.spaceId`, never widened. */
       delegated?: boolean;
+      /** Called once the write committed, when it moved the row to org scope. */
+      onScopeWidened?: (widened: WidenedConnection) => void;
     }
   | {
       kind: "update-by-id";
@@ -3026,9 +3084,7 @@ export async function persistCredentialBundle(
         .limit(1)
         .for("update");
       if (!existing) return undefined;
-      if (target.delegated && existing.spaceId !== target.scope.spaceId) {
-        throw delegatedReconnectRefused();
-      }
+      assertDelegatedReconnect(target.delegated, existing.spaceId, target.scope.spaceId);
       if (clientSpace !== null && existing.spaceId !== clientSpace) {
         throw scopeNarrowingRefused("It was widened while this reconnect ran: reconnect it again.");
       }
@@ -3055,9 +3111,10 @@ export async function persistCredentialBundle(
           `This connection is linked to a different instance (${instance}). Reconnect to the same instance, or create a new connection.`,
         );
       }
-      if (widens && existing.spaceId !== null) {
-        await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId));
-      }
+      const [widened] =
+        widens && existing.spaceId !== null
+          ? await widenConnectionsToOrgScope(tx, eq(integrationConnections.id, target.connectionId))
+          : [];
       const [updated] = await tx
         .update(integrationConnections)
         .set(set)
@@ -3065,11 +3122,12 @@ export async function persistCredentialBundle(
         .returning();
       if (!updated) return undefined;
       const shares = (await loadConnectionShares(tx, [updated.id])).get(updated.id) ?? [];
-      return { updated, shares };
+      return { updated, shares, widened };
     });
     if (!row) {
       throw notFound(`Connection '${target.connectionId}' not found or not owned by caller`);
     }
+    if (row.widened) target.onScopeWidened?.(row.widened);
     return serializeIntegrationConnection(row.updated, {
       here: target.scope.spaceId,
       shares: row.shares,
@@ -3289,6 +3347,7 @@ export async function saveIntegrationConnection(
           packageId: input.packageId,
           authKey: input.authKey,
           ...(input.delegated ? { delegated: true } : {}),
+          ...(input.onScopeWidened ? { onScopeWidened: input.onScopeWidened } : {}),
         },
         persistInput,
       )
@@ -3306,7 +3365,7 @@ export async function saveIntegrationConnection(
 }
 
 /**
- * The resolver's set ({@link usableInSpace}), each row projected for `caller`
+ * The resolver's set ({@link listReachableConnections} under `usable`), each row projected for `caller`
  * ({@link connectionViewOf}), with the actions it holds and, for its owner, the spaces it may share
  * it into under its org role `orgRole` here (`null`: none). `locked_by`: what a 409 would refuse —
  * an own row's delete (a lock anywhere), another's withdrawal from this space.
@@ -3319,12 +3378,9 @@ export async function listIntegrationConnections(
 ): Promise<IntegrationConnectionSummary[]> {
   await assertSpaceInScope(scope);
   const actor = caller.principal.actor;
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(eq(integrationConnections.integrationId, packageId), usableInSpace(scope.spaceId, actor)),
-    );
+  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, "usable", [
+    packageId,
+  ]);
   const ownerName = await resolveConnectionOwnerNames(rows);
   const own = rows.filter((row) => actorOwns(actor, row)).map((row) => row.id);
   const others = rows.filter((row) => !actorOwns(actor, row)).map((row) => row.id);
@@ -3527,6 +3583,11 @@ export async function deleteOwnConnection(
   principal: ConnectionPrincipal,
   connectionId: string,
 ): Promise<{ orgId: string; disabledScheduleIds: string[] } | null> {
+  const { actor } = principal;
+  const schedulesByPin = await schedulesByPinNaming(
+    [connectionId],
+    actor.type === "user" ? [actor.id] : [],
+  );
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select({
@@ -3551,7 +3612,10 @@ export async function deleteOwnConnection(
     }
     await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
     await tx.delete(integrationConnections).where(eq(integrationConnections.id, row.id));
-    return { orgId: row.orgId, disabledScheduleIds: await forgetDeletedConnection(tx, row) };
+    return {
+      orgId: row.orgId,
+      disabledScheduleIds: await forgetDeletedConnection(tx, row, schedulesByPin),
+    };
   });
 }
 
@@ -3562,21 +3626,67 @@ const deletedConnectionOwner = {
 };
 
 /**
+ * By pin id, the schedules each member pin of `ownerIds` naming one of `connectionIds` may name a
+ * set for ({@link schedulesLayerMayName}): read before the delete's transaction opens.
+ */
+async function schedulesByPinNaming(
+  connectionIds: string[],
+  ownerIds: string[],
+): Promise<Map<string, string[]>> {
+  const schedulesByPin = new Map<string, string[]>();
+  if (connectionIds.length === 0 || ownerIds.length === 0) return schedulesByPin;
+  const pins = await db
+    .select({ ...pinForgetColumns, userId: integrationPins.userId })
+    .from(integrationPins)
+    .where(
+      and(
+        inArray(integrationPins.userId, ownerIds),
+        arrayOverlaps(integrationPins.connectionIds, connectionIds),
+      ),
+    );
+  for (const pin of pins) {
+    schedulesByPin.set(pin.id, await schedulesLayerMayName(pinLayer(pin, pin.userId)));
+  }
+  return schedulesByPin;
+}
+
+/** The schedules `schedulesByPin` holds, as a lock filter; `undefined` for none. */
+function schedulesIn(schedulesByPin: ReadonlyMap<string, string[]>): SQL | undefined {
+  const ids = [...schedulesByPin.values()].flat();
+  return ids.length > 0 ? inArray(schedules.id, ids) : undefined;
+}
+
+/**
  * Drop a deleted connection from its OWNER's member pins and schedule overrides, and disable other
- * actors' schedules naming it ({@link planConnectionForget}). Returns the schedules it disabled,
+ * actors' schedules naming it ({@link planConnectionForget}) and those of `schedulesByPin` a pin it
+ * drops leaves unnamed ({@link schedulesByPinNaming}). Returns the schedules it disabled,
  * whose jobs the caller removes once committed (importing the scheduler here would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
   row: { id: string; userId: string | null; endUserId: string | null },
+  schedulesByPin: ReadonlyMap<string, string[]>,
 ): Promise<string[]> {
   // `integration_connections` holds exactly one owner id.
   const owner = actorFromIds(row.userId, row.endUserId)!;
-  const plan = await planConnectionForget(tx, { id: row.id, owner }, { lock: true });
+  const plan = await planConnectionForget(
+    tx,
+    { id: row.id, owner },
+    { lock: true, alsoLock: schedulesIn(schedulesByPin) },
+  );
+  const unnamed: string[] = [];
   for (const pin of plan.pins) {
     // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
+      unnamed.push(
+        ...(await disableSchedulesLeftUnnamed(
+          tx,
+          pinLayer(pin, owner.id),
+          schedulesByPin.get(pin.id) ?? [],
+          "connection_deleted",
+        )),
+      );
     } else {
       await tx
         .update(integrationPins)
@@ -3597,12 +3707,17 @@ async function forgetDeletedConnection(
       .where(eq(schedules.id, schedule.id));
   }
   await disableSchedules(tx, plan.foreignScheduleIds, "connection_deleted");
-  return [...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])), ...plan.foreignScheduleIds];
+  return [
+    ...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])),
+    ...plan.foreignScheduleIds,
+    ...unnamed,
+  ];
 }
 
 /** One of the owner's member pins naming the connection. */
 interface PinForget {
   id: string;
+  spaceId: string;
   agentPackageId: string;
   integrationId: string;
   connectionIds: string[];
@@ -3631,30 +3746,35 @@ interface ConnectionForgetPlan {
   foreignScheduleIds: string[];
 }
 
+const pinForgetColumns = {
+  id: integrationPins.id,
+  spaceId: integrationPins.spaceId,
+  agentPackageId: integrationPins.packageId,
+  integrationId: integrationPins.integrationId,
+  connectionIds: integrationPins.connectionIds,
+};
+
 /**
  * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
  * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
  * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
- * a caller that applies the plan in the same transaction. `scheduleFilter` narrows both schedule
- * lists (a schedule may name a connection of another space), `pinFilter` the pins.
+ * a caller that applies the plan in the same transaction; `alsoLock` joins schedules to that
+ * statement, outside the plan. `scheduleFilter` narrows both schedule lists (a schedule may name a
+ * connection of another space), `pinFilter` the pins.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
   connection: { id: string; owner: Actor },
   {
     lock = false,
+    alsoLock,
     scheduleFilter,
     pinFilter,
-  }: { lock?: boolean; scheduleFilter?: SQL; pinFilter?: SQL } = {},
+  }: { lock?: boolean; alsoLock?: SQL; scheduleFilter?: SQL; pinFilter?: SQL } = {},
 ): Promise<ConnectionForgetPlan> {
   const { id, owner } = connection;
   const pinQuery = executor
-    .select({
-      id: integrationPins.id,
-      agentPackageId: integrationPins.packageId,
-      integrationId: integrationPins.integrationId,
-      connectionIds: integrationPins.connectionIds,
-    })
+    .select(pinForgetColumns)
     .from(integrationPins)
     .where(
       and(
@@ -3670,6 +3790,7 @@ export async function planConnectionForget(
     );
   // Every actor's schedules in one id-ordered statement (`schedules-naming-connection.ts`), split
   // below: the owner's are rewritten, the others' disabled.
+  const inPlan = and(scheduleOverridesName(id), scheduleFilter);
   const scheduleQuery = executor
     .select({
       id: schedules.id,
@@ -3680,12 +3801,14 @@ export async function planConnectionForget(
       endUserId: schedules.endUserId,
       enabled: schedules.enabled,
       connectionOverrides: schedules.connectionOverrides,
+      inPlan: sql<boolean>`${inPlan}`,
     })
     .from(schedules)
-    .where(and(scheduleOverridesName(id), scheduleFilter))
+    .where(or(inPlan, alsoLock))
     .orderBy(asc(schedules.id));
   const pinRows = await (lock ? pinQuery.for("update") : pinQuery);
-  const scheduleRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  const lockedRows = await (lock ? scheduleQuery.for("update") : scheduleQuery);
+  const scheduleRows = lockedRows.filter((row) => row.inPlan);
   const ownRows = scheduleRows
     .filter((row) => scheduleActorIs(row, owner))
     .sort(
@@ -3939,21 +4062,8 @@ export async function getIntegrationAuthStatuses(
   // package is missing the resolver still falls back to the integration's
   // sparse `tools{}` keys.
   const localRef = getLocalServerRef(manifest);
-  let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
-  if (localRef) {
-    const mcpServer = await fetchMcpServerManifest(localRef.name);
-    if (mcpServer) {
-      const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
-      if (Array.isArray(t)) {
-        mcpServerTools = t
-          .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
-          .map((e) => ({
-            name: e.name,
-            description: typeof e.description === "string" ? e.description : undefined,
-          }));
-      }
-    }
-  }
+  const mcpServer = localRef ? await fetchMcpServerManifest(localRef.name) : null;
+  const mcpServerTools = mcpServer ? readMcpServerTools(mcpServer) : undefined;
   // The resolver already emits the snake_case wire shape
   // (`policy.required_scopes`), so the catalog passes through verbatim.
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
@@ -4030,10 +4140,9 @@ export async function getIntegrationAuthStatuses(
 }
 
 /**
- * Surfaces the manifest's `auth` declaration verbatim — used by the
- * OAuth initiate handler to read endpoints + resource + scopes without
- * a second DB round-trip. Returns the full manifest too so callers that
- * need the wider catalog don't re-fetch.
+ * The `auth` declaration every connect flow acts on (kickoff, hosted page, callback, strategies),
+ * with its manifest: the published one, never the draft of a published integration
+ * ({@link readIntegrationManifestForConnect}).
  */
 export async function readIntegrationAuth(
   scope: SpaceScope,

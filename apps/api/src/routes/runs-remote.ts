@@ -51,8 +51,16 @@ import {
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
 import type { IntegrationManifestCache } from "../services/integration-service.ts";
 import { collectFileRefs } from "../services/input-parser.ts";
-import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
-import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
+import {
+  assertConnectionOverridesAllowed,
+  connectionOverridesSchema,
+  dependencyOverridesSchema,
+} from "../lib/launch-schemas.ts";
+import {
+  insertShadowPackage,
+  buildShadowLoadedPackage,
+  deleteOrphanShadowPackage,
+} from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
@@ -60,6 +68,10 @@ import { validateInput } from "../services/schema.ts";
 import { getSpacePackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
+import {
+  toLaunchOverrides,
+  type LaunchOverrides,
+} from "../services/integration-connection-resolver.ts";
 import { versionRefOf } from "../services/agent-version-resolver.ts";
 import { assertSpaceInScope } from "../services/spaces.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
@@ -134,6 +146,9 @@ export const CreateRemoteRunBodySchema = z
     // platform run route's value gate (`isValidDependencyOverride`); the KEY
     // gate + pin resolution happen in `freezeRunSpawnDependencies`.
     dependency_overrides: dependencyOverridesSchema.optional(),
+    // Run-level, both source shapes. The KEY gate needs the effective manifest:
+    // each branch asks it below.
+    connection_overrides: connectionOverridesSchema.optional(),
     contextSnapshot: z
       .record(z.string(), z.unknown())
       .optional()
@@ -245,6 +260,7 @@ export function createRunsRemoteRouter() {
       // Seeded by the inline preflight only — the registry branch resolves no
       // pins of its own, so `createRun` creates its own Map there.
       let manifestCache: IntegrationManifestCache | undefined;
+      let launchOverrides: LaunchOverrides | null;
       // Normalize an empty map to null (mirrors the platform run route): a
       // non-null map on the row means the run carried explicit overrides.
       const dependencyOverrides =
@@ -287,6 +303,11 @@ export function createRunsRemoteRouter() {
         agentForRun = resolved.agent;
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
+        assertConnectionOverridesAllowed(
+          agentForRun.manifest as unknown as Record<string, unknown>,
+          body.connection_overrides,
+        );
+        launchOverrides = toLaunchOverrides(body.connection_overrides, "run_override");
         await assertDependencyDraftOverridesAllowed(
           c,
           dependencyOverrides,
@@ -338,6 +359,7 @@ export function createRunsRemoteRouter() {
           orgId,
           spaceId,
           actor,
+          launchOverrides,
         });
       } else {
         // Composing: `agents:write` on top of the route's `agents:run` —
@@ -364,6 +386,7 @@ export function createRunsRemoteRouter() {
             manifest: src.manifest,
             prompt: src.prompt,
             input: body.input,
+            connection_overrides: body.connection_overrides,
           },
         });
 
@@ -372,6 +395,7 @@ export function createRunsRemoteRouter() {
 
         effectiveInput = preflight.effectiveInput;
         warnings = preflight.warnings;
+        launchOverrides = preflight.launchOverrides;
         // Already seeded with the PINNED integration manifests — `createRun`
         // reuses it instead of resolving every pin a second time.
         manifestCache = preflight.manifestCache;
@@ -394,30 +418,36 @@ export function createRunsRemoteRouter() {
       // never reach a remote host's workspace. Applies to both source shapes:
       // `agentForRun.manifest` is the resolved manifest in either branch.
       const fileInputSchema = agentForRun.manifest.input?.schema;
-      if (fileInputSchema) {
-        assertNoPlatformFileRefs(asJSONSchemaObject(fileInputSchema), effectiveInput ?? {});
-      }
-
       const runId = `run_${crypto.randomUUID()}`;
-      const runner = await resolveRunnerContext(c);
-      const result = await createRun({
-        runId,
-        orgId,
-        spaceId,
-        actor,
-        agent: agentForRun,
-        ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
-        input: effectiveInput,
-        // Normalize an empty map to null (mirrors the platform run route): a
-        // non-null map on the row means the run carried explicit overrides.
-        dependencyOverrides,
-        apiKeyId: c.get("apiKeyId") ?? undefined,
-        sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
-        contextSnapshot: body.contextSnapshot,
-        runnerName: runner.name,
-        runnerKind: runner.kind,
-        ...(manifestCache ? { manifestCache } : {}),
-      });
+      let result: Awaited<ReturnType<typeof createRun>>;
+      try {
+        if (fileInputSchema) {
+          assertNoPlatformFileRefs(asJSONSchemaObject(fileInputSchema), effectiveInput ?? {});
+        }
+
+        const runner = await resolveRunnerContext(c);
+        result = await createRun({
+          runId,
+          orgId,
+          spaceId,
+          actor,
+          agent: agentForRun,
+          ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
+          input: effectiveInput,
+          dependencyOverrides,
+          launchOverrides,
+          apiKeyId: c.get("apiKeyId") ?? undefined,
+          sink: body.sink ? { ttlSeconds: body.sink.ttl_seconds } : undefined,
+          contextSnapshot: body.contextSnapshot,
+          runnerName: runner.name,
+          runnerKind: runner.kind,
+          ...(manifestCache ? { manifestCache } : {}),
+        });
+      } catch (err) {
+        // A refused inline run leaves no run row, so its shadow package is purged.
+        if (attributionPath === "inline_shadow") await deleteOrphanShadowPackage(agentForRun.id);
+        throw err;
+      }
 
       logger.info("runs.remote.attribution", {
         runId: result.runId,

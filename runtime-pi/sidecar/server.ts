@@ -204,9 +204,9 @@ const oauthTokenCache = new OAuthTokenCache({
 // Bootstrap declared integrations IN THE BACKGROUND so the
 // sidecar's `/mcp` listener comes up immediately (the agent retries the
 // MCP handshake; the per-connection spawn + listTools handshake can
-// take several seconds for a fresh node_modules tree). The agent's
-// first `tools/list` call then briefly awaits this promise via the
-// lazy tools provider below.
+// take several seconds for a fresh node_modules tree). `/mcp` serves at
+// once; `GET /integrations/boot-report` awaits this promise, and the agent
+// reads that report before listing its tools.
 // Run-scoped runtime deps built ONCE and shared between the integration
 // boot pipeline (in-process `api_call` MCP server) and the HTTP `/mcp`
 // surface (`createApp`), so both read the same blob store — resource_link

@@ -151,6 +151,20 @@ export async function fetchMcpServerManifest(packageId: string): Promise<McpServ
   return parsed.data;
 }
 
+/** An mcp-server's MCPB `tools[]`, a `local` integration's catalog; `undefined` when absent. */
+export function readMcpServerTools(
+  manifest: McpServerManifest,
+): { name: string; description?: string }[] | undefined {
+  const tools = (manifest as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
+  if (!Array.isArray(tools)) return undefined;
+  return tools
+    .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
+    .map((e) => ({
+      name: e.name,
+      description: typeof e.description === "string" ? e.description : undefined,
+    }));
+}
+
 // ---------------------------------------------------------------------------
 // Spawn-time package version resolution (single kernel)
 // ---------------------------------------------------------------------------
@@ -597,6 +611,25 @@ export async function getIntegration(
   scope: SpaceScope,
   packageId: string,
 ): Promise<IntegrationSummary | null> {
+  const row = await findPlacedIntegrationRow(scope, packageId);
+  if (!row) return null;
+  const manifest = asIntegrationManifest(row.draftManifest);
+  if (!manifest) {
+    logger.warn("Integration manifest failed validation; treating as missing", {
+      packageId,
+    });
+    return null;
+  }
+  return {
+    id: row.id,
+    manifest,
+    orgId: row.orgId,
+    source: row.source as "local" | "system",
+  };
+}
+
+/** The row behind {@link getIntegration}: the integration PLACED in the space, draft unparsed. */
+async function findPlacedIntegrationRow(scope: SpaceScope, packageId: string) {
   const [row] = await db
     .select({
       id: packages.id,
@@ -616,21 +649,55 @@ export async function getIntegration(
       ),
     )
     .limit(1);
+  return row ?? null;
+}
 
-  if (!row) return null;
-  const manifest = asIntegrationManifest(row.draftManifest);
-  if (!manifest) {
-    logger.warn("Integration manifest failed validation; treating as missing", {
+export type ConnectManifestRead =
+  | { ok: true; manifest: IntegrationManifest }
+  /** `no_usable_version`: versions exist, none of which resolves as `latest` and parses. */
+  | { ok: false; reason: "not_found" | "no_usable_version" };
+
+/**
+ * The manifest everything about CONNECTING reads: the connect flows, the auths a space is shown
+ * as connectable, and the registration of the OAuth clients those connects use. It is the
+ * `latest` published version (a system package's own), and the draft only while nothing is
+ * published.
+ *
+ * A draft changes with no version minted, so once a version exists the endpoints a connect sends
+ * an authorization code, a PKCE verifier and the client secret to are read from that version,
+ * like the credential proxy ({@link readIntegrationManifestForProxy}). The draft is never a
+ * fallback for a published integration, and its own validity plays no part once one exists.
+ *
+ * With a `spaceId` the integration must be PLACED there ({@link getIntegration}'s rule); without
+ * one it is any integration the organization can resolve.
+ */
+export async function readIntegrationManifestForConnect(
+  scope: { orgId: string; spaceId?: string },
+  packageId: string,
+): Promise<ConnectManifestRead> {
+  const placed =
+    scope.spaceId !== undefined
+      ? await findPlacedIntegrationRow({ orgId: scope.orgId, spaceId: scope.spaceId }, packageId)
+      : undefined;
+  if (placed === null) return { ok: false, reason: "not_found" };
+  const res = await resolvePublishedManifest(packageId, "integration", scope.orgId);
+  if (res.ok) {
+    const parsed = parseIntegrationManifest(res.rawManifest);
+    if (parsed.ok) return { ok: true, manifest: parsed.manifest };
+    logger.warn("Published integration manifest failed validation", {
       packageId,
+      version: res.version,
     });
-    return null;
+    return { ok: false, reason: "no_usable_version" };
   }
-  return {
-    id: row.id,
-    manifest,
-    orgId: row.orgId,
-    source: row.source as "local" | "system",
-  };
+  if (res.reason !== "no_published_version") {
+    const missing = res.reason === "not_found" || res.reason === "wrong_type";
+    return { ok: false, reason: missing ? "not_found" : "no_usable_version" };
+  }
+  const draft = placed
+    ? asIntegrationManifest(placed.draftManifest)
+    : await getOrgWideIntegrationManifest(scope.orgId, packageId);
+  return draft ? { ok: true, manifest: draft } : { ok: false, reason: "not_found" };
 }
 
 /**

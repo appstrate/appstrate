@@ -4,6 +4,8 @@ The compose that runs `app.appstrate.com`. **No product code lives here**: `dock
 
 The billing module is `packages/module-ee`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
 
+Staging deploys this same file, from `main`, on every merge: `docs/deployment/STAGING.md`.
+
 ## Layout
 
 |                      |                                                             |
@@ -32,6 +34,16 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 **A release is not always an image swap.** Migrations that cannot be replayed, one-off data scripts, and environment variables that must land at a particular moment are all real. The runbook is the authority; this file is not a substitute for it.
 
+**A redeploy migrates and starts in one step**, so it cannot carry a release that runs data scripts between the two. For such a release, stop the application container, run the migrations and then the scripts from the new image (it ships `scripts/migration/`) against the resource's database, then set the version and redeploy: the migrate service then finds nothing pending. Never with a bare `docker compose` from a checkout of this directory: `name:` is inert under Coolify (below), so that run creates an empty `appstrate-prod_pgdata`, migrates it, succeeds, and the scripts never touch production. Run the image in the network namespace of the resource's database container (labelled `com.docker.compose.project=<resource-uuid>` and `com.docker.compose.service=appstrate-postgres`), with the stopped application container's environment: a script validates the platform's whole environment schema when it opens the database, so `DATABASE_URL` alone fails before connecting. That `DATABASE_URL` must name that postgres.
+
+```sh
+docker run --rm --network container:<postgres container> \
+  --env-file <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' <app container>) \
+  ghcr.io/appstrate/appstrate:<version> bun scripts/migration/<script>.ts
+```
+
+The migrations are `bun packages/db/src/migrate.ts` the same way. Which scripts a release needs, and in what order, is in `scripts/migration/README.md`; the exact commands are in the release runbook.
+
 ## Production
 
 Deployed by Coolify as a single `dockercompose` application resource. Its UUID is not written here on purpose: the UUID names the volumes, and a stale one in a document is worse than none — read it off the resource.
@@ -47,8 +59,6 @@ Facts worth writing down, because each one is easy to break:
 - **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 5) refuses one, and `env_file` is what delivers the operator's variables instead.
 
 - **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`: a raw `docker compose` refuses to start without it, and Coolify documents that form as flagging the variable and blocking the deploy until a value is entered. There is no fallback list, and the code default names no billing module. Set it on the resource with `@appstrate/module-ee` included; its Stripe keys are then required (`.env.example` lists them).
-
-- **`MODULES` must never name a subscription module on this deployment.** `@appstrate/module-claude-code` and `@appstrate/module-codex` are never enabled in production; see `docs/architecture/SUBSCRIPTION_COMPLIANCE.md`. Re-read the value before every release.
 
 - **Check what Coolify actually ran, not this file.** Coolify rewrites the compose before running it, so after a deploy read `/data/coolify/applications/<uuid>/docker-compose.yaml` on the server: `MODULES` must appear there with the resource's value, `@appstrate/module-ee` included.
 

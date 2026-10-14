@@ -8,20 +8,24 @@
  *     bun scripts/migration/0041-widen-connections-to-org-scope.ts [--apply]
  *
  * Drizzle `0086` left every row space-scoped; this widens the user-owned rows not minted by a space
- * client (`widenConnectionsToOrgScope`). Run after the deploy, `pg_dump` first. Refuses an empty
- * `DATABASE_URL` (the client would open `./data/pglite`). One transaction per organization, so the
- * label locks stay bounded; dry run by default (each rolled back), `--apply` commits each. Idempotent.
+ * client (`widenConnectionsToOrgScope`). Run in the deploy window, after the migrate service and
+ * `0044`, the app stopped until `0045` has run: a schedule fire answering `must_choose_connection`
+ * in between disables its schedule. `pg_dump` first.
+ * Targets `DATABASE_URL` or `PGLITE_DATA_DIR`, exits 2 with neither (`lib/database-target.ts`).
+ * One transaction per organization, so the label locks stay bounded; dry run by default (each
+ * rolled back), `--apply` commits each. Idempotent.
  */
 
 import { parseArgs } from "node:util";
 import { sql, type SQL } from "drizzle-orm";
 import { integrationConnections as c, integrationOauthClients } from "@appstrate/db/schema";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { exitUnlessDatabaseNamed } from "./lib/database-target.ts";
 
 class DryRunRollback extends Error {}
 
 /** User-owned, space-scoped, not minted by a space client. Table-qualified: never alias the table. */
-const TO_WIDEN: SQL = sql`${c.spaceId} IS NOT NULL AND ${c.endUserId} IS NULL AND NOT EXISTS (
+export const TO_WIDEN: SQL = sql`${c.spaceId} IS NOT NULL AND ${c.endUserId} IS NULL AND NOT EXISTS (
   SELECT 1 FROM ${integrationOauthClients} o WHERE o.id::text = ${c.clientRef} AND o.space_id IS NOT NULL)`;
 
 export interface WidenedConnection {
@@ -92,6 +96,7 @@ export async function runWidenConnectionsToOrgScope(options: {
 }
 
 if (import.meta.main) {
+  exitUnlessDatabaseNamed();
   let code = 1;
   let closeDb: (() => Promise<void>) | undefined;
   try {
@@ -101,9 +106,6 @@ if (import.meta.main) {
       strict: true,
     });
     const apply = values.apply === true;
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is empty — refusing the embedded ./data/pglite; load the .env");
-    }
     ({ closeDb } = await import("@appstrate/db/client"));
     const out = (line: string) => process.stdout.write(`${line}\n`);
     out(`0041 — ${apply ? "APPLY" : "DRY RUN"}`);

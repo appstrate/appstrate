@@ -129,8 +129,9 @@ export const integrationConnections = pgTable(
     // gymnastics. Never empty and unique per owner (`idx_integration_conn_owner_label`);
     // the resolver disambiguates a bound set holding two owners' equal labels.
     label: text("label").notNull(),
-    // Read only by scripts/migration/0044; no code reads or writes it. Dropped with its CHECKs in
-    // the next release. Shares live in `integration_connection_shares`.
+    // Read only by scripts/migration/0044 and the boot guard `assertConnectionSharesCopied`
+    // (apps/api/src/lib/boot.ts); no code writes it. Dropped with its CHECKs and the guard in the
+    // next release. Shares live in `integration_connection_shares`.
     sharedSpaceIds: text("shared_space_ids")
       .array()
       .notNull()
@@ -226,10 +227,11 @@ export const integrationConnections = pgTable(
  * never binds a share. Deleting the space or the connection takes the share with it. `org_id` is the
  * connection's org, and both FKs are composite on it, so a share never names a space of another org.
  *
- * Two invariants are enforced by the share service (`apps/api/src/services/connection-shares.ts`),
- * not by a CHECK of this table: an end user's connection is never shared
- * (`assertConnectionShareable`), and a space-scoped row is shared only into its own space (its
- * reach check, `connectionInSpace`). Who added a share is in the audit trail
+ * Two triggers of migration 0091, which drizzle cannot express, hold two rules as
+ * `check_violation`s: an end user's connection is never shared (`ics_end_user_not_shared`), and a
+ * space-scoped row is shared only into its own space (`ics_space_shares_own`).
+ * `ics_share_invariants` judges a share written here, `ics_connection_keeps_shares` a connection
+ * that changes owner or space while it holds shares. Who added a share is in the audit trail
  * (`integration.connection.share_added`), not on the row.
  */
 export const integrationConnectionShares = pgTable(

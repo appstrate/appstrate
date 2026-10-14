@@ -66,6 +66,7 @@ import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-cl
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
+import { isBearerOnlyCaller } from "../../lib/bearer-only.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { enterSpaceById } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -259,7 +260,7 @@ export function buildServerInstructions(
   const stick = pins ? " For a stored agent, `upsertMyIntegrationPin` makes it stick." : "";
   const newId = granted("listIntegrationConnections")
     ? " Once the user finished the link, its id is the newest connection of that integration and account in `listIntegrationConnections`."
-    : " Once the user finished the link, retrying without overrides works only when `source` is `fallback_auto` (the fallback picks a connection of the same account); for a `member_pin` or `org_default`, the new connection must be named in a pin or an override.";
+    : " Once the user finished the link, a retry without overrides answers `must_choose_connection` when `source` is `fallback_auto`: its `candidate_connections` list the new one. For a `member_pin` or `org_default`, it must be named in a pin or an override.";
   const insufficientScopes = connects
     ? ` An \`insufficient_scopes\` item carries no \`connect_url\`: act on its \`remedy\`. \`rebind_by_admin\` or \`rebind_by_schedule_owner\`: create nothing, tell the user an admin (or the schedule's owner) must switch that binding. \`new_connection\` or \`upgrade_or_new\`: create a NEW connection (as above, WITHOUT \`connection_id\`, \`scopes\` = its \`required_scopes\`) and retry with \`connection_overrides\` naming it.${newId}${stick} Under \`upgrade_or_new\` only, you may pass \`connection_id\` instead, upgrading the connection in place, when the user explicitly chose it after you told them it widens every agent using that connection.`
     : ` An \`insufficient_scopes\` item carries no \`connect_url\`: tell the user to create a connection with its \`required_scopes\` (or have the existing one upgraded) in Appstrate and bind it to this run.`;
@@ -274,7 +275,7 @@ export function buildServerInstructions(
   const connectBullets = runs
     ? `
 - Connecting or reconnecting an integration before a run — an integration may be unconnected, expired, needs-reconnection, under-scoped, or otherwise unusable. Do NOT pre-validate just to launch a "do it now" ${inline ? "inline run" : "run"}: \`run_and_wait\` already runs the same readiness preflight and returns a 409 \`missing_integration_connection\` without consuming credits when the ${inline ? "manifest" : "agent"} cannot run. A declared integration blocks the launch only when the ${inline ? "manifest" : "agent"} marks it \`required\` or what is bound is broken or ambiguous: an optional one with no usable connection, bound to none on purpose (\`[]\`), or inactive in the space lets the run start without it, and the result's \`warnings\` names it with the code that state would raise as an error (${WARNING_CODES_PHRASE}; \`integration_unbound\` alone: a pin or override chose \`[]\`), same \`field\` and fields as an error item; \`auth_key\` and \`required_scopes\` only when connecting would help${warningConnect}; do not start a connect flow or re-run unless the caller asks. A schedule write answers \`warnings: null\` when it judged nothing (disabled, no resolution-affecting change, or written for another member, whose connections it never reveals) and \`[]\` only when it judged and found nothing to report. If \`run_and_wait\` fails with field errors whose \`field\` is \`integrations.<id>\`${inline ? " (or if you intentionally call `validateInlineRun` only to iterate/check readiness without launching)" : ""}, that integration is not ready — whatever the \`code\` (\`not_connected\`, \`needs_reconnection\`, \`insufficient_scopes\`, \`auth_key_mismatch\`, …), with ONE exception below. Handle each such error item by looking ${connects ? "FIRST " : ""}for a \`connect_url\` on the item. When it HAS one, the connect session is already minted and this tool result already carries it: do NOT call ${connects ? "`initiateIntegrationConnect`, do NOT call any other tool" : "any tool"}, do not restate the connection request.${connectFlow} ${connectDelivery}${insufficientScopes} On a later turn, call \`run_and_wait\` again${inline ? " (or `validateInlineRun` if you are only checking readiness)" : ""}; when readiness passes, proceed with the run.
-- The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the platform will not pick the connection itself — the user holds several, or only connections other members share, which are never used without an explicit choice — and needs you to say which one to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to the candidates' \`id\`s: \`connection_overrides: { "<id>": ["<candidate_connection_id>", ...] }\`. Always an ARRAY — a bare id is refused before the launch. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\`, \`owned_by_actor\`, \`needs_reconnection\`, \`scopes_granted\` and \`missing_scopes\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Never pick a candidate whose \`needs_reconnection\` is true (the run fails on it); if it is the one the task needs, tell the user to reconnect it. Prefer a candidate whose \`missing_scopes\` is empty, the one granting least among them: one with missing scopes answers \`insufficient_scopes\`. A candidate with \`owned_by_actor: false\` is another member's shared account, so that choice visibly matters: use it only when the user named it, otherwise ask. Name several only when the task genuinely needs them all (the run's tools then take a required \`connection\` argument); otherwise pick one candidate yourself when nothing distinguishes them, and ask the user only if the choice visibly matters.${pinChoice}
+- The exception — code \`must_choose_connection\` on \`integrations.<id>\` is NOT a connect problem: the platform will not pick the connection itself — the user holds several, or only connections other members share, which are never used without an explicit choice — and needs you to say which one to use. Do NOT start a connect flow for it (another connection makes the ambiguity worse). Retry the SAME \`run_and_wait\` call with the top-level \`connection_overrides\` argument, mapping that integration id to the candidates' \`id\`s: \`connection_overrides: { "<id>": ["<candidate_connection_id>", ...] }\`. Always an ARRAY — a bare id is refused before the launch. The key is the integration id itself — not the error's \`field\` path. The error's \`candidate_connections\` carry a \`label\`, an \`account_id\`, \`owned_by_actor\`, \`needs_reconnection\`, \`scopes_granted\` and \`missing_scopes\`: read those to choose — if the user named an account, match it there rather than listing connections in a separate call. Never pick a candidate whose \`needs_reconnection\` is true (the run fails on it); if it is the one the task needs, tell the user to reconnect it. Prefer a candidate whose \`missing_scopes\` is empty, the one granting least among them: one with missing scopes answers \`insufficient_scopes\`. A candidate with \`owned_by_actor: false\` is another member's shared account, so that choice visibly matters: use it only when the user named it, otherwise ask. Name several only when the task genuinely needs them all (the run's tools then take a required \`connection\` argument); otherwise pick one candidate yourself when nothing distinguishes them, and ask the user only if the choice visibly matters. An enabled schedule write answers this code for the user's one connection too: name the candidate in the schedule's own \`connection_overrides\`.${pinChoice}
 - Code \`auth_serves_no_selected_tool\` on \`integrations.<id>\` is not a connect problem either: the connection its \`connection_id\` names was explicitly bound (your \`connection_overrides\`, or a pin or default) and was made on an auth that exposes none of the agent's selected tools, so reconnecting it changes nothing. When you passed \`connection_overrides\`, retry without that id; when a pin or default binds it, tell the user which connection to take out of the set.
 - Code \`auth_key_serves_no_selected_tool\` on \`integrations.<id>\` is not a connection problem at all: the agent's own \`auth_key\` (its \`required_auth_key\`) names an auth that exposes none of the agent's selected tools, so no connection, pick or override can clear it. Do not start a connect flow. ${inline ? "For an inline run you wrote that configuration: fix `auth_key` or `tools` for that integration in your manifest and retry; for a stored agent, do not retry — tell" : "Do not retry — tell"} the user the agent's configuration must change (its \`auth_key\` for that integration, or its tool selection).
 - Code \`required_integration_unbound\` on \`integrations.<id>\` is not a connect problem: the agent requires that integration and a pin, or a stored schedule's \`connection_overrides\`, binds it to none (\`[]\`). It clears by naming a connection in that layer, or in \`connection_overrides\` (a run override outranks a member pin, not an admin pin); tell the user which. In \`connection_overrides\`, \`[]\` runs without the integration and is refused (400) for a required one.`
@@ -294,9 +295,9 @@ ${runBullets}- ${packageFiles}${packageImportGuidance} Archive bytes stay server
 - A refused call is a tool result with \`isError: true\` and \`{ code, error, … }\`. \`missing_argument\`, \`unknown_argument\`, \`invalid_argument\`, \`unknown_operation\`, \`unknown_space\` and \`space_mismatch\` mean fix the call (\`arguments\` names the faulty ones, \`accepted\` lists what is valid) and retry. \`not_granted\` (a permission, or a file you may see but not download) is final: report it. An operation the route answered with an HTTP error is not a refusal: it comes back as \`{ status, body }\` with \`isError: true\`; read \`body\` to decide — except a \`403\` your permissions explain, which is a \`not_granted\` refusal.
 ${heavyListBullet}${concurrencyBullet}${
     authors
-      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. A declared integration is optional unless \`integrations_configuration[id].required\` is \`true\`: without a usable connection an optional one is reported in the run's \`warnings\` and the run starts anyway; a required one refuses the launch. Mark \`required\` only what the agent cannot work without.${
+      ? `- Integration tool selection — an agent's \`integrations_configuration[id].tools\` resolves as: omitted/undefined → inherits the integration's \`default_tools\`; \`[]\` → no tools (overrides the default); \`["a","b"]\` → exactly those tools; \`"*"\` → all upstream tools (requires \`allow_undeclared_tools\`). List only the tools the agent needs; omit \`tools\` only when it needs the whole default, which can hold write tools. A declared integration whose selection resolves to NOTHING is rejected at publish and at import (\`no_tools_selected\` on \`integrations_configuration.<id>.tools\`) and aborts the run at container boot — so never leave an integration declared with an empty effective selection: either select at least one tool, or remove it from \`dependencies.integrations\`. A declared integration is optional unless \`integrations_configuration[id].required\` is \`true\`: without a usable connection an optional one is reported in the run's \`warnings\` and the run starts anyway; a required one refuses the launch. Mark \`required\` only what the agent cannot work without.${
           granted("getIntegration")
-            ? " An integration's `default_tools` and full `tool_catalog` are on its detail operation (`GET /api/integrations/{packageId}`); read it before selecting tools so you pick real tool names and know what the default already covers."
+            ? " An integration's `default_tools` and full `tool_catalog` are on its detail operation (`GET /api/integrations/{packageId}`); read it before selecting tools so you pick real tool names and know what the default grants."
             : ""
         }
 `
@@ -337,7 +338,20 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     authors: any("authors"),
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
+    proxies: any("proxies"),
   };
+}
+
+/**
+ * Whether the credential proxy accepts the credential this request carries.
+ * The proxy is bearer-only (`isBearerOnlyCaller`) and its tools re-enter it
+ * with that same credential, so a cookie session or the chat's loopback bearer
+ * is offered neither of them.
+ */
+function proxyAcceptsCredential(c: Context<AppEnv>): boolean {
+  return isBearerOnlyCaller(c.get("authMethod"), {
+    firstPartyLoopback: c.get("firstPartyLoopback"),
+  });
 }
 
 /**
@@ -502,9 +516,10 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // (initialize, tools/list) enters any reachable one to pass the guard.
     const ceiling = c.get("scopeCeiling");
     const actor = getActor(c);
+    const proxied = proxyAcceptsCredential(c);
     const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
       ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor),
+      surface: deriveMcpSurface(space.permissions, ceiling, actor, proxied),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
@@ -519,7 +534,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor),
+      surface: deriveMcpSurface(permissions, ceiling, actor, proxied),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -649,7 +664,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor);
+      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c));
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed

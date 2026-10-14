@@ -19,7 +19,12 @@ import { chatSessions, llmUsage, modelProviderCredentials, orgModels } from "@ap
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
+import {
+  createTestContext,
+  createTestUser,
+  memberContext,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { seedTestModelProviders } from "../../helpers/model-providers.ts";
@@ -42,7 +47,7 @@ describe("resolveChatModel", () => {
     ctx = await createTestContext();
   });
 
-  /** The test user's own subscription: a personal credential, never an organization one. */
+  /** The test user's own subscription: a personal credential. */
   async function seedOauthCredential(): Promise<string> {
     const row = await seedOrgModelProviderOAuth({
       orgId: ctx.orgId,
@@ -59,7 +64,7 @@ describe("resolveChatModel", () => {
     return row.id;
   }
 
-  /** A subscription model is unbound: each member's own subscription serves it. */
+  /** An unbound subscription model: each member's own subscription serves it. */
   function createSubscriptionModel(label: string): Promise<string> {
     return createOrgModel(ctx.orgId, label, TEST_OAUTH_MODEL_ID, ctx.user.id, {
       credentialId: null,
@@ -83,14 +88,23 @@ describe("resolveChatModel", () => {
   it("refuses an aliased subscription row (invalid legacy state) — falls to the gateway path", async () => {
     // The member's own subscription is present: it must not serve an aliased row either.
     await seedOauthCredential();
-    // Creation refuses an alias on an unbound model (refuseUnboundAlias), so the
-    // legacy row is written directly, as a write path without those invariants could leave it.
+    // An alias is always bound (`org_models_alias_bound`): here to an organization subscription.
+    const orgSubscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Org OAuth",
+      accessToken: "org-access",
+      refreshToken: "org-refresh",
+      expiresAt: Date.now() + 3_600_000,
+      createdBy: ctx.user.id,
+    });
+    // The row is written directly, as a write path without the alias rule could leave it.
     const [row] = await db
       .insert(orgModels)
       .values({
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
-        credentialId: null,
+        credentialId: orgSubscription.id,
         label: "Masked Subscription",
         modelId: TEST_OAUTH_MODEL_ID,
         aliased: true,
@@ -214,6 +228,26 @@ describe("resolveChatModel", () => {
     expect(await resolveChatModel(ctx.orgId, model!.id, other.id)).toMatchObject({
       subscription: true,
       model: { accessToken: "other-token" },
+    });
+  });
+
+  it("serves a model bound to an organization subscription to a member who owns none", async () => {
+    const orgSubscription = await seedOrgModelProviderOAuth({
+      orgId: ctx.orgId,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+      label: "Organization subscription",
+      accessToken: "org-token",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const presetId = await createOrgModel(ctx.orgId, "Shared", TEST_OAUTH_MODEL_ID, ctx.user.id, {
+      credentialId: orgSubscription.id,
+      providerId: TEST_OAUTH_PROVIDER_ID,
+    });
+    const member = await memberContext(ctx, "member");
+
+    expect(await resolveChatModel(ctx.orgId, presetId, member.user.id)).toMatchObject({
+      subscription: true,
+      model: { credentialId: orgSubscription.id, accessToken: "org-token" },
     });
   });
 

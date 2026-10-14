@@ -55,7 +55,9 @@ export function buildAppConfig(): AppConfig {
           },
         }
       : {}),
-    trustedOrigins: env.TRUSTED_ORIGINS,
+    // The SPA's post-login `?redirect=` allowlist: `APP_URL`'s own origin
+    // (already normalised to one by the env schema) plus `TRUSTED_ORIGINS`.
+    trustedOrigins: [...new Set([env.APP_URL, ...env.TRUSTED_ORIGINS])],
     version: getVersionInfo(),
   };
 }

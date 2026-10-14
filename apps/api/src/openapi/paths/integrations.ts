@@ -123,6 +123,28 @@ const orgDefaultConnectionIdSetJsonSchema = {
     "A connection set of 1 or more ids. An org default spans every agent of the space, so it cannot bind none: deactivating the integration in the space does that.",
 } as const;
 
+/** What removing a pin or an org default answers. */
+export const namingLayerRemovalSchema = {
+  type: "object",
+  required: ["schedules_disabled_count"],
+  properties: {
+    schedules_disabled_count: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "How many schedules the removal disabled (`disabled_reason: connection_set_unnamed`); 0 when there was nothing to remove.",
+    },
+  },
+} as const;
+
+/** The schedules a pin or org default removal disables, closing each removal's description. */
+export const namingLayerRemovalEffect =
+  "The removal's transaction disables (`disabled_reason: connection_set_unnamed`) every enabled schedule it could name a set for — of its space; for a pin, on its agent; for a member pin, of that member — whose fired version uses this integration (declared, not inert) and whose set nothing names afterwards: no `connection_overrides` key, admin pin, pin of its actor or org default, however many connections its actor holds. Their jobs are removed once it commits.";
+
+/** What a connection delete does to the schedules of a member pin it empties. */
+export const droppedPinEffect =
+  "A member pin the delete empties is removed in the delete's transaction, which disables (`disabled_reason: connection_deleted`) its owner's enabled schedules on that pin's agent, in its space, whose fired version uses the integration and whose set nothing else names; their jobs are removed once it commits.";
+
 /** The refusals every connection-set write shares, beyond the per-connection checks. */
 export const connectionSetRefusals = `more than ${MAX_CONNECTIONS_PER_INTEGRATION} ids, or a repeated id (compared case-insensitively)`;
 
@@ -219,7 +241,7 @@ export const sharedSpaceIdsSchema = {
 export const originSpaceIdSchema = {
   type: ["string", "null"],
   description:
-    "Owner only: the space an org-scoped connection was connected from — a run there prefers it among its owner's connections, and a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else.",
+    "Owner only: the space an org-scoped connection was connected from — a space blocking member connections still accepts it. `null` for a space-scoped connection, once that space is deleted, or to a credential bound to another space. Absent for anyone else.",
 } as const;
 
 /** A space by id and name. */
@@ -976,6 +998,7 @@ export const integrationsPaths = {
         "is left empty is disabled); another member's pin keeps the id, and that member's next run fails " +
         "with `pinned_connection_unavailable`. Another actor's enabled schedules naming a deleted " +
         "connection are disabled (`disabled_reason: connection_deleted`), their overrides kept. " +
+        `${droppedPinEffect} ` +
         "Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
@@ -1496,7 +1519,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.",
+        "Returns the connections the caller can use from this space — the same set the runtime resolver picks from: the caller's own that reach the space (space-scoped ones of this space, and every org-scoped one), unless the space blocks member connections for this integration (`block_user_connections`), in which case only those shared into it; **plus** every connection another member shares into the space. Oldest first. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`. Every row carries `spaceId` and `shared_here`, and the owner's own rows also carry `shared_space_ids`, `origin_space_id` and `shareable_spaces`. Rows on this list carry `allowed_actions`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1816,6 +1839,7 @@ export const integrationsPaths = {
       operationId: "deleteIntegrationPin",
       tags: ["Integrations"],
       summary: "Remove an admin pin (admin)",
+      description: `Removes the agent's admin pin for this integration. ${namingLayerRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1823,9 +1847,10 @@ export const integrationsPaths = {
         agentPackageIdParam,
       ],
       responses: {
-        "204": {
-          description: "Pin removed (idempotent — 204 whether the pin existed or not)",
+        "200": {
+          description: "Pin removed, or there was none",
           headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },
@@ -1924,15 +1949,17 @@ export const integrationsPaths = {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
       summary: "Remove the space-wide default connection (admin)",
+      description: `Removes the space's default set for this integration, soft or enforced. ${namingLayerRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
-        "204": {
-          description: "Default removed (idempotent — 204 whether a default existed or not)",
+        "200": {
+          description: "Default removed, or none was set",
           headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
       },

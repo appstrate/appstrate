@@ -246,7 +246,7 @@ describe("Spaces API", () => {
           accountId: "acct-shared",
           label: "Partagée",
           orgId: ctx.orgId,
-          spaceId: ctx.defaultSpaceId,
+          spaceId: null,
           userId: ctx.user.id,
           credentialsEncrypted: "x",
           scopesGranted: [],

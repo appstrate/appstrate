@@ -8,14 +8,14 @@
  * `pairingStore` on mint and does not cancel it on unmount — so closing
  * the modal mid-flow (tab switch, accidental dismiss) does not kill the
  * token. This component, mounted once for all authenticated routes, polls
- * each pending pairing and fires the global success side effects (toast +
- * credential/model-list invalidation) the moment the helper consumes the
- * token, then drops it from the store. The TTL is the backstop for abandoned
- * ones.
+ * each pending pairing and fires the global side effects — the success toast
+ * and credential/model-list invalidation once the redeem produces a credential,
+ * the failure toast when it is refused, unless a modal shows that pairing and
+ * states it inline — then drops it from the store.
  *
  * Polling is scoped to the active org: the status route 404s cross-tenant
  * reads, so a pairing minted in another org resumes only once the user
- * switches back to it (still within its TTL).
+ * switches back to it.
  */
 
 import { useEffect } from "react";
@@ -28,6 +28,7 @@ import {
   pairingStore,
   usePendingPairings,
   removePendingPairing,
+  isPairingShown,
   type PendingPairing,
 } from "../stores/pairing-store";
 
@@ -35,20 +36,20 @@ import {
 function PairingPoll({ pairing }: { pairing: PendingPairing }) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  const status = useModelProviderPairingStatus(pairing.id, { enabled: true });
+  const { state } = useModelProviderPairingStatus(pairing.id);
 
   useEffect(() => {
-    const s = status.data?.status;
-    if (s === "consumed") {
+    if (state === "pending") return;
+    if (state === "connected") {
       toast.success(t("credentials.oauth.callbackSuccess"));
       void qc.invalidateQueries({ queryKey: ["get", "/api/model-provider-credentials"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/models"] });
-      removePendingPairing(pairing.id);
-    } else if (s === "expired") {
-      removePendingPairing(pairing.id);
+    } else if (state === "failed" && !isPairingShown(pairing.id)) {
+      toast.error(t("credentials.oauth.pairingFailed"));
     }
+    removePendingPairing(pairing.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status.data?.status]);
+  }, [state]);
 
   return null;
 }
@@ -57,8 +58,6 @@ export function PendingPairingsWatcher() {
   const pairings = usePendingPairings();
   const currentOrgId = useCurrentOrgId();
 
-  // Drop time-expired pairings periodically so the poller list stays bounded
-  // even when a tab is backgrounded across several TTLs.
   useEffect(() => {
     pairingStore.getState().prune();
     const handle = window.setInterval(() => pairingStore.getState().prune(), 30_000);

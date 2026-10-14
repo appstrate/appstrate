@@ -18,12 +18,7 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import {
-  modelProviderCredentials,
-  orgModels,
-  organizations,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { orgModels, organizations, spacePackages } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import {
@@ -156,9 +151,9 @@ describe("Models API", () => {
         const byId = new Map(body.data.map((m) => [m.id, m]));
         expect(byId.get("sys-model-list-test")).toMatchObject({
           billed_to: "system",
-          binding: "org",
+          binding: "system",
         });
-        expect(byId.get(unbound!.id)).toMatchObject({ binding: "member" });
+        expect(byId.get(unbound!.id)).toMatchObject({ binding: "user" });
         expect(byId.get(bound.id)).toMatchObject({ binding: "org" });
       } finally {
         initSystemModelProviderKeys();
@@ -950,8 +945,7 @@ describe("Models API", () => {
       // Regression: PUT used to write `data` (incl. `aliased`) with no
       // invariant check, so a non-aliased oauth model could become aliased by
       // update — a state POST rejects, caught only late at run launch.
-      // A subscription is the member's own credential, so the model is unbound.
-      await seedOrgModelProviderOAuth({
+      const subscription = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
         label: "Test OAuth",
@@ -959,7 +953,6 @@ describe("Models API", () => {
         refreshToken: "test-refresh",
         expiresAt: null,
         createdBy: ctx.user.id,
-        ownerUserId: ctx.user.id,
       });
       const createRes = await app.request("/api/models", {
         method: "POST",
@@ -967,8 +960,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Subscribed",
           modelId: TEST_OAUTH_MODEL_ID,
-          credentialId: null,
-          providerId: TEST_OAUTH_PROVIDER_ID,
+          credentialId: subscription.id,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -1466,10 +1458,10 @@ describe("Models API", () => {
    */
   describe("dead credential — end-to-end recovery over HTTP", () => {
     /** A `needsReconnection` OAuth credential with one enabled model bound to it. */
-    async function seedDeadPair(label: string) {
+    async function seedDeadPair(label: string, providerId: string = TEST_OAUTH_PROVIDER_ID) {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
+        providerId,
         label: `${label} credential`,
         needsReconnection: true,
       });
@@ -1582,11 +1574,7 @@ describe("Models API", () => {
       // in the first place. "Reconnect this credential" would be misdirection
       // about a row the client cannot even see; the fix is to restore the
       // module. So this behaves exactly as it did before the flag existed.
-      const { cred, model } = await seedDeadPair("Orphaned provider");
-      await db
-        .update(modelProviderCredentials)
-        .set({ providerId: "@gone/provider" })
-        .where(eq(modelProviderCredentials.id, cred.id));
+      const { model } = await seedDeadPair("Orphaned provider", "@gone/provider");
 
       const list = await app.request("/api/models", { headers: authHeaders(ctx) });
       expect(((await list.json()) as any).data.find((m: any) => m.id === model.id)).toBeUndefined();

@@ -85,9 +85,12 @@ export const parameters = {
     required: false,
     description:
       "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the " +
-      "organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same " +
-      "method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, " +
-      "a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, " +
+      "organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth " +
+      "method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a " +
+      "2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that " +
+      "response with " +
+      "`Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, " +
+      "and its `warnings` items carry no bearer connect link (`connect_url`, " +
       "`expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged " +
       "again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, " +
       "the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is " +

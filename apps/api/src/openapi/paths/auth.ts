@@ -180,6 +180,11 @@ export const authPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          description:
+            "The request carries the session cookie from an origin that is neither `APP_URL` nor in `TRUSTED_ORIGINS` (`code: INVALID_ORIGIN`).",
+          content: betterAuthError,
+        },
         "429": betterAuthRateLimited,
       },
     },

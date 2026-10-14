@@ -90,7 +90,7 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.sharedByOther"));
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.needsReconnection"));
     // No candidates travel with an unreachable pick: the way out is clearing it.
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 
   it("leaves the refusal reasons to the form-level list", () => {
@@ -119,7 +119,7 @@ describe("ScheduleActorConnectionChoice", () => {
     expect(html).toContain("schedule-actor-stored-@acme/slack");
     expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.privateConnection"));
     expect(html).not.toContain("c_private");
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 
   it("with nothing the viewer may name, offers no checkbox", () => {
@@ -162,6 +162,6 @@ describe("ScheduleActorConnectionChoice", () => {
       />,
     );
     expect(html).not.toContain(`sched-choice-${GMAIL}-none`);
-    expect(html).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(html).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
   });
 });

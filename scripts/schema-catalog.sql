@@ -1,5 +1,6 @@
--- Schema catalog fingerprint — one sorted line per column, index, constraint and
--- enum of the platform's `public` schema. Read-only: catalog queries only.
+-- Schema catalog fingerprint — one sorted line per column, index, constraint,
+-- enum and migration-installed trigger of the platform's `public` schema.
+-- Read-only: catalog queries only.
 --
 -- What it is for: a database created before a migration squash can sit
 -- at the full journal and still not be the schema the chain builds — production
@@ -19,8 +20,10 @@
 -- Deliberately left out:
 --   * `ee_*` tables — `@appstrate/module-ee` migrates them under its own
 --     journal (`drizzle.ee_migrations`) at init, not through `migrate.ts`;
---   * triggers and functions — the platform installs its NOTIFY triggers at
---     boot, so a migrate-only database has none;
+--   * the NOTIFY triggers — the platform installs them at boot
+--     (`packages/db/src/notify.ts`), so a migrate-only database has none. They
+--     are the triggers whose function is named `notify_*`;
+--   * functions no listed trigger calls;
 --   * column order — a column added later lands last, and nothing reads the
 --     order, so it would only report noise.
 -- Formatting comes from Postgres itself (`format_type`, `pg_get_expr`,
@@ -56,5 +59,17 @@ SELECT line FROM (
   JOIN pg_namespace n ON n.oid = t.typnamespace
   WHERE n.nspname = 'public'
   GROUP BY t.typname
+  UNION ALL
+  -- The function is fingerprinted by its body modulo whitespace: a trigger
+  -- that calls a rewritten one differs, one that calls a re-indented one does
+  -- not.
+  SELECT 'trigger ' || pg_get_triggerdef(t.oid) || ' enabled ' || t.tgenabled::text
+         || ' body md5 ' || md5(btrim(regexp_replace(p.prosrc, '\s+', ' ', 'g')))
+  FROM pg_trigger t
+  JOIN pg_class c ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_proc p ON p.oid = t.tgfoid
+  WHERE n.nspname = 'public' AND NOT t.tgisinternal AND c.relname NOT LIKE 'ee\_%'
+    AND p.proname NOT LIKE 'notify\_%'
 ) catalog
 ORDER BY line COLLATE "C";

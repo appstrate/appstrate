@@ -11,7 +11,12 @@ import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { ApiError, forbidden, notFound, unauthorized } from "../lib/errors.ts";
 import { API_KEY_PREFIX, validateApiKey } from "../services/api-keys.ts";
 import { getOrgMember } from "../services/organizations.ts";
-import { ceilingAllows, effectivePermissions, type Permission } from "../lib/permissions.ts";
+import {
+  ceilingAllows,
+  effectivePermissions,
+  toScopeCeiling,
+  type Permission,
+} from "../lib/permissions.ts";
 import { resolveSpaceRole, type SpaceMemberRow } from "../lib/space-role.ts";
 import { loadSpaceAccess, type SpaceContextRow } from "../lib/space-lookup.ts";
 import {
@@ -32,7 +37,7 @@ import {
   VIEW_AS_QUERY,
 } from "@appstrate/core/permissions";
 import { logger } from "../lib/logger.ts";
-import { getSessionForwardingCookies } from "../lib/auth-cookies.ts";
+import { getSessionForwardingCookies, sessionRealmOf } from "../lib/auth-cookies.ts";
 import type { AppEnv, OrgRole } from "../types/index.ts";
 
 /**
@@ -241,7 +246,7 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
       throw forbidden("The key's creator is not a member of the key's space");
     }
     // On the context too, so ceiling-capped reads below answer as on HTTP.
-    const scopeCeiling = new Set<string>(keyInfo.scopes);
+    const scopeCeiling = toScopeCeiling(keyInfo.scopes);
     c.set("scopeCeiling", scopeCeiling);
     const permissions = effectivePermissions({ orgPermissions: grants, scopeCeiling });
 
@@ -259,6 +264,8 @@ async function validateSSEAuth(c: Context<AppEnv>): Promise<SSEAuthResult | null
   // 2. Fallback: cookie session
   const session = await getSessionForwardingCookies(c);
   if (!session?.user) return null;
+  // This path skips the auth pipeline, so it asks `requirePlatformRealm`'s question itself.
+  if ((await sessionRealmOf(session)) !== "platform") return null;
 
   const orgId = c.req.query("orgId");
   if (!orgId) return null;

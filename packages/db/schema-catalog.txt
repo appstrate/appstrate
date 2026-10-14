@@ -71,6 +71,24 @@ column cli_refresh_tokens.token_hash text not null
 column cli_refresh_tokens.used_at timestamp with time zone
 column cli_refresh_tokens.user_agent text
 column cli_refresh_tokens.user_id text not null
+column connection_calls.actor_id text not null
+column connection_calls.actor_type text not null
+column connection_calls.api_key_id text
+column connection_calls.auth_method text not null
+column connection_calls.connection_id uuid not null
+column connection_calls.created_at timestamp with time zone not null default now()
+column connection_calls.duration_ms integer not null
+column connection_calls.host text not null
+column connection_calls.id bigint not null default nextval('connection_calls_id_seq'::regclass)
+column connection_calls.integration_id text not null
+column connection_calls.method text not null
+column connection_calls.org_id uuid not null
+column connection_calls.outcome text not null
+column connection_calls.owner_id text
+column connection_calls.owner_type text
+column connection_calls.request_id text not null
+column connection_calls.run_id text
+column connection_calls.space_id text not null
 column device_codes.attempts integer not null default 0
 column device_codes.client_id text
 column device_codes.device_code text not null
@@ -211,8 +229,10 @@ column model_provider_pairings.consumed_at timestamp with time zone
 column model_provider_pairings.created_at timestamp with time zone not null default now()
 column model_provider_pairings.credential_id uuid
 column model_provider_pairings.expires_at timestamp with time zone not null
+column model_provider_pairings.failed_at timestamp with time zone
 column model_provider_pairings.id text not null
 column model_provider_pairings.org_id uuid not null
+column model_provider_pairings.owner_user_id text
 column model_provider_pairings.provider_id text not null
 column model_provider_pairings.reconnect_credential_id uuid
 column model_provider_pairings.token_hash text not null
@@ -674,6 +694,9 @@ constraint cli_refresh_tokens cli_refresh_tokens_parent_id_fkey FOREIGN KEY (par
 constraint cli_refresh_tokens cli_refresh_tokens_pkey PRIMARY KEY (id)
 constraint cli_refresh_tokens cli_refresh_tokens_token_hash_unique UNIQUE (token_hash)
 constraint cli_refresh_tokens cli_refresh_tokens_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint connection_calls connection_calls_actor_type_valid CHECK ((actor_type = ANY (ARRAY['user'::text, 'end_user'::text])))
+constraint connection_calls connection_calls_owner_type_valid CHECK (((owner_type IS NULL) OR (owner_type = ANY (ARRAY['user'::text, 'end_user'::text]))))
+constraint connection_calls connection_calls_pkey PRIMARY KEY (id)
 constraint device_codes device_codes_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint device_codes device_codes_device_code_unique UNIQUE (device_code)
 constraint device_codes device_codes_pkey PRIMARY KEY (id)
@@ -751,7 +774,11 @@ constraint model_provider_credentials model_provider_credentials_org_id_organiza
 constraint model_provider_credentials model_provider_credentials_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_credentials model_provider_credentials_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_credential_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE SET NULL
+constraint model_provider_pairings model_provider_pairings_failed_consumed CHECK (((failed_at IS NULL) OR (consumed_at IS NOT NULL)))
 constraint model_provider_pairings model_provider_pairings_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint model_provider_pairings model_provider_pairings_outcome_single CHECK ((NOT ((credential_id IS NOT NULL) AND (failed_at IS NOT NULL))))
+constraint model_provider_pairings model_provider_pairings_owner_is_minter CHECK (((owner_user_id IS NULL) OR (owner_user_id = user_id)))
+constraint model_provider_pairings model_provider_pairings_owner_user_id_user_id_fk FOREIGN KEY (owner_user_id) REFERENCES "user"(id) ON DELETE CASCADE
 constraint model_provider_pairings model_provider_pairings_pkey PRIMARY KEY (id)
 constraint model_provider_pairings model_provider_pairings_token_hash_unique UNIQUE (token_hash)
 constraint model_provider_pairings model_provider_pairings_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
@@ -799,8 +826,9 @@ constraint org_invitations org_invitations_token_unique UNIQUE (token)
 constraint org_members org_members_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_members org_members_org_id_user_id_pk PRIMARY KEY (org_id, user_id)
 constraint org_members org_members_user_id_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE
+constraint org_models org_models_alias_bound CHECK (((NOT aliased) OR (credential_id IS NOT NULL)))
 constraint org_models org_models_created_by_user_id_fk FOREIGN KEY (created_by) REFERENCES "user"(id) ON DELETE SET NULL
-constraint org_models org_models_credential_id_model_provider_credentials_id_fk FOREIGN KEY (credential_id) REFERENCES model_provider_credentials(id) ON DELETE RESTRICT
+constraint org_models org_models_credential_provider_fk FOREIGN KEY (credential_id, provider_id) REFERENCES model_provider_credentials(id, provider_id) ON DELETE RESTRICT
 constraint org_models org_models_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint org_models org_models_pkey PRIMARY KEY (id)
 constraint org_models org_models_source_valid CHECK ((source = ANY (ARRAY['built-in'::text, 'custom'::text])))
@@ -933,7 +961,7 @@ enum package_source local,system
 enum package_type agent,skill,integration,mcp-server
 enum run_origin platform,remote
 enum run_status pending,running,success,failed,timeout,cancelled
-enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared
+enum schedule_disabled_reason actor_invalid,actor_left_org,connection_deleted,connection_unshared,connection_set_unnamed,connection_choice_invalid
 index CREATE INDEX account_user_id_idx ON public.account USING btree (user_id)
 index CREATE INDEX idx_api_keys_created_by ON public.api_keys USING btree (created_by)
 index CREATE INDEX idx_api_keys_org_id ON public.api_keys USING btree (org_id)
@@ -946,6 +974,8 @@ index CREATE INDEX idx_chat_sessions_org_user ON public.chat_sessions USING btre
 index CREATE INDEX idx_chat_sessions_space_user ON public.chat_sessions USING btree (space_id, user_id)
 index CREATE INDEX idx_cli_refresh_tokens_family ON public.cli_refresh_tokens USING btree (family_id)
 index CREATE INDEX idx_cli_refresh_tokens_user ON public.cli_refresh_tokens USING btree (user_id)
+index CREATE INDEX idx_connection_calls_connection_id ON public.connection_calls USING btree (connection_id, id)
+index CREATE INDEX idx_connection_calls_space_id ON public.connection_calls USING btree (space_id, id)
 index CREATE INDEX idx_end_users_org_id ON public.end_users USING btree (org_id)
 index CREATE INDEX idx_end_users_space_id ON public.end_users USING btree (space_id)
 index CREATE INDEX idx_file_links_consumer_run ON public.file_links USING btree (consumer_run_id)
@@ -1068,6 +1098,7 @@ index CREATE UNIQUE INDEX chat_messages_pkey ON public.chat_messages USING btree
 index CREATE UNIQUE INDEX chat_sessions_pkey ON public.chat_sessions USING btree (id)
 index CREATE UNIQUE INDEX cli_refresh_tokens_pkey ON public.cli_refresh_tokens USING btree (id)
 index CREATE UNIQUE INDEX cli_refresh_tokens_token_hash_unique ON public.cli_refresh_tokens USING btree (token_hash)
+index CREATE UNIQUE INDEX connection_calls_pkey ON public.connection_calls USING btree (id)
 index CREATE UNIQUE INDEX device_codes_device_code_unique ON public.device_codes USING btree (device_code)
 index CREATE UNIQUE INDEX device_codes_pkey ON public.device_codes USING btree (id)
 index CREATE UNIQUE INDEX device_codes_user_code_unique ON public.device_codes USING btree (user_code)
@@ -1145,6 +1176,7 @@ index CREATE UNIQUE INDEX uq_files_run_output_dedup ON public.files USING btree 
 index CREATE UNIQUE INDEX uq_integration_conn_id_org_id ON public.integration_connections USING btree (id, org_id)
 index CREATE UNIQUE INDEX uq_llm_usage_proxy_request_id ON public.llm_usage USING btree (request_id) WHERE ((source = 'proxy'::llm_usage_source) AND (request_id IS NOT NULL))
 index CREATE UNIQUE INDEX uq_llm_usage_runner_run_id ON public.llm_usage USING btree (run_id) WHERE ((source = 'runner'::llm_usage_source) AND (run_id IS NOT NULL))
+index CREATE UNIQUE INDEX uq_model_provider_credentials_id_provider_id ON public.model_provider_credentials USING btree (id, provider_id)
 index CREATE UNIQUE INDEX uq_notifications_run_recipient_type ON public.notifications USING btree (run_id, recipient_type, recipient_id, type) WHERE (run_id IS NOT NULL)
 index CREATE UNIQUE INDEX uq_oauth_client_resources_pair ON public.oauth_client_resources USING btree (client_id, resource_id)
 index CREATE UNIQUE INDEX uq_org_invitations_pending ON public.org_invitations USING btree (org_id, email) WHERE (status = 'pending'::invitation_status)
@@ -1159,3 +1191,6 @@ index CREATE UNIQUE INDEX user_pkey ON public."user" USING btree (id)
 index CREATE UNIQUE INDEX verification_pkey ON public.verification USING btree (id)
 index CREATE UNIQUE INDEX webhook_deliveries_pkey ON public.webhook_deliveries USING btree (id)
 index CREATE UNIQUE INDEX webhooks_pkey ON public.webhooks USING btree (id)
+trigger CREATE TRIGGER ics_connection_keeps_shares BEFORE UPDATE OF space_id, user_id ON public.integration_connections FOR EACH ROW WHEN ((((new.user_id IS NULL) AND (old.user_id IS NOT NULL)) OR ((new.space_id IS NOT NULL) AND (new.space_id IS DISTINCT FROM old.space_id)))) EXECUTE FUNCTION ics_connection_keeps_shares_fn() enabled O body md5 249387bef3f242342d2fd7ee4ef5332d
+trigger CREATE TRIGGER ics_share_invariants BEFORE INSERT OR UPDATE ON public.integration_connection_shares FOR EACH ROW EXECUTE FUNCTION ics_share_invariants_fn() enabled O body md5 130cc49a6d6f0a09658e619cbc26a255
+trigger CREATE TRIGGER oauth_clients_level_immutable BEFORE UPDATE ON public.oauth_clients FOR EACH ROW EXECUTE FUNCTION oauth_clients_level_immutable_fn() enabled O body md5 7f996ac8926c88353638c30f47e9b7dc

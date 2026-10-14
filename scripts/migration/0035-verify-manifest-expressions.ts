@@ -11,13 +11,17 @@
  * `{{field}}` in a delivery template (delivered as literal text) and each injected credential
  * a run now refuses as `exfiltration` (the `findUnboundedInjectedCredentials` hits
  * `credentialUrlPolicy` refuses). Exits 1 while any of them has one: a range (`^1.0.0`, the agent
- * editor's default) resolves older versions too. Two advisories are listed and never fail the
+ * editor's default) resolves older versions too. Three advisories are listed and never fail the
  * run: `[scope]`, a scope the manifest write paths refuse (`findInvalidScopeTokens`: the manifest
- * still loads, its next save is refused), and `[clear-secret]`, a credential field named like a
- * secret that the schema does not mark `writeOnly` or `format: "password"` (the connect form
- * shows its input in clear). System packages are skipped: the image ships them
- * (today's `system-packages/` has no issue) and an operator cannot edit one. What it means and how
- * to fix one: `scripts/migration/README.md`.
+ * still loads, its next save is refused), `[default-tools]`, a `default_tools` entry the manifest
+ * alone proves unexposed (`findUnexposedDefaultTools`, so a `local` source is not judged against
+ * its mcp-server): a tool the manifest hides, or one outside a declared `tools_policy` on a
+ * `remote` source (both still load, the next save is refused), or, on a `none` source, a name
+ * outside its catalog (the schema refuses that manifest on read too), and `[clear-secret]`, a
+ * credential field named like a secret that the schema does not mark `writeOnly` or
+ * `format: "password"` (the connect form shows its input in clear). System packages are skipped:
+ * the image ships them (today's `system-packages/` has no issue) and an operator cannot edit one.
+ * What it means and how to fix one: `scripts/migration/README.md`.
  */
 
 import { SQL } from "bun";
@@ -25,6 +29,7 @@ import {
   findInvalidScopeTokens,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
 } from "@appstrate/core/integration";
 import { isSecretField } from "@appstrate/core/form";
 
@@ -128,6 +133,10 @@ export function manifestIssues(rows: readonly StoredManifest[]): {
       advisories += 1;
       report("scope", v);
     }
+    for (const v of findUnexposedDefaultTools(manifest)) {
+      advisories += 1;
+      report("default-tools", v);
+    }
     for (const v of unmarkedSecrets(manifest)) {
       advisories += 1;
       report("clear-secret", v);
@@ -154,7 +163,7 @@ if (import.meta.main) {
   process.stdout.write(
     `\n${rows.length} manifest(s) scanned: ${expressions} expression issue(s), ` +
       `${exfiltration} injected credential(s) runs will refuse as exfiltration, ` +
-      `${advisories} advisory(ies) (scope, clear-secret)\n`,
+      `${advisories} advisory(ies) (scope, default-tools, clear-secret)\n`,
   );
   process.exit(expressions + exfiltration > 0 ? 1 : 0);
 }

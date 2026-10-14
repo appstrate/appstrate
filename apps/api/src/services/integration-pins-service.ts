@@ -14,7 +14,7 @@
  * caller already holds it.
  */
 
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { AuditPayload } from "@appstrate/core/module";
 import { db, toRows } from "@appstrate/db/client";
 import {
@@ -53,6 +53,7 @@ import {
   connectionReach,
   connectionViewOf,
   loadConnectionShares,
+  listReachableConnections,
 } from "./integration-connections.ts";
 import { sharedInSpace, usableInSpace } from "./connection-reach.ts";
 import {
@@ -70,6 +71,7 @@ import type {
 } from "@appstrate/core/integration";
 import type { IntegrationManifestCache } from "./integration-service.ts";
 import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
+import { pinLayer, removeNamingLayer } from "./schedules-named-by-layer.ts";
 
 // Canonical wire shapes live in @appstrate/shared-types so the frontend
 // hook and OpenAPI spec can't drift from the service. Local aliases keep
@@ -330,20 +332,24 @@ async function upsertPin(args: {
 }
 
 /**
- * Delete one pin row — the admin pin for `userId: null`, else that member's; `previous` is the
- * set it held, `null` when there was none.
+ * Delete one pin row — the admin pin for `userId: null`, else that member's — and disable the
+ * schedules that leaves unnamed ({@link removeNamingLayer}); `previous` is the set it held, `null`
+ * when there was none.
  */
 export async function deletePin(
   scope: SpaceScope,
   agentPackageId: string,
   integrationId: string,
   userId: string | null,
-): Promise<{ previous: string[] | null }> {
-  const [row] = await db
-    .delete(integrationPins)
-    .where(pinKey(scope, agentPackageId, integrationId, userId))
-    .returning({ connectionIds: integrationPins.connectionIds });
-  return { previous: row?.connectionIds ?? null };
+): Promise<{ previous: string[] | null; disabledScheduleIds: string[] }> {
+  const pin = { spaceId: scope.spaceId, agentPackageId, integrationId };
+  return removeNamingLayer(pinLayer(pin, userId), async (tx) => {
+    const [row] = await tx
+      .delete(integrationPins)
+      .where(pinKey(scope, agentPackageId, integrationId, userId))
+      .returning({ connectionIds: integrationPins.connectionIds });
+    return { previous: row?.connectionIds ?? null };
+  });
 }
 
 /**
@@ -464,8 +470,8 @@ export async function listMemberPinsForAgent(
  * (space, integration), oldest first. Used by the UI picker:
  * own + shared, with caller-facing labels.
  *
- * Same set — and the same predicate (`usableInSpace`) — as `listIntegrationConnections`
- * on the settings surface; only the projected DTO differs (this one carries
+ * The same rows ({@link listReachableConnections} under `usable`) as `listIntegrationConnections` on the
+ * settings surface; only the projected DTO differs (this one carries
  * `owner_name` and the split owner ids the picker keys on, the other the
  * full connection summary).
  */
@@ -474,17 +480,11 @@ export async function listAccessibleConnections(
   integrationId: string,
   principal: ConnectionPrincipal,
 ): Promise<AccessibleIntegrationConnection[]> {
-  const actor = principal.actor;
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(
-        eq(integrationConnections.integrationId, integrationId),
-        usableInSpace(scope.spaceId, actor),
-      ),
-    )
-    .orderBy(asc(integrationConnections.createdAt), asc(integrationConnections.id));
+  const rows = await listReachableConnections(
+    { spaceId: scope.spaceId, actor: principal.actor },
+    "usable",
+    [integrationId],
+  );
   const ownerName = await resolveConnectionOwnerNames(rows);
   const shares = await loadConnectionShares(
     db,
@@ -561,12 +561,6 @@ async function resolveAgentIntegrationPick(args: {
   const actor = principal.actor;
 
   const agentEntry = parseManifestIntegrations(agentManifest).find((e) => e.id === integrationId);
-  // AFPS §4.4 — preserve the wildcard literal `"*"` so the scope diff
-  // can route through the default-scopes branch of `requiredScopesForAgent`.
-  // Coercing `"*"` to `[]` here would silently bypass the scope diff and let
-  // a connection with zero default scopes appear "fully connected".
-  const agentTools: readonly string[] | "*" = agentEntry?.tools ?? [];
-  const agentScopes = agentEntry?.scopes ?? [];
 
   const manifestRes = await fetchIntegrationManifest(integrationId, args.manifestCache);
   const manifest = manifestRes.ok ? manifestRes.manifest : null;
@@ -589,19 +583,21 @@ async function resolveAgentIntegrationPick(args: {
   // The resolver's own candidate universe (orphaned-auth guard, the dep's pinned
   // `auth_key`, auths serving the selection), so the picker offers exactly the
   // `must_choose_connection` candidates. No manifest → no verdict to align with.
-  const candidateRows =
-    manifest && agentEntry
-      ? servingCandidates(requirementOf(agentEntry, manifest), candidatesRaw, (c) => c.auth_key)
-      : candidatesRaw;
+  const requirement = manifest && agentEntry ? requirementOf(agentEntry, manifest) : null;
+  const candidateRows = requirement
+    ? servingCandidates(requirement, candidatesRaw, (c) => c.auth_key)
+    : candidatesRaw;
   const scoped = candidateRows.map((c) => ({
     c,
     authKey: c.auth_key,
     scopesGranted: c.scopes_granted,
     needsReconnection: c.needs_reconnection,
   }));
+  // Ranked on the resolver's own scope selection, so a candidate's `missing_scopes` is the
+  // verdict's: an agent's `"*"`, written or inherited, is judged on the auth's `default_scopes`.
   // Without a manifest nothing is judged: the listing order stands.
   const ranked = manifest
-    ? rankByLeastPrivilege({ manifest, agentTools, agentScopes }, scoped)
+    ? rankByLeastPrivilege(requirement ?? { manifest, agentTools: [], agentScopes: [] }, scoped)
     : scoped.map((row) => ({ row, scopeFit: "unjudged" as const, missingScopes: [] }));
   const candidates: IntegrationCandidate[] = ranked.map(({ row, scopeFit, missingScopes }) => ({
     ...row.c,
@@ -657,6 +653,8 @@ interface AgentConnectionReadiness {
     /** The agent's `integrations_configuration.<id>.required`. */
     required: boolean;
     run_blocking: boolean;
+    /** Declared, with nothing a run would start: the run cascade skips it. */
+    inert: boolean;
     resolution: IntegrationAgentResolution;
   }>;
 }
@@ -767,6 +765,11 @@ export async function resolveAgentConnectionReadiness(args: {
       : Promise.resolve([] as MemberPinSummary[]),
   ]);
   const blockingIds = new Set(runResolution.errors.map((e) => e.integrationId));
+  // Judged with `includeInert` and by no run: an unloadable manifest is judged by neither.
+  const inert = (id: string) =>
+    !(id in runResolution.resolved) &&
+    !blockingIds.has(id) &&
+    (id in pickResolution.resolved || pickResolution.errors.some((e) => e.integrationId === id));
 
   const resolutions = await Promise.all(
     declared.map((e) =>
@@ -806,6 +809,7 @@ export async function resolveAgentConnectionReadiness(args: {
       integration_package_id: e.id,
       required: e.required === true,
       run_blocking: blockingIds.has(e.id),
+      inert: inert(e.id),
       resolution: resolutions[i]!,
     })),
   };

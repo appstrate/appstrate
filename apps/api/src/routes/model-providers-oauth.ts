@@ -5,27 +5,34 @@ import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import { parseBearer } from "@appstrate/core/bearer";
 import type { AppEnv } from "../types/index.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAnyPermission } from "../middleware/require-permission.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { importOAuthModelProviderConnection } from "../services/model-providers/oauth-flow.ts";
-import { isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
 import {
   cancelPairing,
   consumePairing,
   createPairing,
   getPairing,
   linkPairingCredential,
+  markPairingFailed,
 } from "../services/model-providers/pairings.ts";
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
-import { recordAuditFromContext } from "../services/audit.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { logger } from "../lib/logger.ts";
+import { recordAuditAs, recordAuditFromContext } from "../services/audit.ts";
 import { connectHelperCommand } from "../lib/connect-helper.ts";
 import {
+  credentialOwnerTypeSchema,
   getOrgModelProviderCredential,
-  mayReconnectCredential,
+  MANAGE_CREDENTIALS,
+  assertPersonalCredentialCreatable,
   personalModelCredentialsAllowed,
   personalModelCredentialsDisabled,
+  reconnectVerdict,
   requestModelCredentialCaller,
+  resolveCredentialOwner,
 } from "../services/model-providers/credentials.ts";
 
 /**
@@ -96,9 +103,17 @@ export const createPairingBody = z
       (id) => isOAuthModelProvider(id),
       "providerId must be a registered OAuth model provider",
     ),
+    /** Reconnect this credential in place; absent for a new connection. */
     credentialId: z.uuid().optional(),
+    /** Owner of a new connection (default `org`). */
+    owner_type: credentialOwnerTypeSchema.unwrap().optional(),
   })
-  .strict();
+  .strict()
+  // A reconnect takes its owner from the credential: a restated one is never silently dropped.
+  .refine((body) => body.credentialId === undefined || body.owner_type === undefined, {
+    path: ["owner_type"],
+    message: "owner_type applies to a new connection only; omit it with credentialId",
+  });
 
 /**
  * Pair-redeem handler for the canonical
@@ -108,9 +123,9 @@ export const createPairingBody = z
  * minted the token via POST /pairing (session-auth + RBAC); the helper
  * POSTs the credentials back here with it as Bearer credentials. We
  * `consumePairing()` atomically (single-use) — the resulting row's
- * userId / orgId / providerId override anything the body claims, so a
- * tampered helper cannot redirect the redeem to a different org or
- * provider than the user authorized in the dashboard.
+ * userId / orgId / providerId / ownerUserId override anything the body claims,
+ * so a tampered helper cannot redirect the redeem to a different org, provider
+ * or owner than the user authorized in the dashboard.
  *
  * No cookie / API-key path: the dashboard never POSTs to this route,
  * it only mints pairings + polls their status. `auth-pipeline.ts` lets
@@ -128,49 +143,75 @@ async function handlePairRedeem(c: Context<AppEnv>) {
 
   const consumed = await consumePairing(token);
 
-  const input = await readJsonBody(c, importBody);
+  // The token is spent: a redeem that ends here without a credential is
+  // recorded on the pairing, which the dashboard's poll reads as `failed`.
+  let result: Awaited<ReturnType<typeof importOAuthModelProviderConnection>>;
+  try {
+    const input = await readJsonBody(c, importBody);
 
-  // Body's providerId MUST match what the pairing was minted for —
-  // otherwise the helper could divert the redeem to a different
-  // provider than the user authorized in the dashboard.
-  if (input.providerId !== consumed.providerId) {
-    throw invalidRequest(
-      `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
-      "providerId",
-    );
+    // Body's providerId MUST match what the pairing was minted for —
+    // otherwise the helper could divert the redeem to a different
+    // provider than the user authorized in the dashboard.
+    if (input.providerId !== consumed.providerId) {
+      throw invalidRequest(
+        `providerId in body (${input.providerId}) does not match pairing (${consumed.providerId})`,
+        "providerId",
+      );
+    }
+
+    // The redeem holds no principal: it judges the member who minted the pairing
+    // again, on their grants at this moment.
+    result = await importOAuthModelProviderConnection({
+      providerId: input.providerId,
+      accessToken: input.access_token,
+      refreshToken: input.refresh_token,
+      label: input.label,
+      expiresAt: input.expiresAt,
+      email: input.email,
+      accountId: input.account_id,
+      orgId: consumed.orgId,
+      userId: consumed.userId,
+      ownerUserId: consumed.ownerUserId,
+      ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
+    });
+  } catch (err) {
+    // The redeem's own error is the one thrown, whatever happens to the stamp.
+    await markPairingFailed(consumed.id).catch((stampErr) => {
+      logger.error("Pairing failure stamp failed", {
+        pairingId: consumed.id,
+        error: getErrorMessage(stampErr),
+      });
+    });
+    throw err;
   }
-
-  const result = await importOAuthModelProviderConnection({
-    providerId: input.providerId,
-    accessToken: input.access_token,
-    refreshToken: input.refresh_token,
-    label: input.label,
-    expiresAt: input.expiresAt,
-    email: input.email,
-    accountId: input.account_id,
-    orgId: consumed.orgId,
-    userId: consumed.userId,
-    ...(consumed.reconnectCredentialId ? { credentialId: consumed.reconnectCredentialId } : {}),
-  });
 
   // Link the resulting credential back to the pairing row so the dashboard's
   // GET /pairing/:id poll surfaces it without a separate list call.
   await linkPairingCredential(consumed.id, result.credentialId);
 
-  await recordAuditFromContext(c, {
-    action: consumed.reconnectCredentialId
-      ? "oauth_model_provider.reconnected"
-      : "oauth_model_provider.imported",
-    resourceType: "oauth_model_provider",
-    resourceId: result.credentialId,
-    after: {
-      providerId: result.providerId,
-      credentialId: result.credentialId,
-      availableModelIds: result.availableModelIds,
-      pairingId: consumed.id,
-      // No raw token / email — audit log MUST NOT carry secrets
+  // The request carries no session: the member who minted the pairing is the actor.
+  await recordAuditAs(
+    c,
+    { orgId: consumed.orgId, spaceId: null, actorType: "user", actorId: consumed.userId },
+    {
+      action: consumed.reconnectCredentialId
+        ? "oauth_model_provider.reconnected"
+        : "oauth_model_provider.imported",
+      resourceType: "oauth_model_provider",
+      resourceId: result.credentialId,
+      after: {
+        providerId: result.providerId,
+        credentialId: result.credentialId,
+        // A reconnect changes no owner and does not read the pairing's.
+        ...(consumed.reconnectCredentialId
+          ? {}
+          : { ownerType: consumed.ownerUserId === null ? "org" : "user" }),
+        availableModelIds: result.availableModelIds,
+        pairingId: consumed.id,
+        // No raw token / email — audit log MUST NOT carry secrets
+      },
     },
-  });
+  );
 
   // Deliberate operation-result shape (NOT the bare credential resource —
   // flow-completion exception to the strict rule): the helper's bearer
@@ -215,26 +256,18 @@ export function createModelProvidersOAuthRouter() {
   // Mint a one-shot pairing token. Returns the plaintext token + a
   // ready-to-paste `npx` command. The token is shown once; subsequent
   // GETs only ever return status, never the token itself.
-  router.post(
-    "/pairing",
-    requirePermission("model-provider-credentials", "connect"),
-    rateLimit(10),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const user = c.get("user");
-      const caller = requestModelCredentialCaller(c);
-      const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
+  router.post("/pairing", requireAnyPermission(MANAGE_CREDENTIALS), rateLimit(10), async (c) => {
+    const orgId = c.get("orgId");
+    const user = c.get("user");
+    const caller = requestModelCredentialCaller(c);
+    const input = await readJsonBody(c, createPairingBody, { allowEmpty: true });
 
-      // A subscription is always personal: minting a pairing creates one, so the org policy applies.
-      const personalAllowed = await personalModelCredentialsAllowed(orgId);
-      if (!personalAllowed) throw personalModelCredentialsDisabled();
-
-      if (input.credentialId) {
-        // Reconnect targets the caller's own subscription of this provider; anything else reads as absent.
-        const credential = await getOrgModelProviderCredential(caller, input.credentialId);
-        if (
-          !credential ||
-          !mayReconnectCredential(
+    let ownerUserId: string | null;
+    let reconnectCredentialId: string | null = null;
+    if (input.credentialId !== undefined) {
+      const credential = await getOrgModelProviderCredential(caller, input.credentialId);
+      const verdict = credential
+        ? reconnectVerdict(
             caller,
             {
               source: credential.source,
@@ -243,102 +276,107 @@ export function createModelProvidersOAuthRouter() {
               providerId: credential.providerId,
             },
             input.providerId,
-            personalAllowed,
+            await personalModelCredentialsAllowed(orgId),
           )
-        ) {
-          throw notFound("Model provider credential not found");
-        }
+        : "absent";
+      if (verdict === "policy_off") throw personalModelCredentialsDisabled();
+      if (!credential || verdict === "absent") {
+        throw notFound("Model provider credential not found");
       }
+      ownerUserId = credential.owner_id;
+      reconnectCredentialId = credential.id;
+    } else {
+      ownerUserId = resolveCredentialOwner(c, credentialOwnerTypeSchema.parse(input.owner_type));
+      // The redeem's own guard: a pairing it would refuse is never minted.
+      const provider = getModelProvider(input.providerId);
+      if (ownerUserId !== null && provider) {
+        await assertPersonalCredentialCreatable(orgId, provider, null);
+      }
+    }
 
-      const platformUrl = getEnv().APP_URL;
-      const { id, token, expiresAt } = await createPairing({
-        userId: user.id,
-        orgId,
+    const platformUrl = getEnv().APP_URL;
+    const { id, token, expiresAt } = await createPairing({
+      userId: user.id,
+      orgId,
+      providerId: input.providerId,
+      ownerUserId,
+      ...(reconnectCredentialId ? { reconnectCredentialId } : {}),
+      platformUrl,
+      ttlSeconds: PAIRING_TTL_SECONDS,
+    });
+
+    const command = connectHelperCommand(token);
+
+    await recordAuditFromContext(c, {
+      action: "oauth_model_provider.pairing_created",
+      resourceType: "oauth_model_provider_pairing",
+      resourceId: id,
+      after: {
         providerId: input.providerId,
-        ...(input.credentialId ? { reconnectCredentialId: input.credentialId } : {}),
-        platformUrl,
-        ttlSeconds: PAIRING_TTL_SECONDS,
-      });
-
-      const command = connectHelperCommand(token);
-
-      await recordAuditFromContext(c, {
-        action: "oauth_model_provider.pairing_created",
-        resourceType: "oauth_model_provider_pairing",
-        resourceId: id,
-        after: {
-          providerId: input.providerId,
-          reconnectCredentialId: input.credentialId ?? null,
-          expiresAt: expiresAt.toISOString(),
-          // No raw token in audit — leaks the bearer secret otherwise.
-        },
-      });
-
-      return c.json({
-        id,
-        token,
-        command,
+        ownerType: ownerUserId === null ? "org" : "user",
+        reconnectCredentialId,
         expiresAt: expiresAt.toISOString(),
-      });
-    },
-  );
+        // No raw token in audit — leaks the bearer secret otherwise.
+      },
+    });
+
+    return c.json({
+      id,
+      token,
+      command,
+      expiresAt: expiresAt.toISOString(),
+    });
+  });
 
   // GET /api/model-providers-oauth/pairing/:id
-  // Polled by the dashboard while the user runs the helper. Returns
-  // `pending` until the helper consumes the token, `consumed` after,
-  // `expired` once the TTL elapsed without consumption.
+  // Polled by the dashboard while the user runs the helper. The status is the
+  // outcome of the redeem: `connected` once it linked a credential, `failed`
+  // once it ended without one, `expired` past the TTL, `pending` otherwise — a
+  // redeem in flight included.
   //
   // Wrong-org reads return 404 (not 403) — we never confirm or deny
   // existence of a pairing belonging to a different tenant.
-  router.get(
-    "/pairing/:id",
-    requirePermission("model-provider-credentials", "connect"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
+  router.get("/pairing/:id", requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
+    const orgId = c.get("orgId");
+    const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
 
-      // Another member's pairing reads as absent: it carries that member's reconnect target.
-      const row = await getPairing(id, orgId, c.get("user").id);
-      if (!row) throw notFound("Pairing not found");
+    // Another member's pairing reads as absent: a pairing is its minter's alone.
+    const row = await getPairing(id, orgId, c.get("user").id);
+    if (!row) throw notFound("Pairing not found");
 
-      const now = Date.now();
-      let status: "pending" | "consumed" | "expired";
-      if (row.consumedAt) status = "consumed";
-      else if (row.expiresAt.getTime() <= now) status = "expired";
-      else status = "pending";
+    let status: "pending" | "connected" | "failed" | "expired";
+    if (row.credentialId) status = "connected";
+    else if (row.failedAt) status = "failed";
+    else if (row.expiresAt.getTime() <= Date.now()) status = "expired";
+    else status = "pending";
 
-      return c.json({
-        id: row.id,
-        status,
-        consumed_at: row.consumedAt ? row.consumedAt.toISOString() : null,
-        expiresAt: row.expiresAt.toISOString(),
-        credentialId: row.credentialId,
-      });
-    },
-  );
+    return c.json({
+      id: row.id,
+      status,
+      consumed_at: row.consumedAt ? row.consumedAt.toISOString() : null,
+      expiresAt: row.expiresAt.toISOString(),
+      credentialId: row.credentialId,
+    });
+  });
 
   // DELETE /api/model-providers-oauth/pairing/:id
   // Cancel a pending pairing. Idempotent — returns 204 even when the row
   // is already gone (consumed, expired-and-purged, or wrong org). The
   // wrong-org case is silent for the same reason GET returns 404.
-  router.delete(
-    "/pairing/:id",
-    requirePermission("model-provider-credentials", "connect"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
+  router.delete("/pairing/:id", requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
+    const orgId = c.get("orgId");
+    const { id } = parseBody(pairingIdParam, { id: c.req.param("id") }, "id");
 
-      await cancelPairing(id, orgId, c.get("user").id);
+    await cancelPairing(id, orgId, c.get("user").id);
 
-      await recordAuditFromContext(c, {
-        action: "oauth_model_provider.pairing_cancelled",
-        resourceType: "oauth_model_provider_pairing",
-        resourceId: id,
-      });
+    await recordAuditFromContext(c, {
+      action: "oauth_model_provider.pairing_cancelled",
+      resourceType: "oauth_model_provider_pairing",
+      resourceId: id,
+    });
 
-      return c.body(null, 204);
-    },
-  );
+    return c.body(null, 204);
+  });
 
   return router;
 }

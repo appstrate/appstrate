@@ -33,11 +33,12 @@ const DEFAULT_PERSISTENCE: ConnectionPickerPersistence = { mode: "pin" };
  * `MAX_CONNECTIONS_PER_INTEGRATION`) that "Valider" writes in one go;
  * with a single candidate, clicking its row binds it directly.
  *
- * Single source of truth for "which connections?" UX — shared by the agent
- * page (member pins) and the schedule editor (per-schedule overrides) via the
- * `persistence` prop. The candidate list, scope/lock verdicts and the connect
- * orchestration (hosted connect portal popup) are identical across both; only
- * where the pick lands differs.
+ * Single source of truth for "which connections?" UX. The agent page and the
+ * launch-recovery modal write the member's pin; the run-with-options modal and
+ * the schedule editor hold an override in their form (`persistence`). The
+ * candidate list, scope/lock verdicts and the connect orchestration (hosted
+ * connect portal popup) are identical across them; only where the pick lands
+ * differs.
  */
 export function IntegrationConnectionPicker({
   persistence = DEFAULT_PERSISTENCE,

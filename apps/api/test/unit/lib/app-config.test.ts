@@ -65,6 +65,48 @@ describe("buildAppConfig — closed-mode projection", () => {
 });
 
 /**
+ * `trustedOrigins` is the SPA's post-login `?redirect=` allowlist. `APP_URL`'s
+ * own origin is on it whether or not `TRUSTED_ORIGINS` is set — an absolute
+ * redirect back to the platform itself must not be silently dropped.
+ */
+describe("buildAppConfig — trustedOrigins", () => {
+  const ORIGIN_KEYS = ["APP_URL", "TRUSTED_ORIGINS"] as const;
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const k of ORIGIN_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    for (const k of ORIGIN_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    _resetCacheForTesting();
+  });
+
+  it("holds APP_URL's origin when TRUSTED_ORIGINS is unset", () => {
+    process.env.APP_URL = "https://app.example.com";
+    _resetCacheForTesting();
+    expect(buildAppConfig().trustedOrigins).toEqual(["https://app.example.com"]);
+  });
+
+  it("adds TRUSTED_ORIGINS after APP_URL's origin, without duplicating it", () => {
+    process.env.APP_URL = "https://app.example.com/";
+    process.env.TRUSTED_ORIGINS = "https://docs.example.com,https://app.example.com";
+    _resetCacheForTesting();
+    expect(buildAppConfig().trustedOrigins).toEqual([
+      "https://app.example.com",
+      "https://docs.example.com",
+    ]);
+  });
+});
+
+/**
  * `isSmtpConfigured()` is the one formula behind `features.smtp`, and — since
  * `ModuleInitContext.getSendMail` gates the module-facing mailer on it — the
  * one answer to "will a module's send reach a transport at all". A partial

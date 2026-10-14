@@ -12,9 +12,10 @@
  * `{{var}}` substitution + `authorized_uris` allowlist).
  *
  * `X-Integration-Id` carries the integration package id (`@scope/name`); which
- * connection is decrypted is `selectAccessibleConnection`'s call.
+ * connection is decrypted is `selectAccessibleConnection`'s call: a member of the
+ * `X-Run-Id` run's bound set, else one {@link listConnectionsOutsideRun} lists.
  *
- * Both this external-runner path and the in-container sidecar path
+ * Both this path and the in-container sidecar path
  * (`api-call-credentials.ts`) build the payload via the shared
  * `buildProxyCredentialsPayload` helper in `@appstrate/connect`, so the
  * payload shape and injection contract cannot drift between them.
@@ -27,21 +28,28 @@ import {
   type AfpsHttpDelivery as ConnectAfpsHttpDelivery,
   type ProxyCredentialsPayload,
 } from "@appstrate/connect";
+import { credentialTemplateRefs } from "@appstrate/afps-shared/credential-template";
 import {
   renderAuthAuthorizedUris,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
-import type { Actor } from "../../lib/actor.ts";
+import { actorOwns, type Actor } from "../../lib/actor.ts";
+import { connectionVariablesOf } from "../../lib/connection-identity.ts";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
-import { requireAttributableRun } from "../state/runs.ts";
+import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
+  listActiveIntegrationIds,
+  listReachableConnections,
   selectAccessibleConnection,
   upstreamRejectionStreak,
+  type ProxyReach,
+  type ProxySelectionPath,
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
+import { listOrgDefaultsForResolver } from "../integration-org-defaults-service.ts";
 import type { ConnectionVariables } from "../connect/connection-variables.ts";
 import {
   readIntegrationManifestForProxy,
@@ -57,8 +65,9 @@ export interface ProxyRunSelection extends RunBoundSelection {
 }
 
 /**
- * The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of its own run.
- * Each read checks the run anew, so a run that finished since the call started stops lending.
+ * The `X-Run-Id` run, bound to the ACTOR: a caller borrows only the snapshot of a run of its own
+ * that it executes itself ({@link requireCallerRun}). Each read checks the run anew, so a run that
+ * finished since the call started stops lending.
  */
 export function runBoundSelection(input: {
   orgId: string;
@@ -68,12 +77,12 @@ export function runBoundSelection(input: {
   actor: Actor;
 }): ProxyRunSelection {
   const { orgId, spaceId, runId, integrationId, actor } = input;
-  const attributableRun = () => requireAttributableRun({ orgId, runId, spaceId, owner: actor });
+  const callerRun = () => requireCallerRun({ orgId, runId, spaceId, actor });
   return {
     id: runId,
-    boundSet: async () => (await attributableRun()).resolvedConnections?.[integrationId] ?? [],
+    boundSet: async () => (await callerRun()).resolvedConnections?.[integrationId] ?? [],
     frozenVersion: async () =>
-      (await attributableRun()).resolvedIntegrationVersions?.[integrationId] ?? null,
+      (await callerRun()).resolvedIntegrationVersions?.[integrationId] ?? null,
   };
 }
 
@@ -86,7 +95,7 @@ export class IntegrationCredentialNotFoundError extends Error {
   }
 }
 
-interface ResolveIntegrationProxyInput {
+type ResolveIntegrationProxyInput = {
   /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
   orgId: string;
@@ -94,9 +103,7 @@ interface ResolveIntegrationProxyInput {
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
-  /** The run named by `X-Run-Id` — confines the call to the connections and version it froze. */
-  run?: ProxyRunSelection;
-}
+} & ProxySelectionPath<ProxyRunSelection>;
 
 interface ResolvedIntegrationProxyCredentials {
   /** `payload.authorizedUris` is rendered for the connection: it decides what matches. */
@@ -129,11 +136,7 @@ export async function resolveIntegrationProxyCredentials(
   }
 
   const connection = await resolveConnection(input, manifest);
-  if (!connection) {
-    throw new IntegrationCredentialNotFoundError(
-      `No credentials configured for integration '${input.integrationId}' in space ${input.spaceId}`,
-    );
-  }
+  if (!connection) throw new IntegrationCredentialNotFoundError(noConnectionMessage(input));
 
   const payload = buildPayload(input.integrationId, manifest, connection);
   return {
@@ -203,9 +206,88 @@ export async function forceRefreshIntegrationProxyCredentials(
   return buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables);
 }
 
+/** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
+interface ConnectionOutsideRun {
+  integration_package_id: string;
+  connection_id: string;
+  label: string;
+  owned_by_actor: boolean;
+  auth_key: string;
+  scopes_granted: string[];
+  /** {@link listedAuthorizedUris}: never a value of the connection's credential. */
+  authorized_uris: string[];
+  allow_all_uris: boolean;
+  /** A call binding it answers `409 needs_reconnection` until its owner reconnects it. */
+  needs_reconnection: boolean;
+  call_permission_required: boolean;
+}
+
+/** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
+export async function listConnectionsOutsideRun(
+  scope: { orgId: string; spaceId: string },
+  actor: Actor,
+  reach: ProxyReach,
+): Promise<ConnectionOutsideRun[]> {
+  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, reach);
+  const integrationIds = [...new Set(rows.map((row) => row.integrationId))];
+  const [active, orgDefaults, manifests] = await Promise.all([
+    listActiveIntegrationIds(integrationIds, scope.spaceId),
+    listOrgDefaultsForResolver(scope.spaceId),
+    Promise.all(integrationIds.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null))),
+  ]);
+  const manifestOf = new Map(integrationIds.map((id, i) => [id, manifests[i]!]));
+
+  const listed = rows.flatMap((row): ConnectionOutsideRun[] => {
+    const loaded = manifestOf.get(row.integrationId)!;
+    if (!active.has(row.integrationId) || !loaded.ok) return [];
+    const authDef = loaded.manifest.auths?.[row.authKey] as AfpsManifestAuth | undefined;
+    if (!authDef) return [];
+    const orgDefault = orgDefaults[row.integrationId];
+    const enforcedMembers = orgDefault?.enforce ? orgDefault.connectionIds : null;
+    if (reach === "usable" && enforcedMembers && !enforcedMembers.includes(row.id)) return [];
+    return [
+      {
+        integration_package_id: row.integrationId,
+        connection_id: row.id,
+        label: row.label,
+        owned_by_actor: actorOwns(actor, row),
+        auth_key: row.authKey,
+        scopes_granted: row.scopesGranted,
+        authorized_uris: listedAuthorizedUris(authDef, connectionVariablesOf(row.variables)),
+        allow_all_uris: authDef.allow_all_uris === true,
+        needs_reconnection: row.needsReconnection,
+        call_permission_required: reach === "own" && enforcedMembers !== null,
+      },
+    ];
+  });
+  // Grouped by integration; within one, oldest first.
+  return listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
+}
+
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
+
+/**
+ * Why no connection answers. Outside a run the wording depends only on whether an id was named,
+ * never on whose row it names or whether it exists.
+ */
+function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
+  const { integrationId, run } = input;
+  if (run) return `Run '${run.id}' binds no usable connection of integration '${integrationId}'`;
+  if (input.reach === "usable") {
+    return input.connectionId
+      ? `X-Connection-Id names no connection of integration '${integrationId}' usable in this space`
+      : `No connection of integration '${integrationId}' is usable in this space`;
+  }
+  const subject = input.connectionId
+    ? `X-Connection-Id names none of your own connections of integration '${integrationId}' usable in this space`
+    : `You have no connection of integration '${integrationId}' usable in this space`;
+  return (
+    `${subject}. A connection shared into the space is reached by a caller holding ` +
+    `credential-proxy:call, or through an agent run the platform executes.`
+  );
+}
 
 async function loadManifest(input: ResolveIntegrationProxyInput): Promise<IntegrationManifest> {
   const { integrationId } = input;
@@ -246,7 +328,7 @@ function resolveConnection(
   return selectAccessibleConnection(input.integrationId, manifest, input.connectionId ?? null, {
     spaceId: input.spaceId,
     actor: input.actor,
-    ...(input.run ? { run: input.run } : {}),
+    ...(input.run ? { run: input.run } : { reach: input.reach }),
   });
 }
 
@@ -308,4 +390,21 @@ function buildPayloadFromFields(
     authorizedUris: renderAuthAuthorizedUris(authDef, fields, variables),
     allowAllUris: authDef.allow_all_uris === true,
   });
+}
+
+/**
+ * An auth's `authorized_uris` as the listing gives them: rendered from the connection's variables
+ * alone. An entry templated on a credential field stays as the manifest declares it — a bare
+ * `{$credential.<field>}` entry renders to that field's whole URL, query string included, and the
+ * field may be the secret itself. Only {@link buildPayloadFromFields} renders with the credential.
+ */
+function listedAuthorizedUris(
+  authDef: Pick<AfpsManifestAuth, "authorized_uris">,
+  variables: ConnectionVariables,
+): string[] {
+  return (authDef.authorized_uris ?? []).flatMap((pattern) =>
+    credentialTemplateRefs(pattern).length > 0
+      ? [pattern]
+      : renderAuthAuthorizedUris({ authorized_uris: [pattern] }, {}, variables),
+  );
 }

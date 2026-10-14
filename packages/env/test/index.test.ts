@@ -32,6 +32,7 @@ const TRACKED = [
   "TOOL_RESULT_BYTE_LIMIT",
   "AFPS_SIGNATURE_POLICY",
   "MODEL_CATALOG_URL",
+  "TRUSTED_ORIGINS",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -154,6 +155,17 @@ describe("empty string is universally treated as unset (compose `${VAR:-}` patte
     _resetCacheForTesting();
     process.env.MODEL_CATALOG_URL = "ftp://example.test/catalog";
     expect(() => getEnv()).toThrow(/MODEL_CATALOG_URL/);
+  });
+
+  it("TRUSTED_ORIGINS: unset or empty trusts no extra origin", () => {
+    delete process.env.TRUSTED_ORIGINS;
+    expect(getEnv().TRUSTED_ORIGINS).toEqual([]);
+    _resetCacheForTesting();
+    process.env.TRUSTED_ORIGINS = "";
+    expect(getEnv().TRUSTED_ORIGINS).toEqual([]);
+    _resetCacheForTesting();
+    process.env.TRUSTED_ORIGINS = " https://a.example , ,https://b.example";
+    expect(getEnv().TRUSTED_ORIGINS).toEqual(["https://a.example", "https://b.example"]);
   });
 });
 

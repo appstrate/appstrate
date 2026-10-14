@@ -189,6 +189,7 @@ describe("API Keys API", () => {
       expect(body.scopes).toContain("agents:read");
       expect(body.scopes).toContain("agents:run");
       expect(body.scopes).toContain("credential-proxy:call");
+      expect(body.scopes).toContain("credential-proxy:call-own");
       expect(body.scopes).toContain("llm-proxy:call");
     });
 

@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { presetPermissions } from "../../../src/lib/permissions.ts";
 import {
   resolveSpaceRole,
   spacePermissions,
@@ -40,6 +41,16 @@ describe("resolveSpaceRole on a personal space", () => {
         kind: "preset",
         preset: "admin",
       });
+    }
+  });
+
+  it("grants its owner exactly what `admin` holds, the credential proxy included", () => {
+    const admin = presetPermissions("admin");
+    for (const orgRole of ["owner", "member"] as const) {
+      const owned = spacePermissions(resolveSpaceRole(orgRole, personal, null, OWNER));
+      expect([...owned].sort(), orgRole).toEqual([...admin].sort());
+      expect(owned.has("credential-proxy:call")).toBe(true);
+      expect(owned.has("credential-proxy:call-own")).toBe(true);
     }
   });
 

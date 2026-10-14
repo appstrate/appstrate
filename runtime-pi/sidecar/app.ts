@@ -141,16 +141,16 @@ export interface AppDeps {
   runtimeDeps?: SidecarRuntimeDeps;
   /**
    * Promise that resolves once `bootIntegrations` has finished its
-   * initial pass. `tools/list` awaits this briefly (with a hard
-   * timeout) so the agent's first call sees all declared integration
-   * tools even though the sidecar's HTTP listener came up first.
+   * initial pass. Only `GET /integrations/boot-report` awaits it; `/mcp`
+   * serves from the moment the listener is up.
    */
   integrationBootPromise?: Promise<void>;
   /**
    * Returns the integration boot report once {@link integrationBootPromise}
    * has resolved. Served by `GET /integrations/boot-report`, which the agent
-   * polls after the MCP handshake to (a) emit the per-phase boot breadcrumbs
-   * into the run log and (b) abort the run when `ok` is false. Omitted by
+   * reads after the MCP handshake and before listing its tools, to (a) emit
+   * the per-phase boot breadcrumbs into the run log and (b) abort the run
+   * when `ok` is false. Omitted by
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
@@ -689,10 +689,11 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ status: "ok" });
   });
 
-  // Integration boot report. The agent's bootloader polls this after the MCP
-  // handshake to relay the per-phase breadcrumbs into the run log and to abort
-  // the run when any declared integration failed to boot (`ok: false`). We
-  // await the boot promise so the report is final before answering.
+  // Integration boot report. The agent's bootloader reads this after the MCP
+  // handshake, before listing its tools, to relay the per-phase breadcrumbs
+  // into the run log and to abort the run when any declared integration failed
+  // to boot (`ok: false`). We await the boot promise so the report is final
+  // before answering.
   //
   // Authenticated like the rest of the control surface, by the
   // `SIDECAR_AUTH_HEADER` middleware above. The agent container still holds NO
@@ -1017,7 +1018,6 @@ export function createApp(deps: AppDeps): Hono {
     ...(deps.additionalMcpToolsProvider
       ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
       : {}),
-    ...(deps.integrationBootPromise ? { integrationBootPromise: deps.integrationBootPromise } : {}),
   });
 
   return app;

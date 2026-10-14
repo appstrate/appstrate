@@ -83,10 +83,17 @@ const MCP_TOOLS_DESCRIPTION =
   "and `get_me` unless the client injects its own caller context) is always present, " +
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
   "`run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` " +
-  "(whatever guards the `listFiles` operation's own route) and `import_package_file` — are " +
+  "(whatever guards the `listFiles` operation's own route), `import_package_file`, and " +
+  "`list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or " +
+  "`credential-proxy:call`, on a " +
+  "bearer credential the credential proxy accepts) — are " +
   "declared only to a caller whose grants make them usable, so `tools/list` differs by " +
   "role. Together they let an MCP client discover and call platform API operations, " +
-  "plus launch and wait for agent runs, with the caller's own credentials.";
+  "launch and wait for agent runs, and call third-party APIs through the caller's own " +
+  "connections (and those shared into the space, for a caller holding " +
+  "`credential-proxy:call`), with the caller's own credentials. `api_call` is the only " +
+  "MCP path to the " +
+  "credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves.";
 
 /** Permissions and the refusal shapes, shared by the organization and space endpoints. */
 const MCP_REFUSALS_DESCRIPTION =

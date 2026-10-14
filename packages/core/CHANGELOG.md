@@ -20,6 +20,43 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
 
 ### Added
 
+- **`MODEL_BINDINGS`** / **`ModelBinding`** and **`MODEL_CREDENTIAL_OWNERS`** /
+  **`ModelCredentialOwner`** (`@appstrate/core/model-payer`): whose credential
+  serves a listed model, `system` | `org` | `user` | `managed` (`MODEL_PAYERS`
+  plus `managed`, an alias), and who owns a stored model credential, `org` |
+  `user`, a subset of `ModelPayer`.
+- `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
+  (`./integration`): the `http://` `authorized_uris` entries of the auths
+  that inject a credential over HTTP, as write-path issues. `isTrustedHost`
+  exempts a host the operator designated as internal.
+- **`findUnexposedDefaultTools(manifest, mcpServerTools?)`**
+  (`@appstrate/core/integration`): the write-path rule listing a manifest's
+  `default_tools` entries the platform can prove unexposed, each once. On
+  every source, a name `hidden_tools` lists, a `connect.tool` references, or
+  the upload companion of a hidden `api_call`. Beyond that, a name outside the
+  canonical catalog (`resolveIntegrationToolCatalog`) where it is known: a
+  `none` source carrying no `_meta` key, at any depth, outside the
+  `dev.appstrate/` namespace, a `local` source when `mcpServerTools` (the
+  referenced mcp-server's `tools[]`) is passed, and a `remote` source that
+  declares a `tools_policy`, which bounds the default as it bounds an agent's
+  explicit selection. `integrationManifestSchema` applies the rule to `none`
+  alone. (#1923)
+- **`resolveScopeToolSelection(agentSelection, manifest)`**
+  (`@appstrate/core/integration`): the tool selection an agent's OAuth scopes
+  are inferred from, to pass as `agentTools` to `requiredScopesForAgent` and
+  `missingScopesForConnection`. `"*"` when the effective selection
+  (`resolveEffectiveToolSelection`) is the wildcard, written or inherited from
+  `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
+  names inherited from `default_tools` contribute no scope. (#1923)
+- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): `call-own` gates a call to
+  `/api/credential-proxy/proxy` outside a run on the caller's own connections
+  only; `credential-proxy:call` is unchanged and implies it.
+  `CoreResources["credential-proxy"]` is `"call" | "call-own"`, and
+  `CorePermission` and `SpaceLevelPermission` gain the string. (#1894, #1963)
+- **`withImpliedPermissions(held)`** (`@appstrate/core/permissions`): `held`
+  plus every permission a held one implies. The implications are
+  `runs:read-all` ⇒ `runs:read` and `credential-proxy:call` ⇒
+  `credential-proxy:call-own`; other strings pass through. (#1963)
 - **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
   (`@appstrate/core/integration`): every code an `errors[]` item of the
   connection-readiness read carries, the resolver's error codes plus
@@ -50,9 +87,6 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
   that the consent left out, on a successful completion. (#1913)
 
-- **`AuthResolution.scopeCeiling`** (`@appstrate/core/module`): the scope
-  ceiling a `deferOrgResolution` strategy without `orgRole` declares, applied
-  over the org role resolved later. Absent, the caller is uncapped. (#1911)
 - **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
   before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
   `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**
@@ -136,6 +170,21 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   `off`, or when what it sends is not known. (#1774)
 
 ### Changed
+
+- **BREAKING: `AuthResolution`** (`@appstrate/core/module`) is a union of an
+  inline resolution and a deferred one (`deferOrgResolution: true`), each
+  declaring its ceiling in one place, where 15.0.0 accepted any mix. Inline,
+  `permissions` is the ceiling over `orgRole` (or the whole grant without one),
+  and `scopeCeiling` is absent. Deferred, there is no `orgRole`, `permissions`
+  is empty, and the new **`scopeCeiling`** is the ceiling over the org role
+  resolved later (absent, the caller is uncapped). A strategy that sets
+  `orgRole` or a non-empty `permissions` on a deferred resolution, or
+  `scopeCeiling` on an inline one, fails to compile, and the pipeline answers
+  one the compiler never saw with a 500. `deferOrgResolution` is `true`,
+  `false` or absent: a non-literal `boolean` no longer type-checks. A deferred
+  resolution that carried `orgRole` with `permissions` as its ceiling declares
+  that list as `scopeCeiling` instead; the `X-Org-Id` middleware already
+  replaced the role. (#1911, #1963)
 
 - **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
   `scopesGranted` and `missingScopes`, and a
@@ -238,6 +287,10 @@ Procedure: `docs/deployment/RELEASING_CORE.md`.
   still going. (#1844, #1851)
 - **The wait poll sends the remaining seconds and the server clamps them**
   (`@appstrate/core/run-and-wait-client`). (#1851)
+- **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: a refusal's
+  code holds for every argument it lists. When `scope` and `name` are one
+  absent and the other unusable, the refusal lists the absent one alone as
+  `missing_argument` (it used to list both as `invalid_argument`). (#1925)
 
 ## [15.0.0] — 2026-10-08
 

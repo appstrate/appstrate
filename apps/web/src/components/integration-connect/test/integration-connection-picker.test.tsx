@@ -14,7 +14,8 @@ import { describe, expect, it, spyOn } from "bun:test";
 import { isValidElement, type ReactNode } from "react";
 import { toast } from "sonner";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
-import { $api, type components } from "../../../api/client.ts";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { $api, client, type components } from "../../../api/client.ts";
 import { ApiError } from "../../../api/errors.ts";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { installFakeStorage } from "../../../test/fake-storage.ts";
@@ -107,7 +108,13 @@ function readiness(res: Resolution, runBlocking = false, required = false) {
     blocks_run: runBlocking,
     errors: [],
     integrations: [
-      { integration_package_id: INTEGRATION, required, run_blocking: runBlocking, resolution: res },
+      {
+        integration_package_id: INTEGRATION,
+        required,
+        run_blocking: runBlocking,
+        inert: false,
+        resolution: res,
+      },
     ],
   };
 }
@@ -319,7 +326,7 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     });
     expect(withOverride).toContain(`member-pick-locked-${INTEGRATION}`);
     expect(withOverride).toContain(clear);
-    expect(withOverride).toContain(i18n.t("agents:schedule.connectionOverrides.clearChoice"));
+    expect(withOverride).toContain(i18n.t("agents:connectionOverrides.clearChoice"));
     expect(
       renderPicker(locked, false, { mode: "override", value: null, onChange: () => {} }),
     ).not.toContain(clear);
@@ -337,6 +344,54 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).toContain(">db<");
     expect(html).not.toContain("web · db");
     expect(html).not.toContain(`member-pick-clear-${INTEGRATION}`);
+  });
+
+  it("judges an override narrowing a lock on what it binds, not on the locked set", () => {
+    // The admin pin holds a dead member, so the cascade blocks; the override binds `db` alone.
+    const deadWeb = { ...candidate(WEB, "web"), needs_reconnection: true };
+    const locked = resolution({
+      source: "admin_pin",
+      admin_pinned_connection_ids: [WEB, DB],
+      candidates: [deadWeb, candidate(DB, "db")],
+    });
+    const override = (value: string[] | null): Persistence => ({
+      mode: "override",
+      value,
+      onChange: () => {},
+    });
+    const narrowed = renderPicker(locked, true, override([DB]));
+    expect(narrowed).toContain(`member-pick-locked-${INTEGRATION}`);
+    expect(narrowed).toContain(">db<");
+    expect(narrowed).not.toContain("text-amber-600");
+    // Control: unset, the locked set binds, and narrowed to the dead member it still gates.
+    expect(renderPicker(locked, true, override(null))).toContain("text-amber-600");
+    expect(renderPicker(locked, true, override([WEB]))).toContain("text-amber-600");
+    // "No connection" under a healthy lock gates only an integration the agent requires.
+    const healthy = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB, DB] });
+    expect(renderPicker(healthy, false, override([]), true)).toContain("text-amber-600");
+    expect(renderPicker(healthy, false, override([]))).not.toContain("text-amber-600");
+  });
+
+  it("says why an override reaching outside the lock is refused, whatever the cascade binds", () => {
+    const outranked = `member-pick-outranked-warning-${INTEGRATION}`;
+    const locked = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] });
+    const html = renderPicker(locked, false, {
+      mode: "override",
+      value: [DB],
+      onChange: () => {},
+    });
+    expect(html).toContain("text-amber-600");
+    expect(html).toContain(outranked);
+    expect(html).toContain(i18n.t("agents:error.overrideOutranked"));
+    expect(html).toContain(`member-pick-clear-${INTEGRATION}`);
+    // Control: an override within the lock is not refused.
+    const within = renderPicker(locked, false, {
+      mode: "override",
+      value: [WEB],
+      onChange: () => {},
+    });
+    expect(within).not.toContain(outranked);
+    expect(within).not.toContain("text-amber-600");
   });
 
   it("a soft org default leaves the dropdown open", () => {
@@ -373,6 +428,7 @@ function PickerProbe({
   version,
   manifest = MANIFEST,
   authStatuses = NO_STATUSES,
+  agentTools,
   agentScopes,
   openPopup,
   onPicker,
@@ -381,6 +437,7 @@ function PickerProbe({
   version?: string;
   manifest?: IntegrationManifestView;
   authStatuses?: IntegrationAuthStatus[];
+  agentTools?: string[] | "*";
   agentScopes?: string[];
   openPopup?: ConnectionPickerDeps["openPopup"];
   onPicker: (picker: ConnectionPicker | null) => void;
@@ -392,7 +449,7 @@ function PickerProbe({
         agentPackageId: AGENT,
         manifest,
         authStatuses,
-        agentTools: undefined,
+        agentTools,
         agentScopes,
         persistence,
         version,
@@ -443,29 +500,51 @@ function propsOf(node: ReactNode, testId: string): Record<string, unknown> | und
   return propsOf(node.props.children as ReactNode, testId);
 }
 
+/**
+ * The picker's state for a verdict, as the hook computes it — after `tick`, when given, was
+ * toggled as an uncommitted draft.
+ */
+function pickerFor(
+  res: Resolution,
+  opts: { required?: boolean; persistence?: Persistence; tick?: string } = {},
+): ConnectionPicker {
+  const qc = new QueryClient();
+  qc.setQueryData(READINESS_KEY, readiness(res, false, opts.required ?? false));
+  const pickers: Array<ConnectionPicker | null> = [];
+  render(
+    <PickerProbe
+      persistence={opts.persistence ?? { mode: "pin" }}
+      onPicker={(p) => {
+        pickers.push(p);
+        // A state update during the probe's own render: React renders it again with the draft.
+        if (opts.tick !== undefined && pickers.length === 1) p?.toggle(opts.tick);
+      }}
+    />,
+    { queryClient: qc },
+  );
+  const picker = pickers[pickers.length - 1];
+  if (!picker) throw new Error("the readiness verdict should be loaded");
+  return picker;
+}
+
+/** The menu's element tree for a picker. */
+function menuOf(picker: ConnectionPicker): ReactNode {
+  const trees: ReactNode[] = [];
+  render(<MenuProbe picker={picker} onTree={(tree) => trees.push(tree)} />);
+  return trees[0];
+}
+
+/** Every string rendered literally in an element tree. */
+function textsOf(node: unknown): string[] {
+  if (typeof node === "string") return [node];
+  if (Array.isArray(node)) return node.flatMap(textsOf);
+  if (!isValidElement<{ children?: unknown }>(node)) return [];
+  return textsOf(node.props.children);
+}
+
 describe("IntegrationConnectionPicker — 'no connection'", () => {
   const t = (key: string, opts?: Record<string, unknown>) =>
     i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
-
-  /** The picker's state for a verdict, as the hook computes it. */
-  function pickerFor(
-    res: Resolution,
-    { required = false, persistence }: { required?: boolean; persistence?: Persistence } = {},
-  ): ConnectionPicker {
-    const qc = new QueryClient();
-    qc.setQueryData(READINESS_KEY, readiness(res, false, required));
-    const pickers: Array<ConnectionPicker | null> = [];
-    render(
-      <PickerProbe
-        persistence={persistence ?? { mode: "pin" }}
-        onPicker={(p) => pickers.push(p)}
-      />,
-      { queryClient: qc },
-    );
-    const picker = pickers[0];
-    if (!picker) throw new Error("the readiness verdict should be loaded");
-    return picker;
-  }
 
   it("surfaces the agent's `required` flag, which withholds 'no connection'", () => {
     const unbound = resolution({ source: null, resolved_connection_ids: [] });
@@ -544,7 +623,7 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(authKeysFor(notConnected)).toEqual(["primary", "token"]);
   });
 
-  it("persists [] for 'no connection' and null for inherit, as two different overrides", async () => {
+  it("persists [] for 'no connection' and null for an unset pick, as two different overrides", async () => {
     const written: Array<string[] | null> = [];
     const picker = pickerFor(resolution({}), {
       persistence: { mode: "override", value: [WEB], onChange: (ids) => written.push(ids) },
@@ -561,7 +640,7 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       resolved_connection_ids: [],
     });
     const picker = pickerFor(res);
-    expect(picker.pickedNone).toBe(true);
+    expect(picker.shownPick).toEqual([]);
     expect(picker.checkedIds).toEqual([]);
     expect(renderPicker(res, false)).toContain(t("none"));
     // Control: no pin at all is not "no connection" — the trigger asks to connect.
@@ -570,14 +649,13 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(unpinned).toContain(t("connectLabel"));
   });
 
-  it("an override of 'no connection' inherits nothing: the trigger says so", () => {
-    const html = renderPicker(resolution({}), false, {
-      mode: "override",
-      value: [],
-      onChange: () => {},
-    });
+  it("an override of 'no connection' shows itself: the trigger never shows the cascade's set", () => {
+    const fallback = resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] });
+    const none: Persistence = { mode: "override", value: [], onChange: () => {} };
+    const html = renderPicker(fallback, false, none);
     expect(html).toContain(t("none"));
-    expect(html).not.toContain(t("inherit"));
+    expect(html).not.toContain(">web<");
+    expect(html).not.toContain(t("defaultBadge"));
   });
 
   it("warns on a stored 'no connection' override for an integration the agent requires", () => {
@@ -625,10 +703,10 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
     expect(html).not.toContain(t("none"));
   });
 
-  // `[]` is a subset of any lock, so a launch override may narrow it to none (#1830).
+  // `[]` is a subset of any lock, so a launch override may narrow it to none.
   it("under a lock, offers a 'no connection' override for an integration the agent does not require", () => {
     const none = `member-pick-none-${INTEGRATION}`;
-    const inherit: Persistence = { mode: "override", value: null, onChange: () => {} };
+    const unset: Persistence = { mode: "override", value: null, onChange: () => {} };
     const pinned = resolution({ source: "admin_pin", admin_pinned_connection_ids: [WEB] });
     const enforced = resolution({
       source: "org_default_enforced",
@@ -637,11 +715,11 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       resolved_connection_ids: [WEB],
     });
     for (const locked of [pinned, enforced]) {
-      const html = renderPicker(locked, false, inherit);
+      const html = renderPicker(locked, false, unset);
       expect(html).toContain(`member-pick-locked-${INTEGRATION}`);
       expect(html).toContain(none);
       // Never for a required integration, nor on a member pin (it loses to the lock anyway).
-      expect(renderPicker(locked, false, inherit, true)).not.toContain(none);
+      expect(renderPicker(locked, false, unset, true)).not.toContain(none);
       expect(renderPicker(locked, false)).not.toContain(none);
     }
     // Already none: through the stored override, or the admin's own pin to none.
@@ -652,17 +730,14 @@ describe("IntegrationConnectionPicker — 'no connection'", () => {
       renderPicker(
         resolution({ source: null, admin_pinned_connection_ids: [], resolved_connection_ids: [] }),
         false,
-        inherit,
+        unset,
       ),
     ).not.toContain(none);
   });
 
   it("reads out 'no connection' as a radio, checked when it is the stored choice", () => {
-    const noneItem = (res: Resolution) => {
-      const trees: ReactNode[] = [];
-      render(<MenuProbe picker={pickerFor(res)} onTree={(tree) => trees.push(tree)} />);
-      return propsOf(trees[0], `member-pick-none-${INTEGRATION}`);
-    };
+    const noneItem = (res: Resolution) =>
+      propsOf(menuOf(pickerFor(res)), `member-pick-none-${INTEGRATION}`);
     const none = resolution({ source: null, member_pinned_connection_ids: [] });
     expect(noneItem(none)).toMatchObject({ role: "menuitemradio", "aria-checked": true });
     expect(noneItem(resolution({}))).toMatchObject({
@@ -756,13 +831,17 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
   type Readiness = ReturnType<typeof readiness>;
   type OpenPopup = NonNullable<ConnectionPickerDeps["openPopup"]>;
 
-  const before = async () => readiness(resolution({}));
-  const withAdded = async () =>
-    readiness(
-      resolution({
-        candidates: [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")],
-      }),
-    );
+  const answer = (res: Partial<Resolution>) => async () => readiness(resolution(res));
+  const before = answer({});
+  const ALL = [candidate(WEB, "web"), candidate(DB, "db"), candidate(ADDED, "new")];
+  const withAdded = answer({ candidates: ALL });
+  // The fallback binds `web` alone; with a second connection to choose from it binds nothing.
+  const fallbackBefore = answer({ source: "fallback_auto", resolved_connection_ids: [WEB] });
+  const fallbackAfter = answer({
+    source: null,
+    error_code: "must_choose_connection",
+    candidates: ALL,
+  });
 
   /** The readiness query mounted as the picker holds it: active, each fetch answered in turn. */
   async function mountReadiness(qc: QueryClient, answers: Array<() => Promise<Readiness>>) {
@@ -781,45 +860,17 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     return { asked: () => asked, rebind, unsubscribe };
   }
 
-  function Probe({
-    persistence,
-    openPopup,
-    onPicker,
-  }: {
-    persistence: ConnectionPickerPersistence;
-    openPopup: OpenPopup;
-    onPicker: (picker: ConnectionPicker | null) => void;
-  }) {
-    onPicker(
-      useConnectionPicker(
-        {
-          integrationId: INTEGRATION,
-          agentPackageId: AGENT,
-          manifest: MANIFEST,
-          authStatuses: [],
-          agentTools: undefined,
-          agentScopes: undefined,
-          persistence,
-        },
-        { openPopup },
-      ),
-    );
-    return null;
-  }
-
-  /** Override mode, so a created connection is written straight through `onChange`. */
-  async function setup(
+  async function mount(
     answers: Array<() => Promise<Readiness>>,
     popup: (qc: QueryClient) => OpenPopup,
-    stored: string[] | null = null,
+    persistence: ConnectionPickerPersistence,
   ) {
     const qc = new QueryClient();
     const mounted = await mountReadiness(qc, answers);
-    const picked: Array<string[] | null> = [];
     const pickers: Array<ConnectionPicker | null> = [];
     render(
-      <Probe
-        persistence={{ mode: "override", value: stored, onChange: (ids) => picked.push(ids) }}
+      <PickerProbe
+        persistence={persistence}
         openPopup={popup(qc)}
         onPicker={(p) => pickers.push(p)}
       />,
@@ -828,7 +879,19 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     mounted.rebind();
     const picker = pickers[0];
     if (!picker) throw new Error("the readiness verdict should be loaded");
-    return { mounted, picked, picker };
+    return { mounted, picker };
+  }
+
+  /** Override mode: the written set is what `onChange` receives. */
+  async function setup(
+    answers: Array<() => Promise<Readiness>>,
+    popup: (qc: QueryClient) => OpenPopup,
+    stored: string[] | null = null,
+  ) {
+    const picked: Array<string[] | null> = [];
+    const onChange = (ids: string[] | null) => picked.push(ids);
+    const persistence = { mode: "override" as const, value: stored, onChange };
+    return { ...(await mount(answers, popup, persistence)), picked };
   }
 
   /** The real popup's contract: `true` once the active integration queries were refetched. */
@@ -839,12 +902,65 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
       return true;
     };
 
-  it("writes the created connection, read off the one refetch the popup awaited", async () => {
-    const { mounted, picked, picker } = await setup([before, withAdded], settles);
+  it("adds the created connection to the set the fallback bound, read off the one refetch the popup awaited", async () => {
+    const { mounted, picked, picker } = await setup([fallbackBefore, fallbackAfter], settles);
     await picker.triggerConnect("primary");
-    expect(picked).toEqual([[ADDED]]);
+    expect(picked).toEqual([[WEB, ADDED]]);
     // The mount, then the popup's refetch: reading after it asks nothing more.
     expect(mounted.asked()).toBe(2);
+    mounted.unsubscribe();
+  });
+
+  it("writes the fallback's set with the created connection as the member's pin", async () => {
+    const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
+    try {
+      const { mounted, picker } = await mount(
+        [fallbackBefore, fallbackAfter, fallbackAfter],
+        settles,
+        { mode: "pin" },
+      );
+      await picker.triggerConnect("primary");
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([path, init]) => [path, init.body])).toEqual([
+        [
+          "/api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}",
+          { connection_ids: [WEB, ADDED] },
+        ],
+      ]);
+      // The pin write moved the verdict: it is read again.
+      expect(mounted.asked()).toBe(3);
+      mounted.unsubscribe();
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("adds the created connection to a stored pick", async () => {
+    const { mounted, picked, picker } = await setup([before, withAdded], settles, [WEB]);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[WEB, ADDED]]);
+    mounted.unsubscribe();
+  });
+
+  it("adds the created connection to the member's pin an unset override shows, kept to its candidates", async () => {
+    // The pin names a member that is no candidate: the server binds none of it.
+    const brokenPin = {
+      error_code: "pinned_connection_unavailable" as const,
+      member_pinned_connection_ids: [WEB, GONE],
+    };
+    const { mounted, picked, picker } = await setup(
+      [answer(brokenPin), answer({ ...brokenPin, candidates: ALL })],
+      settles,
+    );
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[WEB, ADDED]]);
+    mounted.unsubscribe();
+  });
+
+  it("replaces a stored 'no connection' with the created connection, never the cascade's set", async () => {
+    const { mounted, picked, picker } = await setup([fallbackBefore, fallbackAfter], settles, []);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[ADDED]]);
     mounted.unsubscribe();
   });
 
@@ -852,6 +968,56 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     const { mounted, picked, picker } = await setup([before, withAdded], settles, [WEB, DB]);
     await picker.triggerConnect("primary", { replacing: WEB });
     expect(picked).toEqual([[ADDED, DB]]);
+    mounted.unsubscribe();
+  });
+
+  it("leaves out a stored member the refetch offers no more", async () => {
+    const dbGone = answer({ candidates: [candidate(WEB, "web"), candidate(ADDED, "new")] });
+    const { mounted, picked, picker } = await setup([before, dbGone], settles, [WEB, DB]);
+    await picker.triggerConnect("primary");
+    expect(picked).toEqual([[WEB, ADDED]]);
+    mounted.unsubscribe();
+  });
+
+  it("writes nothing at the cap and says so", async () => {
+    const warned = spyOn(toast, "warning").mockImplementation(() => 0);
+    try {
+      const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) =>
+        candidate(`c${i}`, `c${i}`),
+      );
+      const fullIds = full.map((c) => c.id);
+      const { mounted, picked, picker } = await setup(
+        [answer({ candidates: full }), answer({ candidates: [...full, candidate(ADDED, "new")] })],
+        settles,
+        fullIds,
+      );
+      await picker.triggerConnect("primary");
+      expect(picked).toEqual([]);
+      expect(warned.mock.calls as unknown[][]).toEqual([
+        [
+          i18n.t("agents:detail.integrationMemberPicker.maxReached", {
+            max: MAX_CONNECTIONS_PER_INTEGRATION,
+          }),
+        ],
+      ]);
+      mounted.unsubscribe();
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  it("swaps at the cap: the replaced member frees the place", async () => {
+    const full = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) =>
+      candidate(`c${i}`, `c${i}`),
+    );
+    const fullIds = full.map((c) => c.id);
+    const { mounted, picked, picker } = await setup(
+      [answer({ candidates: full }), answer({ candidates: [...full, candidate(ADDED, "new")] })],
+      settles,
+      fullIds,
+    );
+    await picker.triggerConnect("primary", { replacing: "c0" });
+    expect(picked).toEqual([[ADDED, ...fullIds.slice(1)]]);
     mounted.unsubscribe();
   });
 
@@ -887,6 +1053,81 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
       mounted.unsubscribe();
     } finally {
       toasted.mockRestore();
+    }
+  });
+
+  it("reports a refused pin write, and reads no verdict it did not move", async () => {
+    const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
+    try {
+      const { mounted, picker } = await mount([before], settles, { mode: "pin" });
+      expect(await picker.persist([WEB])).toBe(false);
+      expect(put).toHaveBeenCalledTimes(1);
+      expect(mounted.asked()).toBe(1);
+      mounted.unsubscribe();
+    } finally {
+      put.mockRestore();
+    }
+  });
+
+  it("a connect whose pin write is refused settles without a second write or read", async () => {
+    const warned = spyOn(toast, "warning").mockImplementation(() => 0);
+    const put = spyOn(client, "PUT").mockRejectedValue(new ApiError("forbidden", "no", 403));
+    try {
+      const { mounted, picker } = await mount([fallbackBefore, fallbackAfter], settles, {
+        mode: "pin",
+      });
+      await expect(picker.triggerConnect("primary")).resolves.toBeUndefined();
+      const calls = put.mock.calls as unknown as Array<[string, { body: unknown }]>;
+      expect(calls.map(([, init]) => init.body)).toEqual([{ connection_ids: [WEB, ADDED] }]);
+      // The mount, then the popup's refetch: the refused write moved no verdict.
+      expect(mounted.asked()).toBe(2);
+      expect(warned).not.toHaveBeenCalled();
+      mounted.unsubscribe();
+    } finally {
+      warned.mockRestore();
+      put.mockRestore();
+    }
+  });
+
+  it("the menu closes on an accepted set and stays open on a refused one", async () => {
+    const closes = async (accepted: boolean) => {
+      const opened: boolean[] = [];
+      const picker = {
+        ...pickerFor(resolution({})),
+        persist: async () => accepted,
+        onOpenChange: (open: boolean) => opened.push(open),
+      };
+      const apply = propsOf(menuOf(picker), `member-pick-apply-${INTEGRATION}`);
+      (apply!.onSelect as (e: { preventDefault: () => void }) => void)({ preventDefault() {} });
+      await Bun.sleep(0);
+      return opened;
+    };
+    expect(await closes(true)).toEqual([false]);
+    expect(await closes(false)).toEqual([]);
+  });
+
+  it("writes nothing and says nothing when the settled popup created no connection", async () => {
+    const failed = spyOn(toast, "error").mockImplementation(() => 0);
+    const warned = spyOn(toast, "warning").mockImplementation(() => 0);
+    const put = spyOn(client, "PUT").mockResolvedValue({ data: {} });
+    try {
+      // The refetch the popup awaited offers the same candidates as before it.
+      const override = await setup([fallbackBefore, fallbackBefore], settles);
+      await override.picker.triggerConnect("primary");
+      expect(override.picked).toEqual([]);
+      expect(override.mounted.asked()).toBe(2);
+      override.mounted.unsubscribe();
+      const pin = await mount([fallbackBefore, fallbackBefore], settles, { mode: "pin" });
+      await pin.picker.triggerConnect("primary");
+      expect(put).not.toHaveBeenCalled();
+      expect(pin.mounted.asked()).toBe(2);
+      pin.mounted.unsubscribe();
+      expect(failed).not.toHaveBeenCalled();
+      expect(warned).not.toHaveBeenCalled();
+    } finally {
+      failed.mockRestore();
+      warned.mockRestore();
+      put.mockRestore();
     }
   });
 });
@@ -938,7 +1179,13 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
 
   function pickerOver(
     candidates: Candidate[],
-    opts: { canAdd?: boolean; agentScopes?: string[]; openPopup?: OpenPopup } = {},
+    opts: {
+      canAdd?: boolean;
+      manifest?: IntegrationManifestView;
+      agentTools?: string[] | "*";
+      agentScopes?: string[];
+      openPopup?: OpenPopup;
+    } = {},
   ): ConnectionPicker {
     const qc = new QueryClient();
     qc.setQueryData(
@@ -949,8 +1196,9 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     render(
       <PickerProbe
         persistence={{ mode: "pin" }}
-        manifest={OAUTH}
+        manifest={opts.manifest ?? OAUTH}
         authStatuses={CONNECTABLE}
+        agentTools={opts.agentTools}
         agentScopes={opts.agentScopes}
         openPopup={opts.openPopup}
         onPicker={(p) => pickers.push(p)}
@@ -1102,6 +1350,42 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
     ]);
   });
 
+  // A `"*"` asks for the auth's `default_scopes` whether the agent writes it or inherits it
+  // from the integration's `default_tools`; inherited tool names ask for nothing.
+  it('a new connection asks for the same scopes under an inherited `"*"` as under a written one', async () => {
+    const defaulting = (defaultTools: string[] | "*") =>
+      ({
+        ...OAUTH,
+        allow_undeclared_tools: true,
+        default_tools: defaultTools,
+        tools_policy: { send_mail: { required_scopes: { primary: ["send"] } } },
+      }) as unknown as IntegrationManifestView;
+    const asked = async (opts: Parameters<typeof pickerOver>[1]) => {
+      const opened: Array<Parameters<OpenPopup>[0]> = [];
+      const picker = pickerOver([], {
+        ...opts,
+        openPopup: async (input) => {
+          opened.push(input);
+          return false;
+        },
+      });
+      await picker.triggerConnect("primary");
+      return { scopes: opened[0]!.scopes, named: picker.connectsWithAgentScopes("primary") };
+    };
+
+    const wildcard = { scopes: ["read"], named: true };
+    expect(await asked({ agentTools: "*" })).toEqual(wildcard);
+    expect(await asked({ manifest: defaulting("*") })).toEqual(wildcard);
+    expect(await asked({ manifest: defaulting(["send_mail"]) })).toEqual({
+      scopes: undefined,
+      named: false,
+    });
+    expect(await asked({ manifest: defaulting("*"), agentTools: ["send_mail"] })).toEqual({
+      scopes: ["send"],
+      named: true,
+    });
+  });
+
   it("shows each row's grant against the agent, and offers a connection with its scopes", () => {
     const exact = scoped(DB, ["read", "send"]);
     const broader = scoped(LABELS, ["read", "send", "labels"], [], { scope_fit: "broader" });
@@ -1124,14 +1408,6 @@ describe("IntegrationConnectionPicker — scopes against the agent", () => {
   });
 });
 
-/** Every string rendered literally in an element tree. */
-function textsOf(node: unknown): string[] {
-  if (typeof node === "string") return [node];
-  if (Array.isArray(node)) return node.flatMap(textsOf);
-  if (!isValidElement<{ children?: unknown }>(node)) return [];
-  return textsOf(node.props.children);
-}
-
 /** The row's `ScopeSummaryText`, rendered, if it shows one. */
 function summaryOf(node: unknown): string | undefined {
   if (Array.isArray(node)) {
@@ -1145,3 +1421,199 @@ function summaryOf(node: unknown): string | undefined {
   if (node.type === ScopeSummaryText) return render(node);
   return summaryOf(node.props.children);
 }
+
+describe("IntegrationConnectionPicker — an unset override", () => {
+  const t = (key: string, opts?: Record<string, unknown>) =>
+    i18n.t(`agents:detail.integrationMemberPicker.${key}`, opts);
+  const OVERRIDE = { mode: "override", onChange: () => {} } as const;
+  const unset: Persistence = { ...OVERRIDE, value: null };
+  const picked = (value: string[]): Persistence => ({ ...OVERRIDE, value });
+  const fallback = resolution({ source: "fallback_auto", resolved_connection_ids: [WEB] });
+
+  it("asks to connect when the cascade binds nothing, warning while runs are blocked", () => {
+    const unbound = resolution({ candidates: [], resolved_connection_ids: [] });
+    const html = renderPicker(unbound, true, unset);
+    expect(html).toContain(t("connectLabel"));
+    expect(html).not.toContain(t("defaultBadge"));
+    expect(html).toContain("text-amber-600");
+    // Control: the same prompt on an integration the run starts without does not warn.
+    expect(renderPicker(unbound, false, unset)).not.toContain("text-amber-600");
+  });
+
+  it("asks for a choice when the verdict says the member must choose", () => {
+    const html = renderPicker(
+      resolution({ source: null, error_code: "must_choose_connection" }),
+      true,
+      unset,
+    );
+    expect(html).toContain(t("chooseLabel"));
+    expect(html).not.toContain(t("defaultBadge"));
+  });
+
+  it("shows the connection the cascade binds, marked as the default, exactly as a member pin does", () => {
+    for (const persistence of [unset, undefined]) {
+      const html = renderPicker(fallback, false, persistence);
+      expect(html).toContain(">web<");
+      expect(html).toContain(t("defaultBadge"));
+      expect(html).not.toContain("text-amber-600");
+    }
+  });
+
+  it("counts a set the cascade binds", () => {
+    const html = renderPicker(
+      resolution({
+        source: "org_default",
+        org_default_connection_ids: [WEB, DB],
+        resolved_connection_ids: [WEB, DB],
+      }),
+      false,
+      unset,
+    );
+    expect(html).toContain(t("selectedCount", { count: 2 }));
+    expect(html).toContain(t("defaultBadge"));
+  });
+
+  it("marks the member's own pin as the default, and a set override as chosen", () => {
+    const pinned = resolution({
+      member_pinned_connection_ids: [WEB],
+      resolved_connection_ids: [WEB],
+    });
+    const byDefault = renderPicker(pinned, false, unset);
+    expect(byDefault).toContain(">web<");
+    expect(byDefault).toContain(t("defaultBadge"));
+    // The same connection, chosen: here as an override, on the agent page as the pin itself.
+    const override = renderPicker(fallback, false, picked([WEB]));
+    for (const chosen of [override, renderPicker(pinned, false)]) {
+      expect(chosen).toContain(">web<");
+      expect(chosen).not.toContain(t("defaultBadge"));
+    }
+  });
+
+  it("warns on a default connection that blocks the run, and names why", () => {
+    const dead = resolution({
+      source: "fallback_auto",
+      error_code: "needs_reconnection",
+      resolved_connection_ids: [WEB],
+      candidates: [{ ...candidate(WEB, "web"), needs_reconnection: true }, candidate(DB, "db")],
+    });
+    const html = renderPicker(dead, true, unset);
+    expect(html).toContain(">web<");
+    expect(html).toContain("text-amber-600");
+    expect(html).toContain(`member-pick-dead-warning-${INTEGRATION}`);
+    // A set override replaces what the cascade binds: the run's verdict is the override's own.
+    const overridden = renderPicker(dead, true, picked([DB]));
+    expect(overridden).toContain(">db<");
+    expect(overridden).not.toContain("text-amber-600");
+    expect(overridden).not.toContain(`member-pick-dead-warning-${INTEGRATION}`);
+  });
+
+  it("names whole a default set with a member gone: the space default's, or the member's pin", () => {
+    const count = `${t("selectedCount", { count: 2 })} · ${t("unavailableCount", { count: 1 })}`;
+    const brokenDefault = renderPicker(
+      resolution({
+        source: "org_default",
+        error_code: "pinned_connection_unavailable",
+        org_default_connection_ids: [WEB, GONE],
+      }),
+      true,
+      unset,
+    );
+    expect(brokenDefault).toContain(count);
+    expect(brokenDefault).toContain(t("defaultBadge"));
+    expect(brokenDefault).toContain(t("defaultUnavailableWarning", { count: 1 }));
+    const brokenPin = renderPicker(
+      resolution({
+        error_code: "pinned_connection_unavailable",
+        member_pinned_connection_ids: [WEB, GONE],
+      }),
+      true,
+      unset,
+    );
+    expect(brokenPin).toContain(count);
+    expect(brokenPin).toContain(t("defaultBadge"));
+    expect(brokenPin).toContain(t("unavailableWarning", { count: 1 }));
+    // A set override speaks for itself, whatever the layers under it hold.
+    const overridden = renderPicker(
+      resolution({ member_pinned_connection_ids: [WEB, GONE] }),
+      true,
+      picked([DB]),
+    );
+    expect(overridden).not.toContain(WARNING);
+    expect(overridden).not.toContain("text-amber-600");
+  });
+
+  it("shows the member's own 'no connection' as the default, amber only when it blocks the run", () => {
+    const pinnedNone = resolution({
+      source: null,
+      member_pinned_connection_ids: [],
+      resolved_connection_ids: [],
+    });
+    const html = renderPicker(pinnedNone, false, unset);
+    expect(html).toContain(t("none"));
+    expect(html).toContain(t("defaultBadge"));
+    expect(html).not.toContain(t("connectLabel"));
+    expect(html).not.toContain("text-amber-600");
+    // The server's verdict on the cascade is the run's: the agent requires the integration.
+    const blocking = renderPicker(pinnedNone, true, unset, true);
+    expect(blocking).toContain(t("none"));
+    expect(blocking).toContain("text-amber-600");
+  });
+
+  it("leaves 'no connection' selectable over the member's own, marked as the default, until it is the override", () => {
+    const pinnedNone = resolution({ source: null, member_pinned_connection_ids: [] });
+    const noneItem = (persistence: Persistence) =>
+      propsOf(menuOf(pickerFor(pinnedNone, { persistence })), `member-pick-none-${INTEGRATION}`)!;
+    const byDefault = noneItem(unset);
+    expect(byDefault).toMatchObject({ "aria-checked": false, disabled: false });
+    expect(textsOf(byDefault.children)).toContain(t("defaultBadge"));
+    const chosen = noneItem(picked([]));
+    expect(chosen).toMatchObject({ "aria-checked": true, disabled: true });
+    expect(textsOf(chosen.children)).not.toContain(t("defaultBadge"));
+  });
+
+  it("ticks and marks as the default the surviving member of a broken member pin the trigger names whole", () => {
+    const brokenPin = resolution({
+      error_code: "pinned_connection_unavailable",
+      member_pinned_connection_ids: [WEB, GONE],
+    });
+    const html = renderPicker(brokenPin, true, unset);
+    expect(html).toContain(
+      `${t("selectedCount", { count: 2 })} · ${t("unavailableCount", { count: 1 })}`,
+    );
+    expect(html).toContain(t("defaultBadge"));
+    const picker = pickerFor(brokenPin, { persistence: unset });
+    expect(picker.checkedIds).toEqual([WEB]);
+    const tree = menuOf(picker);
+    const row = (id: string) => propsOf(tree, `member-pick-option-${id}`)!;
+    expect(row(WEB)).toMatchObject({ "aria-checked": true });
+    expect(textsOf(row(WEB).children)).toContain(t("defaultBadge"));
+    // Control: a candidate outside the pin is neither.
+    expect(row(DB)).toMatchObject({ "aria-checked": false });
+    expect(textsOf(row(DB).children)).not.toContain(t("defaultBadge"));
+  });
+});
+
+describe("IntegrationConnectionPicker — the trigger against an uncommitted draft", () => {
+  const dead = { ...candidate(DB, "db"), needs_reconnection: true };
+  const verdict = resolution({ candidates: [candidate(WEB, "web"), dead] });
+  const override = (value: string[]): Persistence => ({
+    mode: "override",
+    value,
+    onChange: () => {},
+  });
+  const trigger = (picker: ConnectionPicker) =>
+    render(<PickerMenu integrationId={INTEGRATION} picker={picker} />);
+
+  it("a ticked dead connection warns under the picker, and turns the trigger amber once it is the pick", () => {
+    const drafting = pickerFor(verdict, { persistence: override([WEB]), tick: DB });
+    expect(drafting.checkedIds).toEqual([WEB, DB]);
+    expect(drafting.deadConns.map((c) => c.id)).toEqual([DB]);
+    const html = trigger(drafting);
+    expect(html).toContain(">web<");
+    expect(html).not.toContain("text-amber-600");
+    // Control: the same set, committed.
+    const committed = pickerFor(verdict, { persistence: override([WEB, DB]) });
+    expect(committed.deadConns.map((c) => c.id)).toEqual([DB]);
+    expect(trigger(committed)).toContain("text-amber-600");
+  });
+});

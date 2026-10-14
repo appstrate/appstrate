@@ -43,6 +43,7 @@ import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
+  findUnexposedDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
@@ -57,6 +58,7 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import {
   getOrgWideIntegrationManifest,
   fetchMcpServerManifest,
+  readMcpServerTools,
   resolveMcpServerForSpawn,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
@@ -419,7 +421,6 @@ export async function validateAgentIntegrationSelections(
     // needs it too, because "non-empty selection" and "callable selection" are
     // different properties and only the second one is the boot contract.
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
-    let mcpServerCatalogKnown = false;
     const localRef = getLocalServerRef(judgedManifest);
     if (localRef) {
       // Same rule as the integration manifest above, one level deeper: at a
@@ -429,36 +430,14 @@ export async function validateAgentIntegrationSelections(
       // reads `packages.draft_manifest`, which the runtime never does, so a tool
       // present only in the mcp-server author's draft used to pass publish and
       // then register nothing at boot.
-      // Same post-import union one level deeper: `source.server.version` is
-      // resolved against the carried + existing mcp-server versions.
-      const carriedServerVersions = extraManifests?.get(localRef.name);
-      const postImportServer = carriedServerVersions
-        ? await resolvePostImportManifest(
-            localRef.name,
-            localRef.version,
-            orgId,
-            carriedServerVersions,
-          )
-        : null;
-      const mcpServer = postImportServer
-        ? (postImportServer as unknown as McpServerManifest)
-        : judgesPinnedVersions
+      const mcpServer =
+        (await resolvePostImportServer(localRef, orgId, extraManifests)) ??
+        (judgesPinnedVersions
           ? await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
               r.ok ? r.manifest : null,
             )
-          : await fetchMcpServerManifest(localRef.name);
-      if (mcpServer) {
-        const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
-        if (Array.isArray(t)) {
-          mcpServerCatalogKnown = true;
-          mcpServerTools = t
-            .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
-            .map((e) => ({
-              name: e.name,
-              description: typeof e.description === "string" ? e.description : undefined,
-            }));
-        }
-      }
+          : await fetchMcpServerManifest(localRef.name));
+      if (mcpServer) mcpServerTools = readMcpServerTools(mcpServer);
     }
     // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
@@ -472,7 +451,7 @@ export async function validateAgentIntegrationSelections(
     // or when the referenced mcp-server resolved and enumerated tools. Absent
     // both, the surface is discovered at runtime and must not be second-guessed.
     const surfaceIsKnown =
-      mcpServerCatalogKnown ||
+      mcpServerTools !== undefined ||
       Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
         .length > 0;
 
@@ -527,4 +506,37 @@ export async function validateAgentIntegrationSelections(
     }
   }
   return errors;
+}
+
+/** {@link resolvePostImportManifest} for `source.server`; `null` when the bundle carries none. */
+async function resolvePostImportServer(
+  localRef: { name: string; version: string },
+  orgId: string,
+  extraManifests: ValidateAgentIntegrationSelectionsInput["extraManifests"],
+): Promise<McpServerManifest | null> {
+  const carried = extraManifests?.get(localRef.name);
+  if (!carried) return null;
+  const server = await resolvePostImportManifest(localRef.name, localRef.version, orgId, carried);
+  return server as unknown as McpServerManifest | null;
+}
+
+/**
+ * {@link findUnexposedDefaultTools} for a `local` integration, against the `tools[]` of the
+ * mcp-server a run spawns, once the bundle carrying `extraManifests` is imported when given.
+ */
+export async function findUnexposedLocalDefaultTools(
+  manifest: Record<string, unknown>,
+  orgId: string,
+  extraManifests?: ValidateAgentIntegrationSelectionsInput["extraManifests"],
+): Promise<{ path: (string | number)[]; message: string }[]> {
+  if (manifest.type !== "integration" || !Array.isArray(manifest.default_tools)) return [];
+  const localRef = getLocalServerRef(manifest as unknown as IntegrationManifest);
+  if (!localRef) return [];
+  const server =
+    (await resolvePostImportServer(localRef, orgId, extraManifests)) ??
+    (await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
+      r.ok ? r.manifest : null,
+    ));
+  const tools = server ? readMcpServerTools(server) : undefined;
+  return tools ? findUnexposedDefaultTools(manifest, tools) : [];
 }

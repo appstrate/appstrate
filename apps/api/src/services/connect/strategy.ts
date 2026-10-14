@@ -20,6 +20,7 @@ import type {
   IntegrationConnectionSummary,
   PersistTarget,
   ReconnectTarget,
+  WidenedConnection,
 } from "../integration-connections.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
@@ -45,6 +46,11 @@ export interface ConnectContext {
    * validates them (`resolveConnectionVariables`) before use and persists what that returns.
    */
   variables?: Readonly<Record<string, string>>;
+  /**
+   * Told when the reconnect's write moved the row to org scope. Only a write that re-stamps the
+   * minting client can, so only the strategy passing a `clientRef` forwards it.
+   */
+  onScopeWidened?: (widened: WidenedConnection) => void;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */

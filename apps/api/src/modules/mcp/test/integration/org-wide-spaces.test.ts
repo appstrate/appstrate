@@ -138,6 +138,11 @@ describe("mcp org-wide connection", () => {
     expect(missing.data.error as string).toContain("space_id is required");
     expect(missing.data.accepted as string[]).toContain(defaultSpaceId);
 
+    const nulled = payload(
+      await call("invoke_operation", { operation_id: "listAgents", space_id: null }),
+    );
+    expect(nulled.data).toMatchObject({ code: "missing_argument", arguments: ["space_id"] });
+
     const inGestion = payload(
       await call("invoke_operation", { operation_id: "listAgents", space_id: gestion.id }),
     );

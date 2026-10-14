@@ -6,6 +6,7 @@
  * Routes (all mounted under `/api/integrations`, space-scoped):
  *
  *   - `GET    /`                                     — list available + active status
+ *   - `GET    /calls`                                — admin: the credential proxy's calls made in this space
  *
  * Activating and deactivating an integration are NOT here: they are the same
  * act as activating any other package type, on the one pair of doors that
@@ -72,6 +73,7 @@ import {
 } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
+import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -117,6 +119,7 @@ import {
   usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
   type ReconnectTarget,
+  type WidenedConnection,
 } from "../services/integration-connections.ts";
 import { resolveStrategy } from "../services/connect/registry.ts";
 import type {
@@ -591,11 +594,13 @@ function assertScopesInAuthCatalog(
   ]);
 }
 
+type ConnectAudit = Parameters<typeof recordAuditAs>[2];
+
 /**
  * Complete a connect door's write and build its audit events. A creation records the granted
  * scopes. A reconnect renews the credential in place and records them when it changed them, since
- * they reach every agent the connection serves; one that moved a space-scoped row onto an org-tier
- * client records the widening.
+ * they reach every agent the connection serves; one whose write moved the row to org scope
+ * records that widening.
  */
 async function completeConnect(
   strategy: IntegrationConnectStrategy,
@@ -603,14 +608,18 @@ async function completeConnect(
   input: ConnectCompleteInput,
 ) {
   const target = ctx.target;
-  const conn = await strategy.complete(ctx, input);
+  const widenings: WidenedConnection[] = [];
+  const conn = await strategy.complete(
+    { ...ctx, onScopeWidened: (widened) => widenings.push(widened) },
+    input,
+  );
   const after = { packageId: ctx.integrationId, authKey: ctx.authKey, accountId: conn.account_id };
   const scopes =
     target &&
     auditDiff({
       scopesGranted: [[...target.scopesGranted].sort(), [...conn.scopes_granted].sort()],
     });
-  const audits: Parameters<typeof recordAuditAs>[2][] = [
+  const audits: ConnectAudit[] = [
     target
       ? {
           action: "integration.connection.reconnected",
@@ -625,16 +634,18 @@ async function completeConnect(
           after: { ...after, scopesGranted: [...conn.scopes_granted].sort() },
         },
   ];
-  if (target && target.spaceId !== null && conn.spaceId === null) {
-    audits.push({
-      action: "integration.connection.scope_widened",
-      resourceType: "integration_connection",
-      resourceId: conn.id,
-      before: { spaceId: target.spaceId, label: target.label },
-      after: { originSpaceId: target.spaceId, label: conn.label },
-    });
-  }
+  audits.push(...widenings.map(scopeWidenedAudit));
   return { conn, audits };
+}
+
+function scopeWidenedAudit(widened: WidenedConnection): ConnectAudit {
+  return {
+    action: "integration.connection.scope_widened",
+    resourceType: "integration_connection",
+    resourceId: widened.id,
+    before: { spaceId: widened.previousSpaceId, label: widened.previousLabel },
+    after: { originSpaceId: widened.previousSpaceId, label: widened.label },
+  };
 }
 
 /**
@@ -960,6 +971,16 @@ export function createIntegrationsRouter() {
   router.get("/callback", (c) => oauthCallback(c, null));
   router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
 
+  // The credential proxy's journal for this space: every call made here, whatever the connection
+  // and whoever owns it. Under `configure`, the permission that governs which credential the
+  // space resolves to.
+  router.get(
+    "/calls",
+    rateLimit(60),
+    requirePermission("integrations", "configure"),
+    serveSpaceConnectionCalls,
+  );
+
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
@@ -1010,11 +1031,7 @@ export function createIntegrationsRouter() {
       });
       for (const w of widened) {
         await recordAuditFromContext(c, {
-          action: "integration.connection.scope_widened",
-          resourceType: "integration_connection",
-          resourceId: w.id,
-          before: { spaceId: w.previousSpaceId, label: w.previousLabel },
-          after: { originSpaceId: w.previousSpaceId, label: w.label },
+          ...scopeWidenedAudit(w),
           spaceIdOverride: w.previousSpaceId,
         });
       }
@@ -1546,17 +1563,23 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deletePin(scope, agentPackageId, packageId, null);
+      const { previous, disabledScheduleIds } = await deletePin(
+        scope,
+        agentPackageId,
+        packageId,
+        null,
+      );
+      await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
           before: pinAudit(previous),
+          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — 204 whether the pin existed or not.
-      return c.body(null, 204);
+      return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 
@@ -1607,17 +1630,18 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const scope = getSpaceScope(c);
-      const { previous } = await deleteOrgDefault(scope, packageId);
+      const { previous, disabledScheduleIds } = await deleteOrgDefault(scope, packageId);
+      await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.org_default.deleted",
           resourceType: "integration_org_default",
           resourceId: packageId,
           before: orgDefaultAudit(previous),
+          ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
         });
       }
-      // Idempotent delete — 204 whether a default existed or not.
-      return c.body(null, 204);
+      return c.json({ schedules_disabled_count: disabledScheduleIds.length });
     },
   );
 

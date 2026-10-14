@@ -6,7 +6,8 @@ import {
 } from "@appstrate/core/integration";
 import { ApiError } from "../api/errors";
 import type { components } from "../api/schema";
-import { type ActorValue, sameActor } from "./schedule-payload";
+import { withConnectionOverride, type ConnectionSet } from "./connection-set";
+import { type ActorValue, type RunOverridesValue, sameActor } from "./schedule-payload";
 import { sameSet } from "./strings";
 
 /** The integration package id an `integrations.{packageId}` error field names. */
@@ -113,6 +114,24 @@ export function picksAfterActorChange(args: {
 }
 
 /**
+ * `overrides` with a pick made for `pickedAs`, unchanged once the schedule runs as someone else:
+ * a pick names its actor's connections, and a connect popup settles long after it was opened.
+ */
+export function withConnectionPickAs(
+  overrides: RunOverridesValue,
+  pick: {
+    pickedAs: ActorValue | undefined;
+    runsAs: ActorValue | undefined;
+    integrationId: string;
+    connectionIds: ConnectionSet;
+  },
+): RunOverridesValue {
+  return sameActor(pick.pickedAs, pick.runsAs)
+    ? withConnectionOverride(overrides, pick.integrationId, pick.connectionIds)
+    : overrides;
+}
+
+/**
  * Why an integration was refused, as an `agents` key. An open choice with no candidate is one
  * only the actor (or an admin pin) can make.
  */
@@ -133,9 +152,6 @@ export function refusalReasonKey(choice: ConnectionChoice): string {
   }
 }
 
-/** Per-run picks in the run route's `connection_overrides` shape (`launch-schemas.ts`). */
-export type ConnectionOverridesMap = Record<string, string[]>;
-
 /** Verdicts raised before any account is looked at: no pick fixes them. */
 const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
@@ -147,18 +163,20 @@ export function isStructuralCode(code: MissingIntegrationConnectionCode): boolea
   return STRUCTURAL_CODES.has(code);
 }
 
-/** Re-run state: a `must_choose_connection` row waits for a pick (`[]` counts), others don't. */
+/**
+ * Re-run state of a refused launch: offered when a row can be answered, held while the launch is
+ * in flight or `stillBlocking` names a refused integration (undefined = verdict not loaded,
+ * nothing gated: the server stays the authority).
+ */
 export function retryDecision(
   errors: MissingIntegrationFieldError[],
-  picks: ConnectionOverridesMap,
-  retrying = false,
-): { mustChoose: boolean; showRetry: boolean; canRetry: boolean } {
-  const mustChooseIds = errors
-    .filter((e) => e.code === "must_choose_connection")
-    .map((e) => integrationIdOfField(e.field));
+  retrying: boolean,
+  stillBlocking: readonly string[] | undefined,
+): { showRetry: boolean; canRetry: boolean } {
+  const blocked = (e: MissingIntegrationFieldError) =>
+    stillBlocking?.includes(integrationIdOfField(e.field)) === true;
   return {
-    mustChoose: mustChooseIds.length > 0,
     showRetry: errors.some((e) => !isStructuralCode(e.code)),
-    canRetry: !retrying && mustChooseIds.every((id) => picks[id] !== undefined),
+    canRetry: !retrying && !errors.some(blocked),
   };
 }

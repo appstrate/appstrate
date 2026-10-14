@@ -59,6 +59,7 @@ describe("importOAuthModelProviderConnection", () => {
     const result = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_PROVIDER_ID,
       label: "Test OAuth",
       accessToken: "access-1",
@@ -97,6 +98,7 @@ describe("importOAuthModelProviderConnection", () => {
       importOAuthModelProviderConnection({
         orgId,
         userId,
+        ownerUserId: userId,
         providerId: "@example/not-a-real-provider",
         label: "x",
         accessToken: "a",
@@ -110,6 +112,7 @@ describe("importOAuthModelProviderConnection", () => {
       importOAuthModelProviderConnection({
         orgId,
         userId,
+        ownerUserId: userId,
         providerId: "openai",
         label: "x",
         accessToken: "a",
@@ -125,6 +128,7 @@ describe("importOAuthModelProviderConnection", () => {
     const result = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_PROVIDER_ID,
       label: "   ",
       accessToken: "a",
@@ -138,6 +142,7 @@ describe("importOAuthModelProviderConnection", () => {
       importOAuthModelProviderConnection({
         orgId,
         userId,
+        ownerUserId: userId,
         providerId: TEST_OAUTH_PROVIDER_ID,
         label: "x",
         accessToken: "",
@@ -150,6 +155,7 @@ describe("importOAuthModelProviderConnection", () => {
     const first = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_PROVIDER_ID,
       label: "Test v1",
       accessToken: "access-v1",
@@ -160,6 +166,7 @@ describe("importOAuthModelProviderConnection", () => {
     const second = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_PROVIDER_ID,
       label: "Test v2",
       accessToken: "access-v2",

@@ -2235,7 +2235,7 @@ const NON_PROBLEM_ERROR_BODIES: ErrorBodyExemptions = {
   // and its limiter's 429, which answers every route it serves.
   "POST /api/auth/sign-up/email": "application/json",
   "POST /api/auth/sign-in/email": "application/json",
-  "POST /api/auth/sign-out 429": "application/json",
+  "POST /api/auth/sign-out": "application/json",
   "GET /api/auth/get-session 429": "application/json",
   // Browser navigations: every refusal renders an HTML page.
   "GET /activate": "text/html",

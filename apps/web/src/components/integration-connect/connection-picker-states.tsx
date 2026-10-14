@@ -63,8 +63,9 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
 
 /**
  * The locked set, read-only. A stored override within it narrows it, so that subset is what
- * binds (`[]`: none); one reaching outside it is refused (`override_outranked`). Either can be
- * cleared back to the locked set; in override mode, `[]` (if not required) narrows any lock.
+ * binds (`[]`: none) and what the picker is judged on; one reaching outside it is refused
+ * (`override_outranked`), which is said. Either can be cleared back to the locked set; in
+ * override mode, `[]` (if not required) narrows any lock.
  */
 export function LockedPicker({
   integrationId,
@@ -81,7 +82,7 @@ export function LockedPicker({
     lockedConnectionIds,
     lockedBy,
     candidateIds,
-    runBlocking,
+    gatesRun,
     required,
     setLabel,
   } = picker;
@@ -90,6 +91,7 @@ export function LockedPicker({
   const bindingIds = storedOverride !== null && !outranked ? storedOverride : lockedConnectionIds;
   const lockedUnavailableIds = unavailableConnectionIds(bindingIds, candidateIds);
   const clearable = outranked || storedOverride?.length === 0;
+  const warn = outranked || gatesRun;
   const offersNone =
     overrideMode && !required && lockedConnectionIds.length > 0 && storedOverride?.length !== 0;
   return (
@@ -98,10 +100,10 @@ export function LockedPicker({
         variant="outline"
         size="sm"
         disabled
-        className={`h-7 justify-start gap-1.5 text-xs ${runBlocking ? AMBER_TEXT : ""}`}
+        className={`h-7 justify-start gap-1.5 text-xs ${warn ? AMBER_TEXT : ""}`}
         data-testid={`member-pick-locked-${integrationId}`}
       >
-        {runBlocking ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
+        {warn ? <AlertTriangle className="size-3" /> : <Lock className="size-3" />}
         <span className="truncate">
           {bindingIds.length === 0
             ? t("detail.integrationMemberPicker.none")
@@ -133,6 +135,11 @@ export function LockedPicker({
           onClick={() => void persist(null)}
           testId={`member-pick-clear-${integrationId}`}
         />
+      )}
+      {outranked && (
+        <PickerWarning testId={`member-pick-outranked-warning-${integrationId}`}>
+          {t("error.overrideOutranked")}
+        </PickerWarning>
       )}
       {lockedUnavailableIds.length > 0 && (
         <PickerWarning testId={`member-pick-unavailable-warning-${integrationId}`}>

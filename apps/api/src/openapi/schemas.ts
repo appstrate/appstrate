@@ -7,7 +7,7 @@ import {
   runOriginValues,
   scheduleDisabledReasonValues,
 } from "@appstrate/db/schema";
-import { MODEL_PAYERS } from "@appstrate/core/model-payer";
+import { MODEL_BINDINGS, MODEL_CREDENTIAL_OWNERS, MODEL_PAYERS } from "@appstrate/core/model-payer";
 import { runStatusValues } from "@appstrate/core/run-status";
 import {
   RUN_AND_WAIT_RESUME_INSTRUCTION,
@@ -131,7 +131,7 @@ export const ORG_SETTINGS_PROPERTIES = {
   personal_model_credentials: {
     type: "boolean",
     description:
-      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials`, or a subscription pairing) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
+      "Whether members may bring personal model credentials. Defaults to true. When false, adding one (`owner_type: user` on `POST /api/model-provider-credentials` or on `POST /api/model-providers-oauth/pairing`) answers `403 personal_model_credentials_disabled`, and the personal credentials that already exist serve nothing: a model the organization leaves unbound is refused (`409 model_credential_required`), and a run on one is refused at its next call. Always present on read; optional on PATCH.",
   },
 };
 
@@ -261,7 +261,7 @@ export const schemas = {
           },
         },
         description:
-          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, each carrying the fields that tell them apart. Raised when the caller owns several such connections that do not share one oauth2 account, auth and instance, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
+          "Populated on `must_choose_connection` — every connection accessible to the caller on an auth serving the agent's selected tools, own and shared, live and dead, least privilege first (the order of readiness `candidates`), each carrying the fields that tell them apart. Raised when the caller owns several such connections, or owns none and only connections shared by other members exist: a shared connection is never bound without an explicit pick. The write of an enabled schedule raises it for its actor's one own connection too (see that write's 409). Pass the chosen `id`s back as the request body's `connection_overrides` array for that integration to retry the run. On the credential proxy the candidates are the `X-Run-Id` run's bound set, unranked (else every own and shared connection), and the retry names one in `X-Connection-Id`.",
       },
       connection_id: {
         type: "string",
@@ -1691,7 +1691,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...scheduleDisabledReasonValues, null],
         description:
-          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. Cleared by re-enabling.",
+          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin or an enforced org default (`override_outranked`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. Cleared by re-enabling.",
       },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
@@ -1948,7 +1948,7 @@ export const schemas = {
       needs_reconnection: { type: "boolean" },
       owner_type: {
         type: "string",
-        enum: ["org", "user"],
+        enum: [...MODEL_CREDENTIAL_OWNERS],
         description:
           "`user` for a personal credential, usable and editable by `owner_id` only; `org` for an organization or built-in credential.",
       },
@@ -1964,12 +1964,12 @@ export const schemas = {
         type: "array",
         items: { type: "string", enum: ["edit", "delete", "test", "reconnect"] },
         description:
-          "The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`, and `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to its owner holding `model-provider-credentials:connect` when it is an OAuth credential, whether or not it needs reconnection (`needs_reconnection`).",
+          "The actions the caller may take on this credential, computed for the caller. A built-in credential allows only `test`, to a caller holding `model-provider-credentials:read`. An organization credential allows `edit` to a `model-provider-credentials:write` holder, `delete` to a `model-provider-credentials:delete` holder, and `test` to a `model-provider-credentials:read` holder. A personal credential allows `edit` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:write`; `delete` to its owner holding `model-provider-credentials:connect`, or to any `model-provider-credentials:delete` holder; and, while the organization allows personal model credentials, `test` to its owner holding `model-provider-credentials:connect` or `model-provider-credentials:read`. An OAuth credential also allows `reconnect` (re-pairing it in place, `POST /api/model-providers-oauth/pairing` with `credentialId`) to whoever it allows `edit`, a personal one only while the organization allows personal model credentials, whether or not it needs reconnection (`needs_reconnection`).",
       },
       bindable: {
         type: "boolean",
         description:
-          "Whether an organization model may be bound to this credential: `true` for an organization API key (not a subscription), `false` for a personal credential, an organization subscription or a built-in credential.",
+          "Whether an organization model may be bound to this credential: `true` for an organization credential (API key or subscription), `false` for a personal or a built-in one.",
       },
       created_by: { type: ["string", "null"] },
       createdAt: { type: "string", format: "date-time" },
@@ -2072,13 +2072,13 @@ export const schemas = {
       credentialId: {
         type: ["string", "null"],
         description:
-          "The bound organization credential; `null` when `binding` is `member` or `managed`. `null` for managed models — binding not exposed.",
+          "The credential serving the model: the organization credential when `binding` is `org`, the platform's key when it is `system`. `null` when `binding` is `user`, and for managed models — binding not exposed.",
       },
       binding: {
         type: "string",
-        enum: ["org", "member", "managed"],
+        enum: [...MODEL_BINDINGS],
         description:
-          "How the model is served. `org` — bound to one credential (an organization credential, or the platform key for a built-in model). `member` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.",
+          "Whose credential serves the model, in the vocabulary of `billed_to`. `system` — a built-in model, served by the platform's key. `org` — bound to an organization credential. `user` — unbound: each member serves it with their own credential for `providerId`. `managed` — an alias; its binding is not exposed.",
       },
       billed_to: {
         type: ["string", "null"],
@@ -2198,7 +2198,7 @@ export const schemas = {
   IntegrationAgentResolution: {
     type: "object",
     description:
-      "Per-integration connection verdict for an agent: which connections the next run binds (admin pin → enforced org default → launch override → member pin → soft org default → fallback, each layer a set and the fallback binding the caller's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise `must_choose_connection`, never a shared one; then a health and scope check), the annotated candidate list, and admin/member pin + blocked state. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
+      "Per-integration connection verdict for an agent: which connections the next run binds, the annotated candidate list, and admin/member pin + blocked state. The cascade, first layer with a set wins: admin pin → enforced org default → launch override (the run's `connection_overrides`, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the actor's ONE own serving connection binds; several answer `must_choose_connection`; a connection shared by another member is never bound without an explicit pick); then a health and scope check. Computed by the same resolver the runtime uses, and reported in its vocabulary: `source`, `error_code`, `warning`. Readiness carries no launch override, so `source` is never `run_override` / `schedule_override` here.",
     required: [
       "source",
       "error_code",
@@ -2271,7 +2271,7 @@ export const schemas = {
       candidates: {
         type: "array",
         description:
-          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. It is the order the resolver's fallback picks by among the caller's connections of one account. An integration with no selection keeps every auth.",
+          "Every connection accessible to the caller on an auth serving the agent's selected tools — the list a `must_choose_connection` 409 carries — least privilege first: by `scope_fit`, then fewest missing scopes, least excess beyond the agent's scopes and the auth's `default_scopes`, fewest `default_scopes` missed, fewest scopes granted, live before dead, then oldest first. An integration with no selection keeps every auth.",
         items: {
           type: "object",
           required: [
@@ -2357,7 +2357,7 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_package_id", "required", "run_blocking", "resolution"],
+          required: ["integration_package_id", "required", "run_blocking", "inert", "resolution"],
           properties: {
             integration_package_id: { type: "string" },
             required: {
@@ -2369,6 +2369,11 @@ export const schemas = {
               type: "boolean",
               description:
                 "True iff this integration is one of the run-blocking `errors` — not one the run starts without (`resolution.warning`).",
+            },
+            inert: {
+              type: "boolean",
+              description:
+                "True iff the agent declares this integration with nothing a run would start (inert): a run resolves no connection for it, whatever `resolution` reports for the picker.",
             },
             resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
           },

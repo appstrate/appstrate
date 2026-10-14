@@ -48,13 +48,14 @@ describe("isModelSelectable", () => {
 
 describe("isMemberPaid", () => {
   it("is true for a model each member serves with their own credential", () => {
-    expect(isMemberPaid(model({ binding: "member", credentialId: null, billed_to: null }))).toBe(
+    expect(isMemberPaid(model({ binding: "user", credentialId: null, billed_to: null }))).toBe(
       true,
     );
   });
 
-  it("is false for a model bound to one credential or a managed alias", () => {
+  it("is false for a model bound to one credential, a built-in model or a managed alias", () => {
     expect(isMemberPaid(model({ binding: "org" }))).toBe(false);
+    expect(isMemberPaid(model({ binding: "system", billed_to: "system" }))).toBe(false);
     expect(isMemberPaid(model({ binding: "managed" }))).toBe(false);
   });
 });

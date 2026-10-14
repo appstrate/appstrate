@@ -48,7 +48,12 @@ you the matching command).
   never exceed what the key could do over REST.
 
 Grant the key the permissions the work needs on top of those two: what the
-server declares follows the key's scopes (see "The tool surface").
+server declares follows the key's scopes (see "The tool surface"). Calling a
+third-party API through one of your connections takes `credential-proxy:call-own`
+(your own connections) or `credential-proxy:call` (every connection usable in the
+space, which implies `call-own`). A key carries either only from a creator who
+holds it (`call` for a space `admin` or `builder`, `call-own` for an `operator`,
+or a custom role that lists it).
 
 This is the recommended onboarding until you have HTTPS + the OAuth flow set up.
 
@@ -194,7 +199,8 @@ What happens under the hood:
 
 The server exposes a handful of tools rather than one per REST operation (which
 would blow past any client's tool budget): the progressive-disclosure triple
-over the whole API, plus shortcuts for the things clients otherwise get wrong.
+over the API's operations, plus shortcuts for the things clients otherwise get
+wrong and two tools for calling third-party APIs through your connections.
 `mcp:read` is the transport gate — every row asking for it alone is shown to
 anyone who can connect. The rows asking for more are **shown only when those
 grants hold**. The server reads those grants off the guards mounted on the
@@ -203,19 +209,21 @@ operation each tool dispatches to (for `import_package_file`, the
 guards require today. The package `:write` permissions are `agents:write`,
 `skills:write`, `integrations:write` and `mcp-servers:write` — any one will do.
 
-| Tool                       | Permission                                                   | What it does                                                                                                                                                                |
-| -------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_me`                   | `mcp:read`                                                   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context. |
-| `search_operations`        | `mcp:read`                                                   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
-| `describe_operation`       | `mcp:read`                                                   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
-| `read_file`                | `mcp:read`                                                   | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
-| `read_skill`               | `mcp:read`                                                   | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
-| `validate_package_file`    | `mcp:read`                                                   | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
-| `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
-| `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
-| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
-| `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
-| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
+| Tool                       | Permission                                                            | What it does                                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`                   | `mcp:read`                                                            | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context. |
+| `search_operations`        | `mcp:read`                                                            | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
+| `describe_operation`       | `mcp:read`                                                            | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
+| `read_file`                | `mcp:read`                                                            | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
+| `read_skill`               | `mcp:read`                                                            | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
+| `validate_package_file`    | `mcp:read`                                                            | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
+| `get_runtime_capabilities` | `mcp:read`                                                            | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
+| `invoke_operation`         | `mcp:invoke`                                                          | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
+| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all`          | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
+| `list_files`               | `files:read`                                                          | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
+| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                    |
+| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The connections you can call outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                                |
+| `api_call`                 | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
 
 `read_skill` needs `skills:read`, except for a skill a chat turn injected:
 that turn's own bearer reads it at the definition injected (a draft only at the
@@ -256,6 +264,57 @@ timeout only sends `notifications/cancelled` in a new POST, which a stateless
 server cannot match to the call) leaves the server waiting until the run ends,
 30 min at most; the run itself is unaffected, so read it back with `getRun`
 rather than launching it again.
+
+`list_connections` and `api_call` are the credential proxy
+(`/api/credential-proxy/*`) outside a run. The proxy route is not an operation
+of the catalog, so `invoke_operation` does not reach it: these two tools are the
+MCP path, and each request re-enters the route with your credential, so its
+permission check, rate limit and call journal apply as over REST. They are
+declared to a caller authenticated by a bearer (an API key or an OAuth token)
+who holds `mcp:invoke` and `credential-proxy:call-own` or `credential-proxy:call`;
+who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
+
+- **What you reach.** With `credential-proxy:call-own` alone, your OWN
+  connections usable in the space, never one another member shared: that one,
+  and every connection of an integration under an enforced organization default
+  (`call_permission_required` in the listing), is reached by an agent run (`run_and_wait`).
+  With `credential-proxy:call`, the connections usable in the space,
+  yours and those another member shared into it, under the space's
+  organization defaults. A shared connection is used when you name it
+  (`connection_id`) or an organization default designates it, and under an
+  enforced default only the connections it holds are reachable.
+  `list_connections` returns what a call would accept: per connection, the
+  `integration_package_id` and `connection_id` to pass, `owned_by_actor`
+  (`false` for another member's), the `authorized_uris` a target must match,
+  and `needs_reconnection`. It never carries a credential value: an entry that
+  depends on one reads `{$credential.<field>}`, and you target it by writing
+  `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
+  is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
+  `https://{$credential.host}/**`); the platform fills it in.
+- **A call.** `requests` holds 1 to 50 requests, each naming an
+  `integration_package_id`, a `method` and a `target`, with optional `headers`, `body`,
+  `substitute_body` and `connection_id` (which connection, when several of the
+  integration are callable, or to use a shared one). The platform injects the credential: a
+  header of your own platform request (`Authorization`, `Cookie`, …) or one of
+  the proxy's control headers is refused in `headers`, and the whole call is
+  refused before anything is sent when an argument is malformed. Requests run
+  concurrently, three at a time and not in order, and each counts against the
+  proxy's rate limit.
+- **A result.** `{ session_id, results }`, one entry per request, in order. An
+  entry with `status` is the upstream's own answer, whatever the status, with a
+  few response headers and a text `body` cut at `max_response_bytes` (32 KiB by
+  default) and marked `truncated`; a non-text body is replaced by its size. All
+  bodies of one result share a 256 KiB budget. An entry with `error`
+  (`{ status, code, detail }`) is the platform's refusal of that request
+  (`call_permission_required`, `credential_not_found`, `must_choose_connection`,
+  `needs_reconnection`, `unauthorized_target`, `rate_limited`, …) and does not
+  stop the others. The result is `isError` only when no request succeeded.
+- **Sessions.** Pass a previous result's `session_id` to keep the cookies the
+  upstream set; omit it to start a session.
+
+The exact argument and result schemas are the tools' own; the access rule is in
+`docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+credential proxy (`/api/credential-proxy/*`)".
 
 The whole surface follows your permissions the same way: the tool list, the
 operation index in the server instructions, `search_operations` (matches you
@@ -312,4 +371,5 @@ deterministic manifest and override every field, including a strict
 `runtime_tools`).
 
 Streaming/SSE operations (live logs, realtime) cannot be called through
-`invoke_operation` — use `run_and_wait`, fetch logs, or poll instead.
+`invoke_operation` — use `run_and_wait`, fetch logs, or poll instead. Nor can
+the credential proxy: use `api_call`.

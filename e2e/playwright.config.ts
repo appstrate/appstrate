@@ -41,9 +41,13 @@ export default defineConfig({
     // Both append, so lines are not overwritten, but stdout and stderr are not
     // in strict time order. `bash` for `pipefail` (`/bin/sh` is dash in CI),
     // so a startup failure reports the server's exit status, not `tee`'s.
-    // In CI only, the server (not the browsers) may dump core on a crash.
+    // In CI only, the server (not the browsers) may dump core on a crash, and it
+    // starts without the GitHub Actions runner's `GITHUB_*` / `RUNNER_*`
+    // variables, which would fill its unread-keys boot warning (`docs/ENV.md`
+    // § Unread keys). Unset in the shell: Playwright spreads `process.env`
+    // under `env:`, so that map adds keys and removes none.
     command:
-      "bash -o pipefail -c '[ -z \"$CI\" ] || ulimit -c unlimited; cd .. && mkdir -p data/e2e && : >data/e2e/server.log && bun apps/api/src/index.ts 2>&1 >>data/e2e/server.log | tee -a data/e2e/server.log >&2'",
+      "bash -o pipefail -c '[ -z \"$CI\" ] || { ulimit -c unlimited; unset ${!GITHUB_@} ${!RUNNER_@}; }; cd .. && mkdir -p data/e2e && : >data/e2e/server.log && bun apps/api/src/index.ts 2>&1 >>data/e2e/server.log | tee -a data/e2e/server.log >&2'",
     url: E2E_BASE_URL,
     // Reuse an already-listening server ONLY in CI.
     //
@@ -75,7 +79,9 @@ export default defineConfig({
     env: {
       PORT: String(E2E_PORT),
       APP_URL: E2E_BASE_URL,
-      TRUSTED_ORIGINS: `${E2E_BASE_URL},http://localhost:5173`,
+      // Empty, not absent: Bun's `.env` load never overrides a set var, so a
+      // developer `.env` cannot add an origin. APP_URL alone carries sign-up.
+      TRUSTED_ORIGINS: "",
       // tests/models/custom-model.ui.spec.ts points the platform at a mock
       // OpenAI-compatible endpoint on 127.0.0.1; the SSRF guard blocks
       // loopback unless the operator trusts it explicitly.

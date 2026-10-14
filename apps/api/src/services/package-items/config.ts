@@ -7,14 +7,17 @@ import {
   type CompanionFileViolation,
 } from "@appstrate/afps-shared/companion-files";
 import {
+  findCleartextInjectedCredentials,
   findInvalidScopeTokens,
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import { asRecord } from "@appstrate/core/safe-json";
+import { isAllowedInternalIdpHost } from "@appstrate/connect";
 import { validationFailed } from "../../lib/errors.ts";
 import { getLocalServerRef } from "../integration-manifest-helpers.ts";
 
@@ -96,7 +99,9 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
       ...findNonSnakeCaseIdentityClaimKeys(manifest),
       ...findInvalidScopeTokens(manifest),
       ...findUnboundedInjectedCredentials(manifest),
+      ...findCleartextInjectedCredentials(manifest, isAllowedInternalIdpHost),
       ...findUnevaluableExpressions(manifest),
+      ...findUnexposedDefaultTools(manifest),
     ],
     manifestIsStoredFile: true,
   },
@@ -131,7 +136,14 @@ export function assertContentConforms(
 
 /** 400 naming each offending manifest field. */
 export function assertManifestConforms(type: PackageType, manifest: unknown, prefix = ""): void {
-  const violations = CONFIG_BY_TYPE[type].checkManifest?.(manifest) ?? [];
+  assertNoManifestViolations(CONFIG_BY_TYPE[type].checkManifest?.(manifest) ?? [], prefix);
+}
+
+/** The 400 of {@link assertManifestConforms}, for violations a caller found by other means. */
+export function assertNoManifestViolations(
+  violations: { path: (string | number)[]; message: string }[],
+  prefix = "",
+): void {
   if (violations.length === 0) return;
   throw validationFailed(
     violations.map((v) => ({
