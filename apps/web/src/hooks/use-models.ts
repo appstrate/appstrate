@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -62,9 +62,9 @@ export function useDeleteModel() {
   return $api.useMutation("delete", "/api/models/{id}", { onSuccess: invalidate });
 }
 
-export function useSetDefaultModel() {
+export function useSetDefaultModel(meta?: MutationMeta) {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("put", "/api/models/default", { onSuccess: invalidate });
+  return $api.useMutation("put", "/api/models/default", { meta, onSuccess: invalidate });
 }
 
 /** The test answers inline; it runs through the model's key, which it may rotate or flag dead. */

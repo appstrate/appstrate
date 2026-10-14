@@ -15,10 +15,7 @@ import {
   useProvidersRegistry,
   useTestModelProviderCredential,
 } from "../hooks/use-model-provider-credentials";
-import {
-  useProviderColumns,
-  type ProviderColumnsArgs,
-} from "../pages/org-settings/provider-columns";
+import { useProviderColumns, type ProviderColumnsArgs } from "./provider-columns";
 import type { ProviderRow } from "../lib/model-providers";
 
 /** What the page decides: the deeds a row's menu offers, and the type column. */
