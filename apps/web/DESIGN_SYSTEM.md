@@ -63,7 +63,10 @@ they start with `packages/` or `e2e/`.
   dashboard when the app opened on the overlay); closing returns to it
   (`lib/modal-route.ts`). Nothing rides in the history state. Rail pieces:
   `RailHeader`, `RailGroup`, `RailLink`, `ContextSelector`
-  (`components/settings/`).
+  (`components/settings/`). Settings are ONE shell (`pages/settings/layout.tsx`)
+  whose rail lists three sections — Organisation, Espace de travail, Compte
+  (`/preferences`) — built in `pages/settings/navigation.ts` from what each
+  route lets the caller reach.
 - The header's right end stays personal (notification bell, profile); page
   controls never move into it.
 

@@ -197,9 +197,6 @@ const OrgSettingsSpaceOauthPage = lazy(() =>
     default: m.OrgSettingsSpaceOauthPage,
   })),
 );
-const PreferencesLayout = lazy(() =>
-  import("./pages/preferences/layout").then((m) => ({ default: m.PreferencesLayout })),
-);
 const PreferencesGeneralPage = lazy(() =>
   import("./pages/preferences/general").then((m) => ({ default: m.PreferencesGeneralPage })),
 );
@@ -357,11 +354,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
       <CataloguePage />
     </LazyRoute>
   ),
-  "/preferences": (
-    <LazyRoute>
-      <PreferencesLayout />
-    </LazyRoute>
-  ),
+  "/preferences": <Outlet />,
   "/preferences/general": <PreferencesGeneralPage />,
   "/preferences/appearance": <PreferencesAppearancePage />,
   "/preferences/security": <PreferencesSecurityPage />,
@@ -379,8 +372,9 @@ const PAGES: Record<RoutePath, ReactNode> = {
       <ChatModulePage />
     </LazyRoute>
   ),
-  // Both settings scopes share `UnifiedSettingsLayout`, mounted one level up so
-  // switching scope keeps the dialog; each scope's own element is its outlet.
+  // The settings scopes (these two and `/preferences`) share
+  // `UnifiedSettingsLayout`, mounted one level up so switching scope keeps the
+  // dialog; each scope's own element is its outlet.
   "/org-settings": <Outlet />,
   "/org-settings/general": <OrgSettingsGeneralPage />,
   "/org-settings/members": <OrgSettingsMembersPage />,
@@ -442,7 +436,7 @@ function OverlayNotFound() {
 
 /** The nested layouts, with what each index opens. */
 const LAYOUT_INDEX = {
-  "/preferences": <Navigate to="general" replace />,
+  "/preferences": <SettingsIndexRedirect />,
   "/org-settings": <SettingsIndexRedirect />,
   "/workspace-settings": <SettingsIndexRedirect />,
 } satisfies Partial<Record<RoutePath, ReactNode>>;
@@ -916,7 +910,6 @@ export function App() {
           {overlay && (
             <Routes>
               {flatPaths("overlay").map(pageRoute)}
-              {layoutRoute("/preferences")}
               <Route
                 element={
                   <LazyRoute>
@@ -926,6 +919,7 @@ export function App() {
               >
                 {layoutRoute("/org-settings")}
                 {layoutRoute("/workspace-settings")}
+                {layoutRoute("/preferences")}
               </Route>
               {OVERLAY_PREFIXES.map((prefix) => (
                 <Route key={prefix} path={`${prefix}/*`} element={<OverlayNotFound />} />

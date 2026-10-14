@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { routeVerdict } from "../../../lib/route-access";
-import { firstSettingsPath, visibleSettingsSections } from "../navigation";
+import { isUnder, routeVerdict } from "../../../lib/route-access";
+import {
+  activeSettingsItem,
+  firstSettingsPath,
+  isSettingsIndex,
+  settingsContentKey,
+  settingsScopeFromPath,
+  visibleSettingsSections,
+} from "../navigation";
 
 type Features = Record<string, boolean>;
 
@@ -24,6 +31,8 @@ function destinations(features: Features, granted: string[], inPersonalSpace = f
   );
 }
 
+const orgEntries = (paths: string[]) => paths.filter((path) => isUnder(path, "/org-settings"));
+
 const GUEST = ["org:read", "spaces:read", "models:read", "proxies:read"];
 
 describe("unified settings navigation", () => {
@@ -34,9 +43,9 @@ describe("unified settings navigation", () => {
   it("lists General to every member: leaving the organization lives there", () => {
     // A guest reads spaces, models and proxies so its runs resolve them; that
     // is no reason to list their administration screens.
-    expect(destinations(ALL_FEATURES, GUEST)).toEqual(["/org-settings/general"]);
+    expect(orgEntries(destinations(ALL_FEATURES, GUEST))).toEqual(["/org-settings/general"]);
 
-    const member = destinations(ALL_FEATURES, [...GUEST, "members:read", "roles:read"]);
+    const member = orgEntries(destinations(ALL_FEATURES, [...GUEST, "members:read", "roles:read"]));
     expect(member).toEqual([
       "/org-settings/general",
       "/org-settings/members",
@@ -144,5 +153,91 @@ describe("settings index", () => {
     const guest = visibleSettingsSections(options(ALL_FEATURES, GUEST));
     expect(firstSettingsPath(guest, "workspace")).toBe("/org-settings/general");
     expect(firstSettingsPath([], "workspace")).toBeUndefined();
+  });
+});
+
+describe("account section (/preferences)", () => {
+  const OWN_ACCOUNT_PAGES = [
+    "/preferences/general",
+    "/preferences/appearance",
+    "/preferences/security",
+    "/preferences/devices",
+    "/preferences/connections",
+    "/preferences/mcp-access",
+  ];
+
+  it("is built for a caller with no organization or space permission", () => {
+    const sections = visibleSettingsSections(options(NO_FEATURES, []));
+    const account = sections.find((section) => section.scope === "account");
+    expect(account?.items.map((item): string => item.to)).toEqual(OWN_ACCOUNT_PAGES);
+    expect(firstSettingsPath(sections, "account")).toBe("/preferences/general");
+  });
+
+  it("lists the caller's model keys only where their route opens", () => {
+    expect(destinations(NO_FEATURES, [])).not.toContain("/preferences/models");
+    expect(destinations(NO_FEATURES, ["model-provider-credentials:read"])).toContain(
+      "/preferences/models",
+    );
+  });
+
+  it("sits in the same rail as the organization and workspace sections", () => {
+    const sections = visibleSettingsSections(
+      options(ALL_FEATURES, [...GUEST, "space-settings:write"]),
+    );
+    expect(sections.map((section) => section.scope)).toEqual([
+      "organization",
+      "workspace",
+      "account",
+    ]);
+  });
+});
+
+describe("active settings entry", () => {
+  const sections = visibleSettingsSections(options(ALL_FEATURES, GUEST));
+
+  it("names the entry of the page shown, nested URLs included, in every scope", () => {
+    expect(activeSettingsItem(sections, "/org-settings/general")?.to).toBe("/org-settings/general");
+    expect(activeSettingsItem(sections, "/preferences/security")?.to).toBe("/preferences/security");
+    expect(activeSettingsItem(sections, "/preferences/security/x")?.to).toBe(
+      "/preferences/security",
+    );
+  });
+
+  it("names none on a URL the rail does not list", () => {
+    // A guest on /org-settings/members: the page is refused and the entry hidden.
+    expect(activeSettingsItem(sections, "/org-settings/members")).toBeUndefined();
+    expect(activeSettingsItem(sections, "/org-settings/unknown")).toBeUndefined();
+    expect(activeSettingsItem(sections, "/preferences/generalx")).toBeUndefined();
+  });
+});
+
+describe("index URLs", () => {
+  it("treats every scope's root as an index, /preferences included", () => {
+    for (const index of ["/org-settings", "/workspace-settings", "/preferences", "/preferences/"]) {
+      expect(isSettingsIndex(index)).toBe(true);
+    }
+    expect(isSettingsIndex("/preferences/general")).toBe(false);
+  });
+});
+
+describe("settings scope", () => {
+  it("reads the scope off the URL, segment by segment", () => {
+    expect(settingsScopeFromPath("/org-settings/models")).toBe("organization");
+    expect(settingsScopeFromPath("/workspace-settings/end-users")).toBe("workspace");
+    expect(settingsScopeFromPath("/preferences/models")).toBe("account");
+    expect(settingsScopeFromPath("/preferences")).toBe("account");
+  });
+
+  it("remounts the content only when its own scope changes", () => {
+    expect(settingsContentKey("/org-settings/models", "org-a", "ws-a")).toBe("organization:org-a");
+    expect(settingsContentKey("/org-settings/models", "org-a", "ws-b")).toBe("organization:org-a");
+    expect(settingsContentKey("/workspace-settings/end-users", "org-a", "ws-a")).toBe(
+      "workspace:org-a:ws-a",
+    );
+    expect(settingsContentKey("/workspace-settings/end-users", "org-a", "ws-b")).toBe(
+      "workspace:org-a:ws-b",
+    );
+    expect(settingsContentKey("/preferences/models", "org-a", "ws-a")).toBe("account:org-a");
+    expect(settingsContentKey("/preferences/models", "org-a", "ws-b")).toBe("account:org-a");
   });
 });

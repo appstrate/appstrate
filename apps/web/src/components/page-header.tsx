@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
-import { useBreadcrumbStore, type BreadcrumbEntry } from "@/stores/breadcrumb-store";
+import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
+import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 
 export type { BreadcrumbEntry };
 
@@ -31,16 +32,8 @@ export function PageHeader({
   children,
 }: PageHeaderProps) {
   // Pages declare their trail here, next to the code that knows the dynamic
-  // labels; the shell header draws it. Keyed on the labels and hrefs
-  // rather than the array itself, which every page rebuilds on each render and
-  // which would otherwise publish in a loop.
-  const setEntries = useBreadcrumbStore((s) => s.setEntries);
-  const signature = JSON.stringify((breadcrumbs ?? []).map((c) => [c.label, c.href]));
-  useEffect(() => {
-    setEntries(breadcrumbs ?? []);
-    return () => setEntries([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, setEntries]);
+  // labels; the shell header draws it.
+  usePageBreadcrumb(breadcrumbs ?? []);
 
   return (
     <div data-page-header className="mb-4">

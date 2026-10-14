@@ -699,8 +699,6 @@ export function OrgCatalogueModal({
       title={t("catalogue.title")}
       rail={rail}
       mobileNav={mobileNav}
-      contentScrollArea
-      reserveCloseArea
       // Where the reader is, kept in place while the pane scrolls: the kind
       // they are browsing, or the package they opened, with the way back.
       contentHeader={(stuck) =>

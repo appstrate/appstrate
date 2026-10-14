@@ -17,10 +17,9 @@
  * BELOW the chat's context providers, and `ChatShell` is what puts them up.
  */
 
-import { useEffect } from "react";
 import { ChatConversationTitle, type ChatCan, type ChatTranslate } from "@appstrate/module-chat/ui";
 import { useSessions } from "@appstrate/module-chat/unread";
-import { useBreadcrumbStore } from "@/stores/breadcrumb-store";
+import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
 
 export function ChatTitleCrumb({
   conversationId,
@@ -32,23 +31,19 @@ export function ChatTitleCrumb({
   can: ChatCan;
 }) {
   const { data: sessions } = useSessions();
-  const setEntries = useBreadcrumbStore((s) => s.setEntries);
   const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   const title = session ? (session.title ?? t("threads.new")) : null;
 
-  useEffect(() => {
-    if (!conversationId || title === null) {
-      setEntries([]);
-      return;
-    }
-    setEntries([
-      {
-        label: title,
-        node: <ChatConversationTitle activeId={conversationId} t={t} can={can} />,
-      },
-    ]);
-    return () => setEntries([]);
-  }, [conversationId, title, t, can, setEntries]);
+  usePageBreadcrumb(
+    conversationId && title !== null
+      ? [
+          {
+            label: title,
+            node: <ChatConversationTitle activeId={conversationId} t={t} can={can} />,
+          },
+        ]
+      : [],
+  );
 
   return null;
 }

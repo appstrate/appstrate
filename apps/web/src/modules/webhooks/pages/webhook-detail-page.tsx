@@ -25,6 +25,7 @@ export function WebhookDetailPage() {
     <div>
       <PageHeader
         title={webhook.url}
+        breadcrumbs={[{ label: webhook.url }]}
         actions={
           <div className="flex items-center gap-2">
             {webhook.level === "org" && (

@@ -31,10 +31,6 @@ interface PanelDialogProps {
    * collapses to one line.
    */
   mobileNav?: ReactNode;
-  /** Use the design-system overlay scrollbar for this panel's content pane. */
-  contentScrollArea?: boolean;
-  /** Keep page headings and toolbars below the dialog's close affordance. */
-  reserveCloseArea?: boolean;
   /** On a phone, render as a shell surface below the two-line mobile header, not a dialog. */
   mobileAsSurface?: boolean;
   /**
@@ -47,7 +43,7 @@ interface PanelDialogProps {
    * asked for. It takes its background, its rule and, through `stuck`,
    * whatever names the page, only once the pane has scrolled.
    */
-  contentHeader?: (stuck: boolean) => ReactNode;
+  contentHeader: (stuck: boolean) => ReactNode;
   children: ReactNode;
   onClose: () => void;
 }
@@ -56,8 +52,6 @@ export function PanelDialog({
   title,
   rail,
   mobileNav,
-  contentScrollArea = false,
-  reserveCloseArea = false,
   mobileAsSurface = false,
   contentHeader,
   children,
@@ -65,9 +59,8 @@ export function PanelDialog({
 }: PanelDialogProps) {
   const isMobile = useIsMobile();
   // Whether the pane has scrolled past its own top. Read off the scroll
-  // container itself — found by walking up from a sentinel, since the pane is
-  // a `ScrollArea` viewport on one path and a plain overflow div on the other,
-  // and neither is reachable from here by name.
+  // container itself — the `ScrollArea` viewport, which is not reachable from
+  // here by ref, found by walking up from a sentinel.
   const [stuck, setStuck] = useState(false);
   // A callback ref rather than an object ref: the band is rendered inside the
   // dialog's portal, and the node has to be caught when it attaches there.
@@ -87,38 +80,26 @@ export function PanelDialog({
     setPane(scroller);
   };
   const content = (
-    <div
-      className={cn(
-        "w-full max-w-full min-w-0 p-6",
-        // The band reserves the close control's room itself.
-        reserveCloseArea && !contentHeader && "md:pt-14",
-        contentHeader && "pt-0",
-      )}
-      style={{ contain: "inline-size" }}
-    >
+    <div className="w-full max-w-full min-w-0 p-6 pt-0" style={{ contain: "inline-size" }}>
+      {/* Sticky, and inset the way the pane is: `-mx-6` cancels the pane's
+          padding so the band spans its full width, `pr-14` keeps the close
+          control's corner free. */}
+      <div
+        className={cn(
+          // Room under the band: the page below it starts with a title,
+          // and a heading pinned to a bar reads as a label of that bar.
+          "duration-fast sticky top-0 z-20 -mx-6 mb-12 px-6 py-3 pr-14 transition-colors",
+          stuck && "bg-background border-b",
+        )}
+      >
+        {/* One height for every caller, whether it draws a button or a
+            title, so two panels leave the same room above their page. */}
+        <div className="flex min-h-8 items-center">{contentHeader(stuck)}</div>
+      </div>
+      {/* Only a handle on the scrolling pane. */}
+      <div ref={attach} aria-hidden className="-mt-12 h-px" />
       {/* `pr-10` clears the dialog's own close button, which is absolutely
           positioned top-right and would otherwise sit on the selector. */}
-      {contentHeader && (
-        <>
-          {/* Sticky, and inset the way the pane is: `-mx-6` cancels the pane's
-              padding so the band spans its full width, `pr-14` keeps the close
-              control's corner free. */}
-          <div
-            className={cn(
-              // Room under the band: the page below it starts with a title,
-              // and a heading pinned to a bar reads as a label of that bar.
-              "duration-fast sticky top-0 z-20 -mx-6 mb-12 px-6 py-3 pr-14 transition-colors",
-              stuck && "bg-background border-b",
-            )}
-          >
-            {/* One height for every caller, whether it draws a button or a
-                title, so two panels leave the same room above their page. */}
-            <div className="flex min-h-8 items-center">{contentHeader(stuck)}</div>
-          </div>
-          {/* Only a handle on the scrolling pane. */}
-          <div ref={attach} aria-hidden className="-mt-12 h-px" />
-        </>
-      )}
       {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
       {children}
     </div>
@@ -130,11 +111,7 @@ export function PanelDialog({
         aria-label={title}
         className="bg-background fixed inset-x-0 top-24 bottom-0 z-30 flex min-w-0 flex-col overflow-hidden"
       >
-        {contentScrollArea ? (
-          <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
-        ) : (
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{content}</div>
-        )}
+        <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
       </section>
     );
   }
@@ -149,11 +126,8 @@ export function PanelDialog({
           // 390px. The negative margin cancels the padding the shared dialog
           // wrapper puts around every content box.
           "max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0",
-          // The reserved header band owns the close control at every modal
-          // width; other panels enlarge the close target on a phone only.
-          reserveCloseArea
-            ? "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md"
-            : "max-md:[&>button]:top-2.5 max-md:[&>button]:right-2.5 max-md:[&>button]:z-30 max-md:[&>button]:flex max-md:[&>button]:size-11 max-md:[&>button]:items-center max-md:[&>button]:justify-center",
+          // The header band owns the close control at every width.
+          "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md",
         ].join(" ")}
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
@@ -169,15 +143,9 @@ export function PanelDialog({
         <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-md:hidden">
           {rail}
         </aside>
-        {contentScrollArea ? (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
-          </div>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto">{content}</div>
-          </div>
-        )}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );

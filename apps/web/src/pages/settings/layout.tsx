@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One settings shell for two API scopes.
+ * One settings shell for three scopes: organization, workspace and the
+ * caller's own account (`/preferences`).
  *
- * Organization and workspace are independent menu sections in the rail. Each
- * section owns its selector and navigation; they are deliberately not a shared
- * context block. The keyed content outlet prevents data from the previous scope
- * flashing after a context switch.
+ * Each scope is its own menu section in the rail; organization and workspace
+ * carry their context selector. The keyed content outlet prevents data from
+ * the previous scope flashing after a context switch.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Settings, X } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
-import { client } from "../../api/client";
-import { errorMessage } from "../../lib/mutation-error";
 import { spaceLabel } from "../../lib/space-label";
 import { AppVersion } from "../../components/app-version";
 import { SettingsHeading } from "../../components/settings/settings-heading";
@@ -35,18 +32,14 @@ import {
 } from "../../hooks/use-current-space";
 import { useOrg } from "../../hooks/use-org";
 import { modalReturnTarget, useBackgroundLocation } from "../../lib/modal-route";
+import { useOverlayBreadcrumb } from "../../hooks/use-overlay-breadcrumb";
 import {
-  getLastWorkspaceId,
-  pickWorkspaceForOrganization,
-  rememberWorkspace,
+  activeSettingsItem,
+  firstSettingsPath,
+  isSettingsIndex,
   settingsContentKey,
   settingsScopeFromPath,
   type SettingsScope,
-} from "../../lib/settings-context";
-import { useBreadcrumbStore } from "../../stores/breadcrumb-store";
-import { activeSettingsItem } from "../../lib/settings-nav";
-import {
-  firstSettingsPath,
   type UnifiedSettingsNavItem,
   type UnifiedSettingsSection,
 } from "./navigation";
@@ -54,6 +47,7 @@ import { useSettingsSections } from "./use-settings-sections";
 
 interface ScopeNavigationProps {
   section: UnifiedSettingsSection;
+  separated: boolean;
   activeItem?: UnifiedSettingsNavItem;
   contextSelector?: ReactNode;
   label: (key: string) => string;
@@ -63,6 +57,7 @@ interface ScopeNavigationProps {
 
 function ScopeNavigation({
   section,
+  separated,
   activeItem,
   contextSelector,
   label,
@@ -70,7 +65,7 @@ function ScopeNavigation({
   onNavigate,
 }: ScopeNavigationProps) {
   return (
-    <RailGroup title={label(section.labelKey)} separated={section.scope === "workspace"}>
+    <RailGroup title={label(section.labelKey)} separated={separated}>
       {contextSelector}
       <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={label(section.labelKey)}>
         {section.items.map((item) => (
@@ -94,63 +89,42 @@ export function UnifiedSettingsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const background = useBackgroundLocation();
-  const setBreadcrumbEntries = useBreadcrumbStore((state) => state.setEntries);
   const { currentOrg, orgs, switchOrg } = useOrg();
   const { data: applications = [] } = useSpaces();
   const spaceId = useCurrentSpaceId();
   const { switchSpace } = useSpaceSwitcher();
-  const [switchingOrganization, setSwitchingOrganization] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<HTMLDivElement | null>(null);
-  const organizationSwitchRequest = useRef(0);
   const mobileNavigationButton = useRef<HTMLButtonElement>(null);
   const mobileNavigationPanel = useRef<HTMLDivElement>(null);
-  const breadcrumbsBeforeSettings = useRef(useBreadcrumbStore.getState().entries);
-
-  useEffect(
-    () => () => {
-      organizationSwitchRequest.current += 1;
-    },
-    [],
-  );
 
   const sections = useSettingsSections();
 
-  const activeItem = activeSettingsItem(
-    sections.flatMap((section) => section.items),
-    location.pathname,
-  );
+  const activeItem = activeSettingsItem(sections, location.pathname);
   const activeScope = settingsScopeFromPath(location.pathname);
   // On a phone the index IS the navigation: `SettingsIndexRedirect` stays put.
-  const navigationAsIndex = isMobile && sections.length > 0 && isSettingsIndex(location.pathname);
+  const navigationAsIndex = isMobile && isSettingsIndex(location.pathname);
   const navigationOpen = mobileNavigationOpen || navigationAsIndex;
   const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, spaceId);
   const label = (key: string) => t(key, { ns: "settings" });
   const settingsBreadcrumbLabel = label("unifiedSettings.title");
   const activeSectionLabel = activeSection ? label(activeSection.labelKey) : null;
-  const activeItemLabel = activeItem ? label(activeItem.labelKey) : null;
   const activeSectionHref = activeSection?.items[0]?.to ?? activeItem?.to;
 
-  useEffect(() => {
-    const previousBreadcrumbs = breadcrumbsBeforeSettings.current;
-    return () => setBreadcrumbEntries(previousBreadcrumbs);
-  }, [setBreadcrumbEntries]);
-
-  useEffect(() => {
-    if (!activeSectionLabel || !activeItemLabel || !activeSectionHref) return;
-    setBreadcrumbEntries([
-      { label: settingsBreadcrumbLabel, href: "/org-settings" },
-      { label: activeSectionLabel, href: activeSectionHref },
-      { label: activeItemLabel },
-    ]);
-  }, [
-    activeItemLabel,
-    activeSectionHref,
-    activeSectionLabel,
-    setBreadcrumbEntries,
-    settingsBreadcrumbLabel,
-  ]);
+  useOverlayBreadcrumb(
+    activeSectionLabel && activeItem && activeSectionHref
+      ? [
+          { label: settingsBreadcrumbLabel, href: "/org-settings" },
+          { label: activeSectionLabel, href: activeSectionHref },
+          // A link once a page under the item (a webhook) extends the trail.
+          {
+            label: label(activeItem.labelKey),
+            href: location.pathname === activeItem.to ? undefined : activeItem.to,
+          },
+        ]
+      : [],
+  );
 
   useEffect(() => {
     if (!navigationOpen) return;
@@ -200,67 +174,47 @@ export function UnifiedSettingsLayout() {
     requestAnimationFrame(() => mobileNavigationButton.current?.focus());
   };
 
-  const changeOrganization = async (organizationId: string) => {
-    if (!currentOrg || organizationId === currentOrg.id || switchingOrganization) return;
-    const requestId = ++organizationSwitchRequest.current;
-    setSwitchingOrganization(true);
-    try {
-      const { data, error } = await client.GET("/api/spaces", {
-        params: { header: { "X-Org-Id": organizationId } },
-      });
-      if (organizationSwitchRequest.current !== requestId) return;
-      if (error) throw error;
-
-      const workspace = pickWorkspaceForOrganization(
-        data?.data ?? [],
-        getLastWorkspaceId(organizationId),
-      );
-      if (!workspace) throw new Error(label("unifiedSettings.noWorkspace"));
-
-      if (spaceId) rememberWorkspace(currentOrg.id, spaceId);
-      switchOrg(organizationId, workspace.id);
-      rememberWorkspace(organizationId, workspace.id);
-    } catch (error) {
-      if (organizationSwitchRequest.current !== requestId) return;
-      toast.error(label("unifiedSettings.switchError"), {
-        description: errorMessage(error),
-      });
-    } finally {
-      if (organizationSwitchRequest.current === requestId) setSwitchingOrganization(false);
-    }
-  };
-
-  const changeWorkspace = (workspaceId: string) => {
-    if (!currentOrg || workspaceId === spaceId) return;
-    switchSpace(workspaceId);
-    rememberWorkspace(currentOrg.id, workspaceId);
-  };
-
+  // The space of the next organization is `useSpaceResolver`'s pick: its
+  // remembered one for this account, else its default.
   const organizationSelector = (
     <ContextSelector
       value={currentOrg?.id ?? ""}
       label={label("unifiedSettings.organizationSelector")}
-      disabled={switchingOrganization}
       options={orgs}
-      onValueChange={(id) => void changeOrganization(id)}
+      onValueChange={(id) => switchOrg(id)}
     />
   );
   const workspaceSelector = (
     <ContextSelector
       value={spaceId ?? ""}
       label={label("unifiedSettings.workspaceSelector")}
-      disabled={switchingOrganization || applications.length === 0}
+      disabled={applications.length === 0}
       // Listed is not enterable: a closed space shows, disabled.
       options={applications.map((space) => ({
         id: space.id,
         name: spaceLabel(space, t),
         disabled: !isSpaceEnterable(space),
       }))}
-      onValueChange={changeWorkspace}
+      onValueChange={switchSpace}
     />
   );
-  const selectorFor = (scope: SettingsScope) =>
-    scope === "organization" ? organizationSelector : workspaceSelector;
+  const selectors: Partial<Record<SettingsScope, ReactNode>> = {
+    organization: organizationSelector,
+    workspace: workspaceSelector,
+  };
+  const navigationGroups = (mobile: boolean) =>
+    sections.map((section, index) => (
+      <ScopeNavigation
+        key={section.scope}
+        section={section}
+        separated={index > 0}
+        activeItem={activeItem}
+        contextSelector={selectors[section.scope]}
+        label={label}
+        mobile={mobile}
+        onNavigate={mobile ? closeMobileNavigation : undefined}
+      />
+    ));
 
   const closeTarget = modalReturnTarget(background);
   const closeSettings = () => navigate(closeTarget.to, { replace: true, state: closeTarget.state });
@@ -268,17 +222,7 @@ export function UnifiedSettingsLayout() {
   const rail = (
     <div className="flex h-full flex-col">
       <RailHeader icon={Settings} title={label("unifiedSettings.title")} />
-      <div className="flex-1">
-        {sections.map((section) => (
-          <ScopeNavigation
-            key={section.scope}
-            section={section}
-            activeItem={activeItem}
-            contextSelector={selectorFor(section.scope)}
-            label={label}
-          />
-        ))}
-      </div>
+      <div className="flex-1">{navigationGroups(false)}</div>
       <div className="px-4 py-3">
         <AppVersion />
       </div>
@@ -309,19 +253,7 @@ export function UnifiedSettingsLayout() {
         </Button>
       </div>
       <ScrollArea className="min-h-0 flex-1">
-        <div className="pb-3">
-          {sections.map((section) => (
-            <ScopeNavigation
-              key={section.scope}
-              section={section}
-              activeItem={activeItem}
-              contextSelector={selectorFor(section.scope)}
-              label={label}
-              mobile
-              onNavigate={closeMobileNavigation}
-            />
-          ))}
-        </div>
+        <div className="pb-3">{navigationGroups(true)}</div>
       </ScrollArea>
       <div className="shrink-0 px-4 py-3">
         <AppVersion />
@@ -333,8 +265,6 @@ export function UnifiedSettingsLayout() {
     <PanelDialog
       title={label("unifiedSettings.title")}
       rail={rail}
-      contentScrollArea
-      reserveCloseArea
       mobileAsSurface
       // The same band as the catalogue: invisible at rest, the section's name
       // once the page has scrolled past its own heading — and an opaque surface
@@ -397,23 +327,16 @@ export function UnifiedSettingsLayout() {
   );
 }
 
-const SETTINGS_INDEXES = ["/org-settings", "/workspace-settings"];
-
-function isSettingsIndex(pathname: string): boolean {
-  return SETTINGS_INDEXES.includes(pathname.replace(/\/$/, ""));
-}
-
 /**
- * `/org-settings` and `/workspace-settings` land on the first entry the rail
- * lists for this caller in that scope. On a phone the layout shows the rail
- * there instead.
+ * A scope's index (`/org-settings`, `/workspace-settings`, `/preferences`)
+ * lands on the first entry the rail lists for this caller in that scope. On a
+ * phone the layout shows the rail there instead.
  */
 export function SettingsIndexRedirect() {
   const sections = useSettingsSections();
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
-  if (isMobile && sections.length > 0) return null;
-  // No entry at all: nothing in settings is for this caller, so leave.
+  if (isMobile) return null;
   return (
     <Navigate to={firstSettingsPath(sections, settingsScopeFromPath(pathname)) ?? "/"} replace />
   );
