@@ -1,8 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import { MarkerType, type Edge } from "@xyflow/react";
 
-/** The edge grammar of an integration's structure map. */
-export function styleMapEdge(edge: Edge, kind: "dependency" | "resolution"): Edge {
+/** The common edge grammar used by agent and integration maps. */
+export function styleMapEdge(
+  edge: Edge,
+  kind: "flow" | "dependency" | "resolution",
+  bidirectional = false,
+): Edge {
+  if (kind === "flow") {
+    return {
+      ...edge,
+      type: "smoothstep",
+      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--foreground)" },
+      animated: false,
+      style: { stroke: "var(--foreground)", strokeWidth: 3 },
+      zIndex: 3,
+    };
+  }
   if (kind === "dependency") {
     return {
       ...edge,
@@ -25,12 +39,29 @@ export function styleMapEdge(edge: Edge, kind: "dependency" | "resolution"): Edg
     ...edge,
     type: "smoothstep",
     animated: false,
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: "var(--muted-foreground)",
-      width: 12,
-      height: 12,
-    },
+    ...(bidirectional
+      ? {
+          markerStart: {
+            type: MarkerType.ArrowClosed,
+            color: "var(--muted-foreground)",
+            width: 14,
+            height: 14,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "var(--muted-foreground)",
+            width: 14,
+            height: 14,
+          },
+        }
+      : {
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "var(--muted-foreground)",
+            width: 12,
+            height: 12,
+          },
+        }),
     style: {
       stroke: "var(--muted-foreground)",
       strokeWidth: 1.75,

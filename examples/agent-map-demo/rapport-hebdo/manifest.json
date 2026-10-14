@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
+  "name": "@mapdemo/rapport-hebdo",
+  "version": "1.0.0",
+  "type": "agent",
+  "schema_version": "0.2",
+  "display_name": "Rapport hebdomadaire",
+  "description": "Relève les courriels actionnables et publie un résumé.",
+  "timeout": 600,
+  "runtime_tools": ["output", "log"],
+  "dependencies": {
+    "integrations": {
+      "@appstrate/gmail": "^1.0.0",
+      "@appstrate/slack": "^1.0.0"
+    },
+    "skills": {
+      "@mapdemo/mise-en-forme": "^1.0.0"
+    },
+    "mcp_servers": {
+      "@appstrate/github-git": "^1.0.0"
+    }
+  },
+  "integrations_configuration": {
+    "@appstrate/gmail": { "tools": ["api_call"] },
+    "@appstrate/slack": { "tools": ["api_call"] }
+  },
+  "input": {
+    "schema": {
+      "type": "object",
+      "required": ["semaine"],
+      "properties": { "semaine": { "type": "string" } }
+    }
+  },
+  "output": {
+    "schema": {
+      "type": "object",
+      "properties": { "resume": { "type": "string" } }
+    }
+  }
+}

@@ -3,7 +3,13 @@
 import { describe, expect, it } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
-import { agentDiagnosticText, agentDiagnosticCorrectionTarget } from "../agent-diagnostics";
+import {
+  agentDiagnosticText,
+  agentDiagnosticCorrectionTarget,
+  agentDiagnosticLocateTarget,
+  agentDiagnosticMapNodeId,
+  requestedAgentDiagnostic,
+} from "../agent-diagnostics";
 
 await i18nReady;
 
@@ -14,6 +20,7 @@ function diagnostic(overrides: Partial<AgentDiagnostic> = {}): AgentDiagnostic {
     title: "Missing value",
     explanation: "A value is required.",
     field: "config.period",
+    target: { node: "config", item: "period" },
     correction: { destination: "configuration", section: "inputs", params: {} },
     ...overrides,
   };
@@ -23,6 +30,27 @@ describe("agent diagnostics routing", () => {
   const AGENT = "/agents/@acme/demo";
   const target = (correction: AgentDiagnostic["correction"], code = "invalid_config") =>
     agentDiagnosticCorrectionTarget(diagnostic({ code, correction }), AGENT);
+
+  it("adapts semantic targets without deriving a verdict", () => {
+    expect(agentDiagnosticMapNodeId(diagnostic())).toBe("input_values");
+    expect(agentDiagnosticMapNodeId(diagnostic({ target: { node: "toolbox", item: null } }))).toBe(
+      "toolbox",
+    );
+    expect(agentDiagnosticMapNodeId(diagnostic({ target: { node: null, item: null } }))).toBeNull();
+  });
+
+  it("keeps repeated diagnostic codes addressable by field", () => {
+    const first = diagnostic({ code: "schedule_version_differs", field: "schedules.one.version" });
+    const second = diagnostic({ code: "schedule_version_differs", field: "schedules.two.version" });
+    const href = agentDiagnosticLocateTarget(second, AGENT);
+    const url = new URL(href, "http://localhost");
+    expect(url.pathname).toBe(AGENT);
+    expect(url.hash).toBe("#settings");
+    expect(url.searchParams.get("agentSettings")).toBe("map");
+    expect(url.searchParams.get("agentIssue")).toBe("schedule_version_differs");
+    expect(url.searchParams.get("agentIssueField")).toBe("schedules.two.version");
+    expect(requestedAgentDiagnostic(url.searchParams, [first, second])).toEqual(second);
+  });
 
   it("opens the Paramètres section the backend names, carrying nothing else", () => {
     expect(target({ destination: "configuration", section: "inputs", params: {} })).toBe(

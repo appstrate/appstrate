@@ -182,6 +182,8 @@ describe("t() keys", () => {
  * alone. Kept alphabetical.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "agent-map:concept.", // components/map-primitives.tsx — ConceptTitle — t(`agent-map:concept.${concept}.{title,body}`)
+  "agent-map:systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
   "apiError.", // lib/mutation-error.ts — refusalMessage(), one key per server refusal code
   "common:status.", // components/status-badge.tsx — t(`status.${status}`)
   "editor.appearanceColorName.", // components/agent-editor/agent-appearance-fields.tsx

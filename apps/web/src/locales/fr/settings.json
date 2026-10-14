@@ -642,6 +642,7 @@
   "models.credentialUnavailableHint": "La clé de ce modèle n'est plus utilisable : changez-la ou reconnectez l'abonnement.",
   "models.unpriced": "Sans tarif",
   "models.unpricedHint": "Aucun tarif n'est connu pour ce modèle : chaque exécution est enregistrée avec un coût de 0 $.",
+  "models.empty": "Aucun modèle configuré",
   "source.builtIn": "Système",
   "source.custom": "Personnalisé",
   "source.autoProvisioned": "Auto-enregistré",

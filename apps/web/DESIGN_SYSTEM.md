@@ -554,8 +554,8 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     `OAuthClientFormModal`): the secret has no address and does not survive a
     reload.
   - **A modal repeated on a page** is named by what the repeated thing already
-    has that is stable: a map card by its relation id (`?mapConcept=<card>`,
-    `?mapCardList=<card>`), a tool of a catalog by
+    has that is stable: a map card by its relation id or, on the agent map, its
+    concept (`?mapConcept=<card>`, `?mapCardList=<card>`), a tool of a catalog by
     `?inspectTool=<integrationId>:<tool name>` (the catalog answers only for its
     own integration). Full-screen maps are `?fullscreenMap=1`
     (`useMapFullscreen`). A modal opened over another has its own param
@@ -685,8 +685,8 @@ closures[0]`), unless the pair is in its `EXCEPTIONS` list. Each entry names
   bar sends them in one write; `useUnsavedChanges` blocks navigation while dirty.
 - **An agent's input and output schemas** are edited one way: `SchemaFieldList`
   (`components/agent-editor/schema-field-list.tsx`, a table and a modal at
-  `?field-input=` / `?field-output=`), in Paramètres › Schémas and on the creation
-  page.
+  `?field-input=` / `?field-output=`), in Paramètres › Schémas, on the creation page
+  and in the agent map.
 - **Code and JSON editors** are Monaco, only through the lazy facade
   `components/monaco/index.tsx` (`MonacoEditor`, `MonacoDiffEditor`; self-hosted,
   never import `monaco-editor` elsewhere). `JsonEditor` for a JSON value,
@@ -708,7 +708,7 @@ canvas, surfaces on it are white cards, and heights hold across states (no jump)
 ## 14. Modules and feature gating
 
 A surface served by an optional module reads its flag:
-`useAppConfig().features.<flag>` (`chat`, `webhooks`, `oidc`,
+`useAppConfig().features.<flag>` (`agentMap`, `chat`, `webhooks`, `oidc`,
 `billing`, `mcp`). Without the module the entry leaves the
 screen (a settings section, a nav item, a tab); it never opens on a 404. A route
 that needs a module says so in `lib/route-access.ts` (`feature`).

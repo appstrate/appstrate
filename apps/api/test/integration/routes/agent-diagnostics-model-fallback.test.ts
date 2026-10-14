@@ -45,6 +45,7 @@ interface DiagnosticsBody {
   diagnostics: Array<{
     code: string;
     severity: "blocking" | "warning";
+    target: { node: string | null; item: string | null };
     correction: { destination: string; section: string | null; params: Record<string, string> };
   }>;
 }
@@ -128,6 +129,7 @@ describe("GET /api/agents/:scope/:name/diagnostics — pinned model unavailable"
     expect(body.diagnostics[0]).toMatchObject({
       code: "pinned_model_unavailable",
       severity: "warning",
+      target: { node: "model", item: null },
       correction: {
         destination: "configuration",
         section: "model",

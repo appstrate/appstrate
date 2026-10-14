@@ -2,12 +2,17 @@
 
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useAppConfig } from "../../hooks/use-app-config";
 import { cn } from "@appstrate/ui/cn";
 import { Badge as StatusPill } from "@appstrate/ui/components/badge";
 import { useAgentDiagnostics } from "../../hooks/use-agent-diagnostics";
 import { useModalParam } from "../../hooks/use-modal-param";
 import { AgentDiagnosticsDialog, AgentDiagnosticsIssueBadge } from "./agent-diagnostics-dialog";
-import { agentDiagnosticCorrectionTarget, agentDiagnosticText } from "../../lib/agent-diagnostics";
+import {
+  agentDiagnosticCorrectionTarget,
+  agentDiagnosticLocateTarget,
+  agentDiagnosticText,
+} from "../../lib/agent-diagnostics";
 import { OverviewCardAction } from "../overview-card-action";
 import { HealthCard, HealthCardItem, HealthAction } from "../health-card";
 
@@ -21,6 +26,7 @@ export function AgentHealthSection({
 }) {
   const { t } = useTranslation("agents");
   const location = useLocation();
+  const { features } = useAppConfig();
   const diagnostics = useAgentDiagnostics(packageId, version);
   const result = diagnostics.data;
   const issues = useModalParam("agentIssues");
@@ -89,9 +95,20 @@ export function AgentHealthSection({
                     title={text.title}
                     description={text.explanation}
                     actions={
-                      target && (
-                        <HealthAction to={target}>{t("detail.diagnostics.fix")}</HealthAction>
-                      )
+                      <>
+                        {target && (
+                          <HealthAction to={target}>{t("detail.diagnostics.fix")}</HealthAction>
+                        )}
+                        {/* "Locate" opens the map, served by the opt-in agent-map module. */}
+                        {diagnostic.target.node && features.agentMap && (
+                          <HealthAction
+                            to={agentDiagnosticLocateTarget(diagnostic, location.pathname)}
+                            secondary
+                          >
+                            {t("detail.diagnostics.locate")}
+                          </HealthAction>
+                        )}
+                      </>
                     }
                   />
                 );

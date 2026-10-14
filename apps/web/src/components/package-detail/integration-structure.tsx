@@ -379,7 +379,7 @@ export function IntegrationMap({
         id: item.id,
         type: item.nodeType ?? "structure",
         parentId,
-        // Keep interactive cards above their contextual edges.
+        // Keep interactive cards above their contextual edges, as in the agent map.
         zIndex: 4,
         extent: "parent",
         position: { x, y },
@@ -578,7 +578,7 @@ export function IntegrationMap({
         parents.get(edge.source) === activeRelation ||
         parents.get(edge.target) === activeRelation),
   );
-  // Replace only the relevant group relation.
+  // Like the agent map, replace only the relevant group relation.
   // Do not fade every edge or let the new paths intercept the hovered card.
   const detailedGroups = new Set<string>(
     visibleFineEdges.map((edge) =>

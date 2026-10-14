@@ -63,7 +63,8 @@ import { GenerationSettingRows } from "../model-generation-rows";
  * It saves itself, like the rest of the settings: a pause after the
  * last change sends the whole pair, and the line under the form says so.
  */
-function InputSettingsSection({
+/** Exported so the visual map can mount the same settings form in a dialog. */
+export function InputSettingsSection({
   packageId,
   wrapper,
   initialValues,
@@ -204,7 +205,8 @@ function InputSettingRow({
 
 // ─── Model Section ──────────────────────────────────────────────────
 
-function ModelSection({ packageId }: { packageId: string }) {
+/** Exported so the visual map can mount the same picker in a dialog. */
+export function ModelSection({ packageId }: { packageId: string }) {
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
   if (!orgModels || orgModels.length === 0 || !agentModel) return null;
@@ -338,7 +340,8 @@ function NoProxyState() {
   );
 }
 
-function ProxySection({ packageId }: { packageId: string }) {
+/** Shared with the visual map so both surfaces edit the same proxy setting. */
+export function ProxySection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgProxies } = useProxies();
   const { data: agentProxy } = useAgentProxy(packageId);

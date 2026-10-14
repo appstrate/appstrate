@@ -399,7 +399,7 @@ export function createAgentsRouter() {
   );
 
   // GET /api/agents/:scope/:name/diagnostics — shared readiness and warning
-  // projection for Overview and the header.
+  // projection for Overview, the header and the visual Agent Map.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/diagnostics`,
     requirePermission("agents", "read"),

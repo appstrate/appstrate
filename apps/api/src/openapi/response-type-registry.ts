@@ -286,9 +286,11 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "embedded token-usage value object; canonical runtime type lives in @appstrate/afps-shared",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
-  OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
-  OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   AgentDiagnostics: "agent diagnostics envelope; SPA consumes the generated OpenAPI type directly",
+  // AgentMap / AgentMapNode / AgentMapDiagnostic (agent-map) and
+  // OAuthClientObject / OAuthClientWithSecret (oidc) are module-owned wire
+  // schemas, exempted by their own module's `openApiExemptSchemas()`. The one
+  // below stays here: the credential proxy is a core route, not a module's.
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",
   IntegrationCredentialsResponse: "sidecar↔platform credential-proxy wire; no SPA consumer",
   User: "Better-Auth-shaped minimal user; no shared-type",

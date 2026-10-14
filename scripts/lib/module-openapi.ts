@@ -23,6 +23,12 @@ interface CollectedModuleOpenApi {
   paths: Record<string, unknown>;
   /** OpenAPI 3.1 component schemas, keyed by schema name. */
   componentSchemas: Record<string, unknown>;
+  /**
+   * Module-declared step-7b exemptions (schema name → reason), merged with the
+   * core `EXEMPT_SCHEMAS` at the check site so a module-owned wire schema does
+   * not require an entry in the core registry.
+   */
+  exemptSchemas: Record<string, string>;
   /** OpenAPI 3.1 tags contributed by modules. */
   tags: Array<{ name: string; description?: string }>;
   /** Zod ↔ OpenAPI registry entries for request-body schema comparison. */
@@ -114,6 +120,7 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
 
   const paths: Record<string, unknown> = {};
   const componentSchemas: Record<string, unknown> = {};
+  const exemptSchemas: Record<string, string> = {};
   const tags: Array<{ name: string; description?: string }> = [];
   const schemas: OpenApiSchemaEntry[] = [];
   const ownedPathKeys = new Set<string>();
@@ -132,6 +139,8 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
       for (const key of Object.keys(compSchemas)) ownedSchemaNames.add(key);
       Object.assign(componentSchemas, compSchemas);
     }
+    const modExempt = mod.openApiExemptSchemas?.();
+    if (modExempt) Object.assign(exemptSchemas, modExempt);
     const modTags = mod.openApiTags?.();
     if (modTags) {
       for (const tag of modTags) {
@@ -146,6 +155,7 @@ export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   return {
     paths,
     componentSchemas,
+    exemptSchemas,
     tags,
     schemas,
     ownedPathKeys,

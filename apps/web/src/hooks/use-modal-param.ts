@@ -150,7 +150,7 @@ export function useModalParam(name: string) {
   // `setSearchParams` drops the hash, and a detail page's tab lives in it
   // (`#settings`): a modal opened from a tab would close the tab under it.
   // The callbacks change only with the location, so they can ride in memoized
-  // props.
+  // props (the agent map hands them to its nodes).
   const set = useCallback(
     (next: string | null, closing?: string) => {
       if (next === null && !closeGuard.take(location.key)) return;
