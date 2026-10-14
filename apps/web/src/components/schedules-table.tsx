@@ -5,6 +5,7 @@ import { Calendar } from "lucide-react";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { DataTable, type DataColumn } from "./data-table";
 import { EmptyState } from "./page-states";
+import { scheduleDetailPath } from "../lib/package-paths";
 
 export function SchedulesTable({
   schedules,
@@ -41,7 +42,7 @@ export function SchedulesTable({
       error={error}
       empty={empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />}
       rowKey={(schedule) => schedule.id}
-      rowHref={(schedule) => `/schedules/${schedule.id}`}
+      rowHref={(schedule) => scheduleDetailPath(schedule.id)}
       rowLabel={(schedule) => schedule.name || t("schedule.unnamed", { ns: "agents" })}
     />
   );

@@ -9,6 +9,7 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import type { ReactElement } from "react";
 import { QueryClient } from "@tanstack/react-query";
+import type { EnrichedSchedule } from "@appstrate/shared-types";
 import type { components } from "../../api/client.ts";
 import { DashboardContent, type DashboardData } from "../dashboard-content.tsx";
 import { orgStore } from "../../stores/org-store.ts";
@@ -65,6 +66,39 @@ function content(overrides: Partial<DashboardData> = {}): DashboardData {
 
 const run = makeRun({ packageId: null, agent_name: "Rapporteur" });
 
+function makeSchedule(i: number, overrides: Partial<EnrichedSchedule> = {}): EnrichedSchedule {
+  return {
+    id: `sch_${i}`,
+    packageId: "@acme/reporter",
+    userId: "usr_1",
+    endUserId: null,
+    orgId: "org_dash",
+    spaceId: "spc_1",
+    name: `Planif ${i}`,
+    enabled: true,
+    disabled_reason: null,
+    cron_expression: "0 9 * * *",
+    timezone: "UTC",
+    input: null,
+    generation_config_override: null,
+    model_id_override: null,
+    proxy_id_override: null,
+    version_override: null,
+    connection_overrides: null,
+    dependency_overrides: null,
+    last_run_at: null,
+    next_run_at: `2026-10-${String(15 + i).padStart(2, "0")}T09:00:00.000Z`,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+    actor_name: null,
+    actor_type: "user",
+    running_runs: 0,
+    unread_count: 0,
+    last_run_number: 0,
+    ...overrides,
+  };
+}
+
 describe("the dashboard", () => {
   it("tells a fresh organization there is nothing yet, with no zero cards or empty boxes", () => {
     const html = asOrgMember(READER, <DashboardContent {...content()} />);
@@ -118,5 +152,30 @@ describe("the dashboard", () => {
       <DashboardContent {...content({ agents: [agent], unreadCounts: { [agent.id]: 3 } })} />,
     );
     expect(html).toContain('aria-label="3 runs non lus"');
+  });
+
+  it("counts every active schedule and lists the five that fire soonest", () => {
+    // Listed latest first, so the list's order is the dashboard's own.
+    const schedules = [
+      ...Array.from({ length: 6 }, (_, i) => makeSchedule(6 - i)),
+      makeSchedule(7, { next_run_at: null }),
+      makeSchedule(8, { enabled: false }),
+    ];
+    const html = asOrgMember(READER, <DashboardContent {...content({ schedules })} />);
+    expect(html).toContain("Planifications actives");
+    expect(html).toMatch(/Planifications actives<\/span><div><p[^>]*>7<\/p>/);
+    const listed = [...html.matchAll(/Planif (\d)/g)].map((m) => m[1]);
+    expect(listed).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
+  it("says no run is coming when no active schedule has a next run", () => {
+    const schedules = [makeSchedule(1, { next_run_at: null })];
+    const html = asOrgMember(
+      READER,
+      <DashboardContent {...content({ runs: [run], runTotal: 1, schedules })} />,
+    );
+    expect(html).toMatch(/Planifications actives<\/span><div><p[^>]*>1<\/p>/);
+    expect(html).toContain("Aucun run prévu");
+    expect(html).not.toContain("Planifications à venir");
   });
 });

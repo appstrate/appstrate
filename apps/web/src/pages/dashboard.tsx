@@ -66,12 +66,6 @@ export function DashboardPage() {
     if (!seen.has(agent.id)) orderedAgents.push(agent);
   }
 
-  // Upcoming schedules: active, with nextRunAt, sorted by soonest first.
-  const upcomingSchedules = (schedules ?? [])
-    .filter((s) => s.enabled !== false && s.next_run_at)
-    .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
-    .slice(0, 5);
-
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
 
   return (
@@ -82,7 +76,7 @@ export function DashboardPage() {
           agents: orderedAgents,
           runs,
           runTotal: runsData?.total ?? runs.length,
-          schedules: upcomingSchedules,
+          schedules: schedules ?? [],
           agentName,
           unreadCounts,
         }}

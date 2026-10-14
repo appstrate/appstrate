@@ -43,6 +43,7 @@ import { RunOverridesPanel } from "./run-overrides-panel";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
 import { ErrorState, LoadingState } from "./page-states";
+import { Spinner } from "./spinner";
 import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";
 import { useModalParam } from "../hooks/use-modal-param";
@@ -65,7 +66,7 @@ import {
   sameActor,
   scheduleCreatePayload,
 } from "../lib/schedule-payload";
-import { VERSION_INHERIT } from "../lib/schedule-options";
+import { scheduleVersionOptions, VERSION_INHERIT } from "../lib/schedule-options";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { VERSION_PUBLISHED } from "../lib/version-selector";
 
@@ -93,6 +94,7 @@ export function NewScheduleModalHost() {
         initialAgentId={param.value === "1" ? undefined : param.value}
         onCancel={param.close}
         onCreated={(schedule) => param.leave(scheduleDetailPath(schedule.id))}
+        onLeave={param.leave}
       />
     </Modal>
   );
@@ -103,10 +105,13 @@ function NewScheduleForm({
   initialAgentId,
   onCreated,
   onCancel,
+  onLeave,
 }: {
   initialAgentId?: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
+  /** A connection picker's way out to the integration page leaves this modal. */
+  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: agents } = useAgents();
@@ -132,7 +137,13 @@ function NewScheduleForm({
       </Field>
       {agentId ? (
         // A new agent, a new form: its inputs and connections are another agent's.
-        <ScheduleFields key={agentId} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />
+        <ScheduleFields
+          key={agentId}
+          agentId={agentId}
+          onCreated={onCreated}
+          onCancel={onCancel}
+          onLeave={onLeave}
+        />
       ) : (
         agents && <p className="text-muted-foreground text-sm">{t("schedule.noAgent")}</p>
       )}
@@ -144,10 +155,12 @@ function ScheduleFields({
   agentId,
   onCreated,
   onCancel,
+  onLeave,
 }: {
   agentId: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
+  onLeave?: (to: string) => void;
 }) {
   // The form seeds its inputs once: it waits for the agent detail, or a field
   // locked since would be seeded and refused (400 `locked_input_field`).
@@ -155,7 +168,13 @@ function ScheduleFields({
   if (error) return <ErrorState error={error} />;
   if (!deps) return <LoadingState />;
   return (
-    <ScheduleFieldsReady deps={deps} agentId={agentId} onCreated={onCreated} onCancel={onCancel} />
+    <ScheduleFieldsReady
+      deps={deps}
+      agentId={agentId}
+      onCreated={onCreated}
+      onCancel={onCancel}
+      onLeave={onLeave}
+    />
   );
 }
 
@@ -164,11 +183,13 @@ export function ScheduleFieldsReady({
   agentId,
   onCreated,
   onCancel,
+  onLeave,
 }: {
   deps: NonNullable<ReturnType<typeof useScheduleFormDeps>["deps"]>;
   agentId: string;
   onCreated: (schedule: ScheduleWireDto) => void;
   onCancel: () => void;
+  onLeave?: (to: string) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const { user } = useAuth();
@@ -326,14 +347,7 @@ export function ScheduleFieldsReady({
             label={t("run.overrides.versionLabel")}
             value={versionOverride ?? VERSION_INHERIT}
             onChange={(next) => setVersionOverride(next === VERSION_INHERIT ? undefined : next)}
-            leadingOptions={[
-              { value: VERSION_INHERIT, label: t("run.overrides.versionPublished") },
-              // The working copy is its writers' to run: anyone else would be refused at every
-              // fire (403 `draft_not_writable`).
-              ...(deps.homeWritable
-                ? [{ value: "draft", label: t("run.overrides.versionDraft") }]
-                : []),
-            ]}
+            leadingOptions={scheduleVersionOptions(t, { draftOffered: deps.homeWritable })}
           />
           <RunOverridesPanel
             packageId={agentId}
@@ -346,6 +360,7 @@ export function ScheduleFieldsReady({
             onConnectionPick={setConnectionPick}
             version={firedVersion}
             scheduled
+            onLeave={onLeave}
           />
           {/* Fires running as someone else: the panel's pickers would judge the viewer's
               connections. A refusal is answered below the options. */}
@@ -377,7 +392,7 @@ export function ScheduleFieldsReady({
           {t("btn.cancel")}
         </Button>
         <Button type="submit" disabled={!cron || create.isPending || readinessLoading}>
-          {t("btn.create")}
+          {create.isPending ? <Spinner /> : t("btn.create")}
         </Button>
       </div>
     </form>

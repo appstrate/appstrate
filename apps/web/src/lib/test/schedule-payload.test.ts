@@ -9,11 +9,14 @@
 import { describe, it, expect } from "bun:test";
 import {
   armedScheduleWrite,
+  dueScheduleMove,
   sameActor,
   savedScheduleOverrides,
   scheduleConnectionPickPayload,
   scheduleCreatePayload,
+  scheduleExecutionPayload,
   scheduleMovePayload,
+  scheduleRefusalAnswerPayload,
 } from "../schedule-payload.ts";
 import type { FallbackBindingEntry } from "../connection-set.ts";
 
@@ -153,6 +156,69 @@ describe("scheduleMovePayload", () => {
       viewerReadiness,
     });
     expect(viewer.connection_overrides).toEqual({ [GMAIL]: ["conn_own"] });
+  });
+});
+
+describe("dueScheduleMove", () => {
+  const args = {
+    stored: { actor: BOB, versionOverride: null, picks: null },
+    next: { actor: ALICE },
+    runsAsViewer: true,
+  };
+
+  it("holds the move while the next state's facts load", () => {
+    expect(
+      dueScheduleMove({ ...args, ready: false, viewerReadiness: undefined, declared: undefined }),
+    ).toBeNull();
+  });
+
+  it("once they settle, sends it with the connections of the state it moves to", () => {
+    expect(dueScheduleMove({ ...args, ready: true, viewerReadiness, declared })).toEqual({
+      actor: ALICE,
+      connection_overrides: { [GMAIL]: ["conn_own"] },
+    });
+  });
+});
+
+describe("scheduleExecutionPayload", () => {
+  it("sends every override, null when cleared", () => {
+    expect(scheduleExecutionPayload({})).toEqual({
+      model_id_override: null,
+      generation_config_override: null,
+      proxy_id_override: null,
+    });
+    expect(
+      scheduleExecutionPayload({ model_id_override: "gpt", proxy_id_override: "prx_1" }),
+    ).toEqual({
+      model_id_override: "gpt",
+      generation_config_override: null,
+      proxy_id_override: "prx_1",
+    });
+  });
+
+  it("never carries the connection picks", () => {
+    const payload = scheduleExecutionPayload({ connection_overrides: PICKS });
+    expect("connection_overrides" in payload).toBe(false);
+  });
+});
+
+describe("scheduleRefusalAnswerPayload", () => {
+  const sent = { id: "sch_1", version_override: "2.0.0", connection_overrides: PICKS };
+
+  it("re-sends the refused write whole, its picks replaced", () => {
+    expect<unknown>(scheduleRefusalAnswerPayload(sent, { [SLACK]: ["conn_2"] })).toEqual({
+      id: "sch_1",
+      version_override: "2.0.0",
+      connection_overrides: { [SLACK]: ["conn_2"] },
+    });
+  });
+
+  it("clears the map when nothing is picked", () => {
+    expect<unknown>(scheduleRefusalAnswerPayload({ id: "sch_1", actor: BOB }, {})).toEqual({
+      id: "sch_1",
+      actor: BOB,
+      connection_overrides: null,
+    });
   });
 });
 
