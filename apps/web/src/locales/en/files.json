@@ -55,6 +55,7 @@
   "artifact.copyFailed": "Could not copy the content.",
   "artifact.fullscreen": "Full screen",
   "artifact.exitFullscreen": "Exit full screen",
+  "artifact.openInNewTab": "Open in a new tab",
   "run.noAccess": "Your role does not give access to this space's files.",
   "run.truncated": "Only the first 100 files of this run are shown."
 }

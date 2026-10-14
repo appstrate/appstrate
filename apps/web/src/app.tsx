@@ -130,6 +130,9 @@ const UnifiedSettingsLayout = lazy(() =>
 const CataloguePage = lazy(() =>
   import("./pages/catalogue").then((m) => ({ default: m.CataloguePage })),
 );
+const CatalogueIndexRedirect = lazy(() =>
+  import("./pages/catalogue").then((m) => ({ default: m.CatalogueIndexRedirect })),
+);
 const SettingsIndexRedirect = lazy(() =>
   import("./pages/settings/layout").then((m) => ({
     default: m.SettingsIndexRedirect,
@@ -315,10 +318,10 @@ const PAGES: Record<RoutePath, ReactNode> = {
     </LazyRoute>
   ),
   // The catalogue is a destination like settings, not a per-list modal: one
-  // address, reachable from the navigation.
+  // address, reachable from the navigation. Bare, it redirects to its first view.
   "/catalogue": (
     <LazyRoute>
-      <CataloguePage />
+      <CatalogueIndexRedirect />
     </LazyRoute>
   ),
   "/catalogue/:reading/:type": (
