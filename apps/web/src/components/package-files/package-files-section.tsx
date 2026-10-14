@@ -29,9 +29,9 @@ import { bundleFileRole, type BundleFileRole } from "../../lib/bundle-file-role"
 import { splitPackageRef } from "../../lib/package-paths";
 import { JsonEditor } from "../json-editor";
 import { Modal } from "../modal";
-import { LoadingState } from "../page-states";
 import { SettingsHeading } from "../settings/settings-heading";
 import { TableRowActions } from "../table-row-actions";
+import { TextSkeleton } from "../loading-skeletons";
 
 const ROLE_LABEL: Record<BundleFileRole, string> = {
   manifest: "editor.fileRole.manifest",
@@ -83,7 +83,7 @@ export function PackageFilesSection({
         description={t("editor.description.packageFiles")}
       />
       {!data ? (
-        <LoadingState />
+        <TextSkeleton lines={4} />
       ) : (
         <div className="overflow-hidden rounded-lg border">
           <Table>

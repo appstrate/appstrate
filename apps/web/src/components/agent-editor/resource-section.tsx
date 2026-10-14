@@ -58,6 +58,8 @@ import { useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permission
 import { useCanReach } from "../../hooks/use-can-reach";
 import { packagePermission } from "@appstrate/core/permissions";
 import { maySetPackageActive } from "../../lib/package-permissions";
+import { TextSkeleton } from "../loading-skeletons";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 type ResourceEntriesUpdater = ResourceEntry[] | ((prev: ResourceEntry[]) => ResourceEntry[]);
 
@@ -101,7 +103,7 @@ function VersionSelect({
   // mutate the draft. Picking a listed range replaces it explicitly.
   const outOfListValue = value && !ranges.includes(value) ? value : null;
 
-  if (isLoading) return <Spinner />;
+  if (isLoading) return <Skeleton className="h-5 w-16" />;
   if (!available || available.length === 0) {
     return (
       <span className="bg-muted text-muted-foreground inline-block rounded px-2 py-0.5 font-mono text-xs">
@@ -289,9 +291,7 @@ export function ResourceSection({
       {error ? (
         <ErrorState error={error} compact />
       ) : isLoading ? (
-        <div className="text-muted-foreground flex items-center justify-center py-6">
-          <Spinner />
-        </div>
+        <TextSkeleton className="py-2" />
       ) : (!items || items.length === 0) && unlistedDeclaredIds.length === 0 && !leadingItems ? (
         <>
           <p className="text-muted-foreground text-xs">
@@ -587,9 +587,7 @@ function SelectedResources({
       {error ? (
         <ErrorState error={error} compact />
       ) : isLoading ? (
-        <div className="text-muted-foreground flex items-center justify-center py-6">
-          <Spinner />
-        </div>
+        <TextSkeleton className="py-2" />
       ) : rows.length === 0 ? (
         <EmptyState
           message={canReadCatalog ? emptyLabel : t("editor.catalogUnreadable")}

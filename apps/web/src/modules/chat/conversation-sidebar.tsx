@@ -22,6 +22,7 @@ import type {
   ConversationSidebarTab,
   SidebarFile,
 } from "./conversation-sidebar-state";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
 
@@ -157,7 +158,7 @@ function ConversationRuns({
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
   const runs = query.data?.data ?? [];
   if (runs.length === 0) return <PanelState>{t("context.runs.empty")}</PanelState>;
@@ -195,7 +196,7 @@ function ConversationFiles({
   });
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
   const files = query.data?.data ?? [];
   if (files.length === 0) return <PanelState>{t("context.files.empty")}</PanelState>;
@@ -247,7 +248,7 @@ function ConversationInfo({
   );
 
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
-  if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
+  if (query.isLoading) return <TextSkeleton className="p-4" />;
   if (query.error || !query.data) return <PanelState>{t("context.error")}</PanelState>;
 
   const session = query.data;

@@ -23,7 +23,8 @@ import {
   type PackageFileWriteOperation,
 } from "../../lib/package-file-tree";
 import { ContentEditor } from "../package-editor/content-editor";
-import { LoadingState, ErrorState } from "../page-states";
+import { ErrorState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { FileTree } from "./file-tree";
 import { FilePreview } from "./file-preview";
 import { usePackageFile } from "./use-package-file";
@@ -94,7 +95,11 @@ export function PackageFilesEditor({
   });
   if (!active) return null;
   if (!base)
-    return query.isError ? <ErrorState message={t("files.errorLoad")} /> : <LoadingState />;
+    return query.isError ? (
+      <ErrorState message={t("files.errorLoad")} />
+    ) : (
+      <TextSkeleton lines={6} />
+    );
 
   const current = pickActiveEntry(entries, selected, primaryDisplayFile(type).name);
   const busy = files.busy;
@@ -192,7 +197,7 @@ function DraftFilePane({
       {isError ? (
         <ErrorState message={t("files.errorLoad")} />
       ) : isLoading || text === undefined ? (
-        <LoadingState />
+        <TextSkeleton lines={8} />
       ) : (
         <ContentEditor
           value={text}

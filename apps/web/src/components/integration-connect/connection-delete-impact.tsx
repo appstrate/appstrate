@@ -10,7 +10,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import type { useConnectionDeleteImpact } from "../../hooks/use-me-connections";
 import { errorDetail } from "../../lib/mutation-error";
-import { Spinner } from "../spinner";
+import { TextSkeleton } from "../loading-skeletons";
 
 export function ConnectionDeleteImpact({
   impact,
@@ -31,12 +31,8 @@ export function ConnectionDeleteImpact({
   }
   if (!data) {
     return (
-      <div
-        className="text-muted-foreground mt-4 flex items-center gap-2 text-sm"
-        data-testid="connection-delete-impact-loading"
-      >
-        <Spinner />
-        {t("connections.deleteImpact.loading")}
+      <div className="mt-4" data-testid="connection-delete-impact-loading">
+        <TextSkeleton lines={2} />
       </div>
     );
   }

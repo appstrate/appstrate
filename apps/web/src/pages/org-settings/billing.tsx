@@ -20,7 +20,8 @@ import { getUsageBarColor } from "../../lib/usage-severity";
 import { PlanGrid } from "../../components/plan-card";
 import { BillingManagersSection } from "../../components/billing-managers-section";
 import { BillingContactSection } from "../../components/billing-contact-section";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { formatDateField } from "../../lib/format-date";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -62,7 +63,7 @@ export function OrgSettingsBillingPage() {
   // hidden by it, so their queries never fire for a caller the routes would 403.
   const canManageBilling = can("billing:manage");
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading) return <SettingsSkeleton rows={4} />;
   if (error) return <ErrorState error={error} />;
   if (!billing) {
     return <EmptyState message={t("billing.noAccount")} icon={CreditCard} compact />;

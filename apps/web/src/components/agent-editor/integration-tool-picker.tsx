@@ -44,11 +44,11 @@ import {
   toggleApiCallToolSelection,
 } from "./tool-selection.ts";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Spinner } from "../spinner";
 import { Button } from "@appstrate/ui/components/button";
 import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
+import { TextSkeleton } from "../loading-skeletons";
 
 interface IntegrationToolPickerProps {
   packageId: string;
@@ -101,11 +101,7 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   if (isLoading) {
-    return (
-      <div className="mt-2 flex items-center justify-center py-2">
-        <Spinner />
-      </div>
-    );
+    return <TextSkeleton lines={2} className="mt-2" />;
   }
   if (!detail) {
     return (

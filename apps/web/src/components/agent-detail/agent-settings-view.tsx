@@ -38,9 +38,9 @@ import { SectionRail } from "../settings/section-rail";
 import { PackageFilesView } from "../package-files/package-files-view";
 import { AgentConfigurationView } from "./agent-configuration-view";
 import { AgentDetailSplit } from "./agent-detail-split";
-import { LoadingState } from "../page-states";
 import { PackageVersionsSection } from "../package-detail/package-versions-section";
 import { PackageFilesSection } from "../package-files/package-files-section";
+import { SettingsSkeleton } from "../loading-skeletons";
 
 /** The editor sections, lazily: the editor weighs more than the page reading it. */
 const AgentDefinitionEditor = lazy(() =>
@@ -203,7 +203,7 @@ export function AgentSettingsView({
       filesHref={filesHref}
     />
   ) : isDefinitionSection(activeSection) ? (
-    <Suspense fallback={<LoadingState />}>
+    <Suspense fallback={<SettingsSkeleton />}>
       <AgentDefinitionEditor
         detail={detail}
         section={activeSection as AgentDefinitionSection}

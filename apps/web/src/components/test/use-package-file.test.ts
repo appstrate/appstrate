@@ -7,8 +7,8 @@
  * zero-byte file, and openapi-fetch returns `{ data: undefined }` for that
  * response BEFORE `parseAs` is honoured — on a fully successful 200. Reading
  * `data` alone therefore cannot tell "this file is empty" from "no result yet",
- * and `file-preview` renders `<LoadingState/>` for `text === undefined`: an
- * infinite spinner on every empty file in an artifact.
+ * and `file-preview` draws its loading skeleton for `text === undefined`: an
+ * endless placeholder on every empty file in an artifact.
  *
  * `packageFileText` is the decision, extracted so it can be tested as a
  * function. apps/web has no DOM harness and the hook needs a React Query

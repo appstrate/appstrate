@@ -11,7 +11,8 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 import type { PersistenceActorType } from "@appstrate/shared-types";
-import { EmptyState, ErrorState, LoadingState } from "../page-states";
+import { EmptyState, ErrorState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { ActorBadge } from "./actor-badge";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
 import { Modal } from "../modal";
@@ -358,7 +359,7 @@ function MemoryTableSection({
   return (
     <section>
       {isLoading ? (
-        <LoadingState />
+        <TextSkeleton />
       ) : isError ? (
         <ErrorState compact />
       ) : items.length === 0 ? (

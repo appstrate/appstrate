@@ -24,11 +24,11 @@ import {
   type PackageSettingsSection,
 } from "../../lib/settings-section-href";
 import { AgentDetailSplit } from "../agent-detail/agent-detail-split";
-import { LoadingState } from "../page-states";
 import { PackageFilesSection } from "../package-files/package-files-section";
 import { PackageFilesView } from "../package-files/package-files-view";
 import { SectionRail, type SectionRailItem } from "../settings/section-rail";
 import { PackageVersionsSection } from "./package-versions-section";
+import { SettingsSkeleton } from "../loading-skeletons";
 
 const PackageDefinitionEditor = lazy(() =>
   import("../../pages/package-editor").then((module) => ({
@@ -117,7 +117,7 @@ export function PackageSettingsView({
             filesHref={filesHref}
           />
         ) : active === "general" && detail ? (
-          <Suspense fallback={<LoadingState />}>
+          <Suspense fallback={<SettingsSkeleton />}>
             <PackageDefinitionEditor type={type} detail={detail} />
           </Suspense>
         ) : (

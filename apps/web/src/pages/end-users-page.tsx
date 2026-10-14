@@ -13,13 +13,8 @@ import {
   type EndUserInfo,
 } from "../hooks/use-end-users";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import {
-  LoadingState,
-  ErrorState,
-  EmptyState,
-  EmptyStateAction,
-  NoMatchState,
-} from "../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
+import { SettingsSkeleton } from "../components/loading-skeletons";
 import { useModalParam } from "../hooks/use-modal-param";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
@@ -223,7 +218,7 @@ function EndUsersPageContent() {
       {selectedUserId && !selectedUser && (
         <Modal open onClose={closeUser} title={t("spaces.endUserDetail")}>
           {selectedUserLoading ? (
-            <LoadingState />
+            <SettingsSkeleton />
           ) : (
             <ErrorState error={selectedUserError} compact />
           )}

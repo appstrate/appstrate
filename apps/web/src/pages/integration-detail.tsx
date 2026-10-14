@@ -39,12 +39,13 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
-import { LoadingState, ErrorState, ResourceErrorState } from "../components/page-states";
+import { ErrorState, ResourceErrorState } from "../components/page-states";
+import { SettingsSkeleton } from "../components/loading-skeletons";
 import { DetailTabsList, DetailTabsTrigger } from "../components/agent-detail/agent-local-tabs";
 import { AgentDetailSplit } from "../components/agent-detail/agent-detail-split";
 import { SettingsHeading } from "../components/settings/settings-heading";
 import { SectionRail, type SectionRailItem } from "../components/settings/section-rail";
-import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailSkeleton, SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
 import { PackageVersionsSection } from "../components/package-detail/package-versions-section";
@@ -220,7 +221,7 @@ function IntegrationSettings({
         }
       >
         {definition && definitionSection ? (
-          <Suspense fallback={<LoadingState />}>
+          <Suspense fallback={<SettingsSkeleton />}>
             <IntegrationDefinitionEditor
               detail={definition}
               section={definitionSection}
@@ -440,7 +441,7 @@ export function IntegrationDetailPage() {
   const canBrowseIntegrations = useCanReach()("/integrations");
 
   // `source` (system or local) comes from the package detail only: wait for it.
-  if (isLoading || pkgLoading) return <LoadingState />;
+  if (isLoading || pkgLoading) return <PackageDetailSkeleton type="integration" />;
   if (error) {
     // Not placed in this space, or gone: one answer for both, and what the
     // member can do about either.

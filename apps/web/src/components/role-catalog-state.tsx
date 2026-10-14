@@ -5,6 +5,7 @@ import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { errorMessage } from "../lib/mutation-error";
+import { TextSkeleton } from "./loading-skeletons";
 
 /**
  * What a role catalog (`useSpaceRoleOptions`) says when it has no usable list:
@@ -21,7 +22,6 @@ export function RoleCatalogState({
   rolesKnown = true,
   error,
   refetch,
-  loadingMessage,
   emptyMessage,
   className,
 }: {
@@ -29,7 +29,6 @@ export function RoleCatalogState({
   rolesKnown?: boolean;
   error: unknown;
   refetch: () => void;
-  loadingMessage?: string;
   emptyMessage: string | null;
   className?: string;
 }) {
@@ -48,12 +47,7 @@ export function RoleCatalogState({
       </Alert>
     );
 
-  if (isLoading || !rolesKnown)
-    return (
-      <p role="status" className={cn("text-muted-foreground text-sm", className)}>
-        {loadingMessage ?? t("spaceMembers.rolesLoading")}
-      </p>
-    );
+  if (isLoading || !rolesKnown) return <TextSkeleton lines={2} className={className} />;
 
   if (emptyMessage)
     return <p className={cn("text-muted-foreground text-sm", className)}>{emptyMessage}</p>;

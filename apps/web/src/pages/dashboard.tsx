@@ -5,7 +5,8 @@ import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
 import { usePermissions } from "../hooks/use-permissions";
-import { ErrorState, LoadingState } from "../components/page-states";
+import { ErrorState } from "../components/page-states";
+import { DashboardSkeleton } from "../components/loading-skeletons";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { DashboardContent } from "./dashboard-content";
@@ -35,7 +36,7 @@ export function DashboardPage() {
   const isLoading = !ready || runsLoading || agentsLoading;
   const error = runsError || agentsError;
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading) return <DashboardSkeleton />;
   if (error) return <ErrorState error={error} />;
 
   const runs = runsData?.data ?? [];

@@ -37,7 +37,8 @@ import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { MonacoEditor } from "../monaco";
 import { useTheme } from "../../stores/theme-store";
-import { LoadingState, ErrorState } from "../page-states";
+import { ErrorState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import {
   baseName,
   languageForPath,
@@ -144,7 +145,7 @@ export function FilePreview({
       ) : isError ? (
         <ErrorState />
       ) : isLoading || text === undefined ? (
-        <LoadingState />
+        <TextSkeleton lines={8} />
       ) : (
         // No `path` prop on purpose: it makes `@monaco-editor/react` create one
         // model per file URI, and monaco is a module singleton that only ever

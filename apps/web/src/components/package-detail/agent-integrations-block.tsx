@@ -34,6 +34,7 @@ import {
 import { AMBER_TEXT } from "../integration-connect/connection-picker-states";
 import { DataTable, type DataColumn } from "../data-table";
 import { ListToolbar, type FilterSpec } from "../list-toolbar";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 interface AgentIntegrationsBlockProps {
   /** The agent's declared integrations; the Connexions tab renders its own empty state. */
@@ -236,8 +237,8 @@ function IntegrationConnectionCell({
   const { detail, isLoading, error } = state;
 
   if (!detail) {
-    // A spinner only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
-    if (isLoading) return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+    // A placeholder only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
+    if (isLoading) return <Skeleton className="h-4 w-28" />;
     if (isNotPlaced(error))
       return <InactiveIntegration packageId={packageId} required={required} />;
     // Any other failure is named; a disabled read has none to name.
@@ -449,7 +450,7 @@ function IntegrationIdentityCell({
 function IntegrationAccessCell({ state }: { state: DetailState }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { detail, isLoading } = state;
-  if (isLoading) return <Loader2 className="text-muted-foreground size-4 animate-spin" />;
+  if (isLoading) return <Skeleton className="h-4 w-16" />;
   if (!detail) return <span className="text-muted-foreground text-xs">—</span>;
   const types = Array.from(
     new Set(Object.values(detail.manifest.auths ?? {}).map((auth) => auth.type)),

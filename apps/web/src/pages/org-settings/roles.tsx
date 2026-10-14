@@ -38,12 +38,8 @@ import { ScopeMultiSelect } from "../../components/scope-multi-select";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { ViewAsDialog } from "../../components/view-as-dialog";
-import {
-  LoadingState,
-  ErrorState,
-  EmptyState,
-  EmptyStateAction,
-} from "../../components/page-states";
+import { ErrorState, EmptyState, EmptyStateAction } from "../../components/page-states";
+import { TextSkeleton } from "../../components/loading-skeletons";
 import { Spinner } from "../../components/spinner";
 import { useRoleColumns } from "./role-columns";
 import { RoleMatrix } from "./role-matrix";
@@ -219,7 +215,7 @@ export function OrgSettingsRolesPage() {
         <>
           {view === "matrix" ? (
             isLoading ? (
-              <LoadingState />
+              <TextSkeleton lines={6} />
             ) : error ? (
               <ErrorState error={error} />
             ) : (
@@ -495,7 +491,7 @@ function RoleFormModal({ role, onClose }: { role: RoleObject | null; onClose: ()
         <div className="space-y-2">
           <Label>{t("roles.permissionsLabel")}</Label>
           {isLoading ? (
-            <LoadingState />
+            <TextSkeleton lines={5} />
           ) : vocabularyError ? (
             <div role="alert" className="space-y-2">
               <ErrorState error={vocabularyError} compact />

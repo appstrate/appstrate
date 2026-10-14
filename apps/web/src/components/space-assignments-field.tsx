@@ -69,7 +69,6 @@ export function SpaceAssignmentsField({
             isLoading={loading}
             error={error}
             refetch={onRetry}
-            loadingMessage={t("orgSettings.assignmentsLoading")}
             emptyMessage={spaces.length === 0 ? t("orgSettings.assignmentsNoSpaces") : null}
           />
           {value.map((assignment, index) => {

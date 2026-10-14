@@ -21,7 +21,7 @@ import { RailGroup, RailHeader } from "../../components/settings/rail-shell";
 import { ContextSelector } from "../../components/settings/context-selector";
 import { cn } from "@appstrate/ui/cn";
 import { PanelDialog } from "../../components/panel-dialog";
-import { LoadingState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -217,6 +217,6 @@ export function SettingsIndexRedirect() {
   const { ready } = usePermissions();
   const { pathname } = useLocation();
   // Until the permissions load every entry reads as refused.
-  if (!ready) return <LoadingState />;
+  if (!ready) return <SettingsSkeleton />;
   return <Navigate to={firstSettingsPath(sections, settingsScopeFromPath(pathname))} replace />;
 }

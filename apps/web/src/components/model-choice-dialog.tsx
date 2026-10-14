@@ -13,7 +13,8 @@ import { FieldError, FormItem } from "@appstrate/ui/components/field";
 import { OptionSelect } from "@appstrate/ui/components/select";
 import { Modal } from "./modal";
 import { Spinner } from "./spinner";
-import { ErrorState, LoadingState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { TextSkeleton } from "./loading-skeletons";
 import { ModelChoiceList } from "./model-choice";
 import { useModelChoice, type DiscoverWith } from "../hooks/use-model-choice";
 import {
@@ -194,7 +195,7 @@ export function ProviderModelsModal({
         {registryQuery.error || modelsQuery.error ? (
           <ErrorState error={registryQuery.error ?? modelsQuery.error} compact />
         ) : (
-          <LoadingState />
+          <TextSkeleton lines={4} className="py-2" />
         )}
       </Modal>
     );
@@ -248,7 +249,11 @@ export function PersonalModelsModal({
   if (!models || !provider) {
     return (
       <Modal open onClose={onClose} title={t("models.choice.personalTitle")}>
-        {modelsQuery.error ? <ErrorState error={modelsQuery.error} compact /> : <LoadingState />}
+        {modelsQuery.error ? (
+          <ErrorState error={modelsQuery.error} compact />
+        ) : (
+          <TextSkeleton lines={4} className="py-2" />
+        )}
       </Modal>
     );
   }
@@ -306,7 +311,7 @@ export function NewProviderModelsModal({
         ) : registryQuery.data ? (
           <ErrorState message={t("models.form.providerUnavailable")} compact />
         ) : (
-          <LoadingState />
+          <TextSkeleton lines={4} className="py-2" />
         )}
       </Modal>
     );

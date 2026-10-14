@@ -28,7 +28,7 @@ import {
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePackageActivationState, useSetPackageActive } from "../hooks/use-library";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { LoadingState, EmptyState, ResourceErrorState } from "../components/page-states";
+import { EmptyState, ResourceErrorState } from "../components/page-states";
 import { ApiError } from "../api/client";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { isQueryInFlight } from "../lib/query-state";
@@ -36,7 +36,7 @@ import { packageDetailPath } from "../lib/package-paths";
 
 // Shared components
 import { ConfirmModal } from "../components/confirm-modal";
-import { SharedHeader } from "../components/package-detail/shared-header";
+import { PackageDetailSkeleton, SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
 import { PackageOverview } from "../components/package-detail/package-overview";
@@ -221,7 +221,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const newVersion = useModalParam("newVersion");
   const [editorDirty, setEditorDirty] = useState(false);
   // ── Loading / Error ──
-  if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading)) return <LoadingState />;
+  if (isQueryInFlight(detailQuery) || (isVersionView && versionLoading))
+    return <PackageDetailSkeleton type={type} />;
   if (error || !detail) return <ResourceErrorState error={error} />;
 
   // A published version whose stored archive is unavailable EXISTS — redirecting

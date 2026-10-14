@@ -3,7 +3,7 @@
 import { lazy, Suspense } from "react";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
-import { LoadingState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { NoAccessState, UnavailableState } from "../../components/route-gate";
 
 const SpaceAuthTab = lazy(() =>
@@ -20,7 +20,7 @@ export function WorkspaceSettingsAuthPage() {
   if (!can("space-settings:write")) return <NoAccessState />;
 
   return (
-    <Suspense fallback={<LoadingState />}>
+    <Suspense fallback={<SettingsSkeleton />}>
       <SpaceAuthTab />
     </Suspense>
   );

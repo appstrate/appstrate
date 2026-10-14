@@ -14,8 +14,8 @@ import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { cn } from "@appstrate/ui/cn";
-import { Spinner } from "../spinner";
 import type { ModelPickRow } from "@/lib/model-source";
+import { TextSkeleton } from "../loading-skeletons";
 
 /** What a row can offer beyond its tick, once the list is told how (the provider's models dialog). */
 interface RowExtras {
@@ -115,7 +115,6 @@ export function ModelPickList({
   search,
   onSearchChange,
   isLoading,
-  loadingText,
   emptyText,
   grouped,
   footer,
@@ -128,7 +127,6 @@ export function ModelPickList({
   search: string;
   onSearchChange: (value: string) => void;
   isLoading: boolean;
-  loadingText: string;
   emptyText: string;
   /** Split into the provider's curated group and the rest — catalog only. */
   grouped?: boolean;
@@ -185,10 +183,7 @@ export function ModelPickList({
       <div className="divide-y rounded-md border">
         <div className="max-h-64 divide-y overflow-y-auto">
           {isLoading ? (
-            <div className="text-muted-foreground flex items-center justify-center gap-2 py-6 text-sm">
-              <Spinner className="size-3" />
-              {loadingText}
-            </div>
+            <TextSkeleton lines={4} className="p-3" />
           ) : rows.length === 0 ? (
             <div className="text-muted-foreground px-3 py-6 text-center text-sm">{emptyText}</div>
           ) : (

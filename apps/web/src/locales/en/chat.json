@@ -20,7 +20,6 @@
   "action.copy": "Copy",
   "context.label": "Conversation context",
   "context.collapse": "Collapse conversation context",
-  "context.loading": "Loading context…",
   "context.error": "The conversation context could not be loaded.",
   "context.unsaved": "Send a first message to create this conversation.",
   "context.tabs.runs": "Runs",

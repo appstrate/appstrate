@@ -84,7 +84,8 @@ import { packageFilesErrorKey, primaryDisplayFile } from "../../lib/package-file
 import { packageDetailPath, splitPackageRef } from "../../lib/package-paths";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
-import { ErrorState, LoadingState } from "../page-states";
+import { ErrorState } from "../page-states";
+import { TextSkeleton } from "../loading-skeletons";
 import { ContentEditor } from "../package-editor/content-editor";
 import { Spinner } from "../spinner";
 import { UnsavedChangesModal } from "../unsaved-changes-modal";
@@ -614,7 +615,7 @@ export function PackageFilesView({
                   compact
                 />
               ) : !bundleIndex || dependenciesLoading ? (
-                <LoadingState />
+                <TextSkeleton lines={6} />
               ) : (
                 <FileTree
                   entries={visibleFiles.map((file) => file.treeEntry)}
@@ -779,7 +780,7 @@ export function PackageFilesView({
           ) : bundleEntries ? (
             <ErrorState message={t("agents:files.errorLoad")} />
           ) : (
-            <LoadingState />
+            <TextSkeleton lines={8} />
           )}
         </Modal>
       )}
@@ -802,7 +803,7 @@ export function PackageFilesView({
             }
           />
         ) : (
-          <LoadingState />
+          <TextSkeleton lines={8} />
         )}
       </Modal>
     </div>
@@ -1098,7 +1099,7 @@ function FileTextEditor({
   const { t } = useTranslation("agents");
   const { text, isLoading, isError } = usePackageFile(packageId, undefined, entry, true);
   if (isError) return <ErrorState message={t("files.errorLoad")} />;
-  if (isLoading || text === undefined) return <LoadingState />;
+  if (isLoading || text === undefined) return <TextSkeleton lines={8} />;
   return <FileTextEditorBody initial={text} path={path} onApply={onApply} />;
 }
 

@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { LoadingState, ResourceErrorState } from "@/components/page-states";
+import { ResourceErrorState } from "@/components/page-states";
+import { SettingsSkeleton } from "@/components/loading-skeletons";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { useBreadcrumb } from "@/stores/breadcrumb-store";
 import { WebhookDeliveriesTab } from "../components/webhook-deliveries-tab";
@@ -21,7 +22,7 @@ export function WebhookDetailPage() {
   const [tab, setTab] = useTabWithHash(["deliveries", "settings"] as const, "deliveries");
   useBreadcrumb("overlayPage", webhook ? [{ label: webhook.url }] : []);
 
-  if (isLoading) return <LoadingState />;
+  if (isLoading) return <SettingsSkeleton />;
   if (error || !webhook) return <ResourceErrorState error={error} />;
 
   return (

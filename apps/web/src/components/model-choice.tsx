@@ -54,7 +54,6 @@ export function ModelChoiceList({
         search={choice.search.search}
         onSearchChange={choice.search.setSearch}
         isLoading={source === "search" && choice.search.isLoading}
-        loadingText={t("models.form.modelSearchLoading")}
         emptyText={t("models.form.modelSearchEmpty")}
         grouped={source === "catalog"}
         defaultId={choice.star}

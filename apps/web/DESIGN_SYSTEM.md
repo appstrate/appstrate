@@ -32,9 +32,18 @@ they start with `packages/` or `e2e/`.
   placeholder on failure), never as an `<img src>`.
 - **Numbers that change in place** (durations, costs, counts, timers) use
   `tabular-nums`.
-- **Spinner and loading**: `Spinner` (`components/spinner.tsx`) for work in
-  flight on a control, `LoadingState` for a whole panel, `Skeleton` rows when the
-  layout is known (collections do it by themselves).
+- **Loading is in-page**: the frame (shell, `PageHeader`, toolbar, tabs, section
+  titles) draws at once; only what waits on a read waits, in its place and in its
+  shape, as `Skeleton` blocks (`components/loading-skeletons.tsx`):
+  `DetailPageSkeleton` (with the crumbs the address already gives),
+  `ListPageSkeleton`, `SettingsSkeleton`, `FormPageSkeleton`,
+  `DashboardSkeleton`, `TextSkeleton` for a panel, a modal body or a section.
+  Collections draw their own rows. A route waits on its chunk and its
+  permissions under the skeleton its page draws (`skeletonOf`, `app.tsx`), so
+  nothing jumps. `Spinner` (`components/spinner.tsx`) is work in flight on a
+  control (a button, a row being saved), never content on its way; no centred
+  spinner, no « Chargement… » sentence. `BootScreen` is the one exception: before
+  the shell exists there is no page to draw.
 
 ## 2. The shell
 
@@ -467,7 +476,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   on a name opens the row like a click anywhere else. A menu deed that opens the page's own modal pre-filled
   on the row says so in the modal's URL value (`?view-as=space:viewer`, the
   roles page's « Prévisualiser »), the same modal as the page's Actions menu.
-- States: `LoadingState`, `EmptyState`, `ErrorState error=…`, and
+- States: a skeleton (section 1), `EmptyState`, `ErrorState error=…`, and
   for an unreadable resource `ResourceErrorState`
   (`components/page-states.tsx`). Never a silent redirect.
 - **An empty collection you can add to always offers the add button**

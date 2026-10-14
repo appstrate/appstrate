@@ -20,7 +20,8 @@ import { RoleLimitNotice } from "../components/role-limit-notice";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { PageHeader } from "../components/page-header";
 import { DisabledReasonTooltip } from "../components/disabled-reason-tooltip";
-import { LoadingState, ResourceErrorState, EmptyState } from "../components/page-states";
+import { ResourceErrorState, EmptyState } from "../components/page-states";
+import { DetailPageSkeleton } from "../components/loading-skeletons";
 import { JsonView } from "../components/json-view";
 import { ActorLabel } from "../components/actor-label";
 import { Badge } from "@appstrate/ui/components/badge";
@@ -62,7 +63,12 @@ export function ScheduleDetailPage() {
   const [activeTab, setActiveTab] = useTabWithHash(SCHEDULE_TABS, "details");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  if (isQueryInFlight(scheduleQuery)) return <LoadingState />;
+  if (isQueryInFlight(scheduleQuery))
+    return (
+      <DetailPageSkeleton
+        breadcrumbs={[{ label: t("schedule.breadcrumbList"), href: "/schedules" }]}
+      />
+    );
   if (error || !schedule) return <ResourceErrorState error={error} />;
   const disabledReason = schedule.disabled_reason
     ? t(`schedule.disabledReason.${schedule.disabled_reason}`)

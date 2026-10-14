@@ -31,7 +31,8 @@ import {
   sameBillingManagers,
   type BillingManagerStatus,
 } from "../lib/billing-managers";
-import { LoadingState, ErrorState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { SectionCard } from "./section-card";
 import { Spinner } from "./spinner";
 
@@ -67,7 +68,7 @@ export function BillingManagersSection() {
   // an effect, so a refetch cannot silently overwrite an unsaved edit.
   const [draft, setDraft] = useState<string[] | null>(null);
 
-  if (managersQuery.isLoading || orgQuery.isLoading) return <LoadingState />;
+  if (managersQuery.isLoading || orgQuery.isLoading) return <SettingsSkeleton rows={1} />;
   if (managersQuery.error) return <ErrorState error={managersQuery.error} />;
   // Without the roster every saved manager reads as gone, so Save would PUT {}.
   if (orgQuery.error) return <ErrorState error={orgQuery.error} />;

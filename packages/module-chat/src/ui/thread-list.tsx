@@ -35,6 +35,7 @@ import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuSkeleton,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@appstrate/ui/components/sidebar";
@@ -147,6 +148,12 @@ export function ChatConversationList({
       <SidebarGroup className="min-h-0 flex-1 group-data-[collapsible=icon]:hidden">
         <SidebarGroupLabel>{t("threads.title")}</SidebarGroupLabel>
         <SidebarMenu className="min-h-0 flex-1 overflow-y-auto">
+          {isLoading &&
+            Array.from({ length: 5 }, (_, i) => (
+              <SidebarMenuItem key={i}>
+                <SidebarMenuSkeleton />
+              </SidebarMenuItem>
+            ))}
           {list.map((s) => (
             <ConversationRow
               key={s.id}

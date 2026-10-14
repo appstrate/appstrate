@@ -27,7 +27,13 @@ import {
 import { chunkComponent } from "./lib/lazy-chunk";
 import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { ShellFrameProvider, ShellHeader } from "./components/shell-frame";
-import { LoadingState } from "./components/page-states";
+import {
+  DashboardSkeleton,
+  DetailPageSkeleton,
+  FormPageSkeleton,
+  ListPageSkeleton,
+  SettingsSkeleton,
+} from "./components/loading-skeletons";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
 import { NewScheduleModalHost } from "./components/new-schedule-modal";
@@ -73,8 +79,8 @@ const ChatModulePage = lazy(() =>
 );
 
 // Route-level code splitting — heavy authenticated pages are lazy-loaded so
-// the entry chunk only carries the login/dashboard shell. Same Suspense +
-// LoadingState fallback pattern as the module pages above.
+// the entry chunk only carries the login/dashboard shell. Each route waits on
+// its chunk under its page's skeleton (`skeletonOf`).
 const UnifiedPackageDetailPage = lazy(() =>
   import("./pages/unified-package-detail").then((m) => ({ default: m.UnifiedPackageDetailPage })),
 );
@@ -210,9 +216,9 @@ const PreferencesModelsPage = lazy(() =>
   import("./pages/preferences/models").then((m) => ({ default: m.PreferencesModelsPage })),
 );
 
-/** Suspense boundary for lazy route elements — same fallback as module pages. */
-function LazyRoute({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
+/** A lazy screen outside the shell (welcome, onboarding): it waits like the boot does. */
+function PreShellRoute({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<BootScreen />}>{children}</Suspense>;
 }
 
 /**
@@ -224,108 +230,28 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
 const PAGES: Record<RoutePath, ReactNode> = {
   "/": <DashboardPage />,
   "/agents": <PackageIndexPage type="agent" />,
-  "/agents/new": (
-    <LazyRoute>
-      <PackageEditorPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name/:version": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name/runs/:runId": (
-    <LazyRoute>
-      <RunDetailPage />
-    </LazyRoute>
-  ),
-  "/runs": (
-    <LazyRoute>
-      <RunsPage />
-    </LazyRoute>
-  ),
-  "/files": (
-    <LazyRoute>
-      <FilesPage />
-    </LazyRoute>
-  ),
-  "/schedules": (
-    <LazyRoute>
-      <SchedulesListPage />
-    </LazyRoute>
-  ),
-  "/schedules/:id": (
-    <LazyRoute>
-      <ScheduleDetailPage />
-    </LazyRoute>
-  ),
-  "/skills": (
-    <LazyRoute>
-      <SkillsPage />
-    </LazyRoute>
-  ),
-  "/skills/new": (
-    <LazyRoute>
-      <PackageEditorPage type="skill" />
-    </LazyRoute>
-  ),
-  "/skills/:scope/:name": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="skill" />
-    </LazyRoute>
-  ),
-  "/skills/:scope/:name/:version": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="skill" />
-    </LazyRoute>
-  ),
-  "/integrations": (
-    <LazyRoute>
-      <IntegrationsPage />
-    </LazyRoute>
-  ),
-  "/integrations/new": (
-    <LazyRoute>
-      <PackageEditorPage type="integration" />
-    </LazyRoute>
-  ),
-  "/integrations/:scope/:name": (
-    <LazyRoute>
-      <IntegrationDetailPage />
-    </LazyRoute>
-  ),
-  "/mcp-servers": (
-    <LazyRoute>
-      <McpServersPage />
-    </LazyRoute>
-  ),
-  "/mcp-servers/:scope/:name": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="mcp-server" />
-    </LazyRoute>
-  ),
-  "/mcp-servers/:scope/:name/:version": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="mcp-server" />
-    </LazyRoute>
-  ),
+  "/agents/new": <PackageEditorPage type="agent" />,
+  "/agents/:scope/:name": <UnifiedPackageDetailPage type="agent" />,
+  "/agents/:scope/:name/:version": <UnifiedPackageDetailPage type="agent" />,
+  "/agents/:scope/:name/runs/:runId": <RunDetailPage />,
+  "/runs": <RunsPage />,
+  "/files": <FilesPage />,
+  "/schedules": <SchedulesListPage />,
+  "/schedules/:id": <ScheduleDetailPage />,
+  "/skills": <SkillsPage />,
+  "/skills/new": <PackageEditorPage type="skill" />,
+  "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
+  "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
+  "/integrations": <IntegrationsPage />,
+  "/integrations/new": <PackageEditorPage type="integration" />,
+  "/integrations/:scope/:name": <IntegrationDetailPage />,
+  "/mcp-servers": <McpServersPage />,
+  "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
+  "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
   // The catalogue is a destination like settings, not a per-list modal: one
   // address, reachable from the navigation. Bare, it redirects to its first view.
-  "/catalogue": (
-    <LazyRoute>
-      <CatalogueIndexRedirect />
-    </LazyRoute>
-  ),
-  "/catalogue/:reading/:type": (
-    <LazyRoute>
-      <CataloguePage />
-    </LazyRoute>
-  ),
+  "/catalogue": <CatalogueIndexRedirect />,
+  "/catalogue/:reading/:type": <CataloguePage />,
   "/preferences": <Outlet />,
   "/preferences/general": <PreferencesGeneralPage />,
   "/preferences/appearance": <PreferencesAppearancePage />,
@@ -334,16 +260,8 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/preferences/connections": <PreferencesConnectionsPage />,
   "/preferences/mcp-access": <PreferencesMcpAccessPage />,
   "/preferences/models": <PreferencesModelsPage />,
-  "/chat": (
-    <LazyRoute>
-      <ChatModulePage />
-    </LazyRoute>
-  ),
-  "/chat/:conversationId": (
-    <LazyRoute>
-      <ChatModulePage />
-    </LazyRoute>
-  ),
+  "/chat": <ChatModulePage />,
+  "/chat/:conversationId": <ChatModulePage />,
   // The settings scopes (these two and `/preferences`) share
   // `UnifiedSettingsLayout`, mounted one level up so switching scope keeps the
   // dialog; each scope's own element is its outlet.
@@ -393,9 +311,32 @@ const inLayout = (path: RoutePath) => LAYOUTS.some((layout) => isUnder(path, lay
 const flatPaths = (mount: ReturnType<typeof mountOf>) =>
   PATHS.filter((path) => mountOf(path) === mount && !inLayout(path));
 
+/**
+ * What a route draws while its chunk or its permissions load: the skeleton its
+ * page draws while its data loads, so both waits share one shape. An overlay
+ * draws its own frame first, and the chat its own panel.
+ */
+function skeletonOf(path: RoutePath): ReactNode {
+  if (inLayout(path)) return <SettingsSkeleton />;
+  if (isOverlayPath(path) || isUnder(path, "/chat")) return null;
+  if (path === "/") return <DashboardSkeleton />;
+  if (path.endsWith("/new")) return <FormPageSkeleton />;
+  if (path.includes("/:")) return <DetailPageSkeleton />;
+  return <ListPageSkeleton />;
+}
+
 function pageRoute(path: RoutePath) {
+  const skeleton = skeletonOf(path);
   return (
-    <Route key={path} path={path} element={<RouteGate path={path}>{PAGES[path]}</RouteGate>} />
+    <Route
+      key={path}
+      path={path}
+      element={
+        <RouteGate path={path} pending={skeleton}>
+          <Suspense fallback={skeleton}>{PAGES[path]}</Suspense>
+        </RouteGate>
+      }
+    />
   );
 }
 
@@ -404,7 +345,11 @@ function layoutRoute(layout: LayoutPath) {
     <Route
       key={layout}
       path={layout}
-      element={<RouteGate path={layout}>{PAGES[layout]}</RouteGate>}
+      element={
+        <RouteGate path={layout} pending={<SettingsSkeleton />}>
+          {PAGES[layout]}
+        </RouteGate>
+      }
     >
       <Route index element={<SettingsIndexRedirect />} />
       {PATHS.filter((path) => path.startsWith(`${layout}/`)).map(pageRoute)}
@@ -795,57 +740,57 @@ export function App() {
               <Route
                 path="/welcome"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <WelcomePage />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route
                 path="/onboarding/waiting"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <OnboardingWaitingStep />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route
                 path="/onboarding/create"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <OnboardingCreateStep />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route
                 path="/onboarding/plan"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <OnboardingPlanStep />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route
                 path="/onboarding/model"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <OnboardingModelStep />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route
                 path="/onboarding/members"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <OnboardingMembersStep />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route
                 path="/onboarding/complete"
                 element={
-                  <LazyRoute>
+                  <PreShellRoute>
                     <OnboardingDoneStep />
-                  </LazyRoute>
+                  </PreShellRoute>
                 }
               />
               <Route element={<MainLayout />}>
@@ -864,9 +809,9 @@ export function App() {
                   {flatPaths("overlay").map(pageRoute)}
                   <Route
                     element={
-                      <LazyRoute>
+                      <Suspense fallback={null}>
                         <UnifiedSettingsLayout />
-                      </LazyRoute>
+                      </Suspense>
                     }
                   >
                     {LAYOUTS.map(layoutRoute)}

@@ -37,7 +37,8 @@ import { InputFieldRow } from "./settings/input-field-row";
 import { SaveFeedback } from "./settings/save-feedback";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
-import { EmptyState, ErrorState, LoadingState } from "./page-states";
+import { EmptyState, ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { FrequencyComposer } from "./frequency-composer";
 import { NoAccessState } from "./route-gate";
 import { useAuth } from "../hooks/use-auth";
@@ -390,7 +391,7 @@ export function ScheduleSettings({ schedule }: { schedule: Schedule }) {
                 move={move}
               />
             ) : (
-              <LoadingState />
+              <SettingsSkeleton />
             )}
           </>
         )}
@@ -537,7 +538,7 @@ function AgentBoundSection({
   const { deps, error, denied } = useScheduleFormDeps(schedule.packageId);
   if (error) return <ErrorState error={error} />;
   if (denied) return <NoAccessState />;
-  if (!deps) return <LoadingState />;
+  if (!deps) return <SettingsSkeleton rows={2} />;
   // Keyed on the schedule: each section seeds its local state once.
   if (section === "inputs")
     return <InputsSection key={schedule.id} schedule={schedule} deps={deps} update={update} />;
@@ -735,7 +736,7 @@ function ConnectionsSection({ schedule, update, moveWrite }: SectionWrites) {
     });
 
   if (fired.error) return <ErrorState error={fired.error} />;
-  if (!integrations) return <LoadingState />;
+  if (!integrations) return <SettingsSkeleton rows={2} />;
   if (integrations.length === 0) {
     return (
       <EmptyState

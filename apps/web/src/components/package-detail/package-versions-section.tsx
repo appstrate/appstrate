@@ -19,8 +19,8 @@ import { useModalParam } from "../../hooks/use-modal-param";
 import { useVersionDetail } from "../../hooks/use-packages";
 import { DiffTab } from "../diff-tab";
 import { Modal } from "../modal";
-import { LoadingState } from "../page-states";
 import { VersionHistory } from "../version-history";
+import { TextSkeleton } from "../loading-skeletons";
 
 type LatestVersion = Parameters<typeof DiffTab>[0]["latestVersion"];
 
@@ -95,7 +95,7 @@ export function PackageVersionsSection({
             currentContent={currentContent}
           />
         ) : (
-          <LoadingState />
+          <TextSkeleton lines={8} />
         )}
       </Modal>
     </div>

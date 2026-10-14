@@ -36,7 +36,8 @@ import { AgentVersionField } from "./package-version-select";
 import { RunOverridesPanel } from "./run-overrides-panel";
 import { ScheduleActorConnectionChoice } from "./schedule-actor-connection-choice";
 import { ScheduleConnectionAnswer } from "./schedule-connection-answer";
-import { ErrorState, LoadingState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { Spinner } from "./spinner";
 import { useActorName } from "../hooks/use-actor-name";
 import { useAuth } from "../hooks/use-auth";
@@ -155,7 +156,7 @@ function ScheduleFields({
   // locked since would be seeded and refused (400 `locked_input_field`).
   const { deps, error } = useScheduleFormDeps(agentId);
   if (error) return <ErrorState error={error} />;
-  if (!deps) return <LoadingState />;
+  if (!deps) return <SettingsSkeleton />;
   return (
     <ScheduleFieldsReady
       deps={deps}

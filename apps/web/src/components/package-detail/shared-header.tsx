@@ -7,7 +7,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { packageDetailPath, packageListPath } from "../../lib/package-paths";
 import { InlineMarkdown } from "../markdown";
-import { PageHeader } from "../page-header";
+import { PageHeader, type BreadcrumbEntry } from "../page-header";
+import { DetailPageSkeleton } from "../loading-skeletons";
 import { PackageIcon } from "../package-icon";
 
 interface SharedHeaderDetail {
@@ -34,6 +35,21 @@ interface SharedHeaderDetail {
   homeSpaceName?: string | null;
 }
 
+/** The first crumb of a package's page: its family's list. */
+function usePackageListCrumb(type: PackageType): BreadcrumbEntry {
+  const { t } = useTranslation(["agents", "settings"]);
+  return {
+    label:
+      type === "agent" ? t("detail.breadcrumb") : t(`packages.type.${type}s`, { ns: "settings" }),
+    href: packageListPath(type),
+  };
+}
+
+/** A package's page while its detail loads, under its family's crumb. */
+export function PackageDetailSkeleton({ type }: { type: PackageType }) {
+  return <DetailPageSkeleton breadcrumbs={[usePackageListCrumb(type)]} subtitle />;
+}
+
 export function SharedHeader({
   detail,
   isHistoricalVersion,
@@ -52,12 +68,7 @@ export function SharedHeader({
   actionsRight?: React.ReactNode;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-
-  const breadcrumbPath = packageListPath(detail.type);
-  const breadcrumbLabel =
-    detail.type === "agent"
-      ? t("detail.breadcrumb")
-      : t(`packages.type.${detail.type}s`, { ns: "settings" });
+  const listCrumb = usePackageListCrumb(detail.type);
 
   const iconNode = <PackageIcon type={detail.type} icon={detail.icon} color={detail.color} />;
 
@@ -69,7 +80,7 @@ export function SharedHeader({
         icon={iconNode}
         wrapActions
         breadcrumbs={[
-          { label: breadcrumbLabel, href: breadcrumbPath },
+          listCrumb,
           {
             label: detail.displayName,
             href: activeSubpage ? packageDetailPath(detail.type, detail.id) : undefined,

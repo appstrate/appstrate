@@ -18,7 +18,8 @@ import { RunModal } from "../components/run-modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { RunLaunchRecovery } from "../components/run-launch-recovery";
 import { PageHeader } from "../components/page-header";
-import { LoadingState, ResourceErrorState } from "../components/page-states";
+import { ResourceErrorState } from "../components/page-states";
+import { DetailPageSkeleton } from "../components/loading-skeletons";
 import { invalidateOrgStorage } from "../hooks/use-files";
 import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
@@ -226,7 +227,18 @@ export function RunDetailPage() {
     ),
   });
 
-  if (isQueryInFlight(runQuery)) return <LoadingState />;
+  if (isQueryInFlight(runQuery))
+    return (
+      <DetailPageSkeleton
+        subtitle
+        breadcrumbs={[
+          { label: t("detail.breadcrumb"), href: "/agents" },
+          ...(agent?.display_name
+            ? [{ label: agent.display_name, href: `/agents/${packageId}` }]
+            : []),
+        ]}
+      />
+    );
 
   if (error || !run) return <ResourceErrorState error={error} />;
   const rerunRefusal = agent ? agentLaunchRefusal(agent) : null;

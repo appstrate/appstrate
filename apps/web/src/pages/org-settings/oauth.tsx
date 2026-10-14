@@ -8,7 +8,8 @@ import { Label } from "@appstrate/ui/components/label";
 import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
-import { EmptyState, ErrorState, LoadingState } from "../../components/page-states";
+import { EmptyState, ErrorState } from "../../components/page-states";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 
@@ -28,7 +29,7 @@ export function OrgSettingsOAuthPage() {
   const { can } = usePermissions();
 
   if (failureReason) return <ErrorState error={failureReason} />;
-  if (isLoading) return <LoadingState />;
+  if (isLoading) return <SettingsSkeleton rows={2} />;
 
   return (
     <>
@@ -66,7 +67,7 @@ export function OrgSettingsOAuthPage() {
       </SettingsGroup>
 
       {orgSettings?.dashboard_sso_enabled ? (
-        <Suspense fallback={<LoadingState />}>
+        <Suspense fallback={<SettingsSkeleton rows={2} />}>
           <OAuthClientsTab level="org" />
         </Suspense>
       ) : (

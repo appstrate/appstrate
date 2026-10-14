@@ -3,18 +3,9 @@
 import { useTranslation } from "react-i18next";
 import { Plus, SearchX, TriangleAlert, type LucideIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
 import { cn } from "@appstrate/ui/cn";
 import { errorDetail } from "../lib/mutation-error";
 import { ApiError } from "../api/errors";
-
-export function LoadingState() {
-  return (
-    <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
-      <Spinner className="h-6 w-6" />
-    </div>
-  );
-}
 
 /**
  * The request failed — drawn the way the empty state is drawn.

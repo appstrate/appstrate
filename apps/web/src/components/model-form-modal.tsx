@@ -31,7 +31,8 @@ import {
   useProvidersRegistry,
   type ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import { ErrorState, LoadingState } from "./page-states";
+import { ErrorState } from "./page-states";
+import { SettingsSkeleton } from "./loading-skeletons";
 import { refusalMessage } from "../lib/mutation-error";
 import { getProviderById } from "@/lib/provider-registry-helpers";
 import { buildDiscoverBody, parsesAsUrl } from "@/lib/model-discovery";
@@ -80,7 +81,7 @@ export function ModelFormBody(props: ModelFormBodyProps) {
   const { t } = useTranslation(["settings", "common"]);
   const registryQuery = useProvidersRegistry();
   if (registryQuery.error) return <ErrorState error={registryQuery.error} />;
-  if (!registryQuery.data) return <LoadingState />;
+  if (!registryQuery.data) return <SettingsSkeleton />;
   // A row whose provider left the registry has no endpoint to describe and no
   // credential to match: say so rather than render an empty form.
   if (props.model && !getProviderById(props.model.providerId ?? "", registryQuery.data)) {
@@ -494,7 +495,6 @@ function ModelForm({
               search={search.search}
               onSearchChange={search.setSearch}
               isLoading={source === "search" && search.isLoading}
-              loadingText={t("models.form.modelSearchLoading")}
               emptyText={t("models.form.modelSearchEmpty")}
               grouped={source === "catalog"}
             />

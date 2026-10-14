@@ -42,6 +42,7 @@ import {
   useSharePackage,
 } from "../../hooks/use-package-shares";
 import { toastError } from "../../lib/mutation-error";
+import { TextSkeleton } from "../loading-skeletons";
 
 /** The subject of one offer, as the picker encodes it. */
 type ShareTarget = { kind: "user"; userId: string } | { kind: "space"; spaceId: string };
@@ -331,7 +332,7 @@ export function SharePackageDialog({
           <div className="mt-4 space-y-1 border-t pt-4">
             <p className="text-sm font-medium">{t("packages.shareCurrent")}</p>
             {isLoading ? (
-              <Spinner />
+              <TextSkeleton lines={2} className="py-1.5" />
             ) : (shares ?? []).length === 0 ? (
               <p className="text-muted-foreground text-sm">{t("packages.shareEmpty")}</p>
             ) : (
@@ -429,7 +430,7 @@ function CoeditTab({
   const reached = useMemo(() => new Set((existing ?? []).map((row) => row.userId)), [existing]);
   const candidates = orgMembers.filter((candidate) => !reached.has(candidate.userId));
 
-  if (verdict === "unknown") return <Spinner />;
+  if (verdict === "unknown") return <TextSkeleton lines={2} />;
 
   // A personal space belongs to ONE member and takes no others
   // (`personal_space_has_no_members`), and it is never converted while it lives

@@ -16,7 +16,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const layoutAt = (url: string) =>
   render(
-    <RouteGate path="/org-settings">
+    <RouteGate path="/org-settings" pending={null}>
       <p>layout</p>
     </RouteGate>,
     { initialEntries: [url] },
@@ -29,7 +29,7 @@ describe("RouteGate on a layout", () => {
 
   it("says the page does not exist here instead of redirecting", () => {
     const html = render(
-      <RouteGate path="/chat">
+      <RouteGate path="/chat" pending={null}>
         <p>chat</p>
       </RouteGate>,
       { initialEntries: ["/chat"] },
