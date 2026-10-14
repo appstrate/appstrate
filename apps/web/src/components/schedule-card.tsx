@@ -3,14 +3,12 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@appstrate/ui/cn";
-import { Badge } from "./status-badge";
-import { ScheduleStatusBadge } from "./schedule-status-badge";
-import { CountBadge } from "./count-badge";
+import { ScheduleStateBadges } from "./schedule-status-badge";
 import { ActorLabel } from "./actor-label";
 import type { EnrichedSchedule } from "@appstrate/shared-types";
 import { formatDateField } from "../lib/format-date";
 import { scheduleDetailPath } from "../lib/package-paths";
-import { scheduleNextRunAt } from "../lib/schedule-options";
+import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
 
 interface ScheduleCardProps {
@@ -23,7 +21,6 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   // The counters are served with the schedule list (`enrichSchedules` in
   // services/scheduler.ts) as whole-history counts: the card fetches nothing.
-  const runningRuns = schedule.running_runs;
   const nextRunAt = scheduleNextRunAt(schedule);
   const recurrence = describeSchedule(schedule);
 
@@ -34,21 +31,12 @@ export function ScheduleCard({ schedule, agentName }: ScheduleCardProps) {
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-medium">
-            {schedule.name || t("schedule.unnamed", { ns: "agents" })}
-          </h2>
+          <h2 className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</h2>
           <p className="text-muted-foreground mt-1 truncate text-xs">
             {agentName ?? schedule.packageId}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-          <ScheduleStatusBadge schedule={schedule} />
-          <CountBadge
-            count={schedule.unread_count}
-            label={t("dashboard.unreadRuns", { ns: "agents", count: schedule.unread_count })}
-          />
-          {runningRuns > 0 && <Badge status="running" />}
-        </div>
+        <ScheduleStateBadges schedule={schedule} />
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">

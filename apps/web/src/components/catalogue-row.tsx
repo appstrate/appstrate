@@ -11,7 +11,7 @@ import type { LucideIcon } from "lucide-react";
 import { Eye, FolderInput, Share2, X } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { TableRowActions } from "./table-row-actions";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 import type { CatalogueDeeds } from "../lib/catalogue-gates";
 
 interface CatalogueMenuProps {

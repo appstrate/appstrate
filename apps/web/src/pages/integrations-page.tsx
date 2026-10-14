@@ -18,7 +18,7 @@ import { DataTable } from "../components/data-table";
 import { columnMenu, visibleColumns } from "../lib/column-visibility";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-states";
-import { IntegrationIcon } from "../components/integration-icon";
+import { PackageCard } from "../components/package-card";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
@@ -33,6 +33,7 @@ import {
   integrationOrigin,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
+import { packageCardItem } from "../lib/package-card-item";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { usePackageList } from "../hooks/use-packages";
 import { usePermissions } from "../hooks/use-permissions";
@@ -40,41 +41,6 @@ import { useOrg } from "../hooks/use-org";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { useListView } from "../stores/list-view-store";
 import { useIntegrationListColumns } from "./integration-list-columns";
-import type { IntegrationIndexItem } from "@appstrate/shared-types";
-
-function IntegrationCard({
-  integration,
-  orgName,
-}: {
-  integration: IntegrationIndexItem;
-  orgName: string;
-}) {
-  const { t } = useTranslation("settings");
-  const origin = integrationOrigin(integration);
-
-  return (
-    <Link
-      to={`/integrations/${integration.id}`}
-      data-testid="integration-card"
-      data-integration-id={integration.id}
-      className="bg-card hover:border-primary/40 flex flex-col rounded-lg border p-4 transition-colors hover:shadow-md"
-    >
-      <div className="flex items-start gap-3">
-        <IntegrationIcon src={integration.icon ?? undefined} />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold">{integration.name}</h3>
-          <p className="text-muted-foreground truncate text-xs">
-            {origin === "system" ? t("catalogue.sourceSystem") : orgName}
-            {integration.version ? ` · ${integration.version}` : ""}
-          </p>
-        </div>
-      </div>
-      {integration.description && (
-        <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{integration.description}</p>
-      )}
-    </Link>
-  );
-}
 
 export function IntegrationsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -237,7 +203,12 @@ export function IntegrationsPage() {
           items={shown}
           itemKey={(integration) => integration.id}
           renderCard={(integration) => (
-            <IntegrationCard integration={integration} orgName={orgName} />
+            <PackageCard
+              {...packageCardItem(integration, "integration")}
+              // A system integration already says so with the card's shield.
+              meta={integrationOrigin(integration) === "system" ? undefined : orgName}
+              showRun={false}
+            />
           )}
           isLoading={isLoading}
           failure={error}

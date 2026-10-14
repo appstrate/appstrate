@@ -86,7 +86,7 @@ import {
   type IntegrationExecution,
 } from "../lib/integration-collection";
 import { CollectionTabs } from "./collection-tabs";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
 import { CatalogueShared } from "./catalogue-shared";

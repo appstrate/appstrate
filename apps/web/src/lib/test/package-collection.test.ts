@@ -3,7 +3,7 @@
 /** What a collection's search, origin and activity leave on screen. */
 
 import { describe, expect, it } from "bun:test";
-import type { CardItem } from "../../pages/package-list.tsx";
+import type { CardItem } from "../package-card-item.ts";
 import { narrowPackages } from "../package-collection.ts";
 
 const items: CardItem[] = [

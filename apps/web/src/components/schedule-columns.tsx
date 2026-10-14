@@ -23,7 +23,7 @@ import { CountBadge } from "./count-badge";
 import { ActorLabel } from "./actor-label";
 import { CellDate, CellText } from "./table-cells";
 import { formatDateField } from "../lib/format-date";
-import { scheduleNextRunAt } from "../lib/schedule-options";
+import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
@@ -46,9 +46,7 @@ export function useScheduleColumns({
       cell: (schedule) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate font-medium">
-              {schedule.name || t("schedule.unnamed", { ns: "agents" })}
-            </span>
+            <span className="truncate font-medium">{scheduleLabel(schedule, t)}</span>
             <CountBadge
               count={schedule.unread_count}
               label={t("dashboard.unreadRuns", { ns: "agents", count: schedule.unread_count })}

@@ -510,10 +510,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
-  not a collection. Entity cards in lists: `PackageCard`, `ScheduleCard`,
-  `RunCard`. The dashboard (`pages/dashboard-content.tsx`) assembles
-  `MetricCard`, `DashboardAgentCard`, `DashboardRunRow` and
-  `DashboardScheduleRow` for itself.
+  not a collection. Entity cards in lists: `PackageCard` (every package
+  type, the dashboard's agents included), `ScheduleCard`, `RunCard`; a run as
+  a dense list row is `RunRow` (the dashboard, the chat's context panel).
 - Cards are `bg-card` with a `border` on the canvas; a clickable card is one
   stretched link (`absolute inset-0`), never a link around a button.
 

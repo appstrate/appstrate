@@ -67,6 +67,7 @@ const code = (source: string) =>
 
 const DASHBOARD = read("../../pages/dashboard.tsx");
 const SCHEDULE_CARD = read("../schedule-card.tsx");
+const SCHEDULE_STATE = read("../schedule-status-badge.tsx");
 const RUN_LIST = read("../run-list.tsx");
 const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
 const RUNS_TABLE = read("../runs-table.tsx");
@@ -109,8 +110,10 @@ describe("schedule cards read their counters from the schedule", () => {
   });
 
   it("reads the counters served with the list payload", () => {
-    expect(SCHEDULE_CARD).toContain("schedule.running_runs");
-    expect(SCHEDULE_CARD).toContain("schedule.unread_count");
+    // The card draws them through ScheduleStateBadges, off the row it is handed.
+    expect(SCHEDULE_CARD).toContain("<ScheduleStateBadges schedule={schedule} />");
+    expect(SCHEDULE_STATE).toContain("schedule.running_runs");
+    expect(SCHEDULE_STATE).toContain("schedule.unread_count");
   });
 });
 

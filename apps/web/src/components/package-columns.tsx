@@ -27,7 +27,7 @@ import { CountBadge } from "./count-badge";
 import { rowActionsColumn } from "./row-actions-column";
 import { CellEmpty, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 
 /**
  * The column set, as a value the caller holds — see `useRunColumns` on why.

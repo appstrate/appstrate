@@ -1,22 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
-import { Badge } from "./status-badge";
+import { Badge as UIBadge } from "@appstrate/ui/components/badge";
+import { Badge, MetaBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
+import { PackageIcon } from "./package-icon";
 import { RunAgentButton } from "./run-agent-button";
-import { AgentIdentityTile } from "./agent-identity";
 import { packageDetailPath } from "../lib/package-paths";
 import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
-import type { CardItem } from "../pages/package-list";
+import type { CardItem } from "../lib/package-card-item";
 
+/**
+ * A package as a card, the same on every surface (the dashboard, the index
+ * pages, the catalogue): its tile, name and description, its badges top right,
+ * its keywords and an optional footer. The card is ONE link, its title's,
+ * stretched over the surface (`after:absolute after:inset-0`); what acts on
+ * its own (run, the state control, the footer) is raised above it.
+ */
 export function PackageCard({
   id,
   displayName,
   description,
   type,
   source,
+  version,
   runningRuns,
   keywords,
   usedByAgents,
@@ -25,10 +34,12 @@ export function PackageCard({
   autoInstalled,
   icon,
   identity,
+  logo,
   status,
   meta,
   showRun = true,
   onOpen,
+  headingLevel = 2,
 }: CardItem & {
   /**
    * Whether an agent card offers to run it. False in the catalogue: a package
@@ -38,92 +49,72 @@ export function PackageCard({
   showRun?: boolean;
   /** Read it in place instead of navigating — what the catalogue's rows do. */
   onOpen?: () => void;
+  /** 3 where the cards sit under a section's `<h2>` (the dashboard). */
+  headingLevel?: 2 | 3;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const href = packageDetailPath(type, id);
-  const navigate = useNavigate();
-
-  // With `onOpen` the package may have no page in this space (the catalogue
-  // lists packages it does not run), so a modified click opens it in place too.
-  const handleCardClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (window.getSelection()?.toString()) return;
-    if (onOpen) onOpen();
-    else if (e.metaKey || e.ctrlKey) window.open(href, "_blank");
-    else navigate(href);
-  };
-  // The title is the card's keyboard target; the surface's click is the pointer's.
+  // The focus ring is drawn on the stretched overlay, i.e. around the whole
+  // card: on the title itself `truncate` would clip it.
   const titleClass =
-    "focus-visible:ring-ring truncate rounded-sm outline-none focus-visible:ring-2";
+    "truncate outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring";
+  const Heading = headingLevel === 3 ? "h3" : "h2";
 
   return (
-    <div
-      className="border-border bg-card hover:border-foreground/20 hover:bg-accent/50 flex h-full w-full cursor-pointer flex-col rounded-lg border p-4 transition-colors"
-      onClick={handleCardClick}
-    >
+    <div className="border-border bg-card hover:border-foreground/20 hover:bg-accent/50 relative flex h-full w-full flex-col rounded-lg border p-4 transition-colors">
       {/* The icon tile sits LEFT of the title and its description, the way a
           store's card reads: what it is, then what it does. */}
       <div className="flex min-w-0 gap-3">
-        {icon ??
-          (identity && (
-            <AgentIdentityTile
-              agentId={id}
-              icon={identity.icon}
-              color={identity.color}
-              className="size-10 rounded-[10px]"
-            />
-          ))}
+        {icon ?? (
+          <PackageIcon
+            type={type}
+            id={id}
+            icon={type === "agent" ? identity?.icon : logo}
+            color={identity?.color}
+          />
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 className="text-foreground truncate text-sm font-medium">
+              <Heading className="text-foreground truncate text-sm font-medium">
                 {onOpen ? (
-                  <button
-                    type="button"
-                    className={titleClass}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpen();
-                    }}
-                  >
+                  <button type="button" className={titleClass} onClick={onOpen}>
                     {displayName}
                   </button>
                 ) : (
-                  <Link to={href} className={titleClass} onClick={(e) => e.stopPropagation()}>
+                  <Link to={packageDetailPath(type, id)} className={titleClass}>
                     {displayName}
                   </Link>
                 )}
-              </h2>
+              </Heading>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="relative z-10 flex shrink-0 items-center gap-1.5">
               {source === "system" && (
                 <span title={t("list.badgeBuiltIn")}>
-                  <ShieldCheck className="text-muted-foreground h-4 w-4" />
+                  <ShieldCheck
+                    className="text-muted-foreground h-4 w-4"
+                    role="img"
+                    aria-label={t("list.badgeBuiltIn")}
+                  />
                 </span>
               )}
-              {autoInstalled && (
-                <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.65rem] font-medium uppercase">
-                  {t("list.badgeAutoInstalled")}
-                </span>
-              )}
+              {autoInstalled && <MetaBadge label={t("list.badgeAutoInstalled")} />}
               <CountBadge
                 count={unreadCount ?? 0}
                 label={t("dashboard.unreadRuns", { ns: "agents", count: unreadCount ?? 0 })}
               />
               {type === "agent" && !!runningRuns && runningRuns > 0 && <Badge status="running" />}
-              {type === "agent" && showRun && (
-                <div onClick={(e) => e.stopPropagation()}>
-                  {/* Listed here IS runnable here: the index and the launch routes
+              {/* Listed here IS runnable here: the index and the launch routes
                   read the same rule (placed in this space and switched on), so
                   the card never has to explain an activation the row could not
                   carry. A package placed here but switched off is not on this
                   list at all — it is in the space library, with its switch. */}
-                  <RunAgentButton
-                    packageId={id}
-                    variant="ghost"
-                    size="icon"
-                    className="text-muted-foreground hover:text-primary size-7"
-                  />
-                </div>
+              {type === "agent" && showRun && (
+                <RunAgentButton
+                  packageId={id}
+                  variant="ghost"
+                  size="icon"
+                  className="text-muted-foreground hover:text-primary size-7"
+                />
               )}
             </div>
           </div>
@@ -134,22 +125,23 @@ export function PackageCard({
           <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{description || ""}</p>
           {/* Under the description and still right of the icon: the text column
               never runs under the tile. */}
-          {meta && (
+          {(version || meta) && (
             <div className="text-muted-foreground/80 mt-2 flex min-w-0 items-center gap-2 text-xs">
+              {version && (
+                <UIBadge variant="secondary" className="shrink-0 font-mono text-[10px]">
+                  v{version}
+                </UIBadge>
+              )}
               {meta}
             </div>
           )}
         </div>
         {/* Its own column, top-aligned with the title, the way a store's "+"
             sits: the text wraps before it instead of running underneath. */}
-        {status && (
-          <div className="shrink-0 self-start" onClick={(e) => e.stopPropagation()}>
-            {status}
-          </div>
-        )}
+        {status && <div className="relative z-10 shrink-0 self-start">{status}</div>}
       </div>
       {keywords?.length || (type !== "agent" && (usedByAgents ?? 0) > 0) ? (
-        <ScrollArea className="mt-2 w-full">
+        <ScrollArea className="relative z-10 mt-2 w-full">
           <div className="flex gap-1">
             {keywords?.map((kw) => (
               <span
@@ -173,8 +165,7 @@ export function PackageCard({
         <div
           // `min-h-8` so a footer carrying a button and one carrying a line of
           // text are the same height, which is what kept the rows ragged.
-          className="border-border mt-auto flex min-h-8 items-center justify-between gap-2 border-t pt-3"
-          onClick={(e) => e.stopPropagation()}
+          className="border-border relative z-10 mt-auto flex min-h-8 items-center justify-between gap-2 border-t pt-3"
         >
           {actions}
         </div>

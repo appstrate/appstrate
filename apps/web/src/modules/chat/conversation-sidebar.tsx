@@ -1,26 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Dispatch, ReactNode } from "react";
-import {
-  ActivityIcon,
-  ChevronRightIcon,
-  ExternalLinkIcon,
-  FileIcon,
-  FilesIcon,
-  InfoIcon,
-  XIcon,
-} from "lucide-react";
-import { Link } from "react-router-dom";
+import { ActivityIcon, ChevronRightIcon, FileIcon, FilesIcon, InfoIcon, XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 import { $api } from "../../api/client";
-import { Badge } from "../../components/status-badge";
 import { FileArtifact } from "../../components/file-artifact";
+import { RunRow } from "../../components/run-row";
+import { useAgents } from "../../hooks/use-packages";
 import { useFile, useFiles } from "../../hooks/use-files";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useRunAgentName } from "../../hooks/use-run-agent-name";
 import { canReadRuns } from "@appstrate/core/permissions";
 import { formatDateField } from "../../lib/format-date";
 import type {
@@ -148,6 +141,9 @@ function ConversationRuns({
   const { t } = useTranslation("chat");
   const scope = useOrgScope();
   const { can } = usePermissions();
+  const agentName = useRunAgentName();
+  const { data: agents } = useAgents();
+  const agentById = new Map((agents ?? []).map((agent) => [agent.id, agent] as const));
   const query = $api.useQuery(
     "get",
     "/api/runs",
@@ -168,38 +164,16 @@ function ConversationRuns({
 
   return (
     <div className="divide-y">
-      {runs.map((run) => {
-        const label = run.agent_name || run.packageId || t("run.fallbackLabel");
-        const content = (
-          <>
-            <div className="flex min-w-0 items-center gap-2">
-              <ActivityIcon className="text-muted-foreground size-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{label}</span>
-              <Badge status={run.status} compact />
-              {run.packageId ? (
-                <ExternalLinkIcon className="text-muted-foreground size-3.5" />
-              ) : null}
-            </div>
-            <div className="text-muted-foreground mt-1 flex items-center justify-between gap-2 pl-6 text-xs">
-              <span className="truncate font-mono">{run.id}</span>
-              <span className="shrink-0">{formatDateField(run.started_at)}</span>
-            </div>
-          </>
-        );
-        return run.packageId ? (
-          <Link
-            key={run.id}
-            className="hover:bg-muted/50 block px-3 py-3"
-            to={`/agents/${run.packageId}/runs/${run.id}`}
-          >
-            {content}
-          </Link>
-        ) : (
-          <div key={run.id} className="px-3 py-3">
-            {content}
-          </div>
-        );
-      })}
+      {runs.map((run) => (
+        <RunRow
+          key={run.id}
+          run={run}
+          agentName={agentName(run)}
+          agent={run.packageId ? agentById.get(run.packageId) : undefined}
+          dense
+          className="px-3"
+        />
+      ))}
     </div>
   );
 }

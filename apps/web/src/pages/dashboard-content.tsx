@@ -6,15 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import i18n from "../i18n";
 import type { AgentListItem, EnrichedRun, EnrichedSchedule } from "@appstrate/shared-types";
-import {
-  ArrowRight,
-  Bot,
-  MessageSquareText,
-  Copy,
-  LayoutDashboard,
-  ShieldCheck,
-  Sparkles,
-} from "lucide-react";
+import { ArrowRight, Bot, MessageSquareText, Copy, LayoutDashboard, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -26,22 +18,21 @@ import {
 } from "@appstrate/ui/components/carousel";
 import { useCarousel } from "@appstrate/ui/components/carousel-context";
 import { AgentIdentityTile } from "../components/agent-identity";
-import { Badge } from "../components/status-badge";
 import { EmptyState } from "../components/page-states";
 import { Modal } from "../components/modal";
 import { useModalParam } from "../hooks/use-modal-param";
 import { PageHeader } from "../components/page-header";
-import { RunDuration } from "../components/run-duration";
-import { RunAgentButton } from "../components/run-agent-button";
-import { ScheduleStatusBadge } from "../components/schedule-status-badge";
-import { scheduleNextRunAt } from "../lib/schedule-options";
+import { ScheduleStateBadges } from "../components/schedule-status-badge";
+import { PackageCard } from "../components/package-card";
+import { RunRow } from "../components/run-row";
+import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
+import { agentCardItem } from "../lib/package-card-item";
 import { useCanReach } from "../hooks/use-can-reach";
 import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
 import { chatDraftNavigationState } from "../lib/creation-handoff";
 import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";
-import { packageDetailPath, runDetailPath, scheduleDetailPath } from "../lib/package-paths";
-import { RunProvenanceBadges } from "../components/run-cells";
+import { scheduleDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
 
 const CODING_AGENT_SETUP_URL = "https://raw.githubusercontent.com/appstrate/skills/main/README.md";
@@ -199,80 +190,6 @@ function MetricCard({
   );
 }
 
-function DashboardAgentCard({
-  agent,
-  unreadCount,
-  className,
-}: {
-  agent: AgentListItem;
-  unreadCount: number | undefined;
-  className?: string;
-}) {
-  const { t } = useTranslation("agents");
-  const href = packageDetailPath("agent", agent.id);
-
-  return (
-    <div
-      className={cn(
-        "border-border bg-card hover:border-foreground/20 hover:bg-accent/30 group relative flex min-h-48 flex-col rounded-xl border p-4 shadow-sm transition-colors",
-        className,
-      )}
-    >
-      <Link
-        to={href}
-        className="absolute inset-0 z-10 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2"
-        aria-label={t("dashboard.openAgent", { name: agent.display_name || agent.id })}
-      />
-      <div className="flex items-start justify-between gap-3">
-        <AgentIdentityTile
-          agentId={agent.id}
-          icon={agent.icon}
-          color={agent.color}
-          className="size-10 rounded-[10px]"
-        />
-        <div className="relative z-20 flex items-center gap-1.5">
-          {agent.source === "system" && (
-            <ShieldCheck
-              className="text-muted-foreground size-4"
-              aria-label={t("dashboard.systemAgent")}
-            />
-          )}
-          {!!unreadCount && (
-            <span
-              className="bg-destructive text-destructive-foreground flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium"
-              aria-label={t("dashboard.unreadRuns", { count: unreadCount })}
-            >
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </span>
-          )}
-          {agent.running_runs ? <Badge status="running" /> : null}
-          <RunAgentButton
-            packageId={agent.id}
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-primary size-7"
-          />
-        </div>
-      </div>
-      <h3 className="mt-4 truncate text-sm font-semibold">{agent.display_name || agent.id}</h3>
-      <p className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-5">
-        {agent.description || t("dashboard.agentFallbackDescription")}
-      </p>
-      <div className="mt-auto flex items-center gap-2 pt-4">
-        {agent.version && (
-          <span className="bg-muted text-muted-foreground rounded-md px-2 py-1 font-mono text-[10px]">
-            v{agent.version}
-          </span>
-        )}
-        <span className="text-muted-foreground group-hover:text-foreground ml-auto text-[11px] transition-colors">
-          {t("dashboard.open")}
-        </span>
-        <ArrowRight className="text-muted-foreground size-3.5 transition-transform group-hover:translate-x-0.5" />
-      </div>
-    </div>
-  );
-}
-
 function RecentAgents({
   agents,
   unreadCounts,
@@ -294,11 +211,9 @@ function RecentAgents({
       <CarouselContent className="-ml-3 pb-1">
         {agents.map((agent) => (
           <CarouselItem key={agent.id} className="basis-auto pl-3">
-            <DashboardAgentCard
-              agent={agent}
-              unreadCount={unreadCounts?.[agent.id]}
-              className="w-[19rem]"
-            />
+            <div className="h-full w-[19rem]">
+              <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
+            </div>
           </CarouselItem>
         ))}
       </CarouselContent>
@@ -330,62 +245,6 @@ function RecentAgentsEndFade() {
   );
 }
 
-function DashboardRunRow({
-  run,
-  agentName,
-  agent,
-}: {
-  run: EnrichedRun;
-  agentName: (run: EnrichedRun) => string;
-  agent?: AgentListItem;
-}) {
-  const { t } = useTranslation("agents");
-  const name = agentName(run);
-  const content = (
-    <>
-      <AgentIdentityTile
-        agentId={run.packageId ?? run.agent_name ?? run.id}
-        icon={agent?.icon}
-        color={agent?.color}
-        className="size-8"
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{name}</span>
-          {run.runNumber != null && (
-            <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
-              #{run.runNumber}
-            </span>
-          )}
-          <RunProvenanceBadges run={run} />
-        </div>
-        <p className="text-muted-foreground mt-0.5 truncate text-xs">
-          {run.started_at ? formatDateField(run.started_at) : t("dashboard.runPending")}
-        </p>
-      </div>
-      <Badge status={run.status} unread={run.unread} />
-      <span className="text-muted-foreground w-14 text-right text-xs tabular-nums">
-        <RunDuration status={run.status} startedAt={run.started_at} duration={run.duration} />
-      </span>
-    </>
-  );
-
-  const className =
-    "hover:bg-muted/40 flex min-h-16 items-center gap-3 px-4 py-3 transition-colors first:rounded-t-xl last:rounded-b-xl";
-
-  return run.packageId ? (
-    <Link
-      to={runDetailPath(run.packageId, run.id)}
-      state={{ runNumber: run.runNumber }}
-      className={className}
-    >
-      {content}
-    </Link>
-  ) : (
-    <div className={className}>{content}</div>
-  );
-}
-
 function RecentRuns({
   runs,
   agentName,
@@ -400,11 +259,12 @@ function RecentRuns({
   return (
     <div className="border-border bg-card divide-border divide-y rounded-xl border shadow-sm">
       {runs.slice(0, limit).map((run) => (
-        <DashboardRunRow
+        <RunRow
           key={run.id}
           run={run}
-          agentName={agentName}
+          agentName={agentName(run)}
           agent={run.packageId ? agentById.get(run.packageId) : undefined}
+          className="first:rounded-t-xl last:rounded-b-xl"
         />
       ))}
     </div>
@@ -419,6 +279,7 @@ function DashboardScheduleRow({
   agent?: AgentListItem;
 }) {
   const { t } = useTranslation("agents");
+  const nextRunAt = scheduleNextRunAt(schedule);
   return (
     <Link
       to={scheduleDetailPath(schedule.id)}
@@ -431,17 +292,15 @@ function DashboardScheduleRow({
         className="size-9"
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{schedule.name || t("schedule.unnamed")}</p>
+        <p className="truncate text-sm font-medium">{scheduleLabel(schedule, t)}</p>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
           {agent?.display_name ?? schedule.packageId}
         </p>
       </div>
       <div className="shrink-0 text-right">
-        <ScheduleStatusBadge schedule={schedule} />
+        <ScheduleStateBadges schedule={schedule} />
         <p className="text-muted-foreground mt-1 text-[11px] tabular-nums">
-          {schedule.next_run_at
-            ? formatDateField(schedule.next_run_at, "datetime", schedule.timezone)
-            : t("dashboard.noDate")}
+          {nextRunAt ? formatDateField(nextRunAt, "datetime", schedule.timezone) : "—"}
         </p>
       </div>
     </Link>

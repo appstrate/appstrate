@@ -2,7 +2,7 @@
 
 import { useEffect, lazy, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
-import { PackageList } from "./pages/package-list";
+import { PackageIndexPage } from "./pages/package-index";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { LoginPage } from "./pages/login";
@@ -223,7 +223,7 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
  */
 const PAGES: Record<RoutePath, ReactNode> = {
   "/": <DashboardPage />,
-  "/agents": <PackageList />,
+  "/agents": <PackageIndexPage type="agent" />,
   "/agents/new": (
     <LazyRoute>
       <PackageEditorPage type="agent" />
